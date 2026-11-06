@@ -21,12 +21,13 @@ import {
   WebStandardStreamableHTTPServerTransport,
 } from "@modelcontextprotocol/server"
 import {
+  blockedToolText,
   isPluginGatewayError,
   type PluginGateway,
   type PluginGatewayError,
   type PluginGatewayEvent,
+  type PluginToolListing,
   type ToolCallContext,
-  type ToolDefinitionPublic,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import consola from "consola"
 import { randomUUID } from "node:crypto"
@@ -60,11 +61,21 @@ interface Session {
   closed: boolean
 }
 
-function toMcpTool(tool: ToolDefinitionPublic): Tool {
+/**
+ * A tool as MCP clients see it. Blocked tools stay listed, saying they are
+ * turned off and where to turn them on; `ask` tools require Claude Code's
+ * own prompt on every call (`anthropic/requiresUserInteraction`, which
+ * other clients ignore: Maximal asks them itself, see `#approve`).
+ */
+function toMcpTool(tool: PluginToolListing, connector: string): Tool {
+  const description =
+    tool.permission === "block" ?
+      `${blockedToolText(connector, tool.name)}\n\n${tool.description}`
+    : tool.description
   return {
     name: tool.name,
     ...(tool.title === undefined ? {} : { title: tool.title }),
-    description: tool.description,
+    description,
     inputSchema: tool.inputSchema as Tool["inputSchema"],
     ...(tool.outputSchema === undefined ?
       {}
@@ -72,7 +83,26 @@ function toMcpTool(tool: ToolDefinitionPublic): Tool {
     ...(tool.annotations === undefined ?
       {}
     : { annotations: tool.annotations }),
+    ...(tool.permission === "ask" ?
+      { _meta: { [REQUIRES_USER_INTERACTION]: true } }
+    : {}),
   }
+}
+
+/** Claude Code shows its permission prompt on every call of a tool marked so. */
+const REQUIRES_USER_INTERACTION = "anthropic/requiresUserInteraction"
+
+/** The client that honours `REQUIRES_USER_INTERACTION` (MCP `clientInfo.name`). */
+const CLAUDE_CODE_CLIENT = "claude-code"
+
+/** A short, single-line view of a call's arguments for Maximal's question. */
+function argumentsSummary(args: Record<string, unknown>): string {
+  const text = JSON.stringify(args)
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text
+}
+
+function textResult(text: string): CallToolResult {
+  return { isError: true, content: [{ type: "text", text }] }
 }
 
 /** A tool result telling the model why the plugin can't run it now. */
@@ -333,8 +363,10 @@ export class McpSessions {
     )
     server.setRequestHandler("tools/list", () => {
       const gateway = this.#options.getGateway()
-      const tools = gateway?.get(pluginId) ? gateway.listTools(pluginId) : []
-      return { tools: tools.map((tool) => toMcpTool(tool)) }
+      const plugin = gateway?.get(pluginId)
+      const tools = plugin && gateway ? gateway.listTools(pluginId) : []
+      const connector = plugin?.displayName ?? pluginId
+      return { tools: tools.map((tool) => toMcpTool(tool, connector)) }
     })
     return server
   }
@@ -362,14 +394,24 @@ export class McpSessions {
     const gateway = this.#options.getGateway()
     if (!gateway) return notReady(pluginId, "Maximal is stopping.")
     const { name } = request.params
+    const args = request.params.arguments ?? {}
+    const call = callContext(session, request, ctx)
+    const listing = gateway
+      .listTools(pluginId)
+      .find((tool) => tool.name === name)
+    if (listing?.permission === "ask") {
+      const connector = gateway.get(pluginId)?.displayName ?? pluginId
+      const decision = await this.#approve(session, ctx, {
+        connector,
+        tool: name,
+        args,
+      })
+      if (decision.refused) return decision.refused
+      if (decision.approved) call.approved = true
+    }
     let result
     try {
-      result = await gateway.callTool(
-        pluginId,
-        name,
-        request.params.arguments ?? {},
-        callContext(session, request, ctx),
-      )
+      result = await gateway.callTool(pluginId, name, args, call)
     } catch (error) {
       if (!isPluginGatewayError(error)) throw error
       return refusal(gateway, pluginId, error)
@@ -381,6 +423,56 @@ export class McpSessions {
       result as CallToolResult,
       advertised,
     )
+  }
+
+  /**
+   * A person's approval for one call of an `ask` tool: Claude Code's own
+   * prompt (required by `REQUIRES_USER_INTERACTION`; where nobody can answer
+   * it, Claude Code refuses the call itself), else Maximal's question through
+   * MCP elicitation, with no fields so clients show Allow / Deny. A client
+   * that can do neither gets no approval, and the host refuses the call.
+   */
+  async #approve(
+    session: Session,
+    ctx: ServerContext,
+    ask: { connector: string; tool: string; args: Record<string, unknown> },
+  ): Promise<{ approved: boolean; refused?: CallToolResult }> {
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
+    const client = session.server.getClientVersion()?.name
+    if (client === CLAUDE_CODE_CLIENT) return { approved: true }
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
+    if (session.server.getClientCapabilities()?.elicitation === undefined)
+      return { approved: false }
+    const { connector, tool } = ask
+    let action: string
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
+      const answer = await ctx.mcpReq.elicitInput(
+        {
+          message: `Maximal: allow ${connector} to run ${tool}?\n${argumentsSummary(ask.args)}`,
+          requestedSchema: { type: "object", properties: {} },
+        },
+        { signal: ctx.mcpReq.signal, timeout: ELICIT_TIMEOUT_MS },
+      )
+      action = answer.action
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return {
+        approved: false,
+        refused: textResult(
+          `Maximal couldn't get your approval for ${connector}'s ${tool} tool (${reason}), so it wasn't run.`,
+        ),
+      }
+    }
+    if (action === "accept") return { approved: true }
+    return {
+      approved: false,
+      refused: textResult(
+        action === "decline" ?
+          `You declined ${connector}'s ${tool} call, so it wasn't run.`
+        : `${connector}'s ${tool} call was cancelled, so it wasn't run.`,
+      ),
+    }
   }
 
   #forPlugin(pluginId: string): Array<Session> {

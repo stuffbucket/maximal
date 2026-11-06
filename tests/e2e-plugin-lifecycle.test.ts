@@ -42,6 +42,7 @@ import {
   Normalizer,
   trackHandles,
 } from "@stuffbucket/maximal-plugin-host/testing"
+import { blockedToolText } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import { createWorkIqPlugin } from "@stuffbucket/maximal-plugin-workiq"
 import {
   elicitForm,
@@ -493,10 +494,18 @@ function writeClaudeServers(run: Run, servers: Record<string, unknown>) {
   )
 }
 
+/** Work IQ's defaults: read-only allowed, the rest ask, delete_entity off. */
+function expectedPermission(tool: { name: string; group: string }): string {
+  if (tool.name === "delete_entity") return "block/plugin"
+  return tool.group === "read-only" ? "allow/default" : "ask/default"
+}
+
 /** A real MCP client, the Settings detail, and blocking a tool. */
 async function toolsAndPermissions(run: Run): Promise<Client> {
   const { harness, fake } = run
-  // 9. A real MCP client sees the upstream tools, verbatim.
+  // 9. A real MCP client sees the upstream tools, verbatim, except: the one
+  //    turned off by default (delete_entity) says so, and every tool that
+  //    isn't read-only asks Claude Code to prompt on each call.
   let client: Client | undefined
   await step(run, "MCP client: tools mirrored", async () => {
     client = await connectClient(run)
@@ -506,6 +515,8 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
     )
     for (const upstream of WORKIQ_TOOLS) {
       const mirrored = tools.find((tool) => tool.name === upstream.name)
+      const readOnly = upstream.annotations?.readOnlyHint === true
+      const off = upstream.name === "delete_entity"
       expect({
         name: mirrored?.name,
         title: mirrored?.title,
@@ -513,13 +524,18 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
         inputSchema: mirrored?.inputSchema,
         outputSchema: mirrored?.outputSchema,
         annotations: mirrored?.annotations,
+        asks: mirrored?._meta?.["anthropic/requiresUserInteraction"],
       }).toEqual({
         name: upstream.name,
         title: upstream.title,
-        description: upstream.description,
+        description:
+          off ?
+            `${blockedToolText("Work IQ", upstream.name)}\n\n${upstream.description}`
+          : upstream.description,
         inputSchema: upstream.inputSchema,
         outputSchema: upstream.outputSchema,
         annotations: upstream.annotations,
+        asks: readOnly || off ? undefined : true,
       })
     }
   })
@@ -533,7 +549,12 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
     const view = detail.response as {
       toolCounts: { total: number; byGroup: Record<string, number> }
       toolsSource: string
-      tools: Array<{ name: string; permissionSource?: string }>
+      tools: Array<{
+        name: string
+        group: string
+        permission: string
+        permissionSource?: string
+      }>
       manifest: { connector?: Record<string, unknown> }
     }
     expect(view.toolCounts).toEqual({
@@ -541,36 +562,44 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
       byGroup: { "read-only": 6, "write-delete": 5, other: 3 },
     })
     expect(view.toolsSource).toBe("live")
-    expect(new Set(view.tools.map((tool) => tool.permissionSource))).toEqual(
-      new Set(["default"]),
-    )
+    // Read-only tools are allowed, the rest ask; Work IQ keeps delete_entity off.
+    for (const tool of view.tools) {
+      expect(`${tool.name} ${tool.permission}/${tool.permissionSource}`).toBe(
+        `${tool.name} ${expectedPermission(tool)}`,
+      )
+    }
     // Only the auth type leaves the server: no client id, authority or scopes.
     expect(view.manifest.connector?.auth).toEqual({ type: "entra" })
   })
 
-  // 11. Block a tool: hidden from MCP, calls refused, upstream never asked.
-  await step(run, "block delete_entity", async () => {
-    const since = listChangedCount(run.mcpLog)
-    const put = await run.api("PUT", `/plugins/${ID}/tool-permissions`, {
-      permissions: { delete_entity: "block" },
-    })
-    expect(put.status).toBe(200)
-    await listChangedAfter(run, since)
-    const { tools } = await mcp.listTools()
-    expect(tools.map((tool) => tool.name)).not.toContain("delete_entity")
+  // 11. A tool that is off: listed, its calls refused with where to turn it
+  //     on, and the upstream never asked.
+  await step(run, "call delete_entity while it's off", async () => {
     const calls = fake.calls().length
     const refused = await mcp.callTool({
       name: "delete_entity",
       arguments: { path: "/me/messages/1" },
     })
     expect(refused.isError).toBe(true)
-    expect(textOf(refused)).toBe("This tool is blocked in Maximal settings.")
+    expect(textOf(refused)).toBe(blockedToolText("Work IQ", "delete_entity"))
     expect(fake.calls().length).toBe(calls)
+  })
+  await step(run, "turn on delete_entity (ask)", async () => {
+    const since = listChangedCount(run.mcpLog)
+    const put = await run.api("PUT", `/plugins/${ID}/tool-permissions`, {
+      permissions: { delete_entity: "ask" },
+    })
+    expect(put.status).toBe(200)
+    await listChangedAfter(run, since)
+    const { tools } = await mcp.listTools()
+    const tool = tools.find((t) => t.name === "delete_entity")
+    expect(tool?.description).not.toContain("turned off")
+    expect(tool?._meta?.["anthropic/requiresUserInteraction"]).toBe(true)
     expect(harness.settings(ID)).toMatchObject({
-      tools: { permissions: { delete_entity: "block" } },
+      tools: { permissions: { delete_entity: "ask" } },
     })
   })
-  await step(run, "unblock delete_entity", async () => {
+  await step(run, "back to Work IQ's default (off)", async () => {
     const since = listChangedCount(run.mcpLog)
     const put = await run.api("PUT", `/plugins/${ID}/tool-permissions`, {
       permissions: { delete_entity: null },
@@ -578,7 +607,9 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
     expect(put.status).toBe(200)
     await listChangedAfter(run, since)
     const { tools } = await mcp.listTools()
-    expect(tools.map((tool) => tool.name)).toContain("delete_entity")
+    expect(
+      tools.find((t) => t.name === "delete_entity")?.description,
+    ).toStartWith(blockedToolText("Work IQ", "delete_entity"))
   })
 
   return mcp
@@ -615,31 +646,45 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
       expect(request.protocolVersion).toBe(protocol)
   })
 
-  // 13. Progress and elicitation relayed both ways.
-  await step(run, "ask: progress + elicitation round trip", async () => {
-    const progress: Array<{ progress: number; message?: string }> = []
-    const result = await mcp.callTool(
-      { name: "ask", arguments: { question: "What's new?" } },
-      { onprogress: (update) => progress.push(update) },
-    )
-    expect(textOf(result)).toBe("What's new? → accept: shared@contoso.com")
-    expect(progress.map((update) => update.message)).toEqual([
-      "Searching mail",
-      "Summarising",
-    ])
-    const elicitation = run.mcpLog.find(
-      (entry) =>
-        entry.dir === "receive"
-        && isRecord(entry.message)
-        && entry.message.method === "elicitation/create",
-    )
-    expect(elicitation?.message).toMatchObject({
-      params: {
-        message: "Which mailbox should Work IQ search?",
-        requestedSchema: ELICIT_SCHEMA,
-      },
-    })
-  })
+  // 13. An ask tool: Maximal asks this client (it isn't Claude Code) first;
+  //     then progress and Work IQ's own question are relayed both ways.
+  await step(
+    run,
+    "ask: approval, then progress + elicitation round trip",
+    async () => {
+      const mark = run.mcpLog.length
+      const progress: Array<{ progress: number; message?: string }> = []
+      const result = await mcp.callTool(
+        { name: "ask", arguments: { question: "What's new?" } },
+        { onprogress: (update) => progress.push(update) },
+      )
+      expect(textOf(result)).toBe("What's new? → accept: shared@contoso.com")
+      expect(progress.map((update) => update.message)).toEqual([
+        "Searching mail",
+        "Summarising",
+      ])
+      const questions = run.mcpLog
+        .slice(mark)
+        .filter(
+          (entry) =>
+            entry.dir === "receive"
+            && isRecord(entry.message)
+            && entry.message.method === "elicitation/create",
+        )
+        .map((entry) => (entry.message as { params: unknown }).params)
+      expect(questions).toMatchObject([
+        {
+          message:
+            'Maximal: allow Work IQ to run ask?\n{"question":"What\'s new?"}',
+          requestedSchema: { type: "object", properties: {} },
+        },
+        {
+          message: "Which mailbox should Work IQ search?",
+          requestedSchema: ELICIT_SCHEMA,
+        },
+      ])
+    },
+  )
 
   // 14. A throttled result is retried; the wait shows as progress.
   await step(run, "retrieve: result-level 429 then success", async () => {

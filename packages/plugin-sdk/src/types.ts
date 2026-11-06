@@ -135,8 +135,16 @@ export interface PluginManifest {
 /**
  * Per-tool permission. Stored as a string so further states can be added
  * without a settings migration.
+ *
+ * - `allow`: clients call it as they would any tool (their own approval
+ *   rules still apply).
+ * - `ask`: a person approves every call: the client's own prompt where it
+ *   can be required (Claude Code), else Maximal asks through the client
+ *   (MCP elicitation), else the call is refused.
+ * - `block`: still listed, marked as turned off; every call is refused with
+ *   where to turn it on.
  */
-export const TOOL_PERMISSIONS = ["allow", "block"] as const
+export const TOOL_PERMISSIONS = ["allow", "ask", "block"] as const
 export type ToolPermission = (typeof TOOL_PERMISSIONS)[number]
 
 /** Where a tool's effective permission came from. */
@@ -213,6 +221,12 @@ export interface ToolCallContext {
   progress?(update: ToolProgress): void
   /** Present when the client supports elicitation. */
   elicit?(request: ElicitRequest): Promise<ElicitResult>
+  /**
+   * Set by the app when a tool set to `ask` was approved for this call (by
+   * the client's own prompt or Maximal's question). The host refuses an
+   * `ask` call without it.
+   */
+  approved?: boolean
 }
 
 /** Public (serialisable) part of a tool definition. */

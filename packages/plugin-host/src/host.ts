@@ -7,6 +7,7 @@ import type {
   PluginSettingsEntry,
   PluginSnapshot,
   PluginToolsSource,
+  PluginToolListing,
   PluginToolView,
   ToolCallContext,
   ToolDefinitionPublic,
@@ -22,7 +23,11 @@ import {
   type PluginManifest,
   type PluginModule,
 } from "@stuffbucket/maximal-plugin-sdk"
-import { PluginGatewayError } from "@stuffbucket/maximal-plugin-sdk/gateway"
+import {
+  blockedToolText,
+  PluginGatewayError,
+  unapprovedToolText,
+} from "@stuffbucket/maximal-plugin-sdk/gateway"
 import {
   activatePlugin,
   applyPermissionChanges,
@@ -94,7 +99,9 @@ interface PluginRecord {
   catalogQueued: boolean
 }
 
-const BLOCKED_TEXT = "This tool is blocked in Maximal settings."
+function refused(text: string): ToolResult {
+  return { isError: true, content: [{ type: "text", text }] }
+}
 
 /**
  * What `@stuffbucket/maximal-plugin-host/testing` observes of a host: its
@@ -285,18 +292,15 @@ class PluginHost implements PluginGateway {
     return record ? this.#snapshot(record) : undefined
   }
 
-  listTools(pluginId: string): Array<ToolDefinitionPublic> {
+  listTools(pluginId: string): Array<PluginToolListing> {
     const record = this.#record(pluginId)
     if (record.lifecycle !== "active") return []
     const explicit = storedPermissions(this.#document(record))
-    return this.#runtime
-      .tools(pluginId)
-      .filter(
-        (tool) =>
-          resolveToolPermission(record.module, tool, explicit).permission
-          !== "block",
-      )
-      .map((tool) => toPublicTool(tool))
+    return this.#runtime.tools(pluginId).map((tool) => ({
+      ...toPublicTool(tool),
+      permission: resolveToolPermission(record.module, tool, explicit)
+        .permission,
+    }))
   }
 
   toolViews(pluginId: string): Array<PluginToolView> {
@@ -325,11 +329,12 @@ class PluginHost implements PluginGateway {
         `Plugin "${pluginId}" has no tool "${name}".`,
       )
     const explicit = storedPermissions(this.#document(record))
-    if (
-      resolveToolPermission(record.module, tool, explicit).permission
-      === "block"
-    )
-      return { isError: true, content: [{ type: "text", text: BLOCKED_TEXT }] }
+    const { permission } = resolveToolPermission(record.module, tool, explicit)
+    const displayName = record.module.manifest.displayName
+    if (permission === "block")
+      return refused(blockedToolText(displayName, name))
+    if (permission === "ask" && call.approved !== true)
+      return refused(unapprovedToolText(displayName, name))
     const lifetime = record.lifetime?.signal
     const signal =
       lifetime ? AbortSignal.any([call.signal, lifetime]) : call.signal

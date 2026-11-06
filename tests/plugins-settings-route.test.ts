@@ -280,7 +280,8 @@ describe("GET /settings/api/plugins/:id", () => {
         inputSchema: { type: "object" },
         annotations: { destructiveHint: true },
         group: "write-delete",
-        permission: "allow",
+        // Anything that may change something asks by default.
+        permission: "ask",
         permissionSource: "default",
       },
       {
@@ -288,7 +289,7 @@ describe("GET /settings/api/plugins/:id", () => {
         description: "Poke.",
         inputSchema: { type: "object" },
         group: "other",
-        permission: "allow",
+        permission: "ask",
         permissionSource: "default",
       },
     ])
@@ -418,16 +419,18 @@ describe("PUT /settings/api/plugins/:id/tool-permissions", () => {
     expect(await settingsFile("alpha")).toMatchObject({
       tools: { permissions: { delete_item: "block", poke: "allow" } },
     })
-    // Blocked tools are gone from the MCP-facing list.
-    expect(plugins.gateway.listTools("alpha").map((tool) => tool.name)).toEqual(
-      ["search", "poke"],
-    )
+    // Blocked tools stay listed, marked so the MCP layer can say they're off.
+    expect(
+      plugins.gateway
+        .listTools("alpha")
+        .map((tool) => `${tool.name}:${tool.permission}`),
+    ).toEqual(["search:allow", "delete_item:block", "poke:allow"])
     expect(alphaApplies).toBe(1)
 
     const cleared = await detail(
       await putPermissions("alpha", { permissions: { poke: null } }),
     )
-    expect(permissionsOf(cleared).poke).toBe("allow/default")
+    expect(permissionsOf(cleared).poke).toBe("ask/default")
     expect(permissionsOf(cleared).delete_item).toBe("block/user")
   })
 
@@ -442,10 +445,10 @@ describe("PUT /settings/api/plugins/:id/tool-permissions", () => {
   })
 
   test("rejects bad bodies with issues, and unknown plugins", async () => {
-    const ask = await invalid(
-      await putPermissions("alpha", { permissions: { search: "ask" } }),
+    const unknown = await invalid(
+      await putPermissions("alpha", { permissions: { search: "maybe" } }),
     )
-    expect(ask.issues[0].path).toBe("permissions.search")
+    expect(unknown.issues[0].path).toBe("permissions.search")
     await invalid(
       await putPermissions("alpha", { permissions: { "bad name": "block" } }),
     )

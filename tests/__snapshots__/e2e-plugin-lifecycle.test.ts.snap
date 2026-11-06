@@ -642,14 +642,14 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             "call_function read-only allow/default",
             "fetch read-only allow/default",
             "search_paths read-only allow/default",
-            "accept_eula write-delete allow/default",
-            "delete_entity write-delete allow/default",
-            "upload_blob write-delete allow/default",
-            "create_entity write-delete allow/default",
-            "update_entity write-delete allow/default",
-            "ask other allow/default",
-            "list_agents other allow/default",
-            "get_debug_link other allow/default",
+            "accept_eula write-delete ask/default",
+            "delete_entity write-delete block/plugin",
+            "upload_blob write-delete ask/default",
+            "create_entity write-delete ask/default",
+            "update_entity write-delete ask/default",
+            "ask other ask/default",
+            "list_agents other ask/default",
+            "get_debug_link other ask/default",
           ],
           "toolsSource": "live",
         },
@@ -833,73 +833,10 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
     "step": "Settings detail view",
   },
   {
-    "api": [
-      {
-        "body": {
-          "permissions": {
-            "delete_entity": "block",
-          },
-        },
-        "request": "PUT /settings/api/plugins/workiq/tool-permissions",
-        "response": {
-          "(changed)": {
-            "tools": [
-              "retrieve read-only allow/default",
-              "fetch_blob read-only allow/default",
-              "get_schema read-only allow/default",
-              "call_function read-only allow/default",
-              "fetch read-only allow/default",
-              "search_paths read-only allow/default",
-              "accept_eula write-delete allow/default",
-              "delete_entity write-delete block/user",
-              "upload_blob write-delete allow/default",
-              "create_entity write-delete allow/default",
-              "update_entity write-delete allow/default",
-              "ask other allow/default",
-              "list_agents other allow/default",
-              "get_debug_link other allow/default",
-            ],
-          },
-          "id": "workiq",
-        },
-        "status": 200,
-      },
-    ],
-    "listChanged": true,
     "mcp": [
       {
         "send": {
           "id": 2,
-          "jsonrpc": "2.0",
-          "method": "tools/list",
-        },
-      },
-      {
-        "receive": {
-          "id": 2,
-          "jsonrpc": "2.0",
-          "result": {
-            "tools": [
-              "retrieve",
-              "fetch_blob",
-              "get_schema",
-              "call_function",
-              "fetch",
-              "search_paths",
-              "accept_eula",
-              "upload_blob",
-              "create_entity",
-              "update_entity",
-              "ask",
-              "list_agents",
-              "get_debug_link",
-            ],
-          },
-        },
-      },
-      {
-        "send": {
-          "id": 3,
           "jsonrpc": "2.0",
           "method": "tools/call",
           "params": {
@@ -912,12 +849,12 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
       },
       {
         "receive": {
-          "id": 3,
+          "id": 2,
           "jsonrpc": "2.0",
           "result": {
             "content": [
               {
-                "text": "This tool is blocked in Maximal settings.",
+                "text": "Work IQ's delete_entity tool is turned off in Maximal. To use it, turn it on in Maximal → Settings → Integrations → Connectors → Work IQ → Tool permissions.",
                 "type": "text",
               },
             ],
@@ -926,10 +863,80 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         },
       },
     ],
+    "plugin": [],
+    "step": "call delete_entity while it's off",
+  },
+  {
+    "api": [
+      {
+        "body": {
+          "permissions": {
+            "delete_entity": "ask",
+          },
+        },
+        "request": "PUT /settings/api/plugins/workiq/tool-permissions",
+        "response": {
+          "(changed)": {
+            "tools": [
+              "retrieve read-only allow/default",
+              "fetch_blob read-only allow/default",
+              "get_schema read-only allow/default",
+              "call_function read-only allow/default",
+              "fetch read-only allow/default",
+              "search_paths read-only allow/default",
+              "accept_eula write-delete ask/default",
+              "delete_entity write-delete ask/user",
+              "upload_blob write-delete ask/default",
+              "create_entity write-delete ask/default",
+              "update_entity write-delete ask/default",
+              "ask other ask/default",
+              "list_agents other ask/default",
+              "get_debug_link other ask/default",
+            ],
+          },
+          "id": "workiq",
+        },
+        "status": 200,
+      },
+    ],
+    "listChanged": true,
+    "mcp": [
+      {
+        "send": {
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/list",
+        },
+      },
+      {
+        "receive": {
+          "id": 3,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              "retrieve",
+              "fetch_blob",
+              "get_schema",
+              "call_function",
+              "fetch",
+              "search_paths",
+              "accept_eula",
+              "delete_entity",
+              "upload_blob",
+              "create_entity",
+              "update_entity",
+              "ask",
+              "list_agents",
+              "get_debug_link",
+            ],
+          },
+        },
+      },
+    ],
     "plugin": [
-      "settings.json workiq tools.permissions.delete_entity: (none) → "block"",
+      "settings.json workiq tools.permissions.delete_entity: (none) → "ask"",
       "event workiq tools",
-      "visible-tools workiq shown=[] hidden=[delete_entity]",
+      "visible-tools workiq shown=[delete_entity] hidden=[]",
       "event workiq settings",
     ],
     "settingsJson": {
@@ -959,12 +966,12 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
           "updatedAt": "<time>",
         },
         "permissions": {
-          "delete_entity": "block",
+          "delete_entity": "ask",
         },
       },
       "version": 1,
     },
-    "step": "block delete_entity",
+    "step": "turn on delete_entity (ask)",
   },
   {
     "api": [
@@ -984,14 +991,14 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "call_function read-only allow/default",
               "fetch read-only allow/default",
               "search_paths read-only allow/default",
-              "accept_eula write-delete allow/default",
-              "delete_entity write-delete allow/default",
-              "upload_blob write-delete allow/default",
-              "create_entity write-delete allow/default",
-              "update_entity write-delete allow/default",
-              "ask other allow/default",
-              "list_agents other allow/default",
-              "get_debug_link other allow/default",
+              "accept_eula write-delete ask/default",
+              "delete_entity write-delete block/plugin",
+              "upload_blob write-delete ask/default",
+              "create_entity write-delete ask/default",
+              "update_entity write-delete ask/default",
+              "ask other ask/default",
+              "list_agents other ask/default",
+              "get_debug_link other ask/default",
             ],
           },
           "id": "workiq",
@@ -1034,9 +1041,9 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
       },
     ],
     "plugin": [
-      "settings.json workiq tools.permissions.delete_entity: "block" → (none)",
+      "settings.json workiq tools.permissions.delete_entity: "ask" → (none)",
       "event workiq tools",
-      "visible-tools workiq shown=[delete_entity] hidden=[]",
+      "visible-tools workiq shown=[] hidden=[delete_entity]",
       "event workiq settings",
     ],
     "settingsJson": {
@@ -1068,7 +1075,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
       },
       "version": 1,
     },
-    "step": "unblock delete_entity",
+    "step": "back to Work IQ's default (off)",
   },
   {
     "mcp": [
@@ -1154,6 +1161,36 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
           "jsonrpc": "2.0",
           "method": "elicitation/create",
           "params": {
+            "message": 
+"Maximal: allow Work IQ to run ask?
+{"question":"What's new?"}"
+,
+            "mode": "form",
+            "requestedSchema": {
+              "properties": {},
+              "type": "object",
+            },
+          },
+        },
+      },
+      {
+        "send": {
+          "id": 0,
+          "jsonrpc": "2.0",
+          "result": {
+            "action": "accept",
+            "content": {
+              "mailbox": "shared@contoso.com",
+            },
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "elicitation/create",
+          "params": {
             "message": "Which mailbox should Work IQ search?",
             "mode": "form",
             "requestedSchema": {
@@ -1173,7 +1210,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
       },
       {
         "send": {
-          "id": 0,
+          "id": 1,
           "jsonrpc": "2.0",
           "result": {
             "action": "accept",
@@ -1213,7 +1250,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         "total": 2,
       },
     ],
-    "step": "ask: progress + elicitation round trip",
+    "step": "ask: approval, then progress + elicitation round trip",
     "upstream": [
       "POST tools/call ask → 200 session=session#2 auth=bearer protocol=2025-11-25",
       "POST /mcp → 202 session=session#2 auth=bearer protocol=2025-11-25",

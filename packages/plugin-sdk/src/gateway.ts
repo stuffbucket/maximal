@@ -4,7 +4,7 @@
  * Cordis-free by construction — this module has no runtime imports at all
  * (only `import type`), so importing it can never pull cordis or plugin code
  * into the core. The only runtime values are `PluginGatewayError` and its
- * guard.
+ * guard, and the tool-permission wording the host and the MCP layer share.
  */
 import type {
   JsonSchemaObject,
@@ -100,6 +100,11 @@ export interface PluginGatewayEvent {
   notice?: Readonly<PluginNotice>
 }
 
+/** A tool as MCP clients see it, with its effective permission. */
+export type PluginToolListing = ToolDefinitionPublic & {
+  permission: ToolPermission
+}
+
 export interface PluginGateway {
   /**
    * Start/stop/reload plugin fibers to match `settings`. Serialised; failures
@@ -110,10 +115,11 @@ export interface PluginGateway {
   list(): Array<PluginSnapshot>
   get(id: string): PluginSnapshot | undefined
   /**
-   * The MCP-facing tool list: live tools minus blocked ones. Throws
-   * `unknown-plugin`; returns `[]` while the plugin is not active.
+   * The MCP-facing tool list: every live tool with its effective
+   * permission (blocked ones too: the MCP layer marks them as turned off).
+   * Throws `unknown-plugin`; returns `[]` while the plugin is not active.
    */
-  listTools(pluginId: string): Array<ToolDefinitionPublic>
+  listTools(pluginId: string): Array<PluginToolListing>
   /**
    * Every tool with its group and effective permission, for Settings: live
    * tools when the plugin is active and has registered some, else the
@@ -123,7 +129,8 @@ export interface PluginGateway {
   /**
    * Throws `unknown-plugin` / `plugin-inactive` / `unknown-tool`. A tool that
    * throws resolves to `{ isError: true, content: [{ type: "text", text }] }`;
-   * so does a call to a blocked tool ("This tool is blocked in Maximal settings.").
+   * so does a call to a blocked tool, or to an `ask` tool without
+   * `call.approved` (each saying where to change it in Settings).
    */
   callTool(
     pluginId: string,
@@ -249,3 +256,18 @@ export type {
   ToolProgress,
   ToolResult,
 } from "./types"
+
+/** Where a person changes a connector's tool permissions. */
+export function toolPermissionsPlace(connector: string): string {
+  return `Maximal → Settings → Integrations → Connectors → ${connector} → Tool permissions`
+}
+
+/** Said for a tool set to `block`: turned off, and where to turn it on. */
+export function blockedToolText(connector: string, tool: string): string {
+  return `${connector}'s ${tool} tool is turned off in Maximal. To use it, turn it on in ${toolPermissionsPlace(connector)}.`
+}
+
+/** Said for an `ask` call nobody could approve (the client can't ask). */
+export function unapprovedToolText(connector: string, tool: string): string {
+  return `${connector}'s ${tool} tool needs your approval for each call, and this app can't ask for it. Allow it in ${toolPermissionsPlace(connector)}, or use an app that supports MCP elicitation.`
+}

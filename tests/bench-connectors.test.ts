@@ -89,7 +89,7 @@ describe("bench:connectors --drive", () => {
       "MCP tools/list shows every tool",
       "Block delete_entity in Settings",
       "Calling blocked delete_entity is refused",
-      "Unblock delete_entity",
+      "Allow delete_entity",
       "Call allowed retrieve",
       "Policy-denied call (HTTP 403) is an error result",
       "Connector still works after the denial",

@@ -93,21 +93,37 @@ pass it on:
 
 Work IQ's page in Settings → Integrations → Connectors lists every tool Work IQ
 offers, in three groups taken from the tools' own hints: **Read-only**,
-**Write/delete** and **Other**. Each tool is **Allowed** (the default) or
-**Blocked**; a group's menu sets all of its tools at once (*Custom* means its
-tools differ). Open a tool to see its inputs and full schema.
+**Write/delete** and **Other**. Each tool is **Allowed**, **Ask every time**
+or **Blocked**; a group's menu sets all of its tools at once (*Custom* means
+its tools differ). Open a tool to see its inputs and full schema.
 
-- A blocked tool disappears from the tool list MCP clients see (Maximal tells
-  connected clients the list changed), and a call to it is refused with "This
-  tool is blocked in Maximal settings." Allowed tools run as usual; your MCP
-  client still asks before using them.
-- Changes apply at once without restarting Work IQ, and are kept by tool name:
-  a tool that disappears (for example when your organization restricts it)
-  gets its setting back if it returns.
+By default read-only tools are allowed, `delete_entity` is blocked, and every
+other tool asks. Microsoft marks `ask`, `create_entity`, `update_entity` and
+`do_action` as tools that can change things, so they ask too; set `ask` to
+**Allowed** if you'd rather not confirm each question.
+
+- **Allowed** tools run as usual; your MCP client may still ask before using
+  them.
+- **Ask every time**: each call needs your yes first. Claude Code asks you
+  itself, on every call, even when you've allowed the tool there before.
+  Other apps that support MCP elicitation show Maximal's question ("Maximal:
+  allow Work IQ to run update_entity?", with what it will send); only
+  *Accept* runs it. An app that can't ask (Copilot CLI and Codex today) gets
+  a refusal saying where to allow the tool.
+- **Blocked** tools stay in the list MCP clients see, marked as turned off in
+  Maximal, so the AI can tell you why it can't use one and where to turn it
+  on. A call is refused with "Work IQ's delete_entity tool is turned off in
+  Maximal. To use it, turn it on in Maximal → Settings → Integrations →
+  Connectors → Work IQ → Tool permissions."
+- Changes apply at once without restarting Work IQ (Maximal tells connected
+  clients the list changed), and are kept by tool name: a tool that
+  disappears (for example when your organization restricts it) gets its
+  setting back if it returns.
 - While Work IQ is off or signed out, the page shows the tools it offered last
   time ("Last seen …") so you can set permissions ahead of time.
-- Permissions live in Work IQ's settings file
-  (`<app dir>/plugins/workiq/settings.json`, `tools.permissions`).
+- Permissions you choose live in Work IQ's settings file
+  (`<app dir>/plugins/workiq/settings.json`, `tools.permissions`); defaults
+  aren't written there.
 
 ## When Microsoft 365 is busy
 
@@ -170,7 +186,7 @@ Work IQ's own settings live in `<app dir>/plugins/workiq/settings.json`
     "authority": "https://login.microsoftonline.com/organizations"
   },
   "tools": {
-    "permissions": { "delete_entity": "block" },
+    "permissions": { "ask": "allow" },
     "catalog": { "updatedAt": "…", "tools": ["…"] }
   }
 }
@@ -181,7 +197,7 @@ page: `endpoint` (the Work IQ MCP URL) and `authority` (the Microsoft Entra
 authority). Saving an invalid value is refused with the reason next to the
 field; an invalid value edited into the file by hand marks Work IQ failed with
 the reason in Settings, and a file Maximal can't read is reported and never
-overwritten. `tools.permissions` holds your Allowed/Blocked choices and
+overwritten. `tools.permissions` holds your Allowed / Ask every time / Blocked choices (`allow`, `ask`, `block`) and
 `tools.catalog` the last tool list Work IQ offered.
 
 `config.json` → `plugins.workiq` keeps only whether Work IQ is on and its

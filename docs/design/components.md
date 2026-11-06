@@ -176,10 +176,11 @@ typographic sections:
   with a Copy button.
 - Tool permissions: the tools in three groups (Read-only, Write/delete,
   Other), each a twirl with a `.count-badge` and a menu button (Always
-  allow / Blocked set the whole group; Custom marks a mixed group, checked
-  and never an action). A tool row has its title, a two-state
-  `.perm-seg` radio group (Allowed / Blocked: glyph-only, so each option
-  has a name and a tooltip; arrow keys move and choose), its description
+  allow / Ask every time / Blocked set the whole group; Custom marks a mixed
+  group, checked and never an action). A tool row has its title, a
+  three-state `.perm-seg` radio group (Allowed / Asks / Blocked: glyph-only,
+  so each option has a name and a tooltip; arrow keys move and choose; a
+  chosen Asks reads in `--status-warning`), its description
   clamped to two lines with Show more, and twirls for its inputs and,
   nested, its full input schema (`--code-block-max`, scrolls inside).
   Changes save as made and show at once; a failed save puts the control

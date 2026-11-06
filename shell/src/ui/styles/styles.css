@@ -3342,6 +3342,10 @@ html[data-os="macos"] .topbar {
   color: var(--status-success);
 }
 
+.perm-seg__option--ask[aria-checked="true"] {
+  color: var(--status-warning);
+}
+
 .perm-seg__option--block[aria-checked="true"] {
   color: var(--status-error);
 }

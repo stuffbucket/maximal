@@ -370,7 +370,8 @@ export function storedPermissions(
 
 /**
  * Effective permission: explicit (settings file) > plugin
- * `defaultToolPermission` > host default (`allow`). A throwing or invalid
+ * `defaultToolPermission` > host default (`allow` for a read-only tool,
+ * `ask` for anything that may change something). A throwing or invalid
  * plugin default is ignored.
  */
 export function resolveToolPermission(
@@ -391,7 +392,10 @@ export function resolveToolPermission(
       // A broken plugin default never blocks the host default.
     }
   }
-  return { permission: "allow", permissionSource: "default" }
+  return {
+    permission: toolGroup(tool) === "read-only" ? "allow" : "ask",
+    permissionSource: "default",
+  }
 }
 
 export function toolView(
@@ -413,7 +417,7 @@ export function permissionChangesError(changes: unknown): string | undefined {
     if (!TOOL_NAME_PATTERN.test(name))
       return `Invalid tool name ${JSON.stringify(name)}.`
     if (value !== null && !isToolPermission(value))
-      return `Invalid permission ${JSON.stringify(value)} for tool "${name}" (expected "allow", "block" or null).`
+      return `Invalid permission ${JSON.stringify(value)} for tool "${name}" (expected "allow", "ask", "block" or null).`
   }
   return undefined
 }

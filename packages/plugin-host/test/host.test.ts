@@ -105,6 +105,7 @@ describe("reconcile", () => {
         description: "search tool",
         inputSchema: { type: "object", properties: { q: { type: "string" } } },
         annotations: { readOnlyHint: true },
+        permission: "allow",
       },
     ])
     expect(events).toContainEqual({ type: "tools", pluginId: "alpha" })

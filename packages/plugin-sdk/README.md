@@ -112,12 +112,15 @@ validates, writes and reloads your fiber; you never write this file.
 
 ### Tool permissions
 
-Each tool is `allow` or `block` (stored as strings; more states may follow).
-Effective permission: the user's explicit choice > your
-`defaultToolPermission(tool)` > `allow`. Return `undefined` to defer; a
-throwing default is ignored. Blocked tools are hidden from MCP `tools/list`
-and calls to them return `isError` ("This tool is blocked in Maximal
-settings."); permission changes never reload the plugin. Settings groups
+Each tool is `allow` (runs), `ask` (each call needs the person's approval)
+or `block` (turned off). Effective permission: the user's explicit choice >
+your `defaultToolPermission(tool)` > the host default: `allow` for read-only
+tools, `ask` for the rest. Return `undefined` to defer; a throwing default is
+ignored. Blocked tools stay in MCP `tools/list` with a description saying
+they're turned off and where to turn them on; calls to them return `isError`
+with the same words. Your tool handler only runs for an `ask` tool once the
+host has the approval (`ToolCallContext.approved`). Permission changes never
+reload the plugin. Settings groups
 tools with `toolGroup(tool)`: `readOnlyHint` ⇒ `read-only`, else
 `destructiveHint` ⇒ `write-delete`, else `other` — so annotate honestly.
 
@@ -183,7 +186,7 @@ then inspect the migrated result with `testbed.readSettings(id)`. Pass
 `{ storageDir: tempDir }` to back storage with real files (same backend,
 modes and layout as the host). `loaded.toolViews(permissions?)` resolves
 groups and effective permissions (file, or the given map > your
-`defaultToolPermission` > `allow`); the testbed's `callTool` does not enforce
+`defaultToolPermission` > the host default); the testbed's `callTool` does not enforce
 permissions — the host does.
 
 `createTestbed()` loads several plugins into one context; `testbed.events`

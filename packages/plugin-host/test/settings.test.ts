@@ -7,6 +7,10 @@ import type {
 import type { PluginGatewayError } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { toolGroup } from "@stuffbucket/maximal-plugin-sdk"
+import {
+  blockedToolText,
+  unapprovedToolText,
+} from "@stuffbucket/maximal-plugin-sdk/gateway"
 import { waitFor } from "@stuffbucket/maximal-plugin-sdk/testing"
 import { afterEach, describe, expect, test } from "bun:test"
 import { readFileSync, statSync } from "node:fs"
@@ -400,18 +404,32 @@ describe("tool permissions", () => {
     expect(views()).toEqual([
       "read:read-only:allow:default",
       "del:write-delete:block:plugin",
-      "misc:other:allow:default",
+      "misc:other:ask:default",
     ])
-    expect(gateway.listTools("remote").map((t) => t.name)).toEqual([
-      "read",
-      "misc",
-    ])
+    // Blocked tools stay listed (the MCP layer marks them as turned off).
+    const listed = () =>
+      gateway.listTools("remote").map((t) => `${t.name}:${t.permission}`)
+    expect(listed()).toEqual(["read:allow", "del:block", "misc:ask"])
+    const name = module.manifest.displayName
     expect(await gateway.callTool("remote", "del", {}, call())).toEqual({
       isError: true,
-      content: [
-        { type: "text", text: "This tool is blocked in Maximal settings." },
-      ],
+      content: [{ type: "text", text: blockedToolText(name, "del") }],
     })
+    // `ask` runs only when the app says a person approved this call.
+    expect(await gateway.callTool("remote", "misc", {}, call())).toEqual({
+      isError: true,
+      content: [{ type: "text", text: unapprovedToolText(name, "misc") }],
+    })
+    expect(
+      (
+        await gateway.callTool(
+          "remote",
+          "misc",
+          {},
+          { ...call(), approved: true },
+        )
+      ).isError,
+    ).toBe(undefined)
 
     events.length = 0
     await gateway.setToolPermissions("remote", { del: "allow", read: "block" })
@@ -420,10 +438,7 @@ describe("tool permissions", () => {
       { type: "settings", pluginId: "remote" },
     ])
     expect(applied).toHaveLength(1)
-    expect(gateway.listTools("remote").map((t) => t.name)).toEqual([
-      "del",
-      "misc",
-    ])
+    expect(listed()).toEqual(["read:block", "del:allow", "misc:ask"])
     expect((await gateway.callTool("remote", "del", {}, call())).isError).toBe(
       undefined,
     )
@@ -454,7 +469,9 @@ describe("tool permissions", () => {
     ctx().tools.registerAll([tool("misc")])
     expect(gateway.toolViews("remote").map((v) => v.name)).toEqual(["misc"])
     ctx().tools.registerAll([tool("read"), tool("misc")])
-    expect(gateway.listTools("remote").map((t) => t.name)).toEqual(["misc"])
+    expect(
+      gateway.listTools("remote").map((t) => `${t.name}:${t.permission}`),
+    ).toEqual(["read:block", "misc:allow"])
     expect(gateway.toolViews("remote")[0]).toMatchObject({
       name: "read",
       permission: "block",
@@ -466,7 +483,7 @@ describe("tool permissions", () => {
     const { module, applied } = permissioned()
     const { gateway, storageRoot } = createHost([module])
     await expectGatewayError(
-      gateway.setToolPermissions("remote", { read: "ask" as never }),
+      gateway.setToolPermissions("remote", { read: "maybe" as never }),
       "invalid-permissions",
     )
     await expectGatewayError(

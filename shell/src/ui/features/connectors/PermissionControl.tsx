@@ -4,16 +4,41 @@ import { t } from "../../../i18n";
 import type { ToolPermission } from "../../../proxy/client";
 import { cx } from "../../components/cx";
 
-import { AllowGlyph, BlockGlyph } from "./glyphs";
+import { AllowGlyph, AskGlyph, BlockGlyph } from "./glyphs";
 
-const OPTIONS: ReadonlyArray<ToolPermission> = ["allow", "block"];
+const OPTIONS: ReadonlyArray<ToolPermission> = ["allow", "ask", "block"];
 
 function optionLabel(value: ToolPermission): string {
-  return value === "allow" ? t("connectors-tool-allowed") : t("connectors-tool-blocked");
+  switch (value) {
+    case "allow":
+      return t("connectors-tool-allowed");
+    case "ask":
+      return t("connectors-tool-asks");
+    case "block":
+      return t("connectors-tool-blocked");
+  }
 }
 
 function optionTip(value: ToolPermission): string {
-  return value === "allow" ? t("connectors-tool-allowed-tip") : t("connectors-tool-blocked-tip");
+  switch (value) {
+    case "allow":
+      return t("connectors-tool-allowed-tip");
+    case "ask":
+      return t("connectors-tool-asks-tip");
+    case "block":
+      return t("connectors-tool-blocked-tip");
+  }
+}
+
+function OptionGlyph({ value }: { value: ToolPermission }): JSX.Element {
+  switch (value) {
+    case "allow":
+      return <AllowGlyph />;
+    case "ask":
+      return <AskGlyph />;
+    case "block":
+      return <BlockGlyph />;
+  }
 }
 
 interface PermissionControlProps {
@@ -25,7 +50,7 @@ interface PermissionControlProps {
 }
 
 /**
- * Two-state segmented control for one tool: Allowed / Blocked. A radio
+ * Segmented control for one tool: Allowed / Asks / Blocked. A radio
  * group with a roving tab stop: Tab lands on the chosen option, arrow keys
  * move and choose (as native radios do), Home/End jump to either end.
  * Glyph-only, so each option carries its name and a tooltip.
@@ -88,7 +113,7 @@ export function PermissionControl({ tool, value, onChange, disabled = false }: P
             onClick={() => choose(index)}
             onKeyDown={(event) => onKeyDown(event, index)}
           >
-            {option === "allow" ? <AllowGlyph /> : <BlockGlyph />}
+            <OptionGlyph value={option} />
           </button>
         );
       })}

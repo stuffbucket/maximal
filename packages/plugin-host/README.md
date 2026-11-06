@@ -52,14 +52,15 @@ await gateway.reconcile(config.plugins)               // start what is enabled
   one-shot move of a pre-settings-file config (treated as settings version 1
   and migrated); writes only when the file has no `config`, resolves whether
   it wrote; not validated, so a bad legacy value shows as a `failed` plugin.
-- **Tools**: `listTools` (MCP) returns the live tools of an `active` plugin
-  minus blocked ones; `callTool` on a blocked tool resolves to `isError`
-  "This tool is blocked in Maximal settings."; the call signal also aborts
+- **Tools**: `listTools` (MCP) returns the live tools of an `active` plugin,
+  each with its effective `permission` (blocked ones included); `callTool` on
+  a blocked tool, or on an `ask` tool without `call.approved`, resolves to
+  `isError` saying where to change it in Settings; the call signal also aborts
   when the plugin stops; a throwing tool resolves to
   `{ isError: true, content: [{ type: "text", text: message }] }`.
   `toolViews` (Settings) adds `group`, `permission`, `permissionSource`.
-- **Permissions**: `allow` | `block`; explicit (file) > plugin
-  `defaultToolPermission` > `allow`. `setToolPermissions(id, { name: perm | null })`
+- **Permissions**: `allow` | `ask` | `block`; explicit (file) > plugin
+  `defaultToolPermission` > `allow` for read-only tools, else `ask`. `setToolPermissions(id, { name: perm | null })`
   persists to `tools.permissions` (`null` clears), keeps choices for tools
   that are gone, never reloads the plugin, and emits `tools` + `settings`.
 - **Catalog cache**: whenever a plugin's registered tool set becomes

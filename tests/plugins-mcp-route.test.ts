@@ -7,6 +7,10 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client"
+import {
+  blockedToolText,
+  unapprovedToolText,
+} from "@stuffbucket/maximal-plugin-sdk/gateway"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
@@ -112,17 +116,33 @@ let plugins: TestGateway
 let app: Awaited<ReturnType<typeof serveApp>>
 const clients: Array<Client> = []
 
+interface ConnectOptions {
+  /** MCP `clientInfo.name` (default `test`). */
+  name?: string
+  /** Answers elicitations; `false`: the client doesn't support them. */
+  elicit?:
+    | false
+    | ((message: string) => { action: "accept" | "decline" | "cancel" })
+}
+
 async function connect(
   pluginId = "demo",
   headers: Record<string, string> = {},
+  options: ConnectOptions = {},
 ): Promise<Client> {
+  const elicit = options.elicit
   const client = new Client(
-    { name: "test", version: "1.0.0" },
-    { capabilities: { elicitation: {} } },
+    { name: options.name ?? "test", version: "1.0.0" },
+    elicit === false ? {} : { capabilities: { elicitation: {} } },
   )
-  client.setRequestHandler("elicitation/create", () =>
-    Promise.resolve({ action: "accept" as const, content: { name: "Ada" } }),
-  )
+  if (elicit !== false)
+    client.setRequestHandler("elicitation/create", (request) =>
+      Promise.resolve(
+        elicit ?
+          elicit(request.params.message)
+        : { action: "accept" as const, content: { name: "Ada" } },
+      ),
+    )
   await client.connect(
     new StreamableHTTPClientTransport(
       new URL(`${app.origin}/mcp/${pluginId}`),
@@ -231,7 +251,7 @@ describe("/mcp/<pluginId>", () => {
 })
 
 describe("/mcp/<pluginId>: permissions, kinds, setup and access", () => {
-  test("blocked tools vanish from the list (with list_changed) and refuse calls", async () => {
+  test("blocked tools stay listed as turned off (with list_changed) and refuse calls, saying where to turn them on", async () => {
     const client = await connect()
     let changed = 0
     client.setNotificationHandler("notifications/tools/list_changed", () => {
@@ -240,19 +260,21 @@ describe("/mcp/<pluginId>: permissions, kinds, setup and access", () => {
     await new Promise((resolve) => setTimeout(resolve, 100))
     await plugins.gateway.setToolPermissions("demo", { echo: "block" })
     await waitFor(() => changed > 0)
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+    const { tools } = await client.listTools()
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "echo",
       "count",
       "ask",
       "boom",
     ])
+    const off = blockedToolText("DEMO", "echo")
+    expect(tools[0].description).toStartWith(off)
     const refused = await client.callTool({
       name: "echo",
       arguments: { text: "hi" },
     })
     expect(refused.isError).toBe(true)
-    expect(refused.content).toEqual([
-      { type: "text", text: "This tool is blocked in Maximal settings." },
-    ])
+    expect(refused.content).toEqual([{ type: "text", text: off }])
 
     const before = changed
     await plugins.gateway.setToolPermissions("demo", { echo: null })
@@ -265,6 +287,76 @@ describe("/mcp/<pluginId>: permissions, kinds, setup and access", () => {
       arguments: { text: "hi" },
     })
     expect(allowed.isError).toBeFalsy()
+  })
+})
+
+describe("/mcp/<pluginId>: ask permission", () => {
+  test("ask tools carry Claude Code's per-call prompt, and Claude Code isn't asked again", async () => {
+    const asked: Array<string> = []
+    const client = await connect(
+      "demo",
+      {},
+      {
+        name: "claude-code",
+        elicit: (message) => {
+          asked.push(message)
+          return { action: "decline" }
+        },
+      },
+    )
+    const { tools } = await client.listTools()
+    const meta = (name: string) =>
+      tools.find((tool) => tool.name === name)?._meta?.[
+        "anthropic/requiresUserInteraction"
+      ]
+    // `count` isn't read-only, so it asks by default; `echo` is read-only.
+    expect(meta("count")).toBe(true)
+    expect(meta("echo")).toBeUndefined()
+    const result = await client.callTool({ name: "count", arguments: {} })
+    expect(result.isError).toBeFalsy()
+    expect(asked).toEqual([])
+  })
+
+  test("other clients are asked by Maximal before an ask tool runs", async () => {
+    const asked: Array<string> = []
+    let answer: "accept" | "decline" | "cancel" = "accept"
+    const client = await connect(
+      "demo",
+      {},
+      {
+        elicit: (message) => {
+          asked.push(message)
+          return { action: answer }
+        },
+      },
+    )
+    expect(
+      (await client.callTool({ name: "count", arguments: {} })).isError,
+    ).toBeFalsy()
+    expect(asked).toEqual(["Maximal: allow DEMO to run count?\n{}"])
+
+    answer = "decline"
+    const declined = await client.callTool({ name: "count", arguments: {} })
+    expect(declined.isError).toBe(true)
+    expect(declined.content).toEqual([
+      {
+        type: "text",
+        text: "You declined DEMO's count call, so it wasn't run.",
+      },
+    ])
+    // A read-only tool is allowed by default: nobody is asked.
+    const before = asked.length
+    await client.callTool({ name: "echo", arguments: { text: "hi" } })
+    expect(asked).toHaveLength(before)
+  })
+
+  test("a client that can't ask gets an ask tool refused, saying how to allow it", async () => {
+    const client = await connect("demo", {}, { elicit: false })
+    const result = await client.callTool({ name: "count", arguments: {} })
+    expect(result.isError).toBe(true)
+    expect(result.content).toEqual([
+      { type: "text", text: unapprovedToolText("DEMO", "count") },
+    ])
   })
 
   test("a plugin that isn't a connector has no MCP endpoint", async () => {

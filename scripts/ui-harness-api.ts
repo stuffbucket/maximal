@@ -29,6 +29,7 @@ import {
   resolveScenario,
   toolCounts,
   workiqStatus,
+  workiqDefaultPermission,
   workiqToolViews,
 } from "./ui-harness-fixtures"
 
@@ -319,8 +320,10 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       for (const [name, value] of Object.entries(parsed.data.permissions)) {
         const tool = connector.tools.find((t) => t.name === name)
         if (!tool) continue
-        tool.permission = value ?? "allow"
-        tool.permissionSource = value === null ? "default" : "user"
+        Object.assign(
+          tool,
+          value === null ? workiqDefaultPermission(tool) : { permission: value, permissionSource: "user" },
+        )
       }
       pluginsChanged()
       return json(connector)

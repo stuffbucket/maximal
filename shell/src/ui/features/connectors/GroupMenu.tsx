@@ -4,7 +4,7 @@ import { t } from "../../../i18n";
 import type { ToolPermission } from "../../../proxy/client";
 import { cx } from "../../components/cx";
 
-import { AllowGlyph, BlockGlyph, CheckGlyph, ChevronDownGlyph, MixedGlyph } from "./glyphs";
+import { AllowGlyph, AskGlyph, BlockGlyph, CheckGlyph, ChevronDownGlyph, MixedGlyph } from "./glyphs";
 import type { GroupPermission } from "./tools";
 
 interface Item {
@@ -16,6 +16,7 @@ interface Item {
 function items(): Array<Item> {
   return [
     { value: "allow", label: t("connectors-perm-allow"), glyph: <AllowGlyph /> },
+    { value: "ask", label: t("connectors-perm-ask"), glyph: <AskGlyph /> },
     { value: "block", label: t("connectors-perm-block"), glyph: <BlockGlyph /> },
     { value: "custom", label: t("connectors-perm-custom"), glyph: <MixedGlyph /> },
   ];
@@ -30,7 +31,8 @@ interface GroupMenuProps {
 }
 
 /**
- * The group's permission as a menu button: Always allow / Blocked set every
+ * The group's permission as a menu button: Always allow / Ask every time /
+ * Blocked set every
  * tool in the group; Custom marks a mixed group (checked, never an action).
  * Arrow keys move, Enter/Space choose, Escape closes and returns focus to
  * the button, Tab or a click elsewhere closes.

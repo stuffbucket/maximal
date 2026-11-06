@@ -512,9 +512,9 @@ export type PluginKind = z.infer<typeof PluginKind>
 export const PluginSource = z.enum(["built-in", "external"])
 export type PluginSource = z.infer<typeof PluginSource>
 
-/** Per-tool permission. Two states for now; kept a string enum so a third
- *  (e.g. "ask") can be added without migrating stored choices. */
-export const ToolPermission = z.enum(["allow", "block"])
+/** Per-tool permission: `allow`, `ask` (a person approves every call) or
+ *  `block` (listed as turned off, calls refused). */
+export const ToolPermission = z.enum(["allow", "ask", "block"])
 export type ToolPermission = z.infer<typeof ToolPermission>
 
 /** Permission group, from the tool's annotations: `readOnlyHint === true` ⇒

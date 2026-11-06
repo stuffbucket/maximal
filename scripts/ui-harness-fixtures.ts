@@ -596,22 +596,42 @@ export const workiqToolSeeds: Array<ToolSeed> = [
 ]
 
 /** Annotation grouping, as the host infers it. */
-function toolGroup(tool: ToolSeed): ToolGroup {
+function toolGroup(tool: Pick<ToolSeed, "annotations">): ToolGroup {
   if (tool.annotations?.readOnlyHint === true) return "read-only"
   if (tool.annotations?.destructiveHint === true) return "write-delete"
   return "other"
 }
 
-/** The user's explicit choices in the fixtures: one write tool and one
- *  other tool blocked, so those groups read "Custom". */
-export const workiqBlocked: ReadonlyArray<string> = ["delete_entity", "get_debug_link"]
+/** The user's explicit choices in the fixtures: one other tool blocked, so
+ *  that group reads "Custom". */
+export const workiqBlocked: ReadonlyArray<string> = ["get_debug_link"]
+
+/** As the host resolves them: the user's choice, else Work IQ's own default
+ *  (delete_entity off), else read-only allowed and everything else asks. */
+function permissionOf(
+  seed: ToolSeed,
+  blocked: ReadonlyArray<string>,
+): Pick<PluginToolView, "permission" | "permissionSource"> {
+  if (blocked.includes(seed.name)) return { permission: "block", permissionSource: "user" }
+  return workiqDefaultPermission(seed)
+}
+
+/** Work IQ's permission when the user hasn't chosen one. */
+export function workiqDefaultPermission(
+  tool: Pick<ToolSeed, "name" | "annotations">,
+): Pick<PluginToolView, "permission" | "permissionSource"> {
+  if (tool.name === "delete_entity") return { permission: "block", permissionSource: "plugin" }
+  return {
+    permission: toolGroup(tool) === "read-only" ? "allow" : "ask",
+    permissionSource: "default",
+  }
+}
 
 export function workiqToolViews(blocked: ReadonlyArray<string> = workiqBlocked): Array<PluginToolView> {
   return workiqToolSeeds.map((seed) => ({
     ...seed,
     group: toolGroup(seed),
-    permission: blocked.includes(seed.name) ? "block" : "allow",
-    permissionSource: blocked.includes(seed.name) ? "user" : "default",
+    ...permissionOf(seed, blocked),
   }))
 }
 

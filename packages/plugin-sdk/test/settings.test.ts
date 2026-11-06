@@ -315,7 +315,7 @@ describe("tool permissions", () => {
     ])
   })
 
-  test("explicit > plugin default > allow; bad stored values and throwing defaults are ignored", () => {
+  test("explicit > plugin default > host default (read-only allowed, else ask); bad stored values and throwing defaults are ignored", () => {
     const module: Pick<PluginModule, "defaultToolPermission"> = {
       defaultToolPermission: (tool) => {
         if (tool.name === "misc") throw new Error("boom")
@@ -335,6 +335,10 @@ describe("tool permissions", () => {
       permissionSource: "user",
     })
     expect(resolve(del, { del: "ask" })).toEqual({
+      permission: "ask",
+      permissionSource: "user",
+    })
+    expect(resolve(del, { del: "maybe" })).toEqual({
       permission: "block",
       permissionSource: "plugin",
     })
@@ -343,7 +347,7 @@ describe("tool permissions", () => {
       permissionSource: "default",
     })
     expect(resolve(misc)).toEqual({
-      permission: "allow",
+      permission: "ask",
       permissionSource: "default",
     })
     expect(resolve(read, { read: "block" }).permission).toBe("block")
@@ -435,7 +439,7 @@ describe("testbed settings negotiation", () => {
     expect(summary(await loaded.toolViews())).toEqual([
       ["search", "read-only", "block", "user"],
       ["del", "write-delete", "block", "plugin"],
-      ["misc", "other", "allow", "default"],
+      ["misc", "other", "ask", "default"],
     ])
     expect(summary(await loaded.toolViews({ del: "allow" }))[1]).toEqual([
       "del",

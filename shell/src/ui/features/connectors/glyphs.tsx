@@ -44,6 +44,16 @@ export function AllowGlyph(): JSX.Element {
   );
 }
 
+/** Ask: a ring with a question mark. */
+export function AskGlyph(): JSX.Element {
+  return (
+    <Glyph>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.75 9.5a2.4 2.4 0 1 1 3.4 2.2c-.7.35-1.15.95-1.15 1.7v.35M12 16.5h.01" />
+    </Glyph>
+  );
+}
+
 /** Blocked: a ring struck through. */
 export function BlockGlyph(): JSX.Element {
   return (

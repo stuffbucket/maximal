@@ -341,6 +341,12 @@ async function toolNames(client: Client): Promise<Array<string>> {
   return (await client.listTools()).tools.map((tool) => tool.name)
 }
 
+/** Whether `name` is listed as turned off (blocked tools stay listed). */
+async function listedAsOff(client: Client, name: string): Promise<boolean> {
+  const tool = (await client.listTools()).tools.find((t) => t.name === name)
+  return tool?.description?.includes("is turned off in Maximal") === true
+}
+
 /** Accept the terms and sign in through the Settings API, as a user would. */
 async function setUp(
   checks: Checks,
@@ -428,8 +434,12 @@ async function driveEntitled(
       const notified = await waitUntil(() => listChanged() > before, 5_000)
       expectThat(notified, "no tools/list_changed")
       const names = await toolNames(client)
-      expectThat(!names.includes(target.name), "still listed")
-      return `list_changed received; ${names.length} tools listed`
+      expectThat(names.includes(target.name), "no longer listed")
+      expectThat(
+        await listedAsOff(client, target.name),
+        "listed without saying it's turned off",
+      )
+      return `list_changed received; listed as turned off`
     })
 
     await checks.run(`Calling blocked ${target.name} is refused`, async () => {
@@ -439,18 +449,21 @@ async function driveEntitled(
       })) as ToolResultLike
       expectThat(result.isError === true, "the call ran")
       const text = firstText(result)
-      expectThat(text.includes("blocked"), `said "${text}"`)
+      expectThat(text.includes("turned off"), `said "${text}"`)
       return `isError: ${text}`
     })
 
-    await checks.run(`Unblock ${target.name}`, async () => {
+    await checks.run(`Allow ${target.name}`, async () => {
       const before = listChanged()
-      await api.permissions({ [target.name]: null })
+      // Not just cleared: Work IQ's own default keeps delete_entity off.
+      await api.permissions({ [target.name]: "allow" })
       const notified = await waitUntil(() => listChanged() > before, 5_000)
       expectThat(notified, "no tools/list_changed")
-      const names = await toolNames(client)
-      expectThat(names.includes(target.name), "not listed again")
-      return `list_changed received; ${names.length} tools listed`
+      expectThat(
+        !(await listedAsOff(client, target.name)),
+        "still listed as turned off",
+      )
+      return "list_changed received; listed as usable"
     })
 
     const callAllowed = async () =>

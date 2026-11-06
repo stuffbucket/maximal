@@ -30,6 +30,14 @@ memory only when there is no store). It does not read or share agent-kit's
 keychain-encrypted cache, and it is separate from Maximal's GitHub/Copilot
 sign-in. MCP clients never see it.
 
+## Default tool permissions
+
+`delete_entity` is blocked by default (`defaultToolPermission`); every other
+tool takes the host default: allowed when Work IQ marks it read-only, ask
+otherwise. Work IQ marks `ask`, `create_entity`, `update_entity` and
+`do_action` destructive, so those ask. The person's choices in Settings
+override all of this.
+
 ## Throttling
 
 Work IQ calls Microsoft Graph for the user and reports Graph's answer inside
