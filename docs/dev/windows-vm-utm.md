@@ -37,6 +37,30 @@ baseline copy to import."
 All commands accept an optional VM name as the second arg
 (default: `Windows`).
 
+## Cross-build the desktop shell on macOS
+
+The Windows VM payload is a local developer path, not a CI path. CI continues to
+compile and test the shell on the native Windows runners. The scoped
+`tools/windows-cross/mise.toml` pins cargo-xwin without adding it to the root
+mise toolchain, so ordinary root installs and CI never install it.
+
+```sh
+bun run app:windows:setup # one-time: LLVM + cargo-xwin + SDK/CRT cache
+bun run app:windows:check # compile-check target_os="windows" code
+bun run app:windows:build # shell + both sidecars → dist-windows/
+```
+
+Copy the complete ignored `dist-windows/` directory into the VM and run
+`maximal-shell.exe`; all three executables must stay together. This is a raw,
+non-production developer payload, not an installer. It uses a development Tauri
+identifier, separate state, dynamic local port, and no updater.
+
+The setup keeps the downloaded Microsoft SDK/CRT under the ignored
+`.cargo-xwin/` directory and accepts Microsoft's SDK license. Set
+`XWIN_CACHE_DIR` before running the commands to reuse an existing cargo-xwin
+cache instead. Visual Studio Code does not ship a Windows SDK—even if VS Code is
+installed, cargo-xwin still needs the SDK/CRT files managed by xwin.
+
 ## Bring-up checklist (one-time)
 
 Two paths: finish an existing, partly installed `Windows` VM, or start

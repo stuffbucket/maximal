@@ -1,0 +1,5 @@
+# Local-only Windows cross-compilation tools. Root/CI `mise install` does not
+# traverse into this directory, so cargo-xwin is installed only when a developer
+# explicitly runs `bun run app:windows:setup`.
+[tools]
+"cargo:cargo-xwin" = "0.23.1"

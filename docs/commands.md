@@ -52,6 +52,9 @@ bun run app:ui       # UI-only iteration: `bun run build:ui --watch` — rebuild
                      # them at :4141/ui/* (reload the window to pick up changes).
 bun run app:build    # force-rebuild sidecar + tauri build --bundles app,dmg
 bun run app:build:test # build an app bundle with the non-production test identifier
+bun run app:windows:setup # macOS only: install the scoped cargo-xwin toolchain
+bun run app:windows:check # compile-check the Windows Tauri shell from macOS
+bun run app:windows:build # stage a Windows VM payload under dist-windows/
 ```
 
 `bun run start`, `bun run dev` and `maximal start` listen on `127.0.0.1` unless
