@@ -94,9 +94,10 @@ ExecStart=/usr/bin/maximal start --account-type enterprise
 
 Connectors such as [Work IQ](workiq.md) keep their sign-in encrypted, with the
 key in your desktop keyring through the Secret Service (libsecret over D-Bus).
-Ubuntu's and Debian's GNOME desktops have one, unlocked when you log in. On
-another desktop, or if Work IQ's status says *Sign-in: Kept until Maximal
-restarts*, install a keyring and restart Maximal:
+Ubuntu's and Debian's GNOME desktops have one, unlocked when you log in. The
+`maximal` package recommends `libsecret-1-0`, so apt installs the library with
+it. On another desktop, or if Work IQ's status says *Sign-in: Kept until
+Maximal restarts*, install a keyring and restart Maximal:
 
 ```sh
 sudo apt install gnome-keyring libsecret-1-0

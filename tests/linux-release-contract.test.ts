@@ -278,6 +278,12 @@ describe("packaged proxy", () => {
     )
   })
 
+  test("recommends libsecret for connector sign-ins in the keyring", () => {
+    expect(read("build/linux/build-maximal-deb.sh")).toContain(
+      "Recommends: libsecret-1-0",
+    )
+  })
+
   test("the user service stops retrying and has no system-only ordering", () => {
     const unit = read("build/linux/maximal.service")
     const unitSection = unit.slice(0, unit.indexOf("[Service]"))

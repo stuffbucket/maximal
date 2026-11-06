@@ -65,6 +65,8 @@ cp "$maximal_deb" "$work/"
 apt-get install -y -qq "$work/$(basename "$maximal_deb")" curl python3 >/dev/null
 [ "$(dpkg-query -W -f='${Version}' maximal)" = "$debver" ] ||
   fail "installed version is not $debver"
+dpkg-query -W -f='${Recommends}' maximal | grep -q 'libsecret-1-0' ||
+  fail "maximal does not recommend libsecret-1-0"
 for path in /usr/bin/maximal \
   /usr/lib/systemd/user/maximal.service /usr/lib/maximal/installed-by-apt; do
   [ -e "$path" ] || fail "missing $path"

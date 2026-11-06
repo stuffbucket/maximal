@@ -74,6 +74,7 @@ Architecture: $arch
 Maintainer: stuffbucket <apt@mxml.sh>
 Installed-Size: $(installed_size "$root")
 Depends: libc6 (>= 2.39)
+Recommends: libsecret-1-0
 Section: utils
 Priority: optional
 Homepage: https://mxml.sh
