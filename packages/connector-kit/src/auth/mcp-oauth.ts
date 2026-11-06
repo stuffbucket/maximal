@@ -33,9 +33,6 @@ import { signInNotSavedNotice } from "./token-provider"
  */
 export const OAUTH_FILE = "oauth.sealed.json"
 
-/** The plaintext state older versions wrote; moved into `OAUTH_FILE` on first start. */
-export const LEGACY_OAUTH_FILE = "oauth.json"
-
 /** Entry name (before its random key id) of the state's key in the OS credential store. */
 const OAUTH_KEY = "mcp-oauth"
 
@@ -259,17 +256,10 @@ class McpOAuthTokenProvider implements TokenProvider {
       store: options.store,
       secrets: options.secrets,
       file: OAUTH_FILE,
-      legacyFile: LEGACY_OAUTH_FILE,
       keyName: OAUTH_KEY,
       scope: `${options.scope ?? crypto.randomUUID()}:${OAUTH_FILE}`,
       ...(options.onStoreTimeout ? { onTimeout: options.onStoreTimeout } : {}),
       ...(options.logger ? { logger: options.logger } : {}),
-    })
-    // Move older plaintext state off disk now, not at the first token lookup.
-    this.#state.migrate().catch((error: unknown) => {
-      options.logger?.warn(
-        `Could not move the plaintext ${LEGACY_OAUTH_FILE}: ${error instanceof Error ? error.message : String(error)}`,
-      )
     })
   }
 

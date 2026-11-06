@@ -51,9 +51,7 @@ Windows Credential Manager, or the keyring (Secret Service) on Linux. The
 Keychain lists it as *Maximal connectors*. Only the most recently signed-in
 account is kept. *Sign out* deletes the file and the key. Turning Work IQ off
 stops it and removes its tools but keeps the sign-in, the accepted terms and
-your tool permissions. A sign-in an older version saved unencrypted
-(`msal-token-cache.json`) is moved into the credential store when Maximal
-starts, and the old file is deleted once that worked.
+your tool permissions.
 
 Without a usable credential store (most often Linux without a keyring, see
 [Maximal on Linux](linux.md)) Maximal never writes the sign-in to disk: it

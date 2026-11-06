@@ -10,14 +10,12 @@ export {
   createMsalTokenProvider,
   entraAuth,
   type EntraAuthOverrides,
-  LEGACY_TOKEN_CACHE_FILE,
   type MsalTokenProviderOptions,
   SIGN_IN_TIMEOUT_MS,
   TOKEN_CACHE_FILE,
 } from "./auth/entra"
 export {
   createMcpOAuthTokenProvider,
-  LEGACY_OAUTH_FILE,
   mcpOAuth,
   type McpOAuthOptions,
   type McpOAuthOverrides,

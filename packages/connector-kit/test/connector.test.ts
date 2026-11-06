@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import type { AuthStrategy } from "../src/auth/token-provider"
 
-import { LEGACY_TOKEN_CACHE_FILE, TOKEN_CACHE_FILE } from "../src/auth/entra"
+import { TOKEN_CACHE_FILE } from "../src/auth/entra"
 import { resetSealedCacheScopes } from "../src/auth/sealed-cache"
 import {
   defineRemoteMcpConnector,
@@ -408,36 +408,6 @@ describe("connector lifecycle", () => {
       label: "Sign-in",
       value: "Kept until Maximal restarts",
     })
-  })
-
-  test("the Entra strategy moves a plaintext cache into the connector's credential entries at start", async () => {
-    const secrets = memorySecretStore()
-    const empty = JSON.stringify({
-      Account: {},
-      IdToken: {},
-      AccessToken: {},
-      RefreshToken: {},
-      AppMetadata: {},
-    })
-    const plugin = await loadPlugin(
-      defineRemoteMcpConnector(EXAMPLE_MANIFEST, { secretStore: secrets }),
-      {},
-      { storage: { example: { [LEGACY_TOKEN_CACHE_FILE]: empty } } },
-    )
-    cleanups.push(() => plugin.dispose())
-    await waitFor(
-      () =>
-        !Object.hasOwn(
-          plugin.testbed.storage.files("example"),
-          LEGACY_TOKEN_CACHE_FILE,
-        ),
-    )
-    expect(plugin.testbed.storage.files("example")[TOKEN_CACHE_FILE]).toContain(
-      "maximal-sealed/1",
-    )
-    const names = [...secrets.entries.keys()]
-    expect(names).toHaveLength(1)
-    expect(names[0]).toMatch(/^example\/msal-token-cache\/[0-9a-f]{32}$/)
   })
 
   test("signing in raises a 'connected' notice; a cached sign-in at start doesn't", async () => {

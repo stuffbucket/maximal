@@ -76,10 +76,8 @@ replaces it.
   (the browser session decides); signing in again sends `select_account`.
   Every upstream request gets a token silently (MSAL cache / refresh token);
   only the most recently signed-in account is kept. Cache:
-  `msal-token-cache.sealed.json`, encrypted (see *Credentials* below); a
-  plaintext `msal-token-cache.json` from an older version is moved into it
-  when the connector starts and deleted. `config.authority` overrides the
-  authority.
+  `msal-token-cache.sealed.json`, encrypted (see *Credentials* below).
+  `config.authority` overrides the authority.
 - **`mcp-oauth`** — `{ clientId?, scopes? }`. The MCP Authorization spec:
   protected-resource metadata (RFC 9728, from the endpoint) → authorization
   server metadata (RFC 8414 / OIDC discovery) → authorization code + PKCE
@@ -94,9 +92,8 @@ whose `state` is not this sign-in's. A static `clientId` is used as is; without 
   fails clearly otherwise. Account details come from an `id_token` when the
   server sends one. State (client, tokens, discovery, resource) is sealed
   like Entra's cache, below: `oauth.sealed.json`, key entry
-  `<id>/mcp-oauth/<key id>`; a plaintext `oauth.json` from an older version
-  is moved in at start and deleted. A rejected refresh token means signing
-  in again.
+  `<id>/mcp-oauth/<key id>`. A rejected refresh token means signing in
+  again.
 - **`none`** — public server: no sign-in, no `Authorization` header, no
   sign-in/sign-out actions.
 

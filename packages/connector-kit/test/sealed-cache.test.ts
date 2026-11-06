@@ -49,7 +49,6 @@ function sealed(
     store,
     secrets,
     file: "cache.sealed.json",
-    legacyFile: "cache.json",
     keyName: "cache",
     platform: "linux",
     scope: `test:${crypto.randomUUID()}`,
@@ -98,34 +97,11 @@ describe("sealed cache", () => {
     expect(restarted.memoryOnly).toBeUndefined()
   })
 
-  test("moves a plaintext legacy file into the sealed file, then deletes it", async () => {
-    const store = memoryStore()
-    const secrets = memorySecretStore()
-    store.files.set("cache.json", CACHE)
-    const cache = sealed(store, secrets)
-    await cache.migrate()
-    expect(store.files.has("cache.json")).toBe(false)
-    expect(store.files.get("cache.sealed.json")).not.toContain("secret")
-    expect(secrets.entries.size).toBe(1)
-    expect(await sealed(store, secrets).read()).toBe(CACHE)
-  })
-
-  test("a read migrates too; a sealed file already there wins over leftover plaintext", async () => {
-    const store = memoryStore()
-    const secrets = memorySecretStore()
-    await sealed(store, secrets).write(CACHE)
-    store.files.set("cache.json", "stale plaintext")
-    expect(await sealed(store, secrets).read()).toBe(CACHE)
-    expect(store.files.has("cache.json")).toBe(false)
-    expect(secrets.entries.size).toBe(1)
-  })
-
-  test("clear removes the sealed file, any legacy file and the key", async () => {
+  test("clear removes the sealed file and the key", async () => {
     const store = memoryStore()
     const secrets = memorySecretStore()
     const cache = sealed(store, secrets)
     await cache.write(CACHE)
-    store.files.set("cache.json", CACHE)
     await cache.clear()
     expect([...store.files.keys()]).toEqual([])
     expect(secrets.entries.size).toBe(0)
@@ -185,22 +161,6 @@ describe("sealed cache when the store fails", () => {
     expect(await sealed(store, secrets).read()).toBeUndefined()
     await cache.clear()
     expect(await cache.read()).toBeUndefined()
-  })
-
-  test("no credential store: a legacy plaintext file is kept for the next start, its sign-in in memory", async () => {
-    const store = memoryStore()
-    store.files.set("cache.json", CACHE)
-    const secrets = memorySecretStore({ unavailable: new Error("no keyring") })
-    const cache = sealed(store, secrets)
-    expect(await cache.read()).toBe(CACHE)
-    expect([...store.files.keys()]).toEqual(["cache.json"])
-    expect(cache.memoryOnly).toBeDefined()
-
-    // A later start with a working store moves it in after all.
-    secrets.unavailable = undefined
-    const next = sealed(store, secrets)
-    expect(await next.read()).toBe(CACHE)
-    expect([...store.files.keys()]).toEqual(["cache.sealed.json"])
   })
 
   test("a store that fails never costs the sealed sign-in", async () => {

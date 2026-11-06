@@ -18,7 +18,6 @@ import type { TextStore } from "../src/auth/token-provider"
 import {
   createMsalTokenProvider,
   entraAuth,
-  LEGACY_TOKEN_CACHE_FILE,
   sealedCachePlugin,
   TOKEN_CACHE_FILE,
 } from "../src/auth/entra"
@@ -326,7 +325,6 @@ describe("MSAL token provider", () => {
     expect(sealed).toContain('"format":"maximal-sealed/1"')
     for (const secret of ["at-1", "rt-1", "ada@contoso.com", ADA_OID])
       expect(sealed).not.toContain(secret)
-    expect(store.files.has(LEGACY_TOKEN_CACHE_FILE)).toBe(false)
     const names = [...secrets.entries.keys()]
     expect(names).toHaveLength(1)
     expect(names[0]).toMatch(/^msal-token-cache\/[0-9a-f]{32}$/)
@@ -442,38 +440,6 @@ describe("MSAL token provider: sealed cache", () => {
       tokenCache,
     } as never)
     expect(seen).toBe("{}")
-  })
-
-  test("moves a plaintext cache from an older version into the credential store", async () => {
-    const store = memoryStore()
-    const secrets = memorySecretStore()
-    const entra = fakeEntra()
-    const tokens = provider(store, entra, { ...browser(entra), secrets })
-    await tokens.signIn(new AbortController().signal)
-    // What an older version left behind: the same cache, in plain text.
-    store.files.set(
-      LEGACY_TOKEN_CACHE_FILE,
-      (await unsealed(store, secrets)) ?? "",
-    )
-    store.files.delete(TOKEN_CACHE_FILE)
-    secrets.entries.clear()
-
-    const upgraded = provider(store, entra, {
-      open: () => Promise.reject(new Error("must not open a browser")),
-      secrets,
-    })
-    expect(await upgraded.account()).toMatchObject({
-      username: "ada@contoso.com",
-    })
-    expect(store.files.has(LEGACY_TOKEN_CACHE_FILE)).toBe(false)
-    expect(store.files.get(TOKEN_CACHE_FILE)).not.toContain("rt-1")
-    expect(secrets.entries.size).toBe(1)
-    expect(await upgraded.getToken()).toBe("at-1")
-    expect(entra.state.tokenRequests).toHaveLength(1)
-
-    await upgraded.signOut()
-    expect([...store.files.keys()]).toEqual([])
-    expect(secrets.entries.size).toBe(0)
   })
 
   test("without a credential store the sign-in stays in memory, never on disk", async () => {

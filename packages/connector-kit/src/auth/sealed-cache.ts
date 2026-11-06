@@ -57,8 +57,6 @@ export interface SealedCacheOptions {
   secrets: SecretStore
   /** Sealed file name in `store`. */
   file: string
-  /** An older plaintext file: moved into the sealed file on first use, then deleted. */
-  legacyFile?: string
   /** Entry name prefix in `secrets`; a random key id is appended. */
   keyName: string
   /**
@@ -167,7 +165,6 @@ export class SealedCache {
   readonly #now: () => number
   #queue: Promise<unknown> = Promise.resolve()
   #key: Key | undefined
-  #migrated = false
 
   constructor(options: SealedCacheOptions) {
     this.#options = options
@@ -189,26 +186,15 @@ export class SealedCache {
     return state.memory === undefined ? undefined : state.notice
   }
 
-  /** Move a plaintext legacy file into the sealed file (no-op without one). */
-  migrate(): Promise<void> {
-    return this.#serial(() => this.#migrate())
-  }
-
   read(): Promise<string | undefined> {
-    return this.#serial(async () => {
-      await this.#migrate()
-      return await this.#read()
-    })
+    return this.#serial(() => this.#read())
   }
 
   write(text: string): Promise<void> {
-    return this.#serial(async () => {
-      await this.#migrate()
-      await this.#write(text)
-    })
+    return this.#serial(() => this.#write(text))
   }
 
-  /** Delete the sealed file, any legacy file, the key's entry and any in-memory copy. */
+  /** Delete the sealed file, the key's entry and any in-memory copy. */
   clear(): Promise<void> {
     return this.#serial(() => this.#clear())
   }
@@ -237,29 +223,6 @@ export class SealedCache {
       this.#markUnavailable(error)
       return UNAVAILABLE
     }
-  }
-
-  async #migrate(): Promise<void> {
-    const legacy = this.#options.legacyFile
-    if (this.#migrated || legacy === undefined) return
-    this.#migrated = true
-    const { store, file } = this.#options
-    const text = await store.readText(legacy)
-    if (text === undefined) return
-    // A sealed file written since wins over the leftover plaintext.
-    const sealedSince = (await store.readText(file)) !== undefined
-    if (!sealedSince) await this.#write(text)
-    if (!sealedSince && this.#state.memory !== undefined) {
-      // Not sealed: keep the plaintext for the next start to try again.
-      this.#options.logger?.warn(
-        `Could not move the sign-in in ${legacy} into the OS credential store; keeping it in memory and trying again next start.`,
-      )
-      return
-    }
-    await store.delete(legacy)
-    this.#options.logger?.info(
-      `Moved the sign-in from the plaintext ${legacy} into the OS credential store.`,
-    )
   }
 
   async #read(): Promise<string | undefined> {
@@ -385,7 +348,7 @@ export class SealedCache {
   }
 
   async #clear(): Promise<void> {
-    const { store, file, legacyFile } = this.#options
+    const { store, file } = this.#options
     const state = this.#state
     state.memory = undefined
     state.notice = undefined
@@ -396,7 +359,6 @@ export class SealedCache {
     if (this.#key) names.add(this.#key.name)
     this.#key = undefined
     await store.delete(file)
-    if (legacyFile !== undefined) await store.delete(legacyFile)
     for (const name of names) await this.#forgetKey(name)
   }
 

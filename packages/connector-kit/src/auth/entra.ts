@@ -30,9 +30,6 @@ import { signInNotSavedNotice } from "./token-provider"
  */
 export const TOKEN_CACHE_FILE = "msal-token-cache.sealed.json"
 
-/** The plaintext cache older versions wrote; moved into `TOKEN_CACHE_FILE` on first start. */
-export const LEGACY_TOKEN_CACHE_FILE = "msal-token-cache.json"
-
 /** Entry name (before its random key id) of the cache key in the OS credential store. */
 const TOKEN_CACHE_KEY = "msal-token-cache"
 
@@ -113,7 +110,6 @@ function tokenCache(options: MsalTokenProviderOptions): SealedCache {
     store: options.store,
     secrets: options.secrets,
     file: TOKEN_CACHE_FILE,
-    legacyFile: LEGACY_TOKEN_CACHE_FILE,
     keyName: TOKEN_CACHE_KEY,
     scope: `${options.scope ?? crypto.randomUUID()}:${TOKEN_CACHE_FILE}`,
     ...(options.onStoreTimeout ? { onTimeout: options.onStoreTimeout } : {}),
@@ -233,12 +229,6 @@ class MsalTokenProvider implements TokenProvider {
     this.#scopes = [...options.scopes]
     this.#cache = tokenCache(options)
     this.#pca = createClient(options, this.#cache)
-    // Move an older plaintext cache off disk now, not at the first sign-in check.
-    this.#cache.migrate().catch((error: unknown) => {
-      options.logger?.warn(
-        `Could not move the plaintext ${LEGACY_TOKEN_CACHE_FILE}: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    })
   }
 
   credentialNotice(): CredentialNotice | undefined {

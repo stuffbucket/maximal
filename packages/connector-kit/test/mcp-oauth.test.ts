@@ -7,7 +7,6 @@ import type { TextStore } from "../src/auth/token-provider"
 import { startLoopbackRedirect } from "../src/auth/loopback"
 import {
   createMcpOAuthTokenProvider,
-  LEGACY_OAUTH_FILE,
   OAUTH_FILE,
   type McpOAuthOptions,
 } from "../src/auth/mcp-oauth"
@@ -274,34 +273,6 @@ function heldRefresh() {
 }
 
 describe("mcp-oauth state at rest", () => {
-  test("an older plaintext oauth.json moves into the sealed file and is deleted", async () => {
-    const server = fake({ oauth: { clientId: "c" } })
-    const signedIn = provider(server, { clientId: "c" })
-    await signedIn.tokens.signIn(signal())
-    const plaintext = JSON.stringify(
-      await stored(signedIn.store, signedIn.secrets),
-    )
-    expect(plaintext).toContain("token-1")
-
-    // A data folder as an older Maximal left it.
-    const store = memoryStore()
-    store.files.set(LEGACY_OAUTH_FILE, plaintext)
-    const secrets = memorySecretStore()
-    const upgraded = createMcpOAuthTokenProvider({
-      endpoint: server.url,
-      clientId: "c",
-      displayName: "Example",
-      store,
-      secrets,
-      openBrowser: () => Promise.reject(new Error("no browser")),
-      toError: (error) => toConnectorError(error, { name: "Example" }),
-      signInTimeoutMs: 1000,
-    })
-    expect(await upgraded.getToken()).toBe("token-1")
-    expect([...store.files.keys()]).toEqual([OAUTH_FILE])
-    expect(store.files.get(OAUTH_FILE)).not.toContain("token-1")
-  })
-
   test("without a credential store the sign-in stays in memory and nothing is written", async () => {
     const server = fake({ oauth: { clientId: "c" } })
     const secrets = memorySecretStore({
