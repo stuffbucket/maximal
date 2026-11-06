@@ -10,6 +10,7 @@ import {
   PLUGIN_SETTINGS_FILE,
   STORAGE_NAME_PATTERN,
   TOOL_NAME_PATTERN,
+  type PluginNotice,
   type PluginStatus,
   type ToolAnnotations,
   type ToolDefinition,
@@ -336,6 +337,50 @@ export function normalizeToolDefinition(
 
 const STATUS_STATES = new Set(["ready", "needs-setup", "working", "error"])
 const ACTION_KINDS = new Set(["primary", "secondary", "destructive"])
+
+const NOTICE_CODE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
+const NOTICE_TEXT_MAX = 500
+const NOTICE_PARAMS_MAX = 8
+
+function invalidNotice(pluginId: string, message: string): never {
+  throw new PluginContractError(
+    "invalid-notice",
+    `Plugin "${pluginId}" notice: ${message}`,
+    { pluginId },
+  )
+}
+
+/** Validate a `surface.notify` notice and return a frozen copy of its known fields. */
+export function normalizeNotice(
+  pluginId: string,
+  notice: unknown,
+): Readonly<PluginNotice> {
+  if (!isRecord(notice)) return invalidNotice(pluginId, "must be an object.")
+  const { code, message, params } = notice
+  if (typeof code !== "string" || code.length > 64 || !NOTICE_CODE.test(code))
+    invalidNotice(pluginId, `invalid code ${JSON.stringify(code)}.`)
+  if (
+    typeof message !== "string"
+    || message.trim() === ""
+    || message.length > NOTICE_TEXT_MAX
+  )
+    invalidNotice(pluginId, "message must be non-empty text.")
+  const copy: Record<string, string> = {}
+  if (params !== undefined) {
+    if (!isRecord(params) || Object.keys(params).length > NOTICE_PARAMS_MAX)
+      invalidNotice(pluginId, "params must be a small object of strings.")
+    for (const [name, value] of Object.entries(params)) {
+      if (typeof value !== "string" || value.length > NOTICE_TEXT_MAX)
+        invalidNotice(pluginId, `param ${JSON.stringify(name)} must be text.`)
+      copy[name] = value
+    }
+  }
+  return Object.freeze({
+    code: code,
+    message: message,
+    ...(params === undefined ? {} : { params: Object.freeze(copy) }),
+  })
+}
 
 function invalidStatus(pluginId: string, message: string): never {
   throw new PluginContractError(

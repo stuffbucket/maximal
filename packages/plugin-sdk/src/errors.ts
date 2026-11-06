@@ -11,6 +11,7 @@ export type PluginContractErrorCode =
   | "invalid-action"
   | "duplicate-action"
   | "invalid-status"
+  | "invalid-notice"
   | "invalid-storage-name"
   | "invalid-url"
 

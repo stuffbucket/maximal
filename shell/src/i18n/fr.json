@@ -530,6 +530,11 @@
   "native-notify-working-title": "Maximal fonctionne",
   "native-notify-working-body": "Votre première requête vient de passer.",
   "native-notify-working-body-apps": "Les requêtes passent : {apps} peut maintenant utiliser Maximal.",
+  "native-notify-connector-connected-title": "{connector} est connecté",
+  "native-notify-connector-connected-body": "Connecté en tant que {account}. Ses outils sont prêts dans vos applications.",
+  "native-notify-connector-connected-body-noaccount": "Ses outils sont prêts dans vos applications.",
+  "native-notify-connector-not-saved-title": "La connexion à {connector} ne sera pas enregistrée",
+  "native-notify-connector-not-saved-body": "Le magasin d’identifiants du système n’a pas répondu : vous devrez vous reconnecter à {connector} après le redémarrage de Maximal.",
 
   "native-quit-title": "Quitter Maximal ?",
   "native-quit-body": "Toutes les applications connectées à Maximal seront déconnectées.",

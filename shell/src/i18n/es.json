@@ -530,6 +530,11 @@
   "native-notify-working-title": "Maximal funciona",
   "native-notify-working-body": "Su primera solicitud acaba de pasar.",
   "native-notify-working-body-apps": "Las solicitudes están pasando: {apps} ya puede usar Maximal.",
+  "native-notify-connector-connected-title": "{connector} está conectado",
+  "native-notify-connector-connected-body": "Sesión iniciada como {account}. Sus herramientas ya están disponibles en sus aplicaciones.",
+  "native-notify-connector-connected-body-noaccount": "Sus herramientas ya están disponibles en sus aplicaciones.",
+  "native-notify-connector-not-saved-title": "El inicio de sesión de {connector} no se guardará",
+  "native-notify-connector-not-saved-body": "El almacén de credenciales del sistema no respondió, así que tendrá que volver a iniciar sesión en {connector} cuando Maximal se reinicie.",
 
   "native-quit-title": "¿Salir de Maximal?",
   "native-quit-body": "Las aplicaciones conectadas a Maximal se desconectarán.",

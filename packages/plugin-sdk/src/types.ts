@@ -280,9 +280,26 @@ export interface ToolRegistry {
   list(): Array<ToolDefinition>
 }
 
+/**
+ * A one-off message for the person using Maximal, shown as a native
+ * notification by the desktop app. For changes worth interrupting for (a
+ * sign-in that now works, a sign-in that won't survive a restart), not for
+ * status: Settings shows that.
+ */
+export interface PluginNotice {
+  /** Machine code (`a-z`, `0-9`, `-`); the app may word known codes in the user's language. */
+  code: string
+  /** English text, used when the app has no wording for `code`. */
+  message: string
+  /** Values for the app's wording, such as `account`. */
+  params?: Record<string, string>
+}
+
 /** `ctx.surface` — status and actions shown in Settings. */
 export interface PluginSurface {
   setStatus(status: PluginStatus): void
+  /** Best effort: the host may drop notices, and outside the desktop app nothing shows them. */
+  notify(notice: PluginNotice): void
   /** Bound to the caller's fiber. Throws on a duplicate or invalid id. */
   registerAction(id: string, handler: PluginActionHandler): PluginDisposer
 }

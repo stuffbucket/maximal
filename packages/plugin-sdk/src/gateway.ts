@@ -10,6 +10,7 @@ import type {
   JsonSchemaObject,
   PluginKind,
   PluginManifest,
+  PluginNotice,
   PluginStatus,
   PluginToolView,
   ToolAnnotations,
@@ -82,17 +83,21 @@ export interface PluginSnapshot {
 /**
  * `tools`: the MCP-visible tool list may have changed (registration or
  * permission change). `settings`: the plugin's settings file changed
- * (config, permissions).
+ * (config, permissions). `notice`: the plugin sent a one-off message for the
+ * user (`notice` carries it; nothing in the snapshot changes).
  */
 export type PluginGatewayEventType =
   | "lifecycle"
   | "status"
   | "tools"
   | "settings"
+  | "notice"
 
 export interface PluginGatewayEvent {
   type: PluginGatewayEventType
   pluginId: string
+  /** On `notice` events only. */
+  notice?: Readonly<PluginNotice>
 }
 
 export interface PluginGateway {

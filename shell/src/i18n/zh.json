@@ -530,6 +530,11 @@
   "native-notify-working-title": "Maximal 正在运行",
   "native-notify-working-body": "你的第一个请求刚刚通过。",
   "native-notify-working-body-apps": "请求正在通过：{apps} 现在可以使用 Maximal 了。",
+  "native-notify-connector-connected-title": "{connector} 已连接",
+  "native-notify-connector-connected-body": "已以 {account} 身份登录。其工具已可在你的应用中使用。",
+  "native-notify-connector-connected-body-noaccount": "其工具已可在你的应用中使用。",
+  "native-notify-connector-not-saved-title": "{connector} 的登录不会被保存",
+  "native-notify-connector-not-saved-body": "系统凭据存储未响应，因此 Maximal 重启后你需要重新登录 {connector}。",
 
   "native-quit-title": "退出 Maximal?",
   "native-quit-body": "所有连接到 Maximal 的应用都将断开连接。",

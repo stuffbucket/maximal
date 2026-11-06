@@ -530,6 +530,11 @@
   "native-notify-working-title": "Maximal は動作しています",
   "native-notify-working-body": "最初のリクエストが通りました。",
   "native-notify-working-body-apps": "リクエストが通っています。{apps} で Maximal を使えるようになりました。",
+  "native-notify-connector-connected-title": "{connector} に接続しました",
+  "native-notify-connector-connected-body": "{account} としてサインインしました。ツールをアプリで使えます。",
+  "native-notify-connector-connected-body-noaccount": "ツールをアプリで使えます。",
+  "native-notify-connector-not-saved-title": "{connector} のサインインは保存されません",
+  "native-notify-connector-not-saved-body": "システムの資格情報ストアが応答しなかったため、Maximal の再起動後に {connector} へもう一度サインインする必要があります。",
 
   "native-quit-title": "Maximal を終了しますか？",
   "native-quit-body": "Maximal に接続しているすべてのアプリが切断されます。",

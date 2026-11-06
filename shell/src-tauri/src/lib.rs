@@ -1019,6 +1019,7 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
         .updates_enabled()
         .then(|| update_status_endpoint(endpoint, false));
     let working_notice_url = endpoint.http_url("/settings/api/notices/working");
+    let plugin_notices_url = endpoint.http_url("/settings/api/notices/plugins");
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
     // `next_update_check` is when the next check is due (None = now, so the
@@ -1044,6 +1045,7 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
             apply_rejection(&app, rejection);
         }
         check_working_notice(&app, &client, &working_notice_url).await;
+        check_plugin_notices(&app, &client, &plugin_notices_url).await;
         let update_due = next_update_check.is_none_or(|t| std::time::Instant::now() >= t);
         if update_due {
             if let Some(update_url) = update_status_url.as_deref() {
@@ -1122,6 +1124,92 @@ fn fire_working_notification(app: &AppHandle, apps: &[&str]) {
     };
     if let Err(err) = app.notification().builder().title(title).body(body).show() {
         eprintln!("[shell] working notification failed: {err}");
+    }
+}
+
+/// Plugin notices: a connector working again after a sign-in, or a sign-in
+/// that won't survive a restart. POST takes (and clears) the sidecar's queue
+/// (src/lib/plugins/notices.ts); each becomes one notification, worded here
+/// for the codes we know and in the plugin's own English otherwise.
+/// Unreachable, failed, or nothing queued → nothing to do.
+async fn check_plugin_notices(app: &AppHandle, client: &reqwest::Client, url: &str) {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let Ok(resp) = client.post(url).header("x-api-key", key).send().await else {
+        return;
+    };
+    if !resp.status().is_success() {
+        return;
+    }
+    let Ok(payload) = resp.json::<serde_json::Value>().await else {
+        return;
+    };
+    let Some(notices) = payload
+        .get("notices")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    for notice in notices {
+        fire_plugin_notification(app, notice);
+    }
+}
+
+/// One plugin notice as a notification. Best-effort like the others.
+fn fire_plugin_notification(app: &AppHandle, notice: &serde_json::Value) {
+    use tauri_plugin_notification::NotificationExt;
+    let field = |name: &str| {
+        notice
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    };
+    let param = |name: &str| {
+        notice
+            .get("params")
+            .and_then(|params| params.get(name))
+            .and_then(serde_json::Value::as_str)
+    };
+    let name = field("name");
+    let connector = param("connector").unwrap_or(name);
+    let locale = app.state::<LocaleState>().get();
+    let (title, body) = match field("code") {
+        "connected" => (
+            native_i18n::t(
+                &locale,
+                "native-notify-connector-connected-title",
+                &[("connector", connector)],
+            ),
+            match param("account") {
+                Some(account) => native_i18n::t(
+                    &locale,
+                    "native-notify-connector-connected-body",
+                    &[("account", account)],
+                ),
+                None => native_i18n::tr(
+                    &locale,
+                    "native-notify-connector-connected-body-noaccount",
+                ),
+            },
+        ),
+        "sign-in-not-saved" => (
+            native_i18n::t(
+                &locale,
+                "native-notify-connector-not-saved-title",
+                &[("connector", connector)],
+            ),
+            native_i18n::t(
+                &locale,
+                "native-notify-connector-not-saved-body",
+                &[("connector", connector)],
+            ),
+        ),
+        _ => (name.to_owned(), field("message").to_owned()),
+    };
+    if title.is_empty() || body.is_empty() {
+        return;
+    }
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
+        eprintln!("[shell] plugin notification failed: {err}");
     }
 }
 

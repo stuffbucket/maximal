@@ -5,6 +5,7 @@ import type {
   PluginActionHandler,
   PluginDisposer,
   PluginLogger,
+  PluginNotice,
   PluginStatus,
   PluginStorage,
   PluginSurface,
@@ -18,6 +19,7 @@ import {
   assertActionId,
   assertHttpUrl,
   assertStorageName,
+  normalizeNotice,
   normalizeStatus,
   normalizeToolDefinition,
 } from "./validate"
@@ -119,6 +121,12 @@ class SurfaceService extends Service implements PluginSurface {
     const runtime = this[kRuntime]
     const slot = runtime.slotOf(this.ctx, "surface")
     runtime.setStatus(slot, normalizeStatus(slot.id, status))
+  }
+
+  notify(notice: PluginNotice): void {
+    const runtime = this[kRuntime]
+    const slot = runtime.slotOf(this.ctx, "surface")
+    runtime.notice(slot, normalizeNotice(slot.id, notice))
   }
 
   registerAction(id: string, handler: PluginActionHandler): PluginDisposer {

@@ -530,6 +530,11 @@
   "native-notify-working-title": "Maximal работает",
   "native-notify-working-body": "Ваш первый запрос только что прошёл.",
   "native-notify-working-body-apps": "Запросы проходят: {apps} теперь может использовать Maximal.",
+  "native-notify-connector-connected-title": "{connector} подключён",
+  "native-notify-connector-connected-body": "Вход выполнен как {account}. Инструменты готовы в ваших приложениях.",
+  "native-notify-connector-connected-body-noaccount": "Инструменты готовы в ваших приложениях.",
+  "native-notify-connector-not-saved-title": "Вход в {connector} не будет сохранён",
+  "native-notify-connector-not-saved-body": "Системное хранилище учётных данных не ответило, поэтому после перезапуска Maximal нужно будет снова войти в {connector}.",
 
   "native-quit-title": "Выйти из Maximal?",
   "native-quit-body": "Все приложения, подключённые к Maximal, будут отключены.",

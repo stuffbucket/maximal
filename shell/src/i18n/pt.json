@@ -530,6 +530,11 @@
   "native-notify-working-title": "O Maximal está funcionando",
   "native-notify-working-body": "Sua primeira solicitação acabou de passar.",
   "native-notify-working-body-apps": "As solicitações estão passando: {apps} já pode usar o Maximal.",
+  "native-notify-connector-connected-title": "{connector} está conectado",
+  "native-notify-connector-connected-body": "Conectado como {account}. As ferramentas já estão prontas nos seus aplicativos.",
+  "native-notify-connector-connected-body-noaccount": "As ferramentas já estão prontas nos seus aplicativos.",
+  "native-notify-connector-not-saved-title": "O login no {connector} não será salvo",
+  "native-notify-connector-not-saved-body": "O armazenamento de credenciais do sistema não respondeu, então você precisará entrar no {connector} de novo depois que o Maximal reiniciar.",
 
   "native-quit-title": "Sair do Maximal?",
   "native-quit-body": "Todos os aplicativos conectados ao Maximal serão desconectados.",

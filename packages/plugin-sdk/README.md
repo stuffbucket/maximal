@@ -139,6 +139,11 @@ never destructured.
 - **`ctx.surface`** — `setStatus({ state, code, summary, detail?, facts?, actions? })`
   drives the Settings card; `registerAction(id, handler)` backs the buttons
   listed in `status.actions`. Report action failures through status.
+  `notify({ code, message, params? })` raises a one-off message that the
+  desktop app shows as a native notification (worded by `code` when the app
+  knows it, else `message`): for changes worth interrupting for, not for
+  status. Best effort; nothing shows it outside the desktop app. `code` is
+  `a-z0-9-`, `message` non-empty English text.
 - **`ctx.storage`** — private `<app dir>/plugins/<id>/` (0700): `readText`,
   `writeText` (atomic, 0600), `delete`, `dir`. Names are single path
   segments (`/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/`); `settings.json` is

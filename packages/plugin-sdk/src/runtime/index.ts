@@ -52,6 +52,7 @@ export {
   assertPluginDependencies,
   formatConfigIssues,
   injectedServices,
+  normalizeNotice,
   normalizeStatus,
   normalizeToolDefinition,
   type ParsedPluginConfig,

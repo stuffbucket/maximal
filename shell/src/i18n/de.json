@@ -530,6 +530,11 @@
   "native-notify-working-title": "Maximal funktioniert",
   "native-notify-working-body": "Ihre erste Anfrage ist gerade durchgegangen.",
   "native-notify-working-body-apps": "Anfragen gehen durch – {apps} kann Maximal jetzt nutzen.",
+  "native-notify-connector-connected-title": "{connector} ist verbunden",
+  "native-notify-connector-connected-body": "Angemeldet als {account}. Die Werkzeuge stehen in Ihren Apps bereit.",
+  "native-notify-connector-connected-body-noaccount": "Die Werkzeuge stehen in Ihren Apps bereit.",
+  "native-notify-connector-not-saved-title": "Die Anmeldung bei {connector} wird nicht gespeichert",
+  "native-notify-connector-not-saved-body": "Der Anmeldedatenspeicher des Systems hat nicht geantwortet. Sie müssen sich nach einem Neustart von Maximal erneut bei {connector} anmelden.",
 
   "native-quit-title": "Maximal beenden?",
   "native-quit-body": "Alle mit Maximal verbundenen Apps werden getrennt.",

@@ -3,17 +3,20 @@ import type { Context, Fiber } from "@deepseek-ai/cordis"
 import type {
   PluginActionHandler,
   PluginDisposer,
+  PluginNotice,
   PluginStatus,
   ToolDefinition,
 } from "../types"
 
 import { PluginContractError } from "../errors"
 
-export type PluginRuntimeEventType = "status" | "tools"
+export type PluginRuntimeEventType = "status" | "tools" | "notice"
 
 export interface PluginRuntimeEvent {
   type: PluginRuntimeEventType
   pluginId: string
+  /** On `notice` events only. */
+  notice?: Readonly<PluginNotice>
 }
 
 /** One `ctx.effect`-bound contribution (a tool set or an action). */
@@ -256,6 +259,12 @@ export class PluginRuntime {
       return
     slot.status = status
     this.#emit(slot, "status")
+  }
+
+  /** Pass a notice on (only from a plugin that is attached). */
+  notice(slot: PluginSlot, notice: Readonly<PluginNotice>): void {
+    if (!slot.attached || this.#slots.get(slot.id) !== slot) return
+    this.#notify({ type: "notice", pluginId: slot.id, notice })
   }
 
   #withdraw(slot: PluginSlot, registration: Registration): void {

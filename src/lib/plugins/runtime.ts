@@ -14,6 +14,7 @@ import { removeLegacyClaudeDesktopEntries } from "./clients/claude-desktop-clean
 import { syncPluginClient } from "./clients/sync"
 import { composePluginGateway } from "./compose"
 import { getPluginGateway, setPluginGateway } from "./gateway"
+import { queuePluginNotice, takePluginNotices } from "./notices"
 import {
   dropLegacyPluginConfig,
   legacyPluginConfigs,
@@ -121,9 +122,21 @@ export async function startPlugins(
   }
   unsubscribeGateway?.()
   setPluginGateway(gateway)
+  // Notices belong to the gateway that raised them.
+  takePluginNotices()
   // Every event (lifecycle, status, tools, settings) changes what Settings
   // shows; bursts collapse into one `plugins.changed`.
-  unsubscribeGateway = gateway.subscribe(() => notifyPluginsChanged())
+  unsubscribeGateway = gateway.subscribe((event) => {
+    // A notice changes nothing Settings shows; it goes to the shell.
+    if (event.type === "notice") {
+      queuePluginNotice(
+        event,
+        gateway.get(event.pluginId)?.displayName ?? event.pluginId,
+      )
+      return
+    }
+    notifyPluginsChanged()
+  })
   await importLegacyPluginConfigs(gateway)
   await gateway.reconcile(getConfig().plugins)
   syncPluginClients()

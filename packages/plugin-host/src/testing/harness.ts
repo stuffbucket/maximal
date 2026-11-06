@@ -11,6 +11,7 @@ import type {
   HostServices,
   PluginLogger,
   PluginModule,
+  PluginNotice,
   PluginStatus,
 } from "@stuffbucket/maximal-plugin-sdk"
 import type {
@@ -72,7 +73,13 @@ export type TranscriptEntry =
       from: FiberStateName
       to: FiberStateName
     }
-  | { kind: "event"; plugin: string; type: PluginGatewayEventType }
+  | {
+      kind: "event"
+      plugin: string
+      type: PluginGatewayEventType
+      /** On `notice` events: what the plugin asked the app to show. */
+      notice?: PluginNotice
+    }
   | {
       kind: "lifecycle"
       plugin: string
@@ -287,7 +294,9 @@ export function formatEntry(entry: TranscriptEntry): string {
       return `fiber ${entry.plugin}#${entry.fiber} ${entry.from} → ${entry.to}`
     }
     case "event": {
-      return `event ${entry.plugin} ${entry.type}`
+      const notice =
+        entry.notice ? ` ${entry.notice.code}: ${entry.notice.message}` : ""
+      return `event ${entry.plugin} ${entry.type}${notice}`
     }
     case "lifecycle": {
       return `lifecycle ${entry.plugin} ${entry.lifecycle}${entry.error === undefined ? "" : ` error=${JSON.stringify(entry.error)}`}`
@@ -469,7 +478,12 @@ class GatewayRecorder {
     this.#internals = internals
     this.#record = record
     gateway.subscribe((event) => {
-      record({ kind: "event", plugin: event.pluginId, type: event.type })
+      record({
+        kind: "event",
+        plugin: event.pluginId,
+        type: event.type,
+        ...(event.notice ? { notice: { ...event.notice } } : {}),
+      })
       this.#changes(event.pluginId)
     })
   }
