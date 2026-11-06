@@ -11,6 +11,8 @@
 import type { ConsolaInstance } from "consola"
 import type { SSEStreamingApi } from "hono/streaming"
 
+import { PROXY_ERROR_REWRITES } from "~/lib/errors/proxy-error-rewrites"
+import { applyRewrites } from "~/lib/errors/proxy-errors"
 import { buildErrorEvent } from "~/routes/messages/responses-stream-translation"
 
 export type StreamFlow =
@@ -26,6 +28,10 @@ export type StreamFlow =
  * terminal event — the client (Claude Code / the SDK) sees a hung or silently
  * truncated message and can't tell a successful short reply from a failure.
  *
+ * The event goes through the Anthropic wire's error rewrites
+ * (`proxy-error-rewrites.ts`), like the inference routes' other errors; the
+ * route's `onError` can't change a response that has started.
+ *
  * Best-effort: if even the error write fails (socket already gone), we log and
  * move on — there's nothing left to tell the client. `streamSSE` closes the
  * response when the calling callback returns.
@@ -38,10 +44,17 @@ export const emitStreamError = async (
   const { error, flow } = ctx
   const message = error instanceof Error ? error.message : String(error)
   logger.error(`Upstream ${flow} stream failed mid-flight: ${message}`)
-  const errorEvent = buildErrorEvent(
-    `Upstream stream ended unexpectedly: ${message}`,
-    isProxyDefect(error) ? "api_error" : "overloaded_error",
+  const defect = isProxyDefect(error)
+  const reply = applyRewrites(
+    {
+      status: defect ? 500 : 529,
+      type: defect ? "api_error" : "overloaded_error",
+      message: `Upstream stream ended unexpectedly: ${message}`,
+    },
+    { wire: "anthropic", error },
+    PROXY_ERROR_REWRITES.anthropic,
   )
+  const errorEvent = buildErrorEvent(reply.message, reply.type)
   try {
     await stream.writeSSE({
       event: errorEvent.type,
