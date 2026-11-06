@@ -19,8 +19,9 @@
  * - Side effects belong to the error, not the rewrites: an account the
  *   upstream rejected is degraded once, before any rewrite runs.
  *
- * Mid-stream failures can't use this path (the response has started); see
- * `routes/messages/stream-error.ts`.
+ * A failure after a stream has started can't change the response, so
+ * `routes/messages/stream-error.ts` runs the same rewrites itself and writes
+ * the result as an SSE `error` event.
  */
 
 import type { Context, ErrorHandler } from "hono"

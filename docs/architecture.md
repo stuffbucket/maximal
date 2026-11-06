@@ -18,6 +18,10 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
    - `handleWithResponsesApi` — Copilot `/responses` (GPT models)
    - `handleWithChatCompletions` — fallback for everything else
 
+## Errors on the inference routes
+
+The inference route modules (`/v1/messages`, `/:provider/v1/messages`, `/chat/completions`, `/responses`) mount the GitHub-token gate themselves and register `proxyErrorHandler(wire)` (`src/lib/errors/proxy-errors.ts`) as their Hono `onError`; handlers throw. The handler turns the error (`HTTPError` from the upstream, `CopilotAuthFatalError`, `NoUpstreamError` from the gate, or our own) into a wire-neutral reply, runs the wire's ordered rewrites (`proxy-error-rewrites.ts`: not signed in, upstream advice, context-overflow rewording, transient 5xx to 529, retry-header relay) and renders Anthropic's envelope or OpenAI's error object; `retry: "never"` becomes `x-should-retry: false`. A reply is always 4xx/5xx and a throwing rewrite is skipped. Once a stream has started, `routes/messages/stream-error.ts` runs the same rewrites and writes an SSE `error` event. Other routes catch and call `forwardError`, which uses the same path. Wire details: [`spec/wire/auth-transport-wire-prd.md`](spec/wire/auth-transport-wire-prd.md).
+
 ## Key directories
 
 | Path | Purpose |
