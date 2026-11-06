@@ -7,7 +7,7 @@
  * rather than as a dead-end error in the client.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import {
   anthropicErrorType,
@@ -16,6 +16,7 @@ import {
   isTransientUpstreamStatus,
 } from "~/lib/errors/anthropic-error"
 import { forwardAnthropicError, HTTPError } from "~/lib/errors/error"
+import { state } from "~/lib/runtime-state/state"
 import { messageRoutes } from "~/routes/messages/route"
 import { providerMessageRoutes } from "~/routes/provider/messages/route"
 
@@ -233,6 +234,15 @@ describe("forwardAnthropicError", () => {
 })
 
 describe("Anthropic-wire routes use the typed envelope", () => {
+  // The routes refuse without a GitHub sign-in (`requireGithubAuth`).
+  const savedToken = state.githubToken
+  beforeEach(() => {
+    state.githubToken = "test-github-token"
+  })
+  afterEach(() => {
+    state.githubToken = savedToken
+  })
+
   test("/v1/messages wraps a handler failure", async () => {
     const res = await messageRoutes.request("/", {
       method: "POST",

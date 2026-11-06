@@ -24,6 +24,7 @@ const originalFetch = globalThis.fetch
 let originalConfig: ReturnType<typeof getConfig>
 const originalState = {
   copilotToken: state.copilotToken,
+  githubToken: state.githubToken,
   vsCodeVersion: state.vsCodeVersion,
   accountType: state.accountType,
   lastUpstreamRejection: state.lastUpstreamRejection,
@@ -62,6 +63,8 @@ function minimalResponsesResult(): Record<string, unknown> {
 beforeEach(() => {
   originalConfig = getConfig()
   state.copilotToken = "test-token"
+  // The routes refuse without a GitHub sign-in (`requireGithubAuth`).
+  state.githubToken = "test-github-token"
   state.vsCodeVersion = "1.0.0"
   state.accountType = "individual"
   state.lastUpstreamRejection = undefined
@@ -83,6 +86,7 @@ afterEach(() => {
   writeConfig(originalConfig)
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
   state.copilotToken = originalState.copilotToken
+  state.githubToken = originalState.githubToken
   state.vsCodeVersion = originalState.vsCodeVersion
   state.accountType = originalState.accountType
   state.lastUpstreamRejection = originalState.lastUpstreamRejection

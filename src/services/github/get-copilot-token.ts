@@ -2,7 +2,7 @@ import consola from "consola"
 
 import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/config/api-config"
 import { parseCopilotErrorBody } from "~/lib/errors/copilot-error-parser"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
+import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/http-errors"
 import { COPILOT_TOKEN_TIMEOUT_MS } from "~/lib/http/http-timeouts"
 import { sendRequest } from "~/lib/http/send-request"
 import { state } from "~/lib/runtime-state/state"

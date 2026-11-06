@@ -1,15 +1,14 @@
 import { Hono } from "hono"
 
-import { forwardError } from "~/lib/errors/error"
+import { requireGithubAuth } from "~/lib/auth/request-auth"
+import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
 
 import { handleResponses } from "./handler"
 
+// Errors propagate to the error handler, which answers in this route's wire
+// format; the token gate's "not signed in" goes the same way.
 export const responsesRoutes = new Hono()
+responsesRoutes.onError(proxyErrorHandler("openai"))
+responsesRoutes.use(requireGithubAuth)
 
-responsesRoutes.post("/", async (c) => {
-  try {
-    return await handleResponses(c)
-  } catch (error) {
-    return await forwardError(c, error)
-  }
-})
+responsesRoutes.post("/", (c) => handleResponses(c))

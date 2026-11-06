@@ -13,7 +13,7 @@ import {
   type ResolvedProviderConfig,
 } from "~/lib/config/config"
 import { anthropicErrorBody } from "~/lib/errors/anthropic-error"
-import { HTTPError } from "~/lib/errors/error"
+import { HTTPError } from "~/lib/errors/http-errors"
 import {
   asRecord,
   readNestedUsage,
