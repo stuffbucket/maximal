@@ -145,20 +145,21 @@ server.route("/mcp", mcpRoutes)
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so
 // the Tauri shell can load Settings and trigger auth on demand) but the
-// proxy endpoints 401 with `not_authenticated` instead of crashing or
-// firing the device-code flow.
-server.use("/chat/completions", requireGithubAuth)
-server.use("/chat/completions/*", requireGithubAuth)
-server.use("/models", requireGithubAuth)
-server.use("/models/*", requireGithubAuth)
-server.use("/embeddings", requireGithubAuth)
-server.use("/embeddings/*", requireGithubAuth)
-server.use("/usage", requireGithubAuth)
-server.use("/usage/*", requireGithubAuth)
-server.use("/responses", requireGithubAuth)
-server.use("/responses/*", requireGithubAuth)
-server.use("/v1/*", requireGithubAuth)
-server.use("/:provider/v1/*", requireGithubAuth)
+// proxy endpoints refuse instead of crashing or firing the device-code
+// flow. These answer `401 not_authenticated`; the inference routes
+// (messages, chat completions, responses) gate themselves, so the refusal
+// reaches their error handler and is answered in the client's format.
+// `/x/*` also matches `/x` in Hono, so each path is mounted once.
+for (const path of [
+  "/models",
+  "/embeddings",
+  "/usage",
+  "/v1/models",
+  "/v1/embeddings",
+  "/:provider/v1/models",
+]) {
+  server.use(`${path}/*`, requireGithubAuth)
+}
 
 // Track the requests that stream a model response, so the live view can tell
 // which sessions are mid-stream. After auth; /models, /embeddings and the UI

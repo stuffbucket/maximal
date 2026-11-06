@@ -14,7 +14,7 @@ import {
   type ResolvedProviderConfig,
 } from "~/lib/config/config"
 import { anthropicErrorBody } from "~/lib/errors/anthropic-error"
-import { HTTPError } from "~/lib/errors/error"
+import { HTTPError } from "~/lib/errors/http-errors"
 import { createHandlerLogger, debugJson } from "~/lib/platform/logger"
 import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {

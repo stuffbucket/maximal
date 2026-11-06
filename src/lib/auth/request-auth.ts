@@ -3,6 +3,7 @@ import type { Context, MiddlewareHandler } from "hono"
 import consola from "consola"
 
 import { getConfig, type AppConfig } from "~/lib/config/config"
+import { NoUpstreamError } from "~/lib/errors/http-errors"
 import { recordClient } from "~/lib/http/active-clients"
 import { requestContext } from "~/lib/http/request-context"
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
@@ -263,16 +264,12 @@ type AuthDecision =
  * forward with. Lets the HTTP server come up in "unauthenticated mode"
  * (settings + diagnostics still reachable) without the Tauri shell
  * needing to handshake the device-code flow before port 4141 listens.
+ *
+ * Throws `NoUpstreamError`: its own response is the `401 not_authenticated`
+ * contract; an inference route's error handler answers in the client's
+ * format instead (`proxy-errors.ts`).
  */
-export const requireGithubAuth: MiddlewareHandler = async (c, next) => {
-  if (hasGithubToken()) {
-    return next()
-  }
-  return c.json(
-    {
-      error: "not_authenticated",
-      hint: "Open Settings → Account to sign in, or run `maximal auth`.",
-    },
-    401,
-  )
+export const requireGithubAuth: MiddlewareHandler = async (_c, next) => {
+  if (!hasGithubToken()) throw new NoUpstreamError()
+  await next()
 }

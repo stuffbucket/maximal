@@ -15,7 +15,7 @@ import {
   parseCopilotErrorBody,
 } from "~/lib/errors/copilot-error-parser"
 import { logCopilotRateLimits } from "~/lib/errors/copilot-rate-limit"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
+import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/http-errors"
 import {
   clearLastUpstreamRejection,
   setLastUpstreamRejection,

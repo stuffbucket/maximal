@@ -31,6 +31,7 @@ const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 const originalConfig = getConfig()
 const originalState = {
   copilotToken: state.copilotToken,
+  githubToken: state.githubToken,
   lastRequestTimestamp: state.lastRequestTimestamp,
   manualApprove: state.manualApprove,
   models: state.models,
@@ -59,6 +60,8 @@ beforeEach(async () => {
   await closeUsageStore()
 
   state.copilotToken = "test-token"
+  // The routes refuse without a GitHub sign-in (`requireGithubAuth`).
+  state.githubToken = "test-github-token"
   state.manualApprove = false
   state.verbose = false
   state.rateLimitSeconds = undefined
@@ -88,6 +91,7 @@ afterEach(async () => {
   Reflect.deleteProperty(process.env, DB_PATH_ENV)
 
   state.copilotToken = originalState.copilotToken
+  state.githubToken = originalState.githubToken
   state.manualApprove = originalState.manualApprove
   state.verbose = originalState.verbose
   state.rateLimitSeconds = originalState.rateLimitSeconds
