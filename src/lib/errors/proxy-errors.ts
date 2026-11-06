@@ -5,7 +5,8 @@
  * `/responses`, ...) registers `proxyErrorHandler(wire)` as its Hono
  * `onError` and lets errors propagate: an upstream error response
  * (`HTTPError`), an account the upstream rejected (`CopilotAuthFatalError`),
- * or a failure of our own. The handler turns the error into a wire-neutral
+ * no upstream at all (`NoUpstreamError`, thrown by the GitHub-token gate), or
+ * a failure of our own. The handler turns the error into a wire-neutral
  * `ProxyErrorReply`, passes it through the wire's ordered rewrites (each may
  * return a replacement or leave it), and renders it: Anthropic's typed
  * envelope or OpenAI's `{ error }` object, with `retry: "never"` sent as
@@ -34,7 +35,11 @@ import {
   anthropicErrorType,
   type AnthropicErrorType,
 } from "~/lib/errors/anthropic-error"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/http-errors"
+import {
+  CopilotAuthFatalError,
+  HTTPError,
+  NoUpstreamError,
+} from "~/lib/errors/http-errors"
 import { PROXY_ERROR_REWRITES } from "~/lib/errors/proxy-error-rewrites"
 import { parseUpstreamError } from "~/lib/errors/upstream-error-advice"
 
@@ -85,6 +90,17 @@ function errorMessage(error: unknown): string {
 /** The reply before any rewrite: the error as it is. */
 function baseReply(event: ProxyErrorEvent): ProxyErrorReply {
   const { error, upstream, wire } = event
+  if (error instanceof NoUpstreamError) {
+    // Nothing will work until it's fixed, so say so at once: 503 with no
+    // retry (an apiKeyHelper client retries a 401 for minutes).
+    return {
+      status: 503,
+      type: "api_error",
+      message: "Maximal has no upstream to forward this request to.",
+      retry: "never",
+      openai: { type: "service_unavailable" },
+    }
+  }
   if (error instanceof CopilotAuthFatalError) {
     const withUrl =
       error.remediationUrl ?
@@ -233,14 +249,17 @@ export async function proxyErrorResponse(
  * The Hono `onError` for an inference route module: register it with
  * `routes.onError(proxyErrorHandler(wire))` and let the handlers throw.
  * `rewrites` defaults to the wire's built-ins (`proxy-error-rewrites.ts`).
- * An `HTTPException` keeps its own response, as with Hono's default handler.
+ * Other `HTTPException`s keep their own response, as with Hono's default
+ * handler.
  */
 export function proxyErrorHandler(
   wire: ProxyWire,
   rewrites: ReadonlyArray<ProxyErrorRewrite> = PROXY_ERROR_REWRITES[wire],
 ): ErrorHandler {
   return (error, c) => {
-    if (error instanceof HTTPException) return error.getResponse()
+    if (error instanceof HTTPException && !(error instanceof NoUpstreamError)) {
+      return error.getResponse()
+    }
     return proxyErrorResponse(c, error, { wire, rewrites })
   }
 }

@@ -10,8 +10,21 @@ import {
   contextOverflowMessage,
   isTransientUpstreamStatus,
 } from "~/lib/errors/anthropic-error"
+import { NoUpstreamError } from "~/lib/errors/http-errors"
 import { adviseUpstreamError } from "~/lib/errors/upstream-error-advice"
 import { state } from "~/lib/runtime-state/state"
+
+/** No GitHub sign-in: tell the person reading the client what to do. */
+export const notSignedIn: ProxyErrorRewrite = (reply, { error }) =>
+  // The only reason there's no upstream today.
+  error instanceof NoUpstreamError ?
+    {
+      ...reply,
+      message:
+        "Maximal isn't signed in to GitHub, so it can't reach a model. Open Maximal → Settings → Account and sign in (or run `maximal auth`), then try again.",
+      openai: { ...reply.openai, code: "maximal_not_signed_in" },
+    }
+  : undefined
 
 /** Recognizable upstream errors (Copilot's opaque `model_not_supported`,
  *  say) get context and a recovery step, the original kept inline. */
@@ -71,6 +84,7 @@ export const PROXY_ERROR_REWRITES: Record<
   ReadonlyArray<ProxyErrorRewrite>
 > = {
   anthropic: [
+    notSignedIn,
     upstreamAdvice,
     contextOverflow,
     transientToOverloaded,
@@ -78,5 +92,9 @@ export const PROXY_ERROR_REWRITES: Record<
       (status) => status === 429 || isTransientUpstreamStatus(status),
     ),
   ],
-  openai: [upstreamAdvice, retryHeaders((status) => status === 429)],
+  openai: [
+    notSignedIn,
+    upstreamAdvice,
+    retryHeaders((status) => status === 429),
+  ],
 }
