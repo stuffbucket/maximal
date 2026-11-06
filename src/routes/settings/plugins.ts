@@ -40,12 +40,11 @@ import {
   PluginUpdateRequest,
   type PluginValidationIssue,
 } from "~/lib/config/settings-types"
-import { claudeCodePluginClient } from "~/lib/plugins/clients/claude-code"
-import { repairPluginClientKeys } from "~/lib/plugins/clients/sync"
 import { getPluginGateway } from "~/lib/plugins/gateway"
 import {
   applyPluginSettings,
   notifyPluginsChanged,
+  syncPluginClients,
 } from "~/lib/plugins/runtime"
 import { updatePluginEntry } from "~/lib/plugins/settings"
 import { listPluginViews, pluginDetailView } from "~/lib/plugins/view"
@@ -193,13 +192,9 @@ pluginsRoutes.get("/", async (c) => {
       { plugins: [] },
     )
   }
-  try {
-    // A running Claude Code may have written back an entry it read before
-    // Maximal put the key in; put it back (file-only, cheap).
-    repairPluginClientKeys(claudeCodePluginClient)
-  } catch (error) {
-    consola.warn("Could not check the Claude Code MCP server keys", error)
-  }
+  // Claude Code's config may have changed outside Maximal (the user added or
+  // removed their own Work IQ, say); catch up before showing it. Cheap.
+  syncPluginClients()
   return respondValidated(
     c,
     { schema: PluginsListResponse, label: "plugins list" },
@@ -211,6 +206,7 @@ pluginsRoutes.get("/:id", async (c) => {
   const id = c.req.param("id")
   const gateway = getPluginGateway()
   if (!gateway) return apiError(c, 503, "Plugins are not running.")
+  syncPluginClients()
   return respondDetail(c, gateway, id)
 })
 

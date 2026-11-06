@@ -573,6 +573,18 @@ export const PluginClientView = z.object({
   available: z.boolean(),
   /** English reason when not available. */
   reason: z.string().optional(),
+  /**
+   * The client already runs this service without Maximal: a server or
+   * plugin named after the connector (`workiq`). Maximal then adds no
+   * `maximal-<id>` entry of its own, even when `selected`.
+   */
+  standalone: z
+    .object({
+      /** Its name in the client: a server name, or `plugin@marketplace`. */
+      name: z.string(),
+      source: z.enum(["server", "plugin"]),
+    })
+    .optional(),
 })
 export type PluginClientView = z.infer<typeof PluginClientView>
 

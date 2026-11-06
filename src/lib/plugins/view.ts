@@ -43,13 +43,28 @@ interface ClientAvailability {
   available: boolean
 }
 
-async function clientAvailability(): Promise<Array<ClientAvailability>> {
-  return Promise.all(
-    PLUGIN_CLIENTS.map(async (configurator) => ({
-      configurator,
-      available: await configurator.available().catch(() => false),
-    })),
-  )
+function clientAvailability(): Array<ClientAvailability> {
+  return PLUGIN_CLIENTS.map((configurator) => {
+    let available = false
+    try {
+      available = configurator.available()
+    } catch {
+      // Unreadable config: shown as unavailable.
+    }
+    return { configurator, available }
+  })
+}
+
+/** The client's own setup of the connector, which Maximal defers to. */
+function standaloneIn(
+  configurator: PluginClientConfigurator,
+  id: string,
+): PluginClientView["standalone"] {
+  try {
+    return configurator.standalone(id)
+  } catch {
+    return undefined
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -162,14 +177,16 @@ function toView(
     toolsSource: snapshot.toolsSource,
     clients:
       isConnector ?
-        clients.map(
-          ({ configurator, available }): PluginClientView => ({
+        clients.map(({ configurator, available }): PluginClientView => {
+          const standalone = standaloneIn(configurator, snapshot.id)
+          return {
             id: configurator.clientId,
             selected: selected.includes(configurator.clientId),
             available,
             ...(available ? {} : { reason: configurator.unavailableReason() }),
-          }),
-        )
+            ...(standalone ? { standalone } : {}),
+          }
+        })
       : [],
     endpoint: isConnector ? pluginMcpUrl(snapshot.id) : "",
   }
@@ -206,32 +223,34 @@ function safeToolViews(
   }
 }
 
-export async function listPluginViews(
+export function listPluginViews(
   gateway: PluginGateway,
 ): Promise<PluginsListResponse> {
-  const clients = await clientAvailability()
+  const clients = clientAvailability()
   const config = getConfig()
-  return {
+  return Promise.resolve({
     plugins: gateway.list().map((snapshot) =>
       toView(snapshot, safeToolViews(gateway, snapshot.id), {
         config,
         clients,
       }),
     ),
-  }
+  })
 }
 
-export async function pluginDetailView(
+export function pluginDetailView(
   gateway: PluginGateway,
   id: string,
 ): Promise<PluginDetailView | undefined> {
-  const clients = await clientAvailability()
+  const clients = clientAvailability()
   const snapshot = gateway.get(id)
-  if (!snapshot) return undefined
+  if (!snapshot) return Promise.resolve(undefined)
   const tools = safeToolViews(gateway, id)
-  return toDetail(
-    snapshot,
-    tools,
-    toView(snapshot, tools, { config: getConfig(), clients }),
+  return Promise.resolve(
+    toDetail(
+      snapshot,
+      tools,
+      toView(snapshot, tools, { config: getConfig(), clients }),
+    ),
   )
 }

@@ -59,6 +59,12 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         "status": 200,
       },
     ],
+    "claudeMcpServers": {
+      "github": {
+        "type": "http",
+        "url": "https://mcp.example.test/github",
+      },
+    },
     "configJson": {
       "workiq": {},
     },
@@ -123,7 +129,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         "toolsSource": "none",
       },
     ],
-    "step": "boot (legacy config.json value migrated)",
+    "step": "boot (an older Maximal's settings migrated)",
     "storage": [
       "settings.json",
     ],
@@ -463,15 +469,12 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         "status": 200,
       },
     ],
-    "claudeCli": [
-      "mcp add-json --scope user workiq {"type":"http","url":"<maximal>/mcp/workiq","headers":{"Authorization":"Bearer <sha256(api-key)>"}}",
-    ],
     "claudeMcpServers": {
       "github": {
         "type": "http",
         "url": "https://mcp.example.test/github",
       },
-      "workiq": {
+      "maximal-workiq": {
         "headers": {
           "Authorization": "Bearer <api-key>",
         },
@@ -505,84 +508,6 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
     "step": "send Work IQ to Claude Code",
   },
   {
-    "mcp": [
-      {
-        "send": {
-          "id": 0,
-          "jsonrpc": "2.0",
-          "method": "initialize",
-          "params": {
-            "capabilities": {
-              "elicitation": {},
-            },
-            "clientInfo": {
-              "name": "e2e-client",
-              "version": "1.0.0",
-            },
-            "protocolVersion": "2025-11-25",
-          },
-        },
-      },
-      {
-        "receive": {
-          "id": 0,
-          "jsonrpc": "2.0",
-          "result": {
-            "capabilities": {
-              "tools": {
-                "listChanged": true,
-              },
-            },
-            "protocolVersion": "2025-11-25",
-            "serverInfo": {
-              "name": "workiq",
-              "version": "<version>",
-            },
-          },
-        },
-      },
-      {
-        "send": {
-          "jsonrpc": "2.0",
-          "method": "notifications/initialized",
-        },
-      },
-      {
-        "send": {
-          "id": 1,
-          "jsonrpc": "2.0",
-          "method": "tools/list",
-        },
-      },
-      {
-        "receive": {
-          "id": 1,
-          "jsonrpc": "2.0",
-          "result": {
-            "tools": [
-              "retrieve",
-              "fetch_blob",
-              "get_schema",
-              "call_function",
-              "fetch",
-              "search_paths",
-              "accept_eula",
-              "delete_entity",
-              "upload_blob",
-              "create_entity",
-              "update_entity",
-              "ask",
-              "list_agents",
-              "get_debug_link",
-            ],
-          },
-        },
-      },
-    ],
-    "plugin": [],
-    "step": "MCP client: tools mirrored",
-  },
-  {
     "api": [
       {
         "request": "GET /settings/api/plugins/workiq",
@@ -593,6 +518,10 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "available": true,
               "id": "claude-code",
               "selected": true,
+              "standalone": {
+                "name": "workiq",
+                "source": "server",
+              },
             },
           ],
           "config": {
@@ -704,6 +633,179 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             "get_debug_link other allow/default",
           ],
           "toolsSource": "live",
+        },
+        "status": 200,
+      },
+    ],
+    "claudeMcpServers": {
+      "github": {
+        "type": "http",
+        "url": "https://mcp.example.test/github",
+      },
+      "workiq": {
+        "args": [
+          "-y",
+          "@microsoft/workiq@latest",
+          "mcp",
+        ],
+        "command": "npx",
+      },
+    },
+    "plugin": [],
+    "sse": [
+      {
+        "(changed)": {
+          "clients": [
+            {
+              "available": true,
+              "id": "claude-code",
+              "selected": true,
+              "standalone": {
+                "name": "workiq",
+                "source": "server",
+              },
+            },
+          ],
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "user's own Work IQ takes precedence",
+  },
+  {
+    "api": [
+      {
+        "request": "GET /settings/api/plugins/workiq",
+        "response": {
+          "(changed)": {
+            "clients": [
+              {
+                "available": true,
+                "id": "claude-code",
+                "selected": true,
+              },
+            ],
+          },
+          "id": "workiq",
+        },
+        "status": 200,
+      },
+    ],
+    "claudeMcpServers": {
+      "github": {
+        "type": "http",
+        "url": "https://mcp.example.test/github",
+      },
+      "maximal-workiq": {
+        "headers": {
+          "Authorization": "Bearer <api-key>",
+        },
+        "type": "http",
+        "url": "<maximal>/mcp/workiq",
+      },
+    },
+    "plugin": [],
+    "sse": [
+      {
+        "(changed)": {
+          "clients": [
+            {
+              "available": true,
+              "id": "claude-code",
+              "selected": true,
+            },
+          ],
+        },
+        "id": "workiq",
+      },
+    ],
+    "step": "user's own Work IQ removed",
+  },
+  {
+    "mcp": [
+      {
+        "send": {
+          "id": 0,
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "params": {
+            "capabilities": {
+              "elicitation": {},
+            },
+            "clientInfo": {
+              "name": "e2e-client",
+              "version": "1.0.0",
+            },
+            "protocolVersion": "2025-11-25",
+          },
+        },
+      },
+      {
+        "receive": {
+          "id": 0,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {
+                "listChanged": true,
+              },
+            },
+            "protocolVersion": "2025-11-25",
+            "serverInfo": {
+              "name": "workiq",
+              "version": "<version>",
+            },
+          },
+        },
+      },
+      {
+        "send": {
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized",
+        },
+      },
+      {
+        "send": {
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "tools/list",
+        },
+      },
+      {
+        "receive": {
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              "retrieve",
+              "fetch_blob",
+              "get_schema",
+              "call_function",
+              "fetch",
+              "search_paths",
+              "accept_eula",
+              "delete_entity",
+              "upload_blob",
+              "create_entity",
+              "update_entity",
+              "ask",
+              "list_agents",
+              "get_debug_link",
+            ],
+          },
+        },
+      },
+    ],
+    "plugin": [],
+    "step": "MCP client: tools mirrored",
+  },
+  {
+    "api": [
+      {
+        "request": "GET /settings/api/plugins/workiq",
+        "response": {
+          "(unchanged)": true,
+          "id": "workiq",
         },
         "status": 200,
       },
@@ -1498,9 +1600,6 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         },
         "status": 200,
       },
-    ],
-    "claudeCli": [
-      "mcp remove --scope user workiq",
     ],
     "claudeMcpServers": {
       "github": {

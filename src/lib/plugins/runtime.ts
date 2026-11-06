@@ -11,11 +11,7 @@ import { getConfig } from "~/lib/config/config"
 import { settingsEventBus } from "~/lib/config/settings-events"
 
 import { removeLegacyClaudeDesktopEntries } from "./clients/claude-desktop-cleanup"
-import {
-  releasePluginClientOffline,
-  type SyncPluginClientOptions,
-  syncPluginClient,
-} from "./clients/sync"
+import { syncPluginClient } from "./clients/sync"
 import { composePluginGateway } from "./compose"
 import { getPluginGateway, setPluginGateway } from "./gateway"
 import {
@@ -50,14 +46,17 @@ export function notifyPluginsChanged(): void {
   notifyTimer.unref()
 }
 
-/** Bring every client's MCP entries in line with `config.plugins`. Never
- *  rejects; a client that fails is logged. */
-export async function syncPluginClients(
-  options: SyncPluginClientOptions = {},
-): Promise<void> {
+/**
+ * Bring every client's MCP entries in line with the config and what the
+ * client already has (see `clients/sync`); tells Settings when an entry
+ * changed. Cheap and idempotent, so Settings reads call it too. Never
+ * throws; a client that fails is logged.
+ */
+export function syncPluginClients(): void {
+  let changed = false
   for (const configurator of PLUGIN_CLIENTS) {
     try {
-      await syncPluginClient(configurator, options)
+      changed = syncPluginClient(configurator) || changed
     } catch (error) {
       consola.warn(
         `Could not update ${configurator.clientId} MCP servers`,
@@ -65,22 +64,7 @@ export async function syncPluginClients(
       )
     }
   }
-  notifyPluginsChanged()
-}
-
-/** Shutdown: take Maximal's entries back out of clients that read their
- *  config per session. Synchronous and file-only (the `exit` safety net). */
-export function releasePluginClientsOnShutdown(): void {
-  for (const configurator of PLUGIN_CLIENTS) {
-    try {
-      releasePluginClientOffline(configurator)
-    } catch (error) {
-      consola.warn(
-        `Could not remove ${configurator.clientId} MCP servers on shutdown`,
-        error,
-      )
-    }
-  }
+  if (changed) notifyPluginsChanged()
 }
 
 /**
@@ -142,7 +126,7 @@ export async function startPlugins(
   unsubscribeGateway = gateway.subscribe(() => notifyPluginsChanged())
   await importLegacyPluginConfigs(gateway)
   await gateway.reconcile(getConfig().plugins)
-  await syncPluginClients()
+  syncPluginClients()
   return gateway
 }
 
@@ -152,7 +136,7 @@ export async function applyPluginSettings(): Promise<void> {
   const gateway = getPluginGateway()
   if (!gateway) return
   await gateway.reconcile(getConfig().plugins)
-  await syncPluginClients()
+  syncPluginClients()
 }
 
 const stoppingHooks = new Set<() => Promise<void> | void>()

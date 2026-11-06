@@ -3,9 +3,8 @@
  * HTTP), served in-process from the plugin gateway (sessions:
  * `./mcp-sessions`). Only plugins of kind `connector` get an endpoint.
  *
- * The URL and server name are the plugin id, so Claude Code entries written
- * for `/mcp/workiq` keep working and tools keep their `mcp__workiq__*`
- * names. Sessions are stateful (elicitation needs a session to send the
+ * The URL and server name are the plugin id (`/mcp/workiq`); Claude Code
+ * knows the endpoint as `maximal-workiq` (see `lib/plugins/clients`). Sessions are stateful (elicitation needs a session to send the
  * request back on) and last until the client deletes them, the plugin is
  * turned off, or they sit idle with no open stream for half an hour.
  *

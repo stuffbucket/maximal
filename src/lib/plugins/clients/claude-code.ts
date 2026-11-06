@@ -1,59 +1,49 @@
 /**
- * Claude Code's side of plugin MCP endpoints.
+ * Claude Code's side of connector MCP endpoints.
  *
- * Entries live in Claude Code's user scope (`~/.claude.json`, or
- * `$CLAUDE_CONFIG_DIR/.claude.json`) as HTTP servers pointing at Maximal's
- * stable `/mcp/<id>` URL, named after the plugin (so Work IQ's tools keep
- * their `mcp__workiq__*` names). Adds and removes go through the `claude`
- * CLI so Claude Code writes its own file.
+ * Each connector the user sends to Claude Code is an HTTP server in Claude
+ * Code's user scope (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`)
+ * named `maximal-<id>` and pointing at Maximal's `/mcp/<id>`, so its tools
+ * are `mcp__maximal-<id>__*`. Maximal edits the file itself: one verified
+ * atomic write per pass, re-read and retried because Claude Code rewrites
+ * the file often. A pass writes only when something differs.
  *
- * Keys never appear on a command line. `claude mcp add-json` gets a SHA-256
- * placeholder in the Authorization header; Maximal then swaps in the real key
- * with one atomic edit of that single header. Claude Code rewrites the file
- * often, so the swap is verified and retried, and the next reconcile (or
- * Settings read, via `repairKeys`) repairs any placeholder a lost race or a
- * running Claude Code's write-back left behind.
+ * An entry is Maximal's when it is named `maximal-<id>` and is an HTTP entry
+ * for `/mcp/<id>` on 127.0.0.1 (any port, so a port change rewrites it).
+ * Nothing else is changed. Entries stay while Maximal is stopped: Claude
+ * Code shows the server as failing to connect, and the name says why.
  *
- * Only entries Maximal recorded as written (`owned`) that still point at
- * Maximal's URL are ever changed or removed; a same-name entry the user
- * already had is reported as skipped. Entries are taken out at shutdown and
- * put back at boot: each Claude Code session reads the file when it starts,
- * so a session started while Maximal is down doesn't get a dead server.
+ * The user's own setup of the same service wins: a Claude Code server or
+ * enabled plugin named `<id>` (Microsoft's `workiq`, say) means Maximal adds
+ * no `maximal-<id>`, and Settings says why (`standalone`).
  */
 
-import consola from "consola"
-import { createHash } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 import {
+  getClaudeCodeSettingsPath,
   HELPER_LABEL,
-  isProxyBaseUrlConfigured,
 } from "~/apps/claude-code/config"
-import { detectClaudeInstalls } from "~/apps/claude-code/detect"
+import { claudeCodeRoutingIntended } from "~/apps/claude-code/reconcile"
 import { atomicWriteJson } from "~/lib/platform/atomic-json"
 import { parseJsonText } from "~/lib/platform/json-text"
-import { runFile } from "~/lib/system/run-file"
 
 import {
   isMaximalMcpUrl,
+  type PluginClientApplyResult,
   type PluginClientConfigurator,
   type PluginClientEntry,
-  type PluginReconcileResult,
+  type StandaloneInstall,
 } from "./sync"
 
-const CLI_TIMEOUT_MS = 20_000
-const KEY_SWAP_ATTEMPTS = 3
-
-/** Runs `claude <args>`; rejects on failure. */
-export type ClaudeCliRunner = (args: Array<string>) => Promise<void>
+const WRITE_ATTEMPTS = 3
+export const ENTRY_PREFIX = "maximal-"
 
 export interface ClaudeCodePluginClientOptions {
   configPath?: () => string
-  /** Undefined runner means no usable `claude` binary was found. */
-  runner?: () => Promise<ClaudeCliRunner | undefined>
-  available?: () => Promise<boolean>
+  settingsPath?: () => string
   integrationOn?: () => boolean
 }
 
@@ -64,322 +54,160 @@ export function claudeUserConfigPath(): string {
     : path.join(os.homedir(), ".claude.json")
 }
 
-async function defaultRunner(): Promise<ClaudeCliRunner | undefined> {
-  // Windows .cmd/.ps1 shims need a shell, which would put JSON through shell
-  // quoting; only a real executable is used. Detection stops at the first
-  // `claude` on PATH, so when that is npm's claude.cmd, look again in the
-  // places the native installer uses, without PATH.
-  const usable = (candidate: { path: string }) =>
-    process.platform !== "win32" || candidate.path.endsWith(".exe")
-  const install =
-    (await detectClaudeInstalls({ readVersion: () => null })).find(
-      (candidate) => usable(candidate),
-    )
-    ?? (process.platform === "win32" ?
-      (
-        await detectClaudeInstalls({ readVersion: () => null, pathDirs: [] })
-      ).find((candidate) => usable(candidate))
-    : undefined)
-  if (!install) return undefined
-  return async (args) => {
-    const result = await runFile(install.path, args, {
-      timeoutMs: CLI_TIMEOUT_MS,
-    })
-    if (result.code !== 0) {
-      throw new Error(
-        result.stderr.trim() || `claude exited with code ${result.code}`,
-      )
-    }
-  }
+/** The name of Maximal's entry for plugin `id`. */
+export function entryName(id: string): string {
+  return `${ENTRY_PREFIX}${id}`
+}
+
+type Servers = Record<string, unknown>
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function readDocument(file: string): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = parseJsonText(fs.readFileSync(file, "utf8"))
-    return typeof parsed === "object" && parsed !== null ?
-        (parsed as Record<string, unknown>)
-      : undefined
+    return isRecord(parsed) ? parsed : undefined
   } catch {
     return undefined
   }
 }
 
-function readServers(file: string): Record<string, unknown> {
+function readServers(file: string): Servers {
   const servers = readDocument(file)?.mcpServers
-  return typeof servers === "object" && servers !== null ?
-      (servers as Record<string, unknown>)
-    : {}
+  return isRecord(servers) ? servers : {}
 }
 
-/** Ours only when it is an HTTP entry for this plugin's Maximal URL, on
- *  whatever port Maximal used when it was written. */
-export function isOwnedMcpEntry(value: unknown, id: string): boolean {
-  if (typeof value !== "object" || value === null) return false
-  const { type, url } = value as Record<string, unknown>
-  return type === "http" && isMaximalMcpUrl(url, id)
+/** An HTTP entry for plugin `id`'s Maximal URL, on whatever port. */
+function pointsAtMaximal(value: unknown, id: string): boolean {
+  return (
+    isRecord(value) && value.type === "http" && isMaximalMcpUrl(value.url, id)
+  )
 }
 
-function authorization(value: unknown): string | undefined {
-  const headers = (value as { headers?: Record<string, unknown> } | undefined)
-    ?.headers
-  const header = headers?.Authorization
-  return typeof header === "string" ? header : undefined
+/** Whether `name` → `value` is an entry Maximal wrote (`maximal-<id>`). */
+export function isMaximalEntry(name: string, value: unknown): boolean {
+  if (!name.startsWith(ENTRY_PREFIX)) return false
+  return pointsAtMaximal(value, name.slice(ENTRY_PREFIX.length))
 }
 
-/** The Authorization value the client config should end up with. */
-function bearer(apiKey: string): string {
-  return `Bearer ${apiKey}`
-}
-
-export function keyPlaceholder(apiKey: string): string {
-  return bearer(createHash("sha256").update(apiKey).digest("hex"))
-}
-
-/** The entry as `claude mcp add-json` receives it: never the real key. */
-function addJsonPayload(entry: PluginClientEntry): string {
-  return JSON.stringify({
+function wantedEntry(entry: PluginClientEntry): Record<string, unknown> {
+  return {
     type: "http",
     url: entry.url,
     ...(entry.apiKey === undefined ?
       {}
-    : { headers: { Authorization: keyPlaceholder(entry.apiKey) } }),
-  })
+    : { headers: { Authorization: `Bearer ${entry.apiKey}` } }),
+  }
+}
+
+function sameEntry(current: unknown, wanted: Record<string, unknown>): boolean {
+  if (!isRecord(current)) return false
+  const { type, url, headers } = current
+  return JSON.stringify({ type, url, headers }) === JSON.stringify(wanted)
 }
 
 /**
- * One verified atomic edit of the user config's `mcpServers`. Claude Code
- * rewrites this file often, so the edit is re-read and retried a few times.
- * `done` says whether the file is already in the wanted state; `apply`
- * mutates the servers map and returns false when it must not proceed.
+ * The servers map as it should be: Maximal's entries exactly `desired`,
+ * legacy entries (named `<id>`, from older versions) removed, everything
+ * else untouched. A `maximal-<id>` name the user took for something else
+ * is left alone.
  */
-function editServers(
+function nextServers(
+  servers: Servers,
+  desired: ReadonlyArray<PluginClientEntry>,
+  legacy: ReadonlyArray<string>,
+): { servers: Servers; result: PluginClientApplyResult } {
+  const next: Servers = { ...servers }
+  const result: PluginClientApplyResult = { written: [], removed: [] }
+  const wantedNames = new Set(desired.map((entry) => entryName(entry.id)))
+  for (const [name, value] of Object.entries(servers)) {
+    const stale = isMaximalEntry(name, value) && !wantedNames.has(name)
+    const old = legacy.includes(name) && pointsAtMaximal(value, name)
+    if (stale || old) {
+      Reflect.deleteProperty(next, name)
+      result.removed.push(name)
+    }
+  }
+  for (const entry of desired) {
+    const name = entryName(entry.id)
+    const current = next[name]
+    if (current !== undefined && !isMaximalEntry(name, current)) continue
+    const wanted = wantedEntry(entry)
+    if (sameEntry(current, wanted)) continue
+    next[name] = wanted
+    result.written.push(name)
+  }
+  return { servers: next, result }
+}
+
+/** One pass over the user config; see the module comment. */
+function applyToFile(
   file: string,
-  edit: {
-    done: (servers: Record<string, unknown>) => boolean
-    apply: (servers: Record<string, unknown>) => boolean
-  },
-): boolean {
-  for (let attempt = 0; attempt < KEY_SWAP_ATTEMPTS; attempt += 1) {
+  desired: ReadonlyArray<PluginClientEntry>,
+  legacy: ReadonlyArray<string>,
+): PluginClientApplyResult {
+  let last: PluginClientApplyResult = { written: [], removed: [] }
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt += 1) {
     const document = readDocument(file)
-    if (!document) return false
-    const servers = { ...(document.mcpServers as Record<string, unknown>) }
-    if (edit.done(servers)) return true
-    if (!edit.apply(servers)) return false
+    if (!document) {
+      // Never replace a config that is there but unreadable (and keep the
+      // legacy record for a pass that can read it).
+      if (fs.existsSync(file))
+        throw new Error(`Claude Code's user config can't be read: ${file}`)
+      // Without one, create it only to add something.
+      if (desired.length === 0) return last
+    }
+    const servers = isRecord(document?.mcpServers) ? document.mcpServers : {}
+    const { servers: next, result } = nextServers(servers, desired, legacy)
+    if (attempt === 0) last = result
+    if (result.written.length === 0 && result.removed.length === 0) return last
     atomicWriteJson(
       file,
-      { ...document, mcpServers: servers },
+      { ...document, mcpServers: next },
       { label: "Claude Code user config" },
     )
-    if (edit.done(readServers(file))) return true
   }
-  return false
+  throw new Error("Claude Code kept rewriting its user config")
 }
 
-/** Replace only this entry's Authorization header in the user config. */
-function swapInKey(file: string, id: string, apiKey: string): boolean {
-  const wanted = bearer(apiKey)
-  return editServers(file, {
-    done: (servers) => authorization(servers[id]) === wanted,
-    apply: (servers) => {
-      const current = servers[id] as Record<string, unknown> | undefined
-      if (!current || !isOwnedMcpEntry(current, id)) return false
-      servers[id] = {
-        ...current,
-        headers: {
-          ...(current.headers as Record<string, unknown> | undefined),
-          Authorization: wanted,
-        },
-      }
-      return true
-    },
-  })
-}
-
-/** Remove an owned entry without the CLI (shutdown has no time for it). */
-function removeFromFile(file: string, id: string): boolean {
-  return editServers(file, {
-    done: (servers) => !isOwnedMcpEntry(servers[id], id),
-    apply: (servers) => Reflect.deleteProperty(servers, id),
-  })
-}
-
-function needsReplace(current: unknown, entry: PluginClientEntry): boolean {
-  // A new port changes the URL, and adding or dropping a header changes the
-  // entry's shape; either way, recreate it.
-  const { url } = current as { url?: unknown }
-  return (
-    url !== entry.url
-    || (authorization(current) === undefined) !== (entry.apiKey === undefined)
+/** A user server or enabled plugin named `id`. */
+function findStandalone(
+  id: string,
+  servers: Servers,
+  settingsFile: string,
+): StandaloneInstall | undefined {
+  const wanted = id.toLowerCase()
+  const server = Object.keys(servers).find(
+    (name) =>
+      name.toLowerCase() === wanted && !pointsAtMaximal(servers[name], id),
   )
+  if (server !== undefined) return { name: server, source: "server" }
+  const plugins = readDocument(settingsFile)?.enabledPlugins
+  if (!isRecord(plugins)) return undefined
+  const plugin = Object.keys(plugins).find(
+    (key) =>
+      plugins[key] === true && key.split("@")[0]?.toLowerCase() === wanted,
+  )
+  return plugin === undefined ? undefined : { name: plugin, source: "plugin" }
 }
 
 export function createClaudeCodePluginClient(
   options: ClaudeCodePluginClientOptions = {},
 ): PluginClientConfigurator {
   const configPath = options.configPath ?? claudeUserConfigPath
-  const getRunner = options.runner ?? defaultRunner
-  const integrationOn =
-    options.integrationOn ?? (() => isProxyBaseUrlConfigured())
+  const settingsPath = options.settingsPath ?? getClaudeCodeSettingsPath
+  const integrationOn = options.integrationOn ?? claudeCodeRoutingIntended
   return {
     clientId: "claude-code",
     apiKeyLabel: HELPER_LABEL,
-    available:
-      options.available
-      ?? (async () => integrationOn() && (await getRunner()) !== undefined),
-    unavailableReason: () =>
-      integrationOn() ?
-        "Maximal could not find a Claude Code program it can run."
-      : "Turn on Claude Code in Maximal first.",
-    reconcile(desired, owned) {
-      return reconcileUserScope({
-        file: configPath(),
-        desired,
-        owned,
-        getRunner,
-      })
-    },
-    repairKeys(desired, owned) {
-      const file = configPath()
-      const existing = readServers(file)
-      for (const entry of desired) {
-        if (entry.apiKey === undefined || !owned.includes(entry.id)) continue
-        const current = existing[entry.id]
-        if (!isOwnedMcpEntry(current, entry.id)) continue
-        const header = authorization(current)
-        // No header at all is a different entry shape; reconcile recreates it.
-        if (header === undefined || header === bearer(entry.apiKey)) continue
-        if (swapInKey(file, entry.id, entry.apiKey)) {
-          consola.info(
-            `Put the key back into Claude Code MCP server "${entry.id}"`,
-          )
-        }
-      }
-    },
-    releaseOffline(owned) {
-      return releaseUserScope(configPath(), owned)
-    },
+    available: integrationOn,
+    unavailableReason: () => "Turn on Claude Code in Maximal first.",
+    standalone: (id) =>
+      findStandalone(id, readServers(configPath()), settingsPath()),
+    apply: (desired, legacy) => applyToFile(configPath(), desired, legacy),
   }
-}
-
-interface ReconcileInput {
-  file: string
-  desired: Array<PluginClientEntry>
-  owned: Array<string>
-  getRunner: () => Promise<ClaudeCliRunner | undefined>
-}
-
-type Run = (args: Array<string>) => Promise<boolean>
-
-async function reconcileUserScope(
-  input: ReconcileInput,
-): Promise<PluginReconcileResult> {
-  const { file, desired, owned } = input
-  const existing = readServers(file)
-  const result: PluginReconcileResult = {
-    owned: [],
-    added: [],
-    removed: [],
-    skipped: [],
-  }
-  let runner: Promise<ClaudeCliRunner | undefined> | undefined
-  const run: Run = async (args) => {
-    runner ??= input.getRunner()
-    const claude = await runner
-    if (!claude) return false
-    try {
-      await claude(args)
-      return true
-    } catch (error) {
-      consola.warn(`claude ${args.slice(0, 2).join(" ")} failed`, error)
-      return false
-    }
-  }
-  const desiredIds = new Set(desired.map((entry) => entry.id))
-
-  for (const id of owned) {
-    if (desiredIds.has(id)) continue
-    if (!isOwnedMcpEntry(existing[id], id)) continue
-    if (await run(["mcp", "remove", "--scope", "user", id])) {
-      result.removed.push(id)
-    } else {
-      result.owned.push(id)
-    }
-  }
-
-  for (const entry of desired) {
-    const outcome = await reconcileEntry({ entry, existing, owned, file, run })
-    if (outcome === "skipped") result.skipped.push(entry.id)
-    if (outcome === "added") result.added.push(entry.id)
-    if (outcome !== "skipped" && outcome !== "failed") {
-      result.owned.push(entry.id)
-    }
-  }
-  return result
-}
-
-/** Remove every owned entry by editing the file: no CLI, no waiting. */
-function releaseUserScope(
-  file: string,
-  owned: Array<string>,
-): PluginReconcileResult {
-  const existing = readServers(file)
-  const result: PluginReconcileResult = {
-    owned: [],
-    added: [],
-    removed: [],
-    skipped: [],
-  }
-  for (const id of owned) {
-    if (!isOwnedMcpEntry(existing[id], id)) continue
-    if (removeFromFile(file, id)) result.removed.push(id)
-    else result.owned.push(id)
-  }
-  return result
-}
-
-async function reconcileEntry(input: {
-  entry: PluginClientEntry
-  existing: Record<string, unknown>
-  owned: Array<string>
-  file: string
-  run: Run
-}): Promise<"added" | "kept" | "skipped" | "failed"> {
-  const { entry, existing, owned, file, run } = input
-  const current = existing[entry.id]
-  const ours = owned.includes(entry.id) && isOwnedMcpEntry(current, entry.id)
-  if (current !== undefined && !ours) return "skipped"
-
-  let added = false
-  if (current === undefined || needsReplace(current, entry)) {
-    if (
-      current !== undefined
-      && !(await run(["mcp", "remove", "--scope", "user", entry.id]))
-    ) {
-      return "kept"
-    }
-    const ran = await run([
-      "mcp",
-      "add-json",
-      "--scope",
-      "user",
-      entry.id,
-      addJsonPayload(entry),
-    ])
-    // The CLI can write the entry and still fail (a timeout, say). If
-    // Maximal's entry is there, carry on as if it had succeeded, so it is
-    // recorded as owned and gets its key; otherwise the next pass would take
-    // it for the user's own and never touch it again.
-    if (!ran && !isOwnedMcpEntry(readServers(file)[entry.id], entry.id)) {
-      return current === undefined ? "failed" : "kept"
-    }
-    added = current === undefined
-  }
-  if (entry.apiKey !== undefined && !swapInKey(file, entry.id, entry.apiKey)) {
-    consola.warn(
-      `Could not finish writing the key for Claude Code MCP server "${entry.id}"; will retry next time.`,
-    )
-  }
-  return added ? "added" : "kept"
 }
 
 export const claudeCodePluginClient = createClaudeCodePluginClient()

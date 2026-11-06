@@ -115,18 +115,23 @@ gone through and to check before trying again, so nothing is sent twice.
 
 On Work IQ’s page in Settings → Integrations → Connectors, tick **Claude Code**. Maximal then
 registers Work IQ with Claude Code (user scope, in `~/.claude.json`) as an
-HTTP MCP server named `workiq` at `http://127.0.0.1:<port>/mcp/workiq`, using
-your Claude Code key. Its tools appear in Claude Code as `mcp__workiq__<tool>`.
+HTTP MCP server named `maximal-workiq` at `http://127.0.0.1:<port>/mcp/workiq`,
+using your Claude Code key. Its tools appear in Claude Code as
+`mcp__maximal-workiq__<tool>`. Start a new Claude Code session after turning
+Work IQ on.
 
-- The Claude Code integration (Settings → Apps) must be on, and Maximal
-  must find a `claude` program it can run; otherwise the box is unavailable
-  and says why.
-- The entry exists while Maximal runs: Maximal removes it when it quits and
-  adds it back when it starts, so a Claude Code session started while Maximal
-  is stopped doesn't see a dead server. Start a new Claude Code session after
-  turning Work IQ on.
-- An existing `workiq` entry of your own is left alone, and Maximal doesn't
-  add its own.
+- The Claude Code integration (Settings → Apps) must be on; otherwise the box
+  is unavailable and says why.
+- The entry stays while Maximal is stopped. Claude Code then shows
+  `maximal-workiq` as failing to connect, and it works again once Maximal is
+  running. Turning Work IQ off, unticking Claude Code, turning off the Claude
+  Code integration or `maximal uninstall` removes it.
+- If Claude Code already has its own Work IQ (a server named `workiq`, or
+  Microsoft’s `workiq@work-iq` plugin), Maximal adds nothing and Settings
+  marks Work IQ with a note saying so. Remove yours and Maximal adds its own the
+  next time Settings looks.
+- Versions before the rename wrote a `workiq` entry; Maximal replaces it with
+  `maximal-workiq` when it starts.
 
 Any other MCP client on this machine can use the same URL with Maximal's API
 key (`Authorization: Bearer <key>` or `x-api-key`), when keys are required.

@@ -94,7 +94,8 @@ export interface AppsConfig {
     /** Proxy routing applied to Claude Code (env.ANTHROPIC_BASE_URL in
      *  ~/.claude/settings.json). */
     enabled?: boolean
-    /** MCP endpoint ids Maximal added to Claude Code's user scope. */
+    /** Legacy: entry names older versions wrote into Claude Code's user
+     *  scope. The next plugin client sync removes them and this list. */
     mcpServers?: Array<string>
     /** Explicit model for Claude Code's Haiku alias. Missing means Automatic. */
     fastModel?: string

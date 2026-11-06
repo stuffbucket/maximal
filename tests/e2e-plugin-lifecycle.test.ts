@@ -10,10 +10,12 @@
  * Settings HTTP API, the Settings events stream (SSE) and a real MCP client
  * session on `/mcp/workiq`.
  *
- * Claude Code is on the other side of the connector: a fake `claude`
- * executable first on PATH (`helpers/fake-claude-cli`) is what Maximal finds
- * and runs to write its user-scope MCP entry, and the MCP client connects
- * with exactly the URL and headers that entry gives Claude Code.
+ * Claude Code is on the other side of the connector: a fake `claude` first
+ * on PATH (`helpers/fake-claude-cli`) is the install Maximal finds, Maximal
+ * writes `maximal-workiq` into a temp `CLAUDE_CONFIG_DIR/.claude.json`, and
+ * the MCP client connects with exactly the URL and headers that entry gives
+ * Claude Code. The run starts as an upgrade (an older Maximal's `workiq`
+ * entry in Claude Code) and covers the user's own Work IQ taking precedence.
  *
  * Every boundary is recorded per step — the plugin transcript (fibers,
  * gateway events, status, tools, settings.json diffs, storage names,
@@ -51,13 +53,14 @@ import {
   WORKIQ_TOOLS,
 } from "@stuffbucket/maximal-plugin-workiq/testing"
 import { afterAll, expect, test } from "bun:test"
-import { createHash, randomBytes } from "node:crypto"
+import { randomBytes } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { PATHS } from "~/lib/platform/paths"
+import { entryName } from "~/lib/plugins/clients/claude-code"
 import { startPlugins, stopPlugins } from "~/lib/plugins/runtime"
 import { setListeningPort } from "~/lib/start/proxy-port"
 import { BUILD_VERSION } from "~/lib/update/build-info"
@@ -67,7 +70,6 @@ import { server } from "~/server"
 import { installFakeClaudeCli } from "./helpers/fake-claude-cli"
 import {
   type ApiExchange,
-  claudeCliCalls,
   claudeMcpServers,
   configPlugins,
   listChangedAfter,
@@ -101,6 +103,13 @@ const ACCOUNT = {
 const RETRY_MS = 50
 /** A server the user added to Claude Code themselves; Maximal never touches it. */
 const USER_SERVER = { type: "http", url: "https://mcp.example.test/github" }
+/** The user's own Work IQ, set up the way Microsoft's README shows. */
+const USER_WORKIQ = {
+  command: "npx",
+  args: ["-y", "@microsoft/workiq@latest", "mcp"],
+}
+/** Maximal's entry name in Claude Code. */
+const ENTRY = entryName(ID)
 const ELICIT_SCHEMA = {
   type: "object" as const,
   properties: { mailbox: { type: "string" as const, title: "Mailbox" } },
@@ -121,7 +130,7 @@ afterAll(async () => {
 /** Connect the way Claude Code would: with the URL and headers of the entry
  *  Maximal wrote into its user config. */
 async function connectClient(run: Run): Promise<Client> {
-  const entry = claudeMcpServers(run)[ID] as
+  const entry = claudeMcpServers(run)[ENTRY] as
     | { type: string; url: string; headers?: Record<string, string> }
     | undefined
   if (entry?.type !== "http") throw new Error("no Claude Code entry")
@@ -194,7 +203,6 @@ async function startRun(fake: FakeRemoteMcp): Promise<Run> {
       [API_KEY]: "<api-key>",
       [BUILD_VERSION]: "<version>",
       [claude.cli.binDir]: "<claude-bin>",
-      [createHash("sha256").update(API_KEY).digest("hex")]: "<sha256(api-key)>",
     },
     secrets: SECRETS,
   })
@@ -231,6 +239,8 @@ async function startRun(fake: FakeRemoteMcp): Promise<Run> {
         },
       ],
     },
+    // What an older Maximal recorded writing into Claude Code.
+    apps: { claudeCode: { mcpServers: [ID] } },
   })
   cleanups.push(() => void writeConfig({}))
   const app = await serveApp(server.fetch)
@@ -271,8 +281,9 @@ async function startRun(fake: FakeRemoteMcp): Promise<Run> {
 
 /**
  * Claude Code installed but not routed through Maximal: the fake CLI first
- * on PATH, and a fresh `CLAUDE_CONFIG_DIR` whose user config already has
- * the user's own MCP server.
+ * on PATH, and a fresh `CLAUDE_CONFIG_DIR` whose user config has the user's
+ * own MCP server and the `workiq` entry an older Maximal wrote (recorded in
+ * `config.json`, see `startRun`).
  */
 function startClaudeCode(): Run["claude"] {
   const cli = installFakeClaudeCli()
@@ -288,21 +299,39 @@ function startClaudeCode(): Run["claude"] {
   const configFile = path.join(dir, ".claude.json")
   fs.writeFileSync(
     configFile,
-    JSON.stringify({ numStartups: 3, mcpServers: { github: USER_SERVER } }),
+    JSON.stringify({
+      numStartups: 3,
+      mcpServers: {
+        github: USER_SERVER,
+        [ID]: {
+          type: "http",
+          url: `http://127.0.0.1:4141/mcp/${ID}`,
+          headers: { Authorization: "Bearer <sha256 placeholder>" },
+        },
+      },
+    }),
   )
   return { cli, configFile }
 }
 
-/** What `config.json` says Maximal wrote into Claude Code. */
-const ownedInClaudeCode = () => getConfig().apps?.claudeCode?.mcpServers ?? []
+/** Claude Code as Settings shows it on Work IQ. */
+async function claudeCodeClient(run: Run): Promise<Record<string, unknown>> {
+  const detail = await run.api("GET", `/plugins/${ID}`)
+  const clients = (detail.response as { clients: Array<{ id: string }> })
+    .clients
+  const view = clients.find((client) => client.id === "claude-code")
+  if (!view) throw new Error("no Claude Code client")
+  return view
+}
 
 // ── Phases ─────────────────────────────────────────────────────────────
 
 /** Boot, enable, terms, sign-in. Resolves the negotiated MCP version. */
 async function bootAndSetUp(run: Run): Promise<string> {
   const { harness, fake } = run
-  // 1. Boot: the legacy value moves into settings.json; Work IQ stays off.
-  await step(run, "boot (legacy config.json value migrated)", async () => {
+  // 1. Boot: the legacy config value moves into settings.json, the old
+  //    Claude Code entry is removed; Work IQ stays off.
+  await step(run, "boot (an older Maximal's settings migrated)", async () => {
     await startPlugins({ gateway: harness.gateway })
     const list = await run.api("GET", "/plugins")
     expect(list.status).toBe(200)
@@ -313,6 +342,10 @@ async function bootAndSetUp(run: Run): Promise<string> {
       config: { endpoint: fake.url },
     })
     expect(configPlugins()).toEqual({ [ID]: {} })
+    // The `workiq` entry an older Maximal wrote into Claude Code is gone,
+    // and so is its record; the user's server stays.
+    expect(claudeMcpServers(run)).toEqual({ github: USER_SERVER })
+    expect(getConfig().apps?.claudeCode).not.toHaveProperty("mcpServers")
     const mcp = await fetch(`${run.origin}/mcp/${ID}`, {
       method: "POST",
       headers: { authorization: `Bearer ${API_KEY}` },
@@ -385,11 +418,15 @@ async function sendToClaudeCode(run: Run) {
     expect(toggled.status).toBe(200)
     expect(toggled.response).toMatchObject({ enabled: true, conflict: null })
     expect(claudeMcpServers(run)).toEqual({ github: USER_SERVER })
-    expect(claudeCliCalls(run)).toEqual([])
   })
 
-  // 6. Work IQ → Claude Code: one `claude mcp add-json` with a placeholder,
-  //    then the real key swapped into the file; the user's server untouched.
+  // 6. Work IQ → Claude Code: `maximal-workiq` with the real key; the user's
+  //    server and the rest of the file untouched.
+  const ours = () => ({
+    type: "http",
+    url: `${run.origin}/mcp/${ID}`,
+    headers: { Authorization: `Bearer ${API_KEY}` },
+  })
   await step(run, "send Work IQ to Claude Code", async () => {
     const patched = await run.api("PATCH", `/plugins/${ID}`, {
       clients: ["claude-code"],
@@ -397,29 +434,56 @@ async function sendToClaudeCode(run: Run) {
     expect(patched.status).toBe(200)
     expect(claudeMcpServers(run)).toEqual({
       github: USER_SERVER,
-      [ID]: {
-        type: "http",
-        url: `${run.origin}/mcp/${ID}`,
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      },
+      [ENTRY]: ours(),
     })
     const document = JSON.parse(
       readText(run.claude.configFile) ?? "{}",
     ) as Record<string, unknown>
     expect(document.numStartups).toBe(3)
-    const calls = claudeCliCalls(run)
-    expect(calls.map((args) => args.slice(0, 5))).toEqual([
-      ["mcp", "add-json", "--scope", "user", ID],
-    ])
-    expect(calls.flat().some((arg) => arg.includes(API_KEY))).toBe(false)
-    expect(ownedInClaudeCode()).toEqual([ID])
   })
+
+  // 7. The user sets up Work IQ in Claude Code themselves: theirs wins,
+  //    Maximal's entry goes, and Settings says why.
+  await step(run, "user's own Work IQ takes precedence", async () => {
+    writeClaudeServers(run, { ...claudeMcpServers(run), [ID]: USER_WORKIQ })
+    expect(await claudeCodeClient(run)).toMatchObject({
+      selected: true,
+      available: true,
+      standalone: { name: ID, source: "server" },
+    })
+    expect(claudeMcpServers(run)).toEqual({
+      github: USER_SERVER,
+      [ID]: USER_WORKIQ,
+    })
+  })
+
+  // 8. They remove theirs: Maximal's comes back on the next look.
+  await step(run, "user's own Work IQ removed", async () => {
+    const { [ID]: _theirs, ...rest } = claudeMcpServers(run)
+    writeClaudeServers(run, rest)
+    expect(await claudeCodeClient(run)).not.toHaveProperty("standalone")
+    expect(claudeMcpServers(run)).toEqual({
+      github: USER_SERVER,
+      [ENTRY]: ours(),
+    })
+  })
+}
+
+/** Edit Claude Code's user servers as the user (or Claude Code) would. */
+function writeClaudeServers(run: Run, servers: Record<string, unknown>) {
+  const document = JSON.parse(
+    readText(run.claude.configFile) ?? "{}",
+  ) as Record<string, unknown>
+  fs.writeFileSync(
+    run.claude.configFile,
+    JSON.stringify({ ...document, mcpServers: servers }, null, 2),
+  )
 }
 
 /** A real MCP client, the Settings detail, and blocking a tool. */
 async function toolsAndPermissions(run: Run): Promise<Client> {
   const { harness, fake } = run
-  // 7. A real MCP client sees the upstream tools, verbatim.
+  // 9. A real MCP client sees the upstream tools, verbatim.
   let client: Client | undefined
   await step(run, "MCP client: tools mirrored", async () => {
     client = await connectClient(run)
@@ -449,7 +513,7 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
   if (!client) throw new Error("no MCP client")
   const mcp = client
 
-  // 8. Settings detail: groups, permission sources.
+  // 10. Settings detail: groups, permission sources.
   await step(run, "Settings detail view", async () => {
     const detail = await run.api("GET", `/plugins/${ID}`)
     expect(detail.status).toBe(200)
@@ -471,7 +535,7 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
     expect(view.manifest.connector?.auth).toEqual({ type: "entra" })
   })
 
-  // 9. Block a tool: hidden from MCP, calls refused, upstream never asked.
+  // 11. Block a tool: hidden from MCP, calls refused, upstream never asked.
   await step(run, "block delete_entity", async () => {
     const since = listChangedCount(run.mcpLog)
     const put = await run.api("PUT", `/plugins/${ID}/tool-permissions`, {
@@ -510,7 +574,7 @@ async function toolsAndPermissions(run: Run): Promise<Client> {
 /** Calls: exact upstream request, relays, retry on throttling, a policy denial. */
 async function toolCalls(run: Run, mcp: Client, protocol: string) {
   const { harness, fake } = run
-  // 10. An allowed call: exactly what goes upstream and what comes back.
+  // 12. An allowed call: exactly what goes upstream and what comes back.
   await step(run, "call retrieve", async () => {
     const mark = fake.requests.length
     const args = { query: "Q3 plan", sources: ["teams", "mail"], top: 3 }
@@ -538,7 +602,7 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
       expect(request.protocolVersion).toBe(protocol)
   })
 
-  // 11. Progress and elicitation relayed both ways.
+  // 13. Progress and elicitation relayed both ways.
   await step(run, "ask: progress + elicitation round trip", async () => {
     const progress: Array<{ progress: number; message?: string }> = []
     const result = await mcp.callTool(
@@ -564,7 +628,7 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
     })
   })
 
-  // 12. A throttled result is retried; the wait shows as progress.
+  // 14. A throttled result is retried; the wait shows as progress.
   await step(run, "retrieve: result-level 429 then success", async () => {
     const throttled = fake.throttled
     fake.throttle({ mode: "result", tool: "retrieve" })
@@ -588,7 +652,7 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
     )
   })
 
-  // 13. A policy 403 fails that call only.
+  // 15. A policy 403 fails that call only.
   await step(run, "retrieve: policy 403 isolated", async () => {
     fake.fail({
       status: 403,
@@ -612,7 +676,7 @@ async function toolCalls(run: Run, mcp: Client, protocol: string) {
 /** Config changes through Settings, then sign-out. */
 async function configAndSignOut(run: Run, mcp: Client) {
   const { harness, fake } = run
-  // 14. Config changes through Settings.
+  // 16. Config changes through Settings.
   await step(run, "PATCH invalid config → 400, nothing reloads", async () => {
     const settingsBefore = harness.settingsText(ID)
     const mark = harness.mark()
@@ -646,7 +710,7 @@ async function configAndSignOut(run: Run, mcp: Client) {
     expect(tools).toHaveLength(WORKIQ_TOOLS.length)
   })
 
-  // 15. Sign out: tools gone, token cache removed, upstream sessions closed.
+  // 17. Sign out: tools gone, token cache removed, upstream sessions closed.
   await step(run, "sign-out → signin-needed", async () => {
     const since = listChangedCount(run.mcpLog)
     expect(
@@ -673,7 +737,7 @@ async function disableAndShutDown(
   tracker: HandleTracker,
 ) {
   const { harness, fake } = run
-  // 16. Disable: the endpoint disappears.
+  // 18. Disable: the endpoint disappears.
   await step(run, "disable → MCP 404", async () => {
     const patched = await run.api("PATCH", `/plugins/${ID}`, {
       enabled: false,
@@ -702,17 +766,9 @@ async function disableAndShutDown(
     expect(pluginMcpRoutes.sessionCount(ID)).toBe(0)
     // Claude Code loses the entry Maximal wrote, and only that one.
     expect(claudeMcpServers(run)).toEqual({ github: USER_SERVER })
-    expect(claudeCliCalls(run).at(-1)).toEqual([
-      "mcp",
-      "remove",
-      "--scope",
-      "user",
-      ID,
-    ])
-    expect(ownedInClaudeCode()).toEqual([])
   })
 
-  // 17. Shutdown: nothing left open, anywhere.
+  // 19. Shutdown: nothing left open, anywhere.
   await mcp.close().catch(() => undefined)
   await run.sse.close()
   await run.closeApp()
@@ -753,7 +809,6 @@ test("Work IQ end to end: boot → setup → tools → calls → config → sign
     config: readText(PATHS.CONFIG_PATH),
     settings: readText(settingsFile(run)),
     claudeCode: readText(run.claude.configFile),
-    claudeCli: run.claude.cli.calls(),
   }
   expect(findSecrets(outward, SECRETS)).toEqual([])
   expect(run.harness.secretsSeen()).toEqual([])

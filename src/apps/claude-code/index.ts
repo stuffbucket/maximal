@@ -1,11 +1,8 @@
 import type { AppEntry } from "~/lib/config/settings-types"
 
 import { claudeCodePluginClient } from "~/lib/plugins/clients/claude-code"
-import {
-  releasePluginClientOffline,
-  syncPluginClient,
-} from "~/lib/plugins/clients/sync"
-import { notifyPluginsChanged } from "~/lib/plugins/runtime"
+import { removePluginClientEntries } from "~/lib/plugins/clients/sync"
+import { notifyPluginsChanged, syncPluginClients } from "~/lib/plugins/runtime"
 
 import type { AppUninstallResult, ClientApp } from "../index"
 
@@ -53,7 +50,7 @@ export const claudeCodeApp: ClientApp = {
     }
   },
 
-  async enable() {
+  enable() {
     const result = applyProxyBaseUrl()
     const conflict =
       (
@@ -68,20 +65,20 @@ export const claudeCodeApp: ClientApp = {
     // not configure.
     if (success) {
       setClaudeCodeRoutingIntent(true)
-      // Restore the plugin MCP servers the user chose for Claude Code.
-      await syncPluginClient(claudeCodePluginClient)
-      // Connectors list Claude Code as a client only while routing is on.
+      // Add the connectors the user chose for Claude Code, and tell
+      // Settings, which offers Claude Code as a client only while it's on.
+      syncPluginClients()
       notifyPluginsChanged()
     }
-    return { success, conflict }
+    return Promise.resolve({ success, conflict })
   },
 
-  async disable() {
+  disable() {
     const result = revertProxyBaseUrl()
     setClaudeCodeRoutingIntent(false)
-    await syncPluginClient(claudeCodePluginClient, { active: false })
+    syncPluginClients()
     notifyPluginsChanged()
-    return { success: result.wrote }
+    return Promise.resolve({ success: result.wrote })
   },
 
   uninstall(): Promise<AppUninstallResult> {
@@ -94,7 +91,7 @@ export const claudeCodeApp: ClientApp = {
     if (result.wrote) {
       reverted.push(`reverted ${getClaudeCodeSettingsPath()}`)
     }
-    const mcp = releasePluginClientOffline(claudeCodePluginClient)
+    const mcp = removePluginClientEntries(claudeCodePluginClient)
     if (mcp.removed.length > 0) {
       reverted.push(`removed our MCP servers: ${mcp.removed.join(", ")}`)
     }

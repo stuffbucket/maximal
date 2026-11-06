@@ -1,7 +1,9 @@
 /**
- * Plugin client sync: which plugin endpoints a client should have, the
- * ownership record (`apps.claudeCode.mcpServers`), shutdown release, and
- * the one-shot cleanup of the parked broker's Claude Desktop entries.
+ * Plugin client sync: which connector endpoints a client should have (on,
+ * chosen for the client, integration on, not already set up by the user),
+ * the one-time removal of entry names older versions recorded
+ * (`apps.claudeCode.mcpServers`), uninstall, and the one-shot cleanup of the
+ * parked broker's Claude Desktop entries.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -14,8 +16,8 @@ import { removeLegacyClaudeDesktopEntries } from "~/lib/plugins/clients/claude-d
 import {
   type PluginClientConfigurator,
   type PluginClientEntry,
-  type PluginReconcileResult,
-  releasePluginClientOffline,
+  removePluginClientEntries,
+  type StandaloneInstall,
   syncPluginClient,
 } from "~/lib/plugins/clients/sync"
 
@@ -26,33 +28,31 @@ import {
 } from "./helpers/plugins"
 
 interface FakeClient extends PluginClientConfigurator {
-  calls: Array<{ desired: Array<PluginClientEntry>; owned: Array<string> }>
-  released: Array<Array<string>>
+  calls: Array<{ desired: Array<PluginClientEntry>; legacy: Array<string> }>
 }
 
-function fakeClient(available = true): FakeClient {
+function fakeClient(
+  options: {
+    available?: boolean
+    standalone?: Record<string, StandaloneInstall>
+    fail?: boolean
+  } = {},
+): FakeClient {
   const calls: FakeClient["calls"] = []
-  const released: FakeClient["released"] = []
   return {
     clientId: "claude-code",
     apiKeyLabel: "claude-code",
     calls,
-    released,
-    available: () => Promise.resolve(available),
+    available: () => options.available ?? true,
     unavailableReason: () => "off",
-    reconcile(desired, owned): Promise<PluginReconcileResult> {
-      calls.push({ desired, owned })
-      const ids = desired.map((entry) => entry.id)
-      return Promise.resolve({
-        owned: ids,
-        added: ids.filter((id) => !owned.includes(id)),
-        removed: owned.filter((id) => !ids.includes(id)),
-        skipped: [],
-      })
-    },
-    releaseOffline(owned) {
-      released.push(owned)
-      return { owned: [], added: [], removed: owned, skipped: [] }
+    standalone: (id) => options.standalone?.[id],
+    apply(desired, legacy) {
+      calls.push({ desired: [...desired], legacy: [...legacy] })
+      if (options.fail) throw new Error("unreadable")
+      return {
+        written: desired.map((entry) => `maximal-${entry.id}`),
+        removed: [],
+      }
     },
   }
 }
@@ -67,16 +67,25 @@ afterEach(async () => {
   writeConfig({})
 })
 
+const KEY_ENTRY = {
+  id: "k1",
+  label: "claude-code",
+  key: "claude-code-key-1",
+  enabled: true,
+  created_at: "2026-01-01T00:00:00Z",
+}
+
 describe("syncPluginClient", () => {
   beforeEach(async () => {
     plugins = await startTestGateway([
       definePlugin("alpha", noop),
       definePlugin("beta", noop),
+      definePlugin("epsilon", noop),
       definePlugin("delta", noop, { kind: "extension" }),
     ])
   })
 
-  test("wants each known connector that is on and chose the client", async () => {
+  test("wants each known connector that is on, chose the client, and isn't the user's own", () => {
     writeConfig({
       plugins: {
         alpha: { enabled: true, clients: ["claude-code"] },
@@ -84,81 +93,79 @@ describe("syncPluginClient", () => {
         gamma: { enabled: true, clients: ["claude-code"] },
         // Not a connector: no MCP endpoint to register.
         delta: { enabled: true, clients: ["claude-code"] },
+        // The user runs their own epsilon in the client.
+        epsilon: { enabled: true, clients: ["claude-code"] },
       },
-      auth: {
-        apiKeyEntries: [
-          {
-            id: "k1",
-            label: "claude-code",
-            key: "claude-code-key-1",
-            enabled: true,
-            created_at: "2026-01-01T00:00:00Z",
-          },
-        ],
-      },
+      auth: { apiKeyEntries: [KEY_ENTRY] },
     })
-    const client = fakeClient()
+    const client = fakeClient({
+      standalone: { epsilon: { name: "epsilon", source: "server" } },
+    })
 
-    const result = await syncPluginClient(client)
+    expect(syncPluginClient(client)).toBe(true)
 
     expect(client.calls).toHaveLength(1)
-    expect(client.calls[0].owned).toEqual([])
-    expect(client.calls[0].desired).toHaveLength(1)
-    const [wanted] = client.calls[0].desired
-    expect(wanted.id).toBe("alpha")
-    expect(wanted.apiKey).toBe("claude-code-key-1")
-    expect(wanted.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/alpha$/)
-    expect(result.added).toEqual(["alpha"])
-    expect(getConfig().apps?.claudeCode?.mcpServers).toEqual(["alpha"])
+    const [{ desired, legacy }] = client.calls
+    expect(legacy).toEqual([])
+    expect(desired).toHaveLength(1)
+    expect(desired[0].id).toBe("alpha")
+    expect(desired[0].apiKey).toBe("claude-code-key-1")
+    expect(desired[0].url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/alpha$/)
   })
 
-  test("takes owned entries out when the integration is off", async () => {
+  test("wants nothing when the integration is off", () => {
     writeConfig({
       plugins: { alpha: { enabled: true, clients: ["claude-code"] } },
-      apps: { claudeCode: { mcpServers: ["alpha"] } },
     })
-    const client = fakeClient(false)
+    const client = fakeClient({ available: false })
 
-    await syncPluginClient(client)
+    expect(syncPluginClient(client)).toBe(false)
 
-    expect(client.calls).toEqual([{ desired: [], owned: ["alpha"] }])
-    expect(getConfig().apps?.claudeCode?.mcpServers).toEqual([])
+    expect(client.calls).toEqual([{ desired: [], legacy: [] }])
   })
 
-  test("does not touch the client when nothing is wanted or owned", async () => {
-    writeConfig({ plugins: { alpha: { enabled: true } } })
-    const client = fakeClient()
-    await syncPluginClient(client)
-    expect(client.calls).toEqual([])
-  })
-})
-
-describe("outside the serving process", () => {
-  test("sync is a no-op without a running gateway", async () => {
-    writeConfig({
-      plugins: { alpha: { enabled: true, clients: ["claude-code"] } },
-      apps: { claudeCode: { mcpServers: ["alpha"] } },
-    })
-    const client = fakeClient()
-    await syncPluginClient(client)
-    expect(client.calls).toEqual([])
-    expect(getConfig().apps?.claudeCode?.mcpServers).toEqual(["alpha"])
-  })
-
-  test("offline release removes owned entries and clears the record", () => {
+  test("passes the legacy names once, then clears them", () => {
     writeConfig({
       apps: { claudeCode: { enabled: true, mcpServers: ["alpha"] } },
     })
     const client = fakeClient()
 
-    const result = releasePluginClientOffline(client)
+    syncPluginClient(client)
+    syncPluginClient(client)
 
-    expect(result.removed).toEqual(["alpha"])
-    expect(client.released).toEqual([["alpha"]])
-    expect(getConfig().apps?.claudeCode).toEqual({
-      enabled: true,
-      mcpServers: [],
+    expect(client.calls.map((call) => call.legacy)).toEqual([["alpha"], []])
+    expect(getConfig().apps?.claudeCode).toEqual({ enabled: true })
+  })
+
+  test("keeps the legacy names when the client's config can't be written", () => {
+    writeConfig({ apps: { claudeCode: { mcpServers: ["alpha"] } } })
+    expect(() => syncPluginClient(fakeClient({ fail: true }))).toThrow()
+    expect(getConfig().apps?.claudeCode?.mcpServers).toEqual(["alpha"])
+  })
+})
+
+describe("outside the serving process", () => {
+  test("sync is a no-op without a running gateway", () => {
+    writeConfig({
+      plugins: { alpha: { enabled: true, clients: ["claude-code"] } },
+      apps: { claudeCode: { mcpServers: ["alpha"] } },
     })
+    const client = fakeClient()
+    expect(syncPluginClient(client)).toBe(false)
+    expect(client.calls).toEqual([])
+    expect(getConfig().apps?.claudeCode?.mcpServers).toEqual(["alpha"])
+  })
+
+  test("uninstall removes every entry and the legacy record", () => {
+    writeConfig({
+      apps: { claudeCode: { enabled: true, mcpServers: ["alpha"] } },
+    })
+    const client = fakeClient()
+
+    removePluginClientEntries(client)
+
+    expect(client.calls).toEqual([{ desired: [], legacy: ["alpha"] }])
+    expect(getConfig().apps?.claudeCode).toEqual({ enabled: true })
   })
 })
 

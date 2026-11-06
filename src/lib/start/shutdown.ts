@@ -6,8 +6,8 @@
  * order, including the Claude Code revert step, is documented inline
  * in initiateShutdown().
  *
- * Coverage matrix for the Claude Code base-URL revert (and the removal of
- * the plugin MCP servers Maximal added to Claude Code):
+ * Coverage matrix for the Claude Code base-URL revert (the connector MCP
+ * servers Maximal added to Claude Code stay; see `plugins/clients`):
  *   - SIGTERM / SIGINT          → initiateShutdown ✓
  *   - process.exit(n) anywhere  → `exit` event safety net ✓
  *   - uncaught exception        → `exit` event safety net ✓
@@ -23,7 +23,6 @@ import consola from "consola"
 
 import { runAppShutdownHooks } from "~/apps/registry"
 import { removePidfile } from "~/lib/platform/replace-running"
-import { releasePluginClientsOnShutdown } from "~/lib/plugins/runtime"
 
 import { clearSessionRunning } from "./session-sentinel"
 
@@ -38,14 +37,6 @@ function runAppCleanup(phase: string): void {
     `shutdown: ${phase} app hooks finished`
       + ` (${result.completed.length} completed, ${result.failed.length} failed)`,
   )
-}
-
-function releasePluginClientsBestEffort(phase: string): void {
-  try {
-    releasePluginClientsOnShutdown()
-  } catch (error) {
-    consola.warn(`shutdown: ${phase} plugin client cleanup failed`, error)
-  }
 }
 
 function clearSessionRunningBestEffort(phase: string): void {
@@ -74,10 +65,6 @@ export async function initiateShutdown(
   // the next boot re-applies it. Synchronous + best-effort — a slow/failed
   // file write must not delay or block the drain.
   runAppCleanup("graceful")
-  // Same for the plugin MCP servers Maximal added to Claude Code, so a new
-  // session doesn't point at a stopped Maximal. Boot re-adds them from the
-  // recorded choices. File-only and synchronous.
-  releasePluginClientsBestEffort("graceful")
 
   // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the
   // timer itself never holds the loop open in the happy path.
@@ -140,7 +127,6 @@ export function installShutdownHandlers(
   // (the boot-time stale-session warning surfaces them after the fact).
   process.on("exit", () => {
     runAppCleanup("exit safety-net")
-    releasePluginClientsBestEffort("exit safety-net")
     clearSessionRunningBestEffort("exit safety-net")
   })
 

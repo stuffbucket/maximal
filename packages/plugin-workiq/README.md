@@ -4,8 +4,8 @@ The Work IQ connector for maximal. It connects maximal directly to
 Microsoft's hosted Work IQ MCP service (`https://workiq.svc.cloud.microsoft/mcp`,
 MCP Streamable HTTP) with its own Microsoft Entra sign-in, and exposes the
 service's tools — exactly the list the service returns from `tools/list` — as
-plugin tools under the id `workiq`, so tool names keep the `mcp__workiq__*`
-prefix. It is a manifest and Work IQ wording on top of
+plugin tools under the id `workiq`, served at `/mcp/workiq` (Claude Code
+knows it as `maximal-workiq`, so tools are `mcp__maximal-workiq__*`). It is a manifest and Work IQ wording on top of
 `@stuffbucket/maximal-connector-kit`, which does the work (see its README for
 upstream behaviour, statuses and actions).
 
