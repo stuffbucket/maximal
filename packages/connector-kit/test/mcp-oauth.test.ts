@@ -71,6 +71,7 @@ function sealedState(store: TextStore, secrets: SecretStore): SealedCache {
     secrets,
     file: OAUTH_FILE,
     keyName: "mcp-oauth",
+    scope: `test:${crypto.randomUUID()}`,
   })
 }
 

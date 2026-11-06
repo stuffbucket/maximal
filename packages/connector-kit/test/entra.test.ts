@@ -252,6 +252,7 @@ async function unsealed(
     secrets,
     file: TOKEN_CACHE_FILE,
     keyName: "msal-token-cache",
+    scope: `test:${crypto.randomUUID()}`,
   }).read()
 }
 
@@ -653,6 +654,8 @@ describe("MSAL token provider: failures and refresh", () => {
       logger: { debug() {}, info() {}, warn() {}, error() {} },
       signInTimeoutMs: 10_000,
       toError: (error: unknown) => toConnectorError(error, { name: "Example" }),
+      scope: `test:${crypto.randomUUID()}`,
+      notify: () => {},
     }
     const tokens = strategy.create(env)
     await tokens.signIn(new AbortController().signal)

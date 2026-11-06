@@ -22,6 +22,7 @@ import type {
 import { ConnectorError, isAbort, signedOut } from "../errors"
 import { abortable, escapeHtml } from "../util"
 import { SealedCache } from "./sealed-cache"
+import { signInNotSavedNotice } from "./token-provider"
 
 /**
  * Storage file holding MSAL's serialized token cache, encrypted with a key
@@ -49,6 +50,10 @@ export interface MsalTokenProviderOptions {
   store: TextStore
   /** The OS credential store: holds the cache's key (tests: an in-memory fake). */
   secrets: SecretStore
+  /** `AuthEnv.scope`; without one this provider's in-memory sign-in is its own. */
+  scope?: string
+  /** Called once if the credential store stops answering. */
+  onStoreTimeout?: (notice: CredentialNotice) => void
   /** Opens the authorize URL in the system browser (`ctx.host.openExternal`). */
   openBrowser: (url: string) => Promise<void>
   /** Classifies MSAL failures with the connector's wording. */
@@ -110,6 +115,8 @@ function tokenCache(options: MsalTokenProviderOptions): SealedCache {
     file: TOKEN_CACHE_FILE,
     legacyFile: LEGACY_TOKEN_CACHE_FILE,
     keyName: TOKEN_CACHE_KEY,
+    scope: `${options.scope ?? crypto.randomUUID()}:${TOKEN_CACHE_FILE}`,
+    ...(options.onStoreTimeout ? { onTimeout: options.onStoreTimeout } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
   })
 }
@@ -497,6 +504,10 @@ export function entraAuth(
         scopes: manifest.scopes,
         store: env.store,
         secrets: env.secrets,
+        scope: env.scope,
+        onStoreTimeout: (notice) => {
+          env.notify(signInNotSavedNotice(env.displayName, notice))
+        },
         openBrowser: env.openBrowser,
         toError: env.toError,
         displayName: env.displayName,

@@ -104,8 +104,8 @@ sudo apt install gnome-keyring libsecret-1-0
 ```
 
 Without a keyring (headless, over SSH, or a service with no login session)
-Maximal never writes the sign-in to disk: it keeps it in memory, and you sign
-in again after each restart.
+Maximal never writes the sign-in to disk: it keeps it in memory (turning Work IQ
+off and on keeps it), and you sign in again after each restart.
 
 ## Update
 

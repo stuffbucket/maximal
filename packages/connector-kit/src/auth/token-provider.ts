@@ -1,5 +1,8 @@
 import type { FetchLike } from "@modelcontextprotocol/client"
-import type { PluginLogger } from "@stuffbucket/maximal-plugin-sdk"
+import type {
+  PluginLogger,
+  PluginNotice,
+} from "@stuffbucket/maximal-plugin-sdk"
 
 import type { ConnectorError } from "../errors"
 import type { SecretStore } from "./secret-store"
@@ -73,6 +76,13 @@ export interface AuthEnv {
   store: TextStore
   /** The OS credential store, scoped to this connector. */
   secrets: SecretStore
+  /**
+   * Identifies this connector's data across rebuilds in one process (its id
+   * and data directory): a sign-in kept in memory outlives turning it off and on.
+   */
+  scope: string
+  /** Raise a one-off native notification (`ctx.surface.notify`). Never throws. */
+  notify: (notice: PluginNotice) => void
   /** Opens a URL in the system browser (`ctx.host.openExternal`). */
   openBrowser: (url: string) => Promise<void>
   logger: PluginLogger
@@ -99,4 +109,19 @@ export interface AuthStrategy {
   /** Status detail while the browser sign-in is pending. */
   readonly signInWaiting?: string
   create(env: AuthEnv): TokenProvider
+}
+
+/** Notice code when the OS credential store stopped answering. */
+export const SIGN_IN_NOT_SAVED = "sign-in-not-saved"
+
+/** The notice for a credential-store timeout: the sign-in lasts until restart. */
+export function signInNotSavedNotice(
+  displayName: string,
+  notice: CredentialNotice,
+): PluginNotice {
+  return {
+    code: SIGN_IN_NOT_SAVED,
+    message: `${displayName}: ${notice.detail}`,
+    params: { connector: displayName },
+  }
 }

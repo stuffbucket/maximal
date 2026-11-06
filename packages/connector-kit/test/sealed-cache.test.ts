@@ -6,7 +6,11 @@ import { describe, expect, test } from "bun:test"
 
 import type { TextStore } from "../src/auth/token-provider"
 
-import { memoryOnlyNotice, SealedCache } from "../src/auth/sealed-cache"
+import {
+  memoryOnlyNotice,
+  SealedCache,
+  type SealedCacheOptions,
+} from "../src/auth/sealed-cache"
 import { osSecretStore, scopedSecretStore } from "../src/auth/secret-store"
 import { memorySecretStore } from "../src/testing/secret-store"
 import { rejection } from "./rejection"
@@ -32,10 +36,14 @@ function memoryStore(): TextStore & { files: Map<string, string> } {
   }
 }
 
+/**
+ * A cache over `store`. Each call is its own process unless `options.scope`
+ * is shared (a connector rebuilt within one run).
+ */
 function sealed(
   store: TextStore,
   secrets = memorySecretStore(),
-  platform = "linux",
+  options: Partial<SealedCacheOptions> = {},
 ) {
   return new SealedCache({
     store,
@@ -43,7 +51,9 @@ function sealed(
     file: "cache.sealed.json",
     legacyFile: "cache.json",
     keyName: "cache",
-    platform,
+    platform: "linux",
+    scope: `test:${crypto.randomUUID()}`,
+    ...options,
   })
 }
 
@@ -155,7 +165,9 @@ describe("sealed cache", () => {
     expect(await sealed(store, secrets).read()).toBeUndefined()
     expect(store.files.has("cache.sealed.json")).toBe(false)
   })
+})
 
+describe("sealed cache when the store fails", () => {
   test("no credential store: memory only, nothing written, and the status says why", async () => {
     const store = memoryStore()
     const secrets = memorySecretStore({
@@ -175,31 +187,106 @@ describe("sealed cache", () => {
     expect(await cache.read()).toBeUndefined()
   })
 
-  test("no credential store: a legacy plaintext file is deleted, its sign-in kept in memory", async () => {
+  test("no credential store: a legacy plaintext file is kept for the next start, its sign-in in memory", async () => {
     const store = memoryStore()
     store.files.set("cache.json", CACHE)
-    const cache = sealed(
-      store,
-      memorySecretStore({ unavailable: new Error("no keyring") }),
-    )
+    const secrets = memorySecretStore({ unavailable: new Error("no keyring") })
+    const cache = sealed(store, secrets)
     expect(await cache.read()).toBe(CACHE)
-    expect([...store.files.keys()]).toEqual([])
+    expect([...store.files.keys()]).toEqual(["cache.json"])
     expect(cache.memoryOnly).toBeDefined()
+
+    // A later start with a working store moves it in after all.
+    secrets.unavailable = undefined
+    const next = sealed(store, secrets)
+    expect(await next.read()).toBe(CACHE)
+    expect([...store.files.keys()]).toEqual(["cache.sealed.json"])
   })
 
-  test("a store that goes away keeps the sealed file until a new sign-in replaces it", async () => {
+  test("a store that fails never costs the sealed sign-in", async () => {
     const store = memoryStore()
     const secrets = memorySecretStore()
     await sealed(store, secrets).write(CACHE)
+    const sealedFile = store.files.get("cache.sealed.json")
     secrets.unavailable = new Error("keyring locked")
     const cache = sealed(store, secrets)
     // The keyring may be back next start: keep what is sealed.
     expect(await cache.read()).toBeUndefined()
-    expect(store.files.has("cache.sealed.json")).toBe(true)
-    // A sign-in now lives in memory; the old sealed one must not come back later.
+    // A sign-in made now lives in memory, and the file stays as it was.
     await cache.write("new sign-in")
-    expect(store.files.has("cache.sealed.json")).toBe(false)
+    expect(store.files.get("cache.sealed.json")).toBe(sealedFile)
     expect(await cache.read()).toBe("new sign-in")
+    expect(cache.memoryOnly).toBeDefined()
+  })
+
+  test("a sign-in kept in memory survives the connector being rebuilt", async () => {
+    const store = memoryStore()
+    const secrets = memorySecretStore({ unavailable: new Error("no keyring") })
+    const scope = `test:${crypto.randomUUID()}`
+    await sealed(store, secrets, { scope }).write(CACHE)
+    // Turned off and on: a new instance, same process.
+    const rebuilt = sealed(store, secrets, { scope })
+    expect(await rebuilt.read()).toBe(CACHE)
+    expect(rebuilt.memoryOnly).toBeDefined()
+    // Signing out forgets it for every instance.
+    await rebuilt.clear()
+    expect(await sealed(store, secrets, { scope }).read()).toBeUndefined()
+  })
+
+  test("a refused store is tried again later, and the sign-in is sealed once it works", async () => {
+    const store = memoryStore()
+    const secrets = memorySecretStore({ unavailable: new Error("locked") })
+    let now = 0
+    const cache = sealed(store, secrets, {
+      retryMs: 1000,
+      now: () => now,
+    })
+    await cache.write("first")
+    expect(cache.memoryOnly).toBeDefined()
+    secrets.unavailable = undefined
+    // Not yet: no new store call before the retry time.
+    const calls = secrets.calls.length
+    await cache.write("second")
+    expect(secrets.calls.length).toBe(calls)
+    expect(store.files.has("cache.sealed.json")).toBe(false)
+    now = 1000
+    await cache.write("third")
+    expect(cache.memoryOnly).toBeUndefined()
+    expect(await sealed(store, secrets).read()).toBe("third")
+  })
+
+  test("a store that never answers times out once, says so, and isn't asked again", async () => {
+    const store = memoryStore()
+    const secrets = memorySecretStore({ stalled: true })
+    const timeouts: Array<string> = []
+    let now = 0
+    const cache = sealed(store, secrets, {
+      platform: "darwin",
+      timeoutMs: 20,
+      retryMs: 1000,
+      now: () => now,
+      onTimeout: (notice) => timeouts.push(notice.detail),
+    })
+    await cache.write(CACHE)
+    expect(await cache.read()).toBe(CACHE)
+    expect(cache.memoryOnly?.detail).toContain("macOS Keychain")
+    expect(timeouts).toHaveLength(1)
+    const calls = secrets.calls.length
+    now = 10_000
+    await cache.write("later")
+    await cache.clear()
+    expect(secrets.calls.length).toBe(calls)
+    expect(timeouts).toHaveLength(1)
+  })
+
+  test("a value under the key's name that isn't a key is removed, not left behind", async () => {
+    const store = memoryStore()
+    const secrets = memorySecretStore()
+    await sealed(store, secrets).write(CACHE)
+    const [name] = [...secrets.entries.keys()]
+    secrets.entries.set(name, "not-a-key")
+    expect(await sealed(store, secrets).read()).toBeUndefined()
+    expect(secrets.entries.has(name)).toBe(false)
   })
 
   test("operations run one at a time: concurrent first writes share one key", async () => {

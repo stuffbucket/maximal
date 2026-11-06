@@ -297,6 +297,24 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         },
         "status": 202,
       },
+      {
+        "request": "POST /settings/api/notices/plugins",
+        "response": {
+          "notices": [
+            {
+              "code": "connected",
+              "message": "Work IQ is connected as e2e@contoso.com.",
+              "name": "Work IQ",
+              "params": {
+                "account": "e2e@contoso.com",
+                "connector": "Work IQ",
+              },
+              "plugin": "workiq",
+            },
+          ],
+        },
+        "status": 200,
+      },
     ],
     "plugin": [
       "event workiq status",
@@ -310,6 +328,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
       "tools workiq +[retrieve, fetch_blob, get_schema, call_function, fetch, search_paths, accept_eula, delete_entity, upload_blob, create_entity, update_entity, ask, list_agents, get_debug_link] -[]",
       "event workiq status",
       "status workiq ready/ready "Connected as e2e@contoso.com" facts=[Account=e2e@contoso.com, Tenant=00000000-0000-4000-8000-0000000000e2, Tools=14, Protocol=MCP 2025-11-25] actions=[sign-out:"Sign out"(destructive)+confirm]",
+      "event workiq notice connected: Work IQ is connected as e2e@contoso.com.",
       "settings.json workiq tools.catalog.updatedAt: (none) → "<time>"; tools.catalog.tools: (none) → ["retrieve","fetch_blob","get_schema","call_function","fetch","search_paths","accept_eula","delete_entity","upload_blob","create_entity","update_entity","ask","list_agents","get_debug_link"]",
     ],
     "settingsJson": {

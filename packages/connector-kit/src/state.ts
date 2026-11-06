@@ -1,5 +1,6 @@
 import type {
   PluginLogger,
+  PluginNotice,
   PluginStatus,
   PluginStatusAction,
   ToolCallContext,
@@ -65,6 +66,8 @@ export interface ControllerOptions {
   /** Connector display name used in statuses. */
   name: string
   setStatus(status: PluginStatus): void
+  /** Raise a one-off native notification (`ctx.surface.notify`). */
+  notify?(notice: PluginNotice): void
   /** Atomically replace the plugin's tool set (`ctx.tools.registerAll`). */
   setTools(tools: Array<ToolDefinition>): void
   storage: TextStore
@@ -86,6 +89,12 @@ export interface ControllerOptions {
   wording?: ControllerWording
 }
 
+/** Notice code when a connector goes from signed out or broken to working. */
+export const CONNECTED_NOTICE = "connected"
+
+/** Fewest milliseconds between two "connected" notices from one connector. */
+const CONNECTED_NOTICE_INTERVAL_MS = 5 * 60_000
+
 type Phase =
   | "starting"
   | "terms"
@@ -94,6 +103,14 @@ type Phase =
   | "connecting"
   | "ready"
   | "error"
+
+/** Phases that wait on someone or something; the rest are steps in between. */
+const SETTLED_PHASES: ReadonlySet<Phase> = new Set([
+  "terms",
+  "signin",
+  "ready",
+  "error",
+])
 
 interface Operation {
   readonly signal: AbortSignal
@@ -117,6 +134,9 @@ export class ConnectorController {
   #op: AbortController | undefined
   #generation = 0
   #phase: Phase = "starting"
+  /** The last phase that waits on someone or something (not a step in between). */
+  #settled: Phase | undefined
+  #lastConnectedNotice = Number.NEGATIVE_INFINITY
   #account: ConnectorAccount | undefined
   #toolCount = 0
   /** Most tools a successful list returned for the current sign-in. */
@@ -421,6 +441,33 @@ export class ConnectorController {
     if (this.#lifetime.signal.aborted) return
     this.#phase = phase
     this.#options.setStatus(status)
+    if (!SETTLED_PHASES.has(phase)) return
+    if (
+      phase === "ready"
+      && (this.#settled === "signin" || this.#settled === "error")
+    )
+      this.#noticeConnected()
+    this.#settled = phase
+  }
+
+  /**
+   * Signed out or broken, now working: worth a notification. A normal start
+   * with a saved sign-in, and token refreshes, stay quiet; a connection that
+   * keeps dropping and recovering says so at most every few minutes.
+   */
+  #noticeConnected(): void {
+    const now = Date.now()
+    if (now - this.#lastConnectedNotice < CONNECTED_NOTICE_INTERVAL_MS) return
+    this.#lastConnectedNotice = now
+    const account = this.#account?.username
+    this.#options.notify?.({
+      code: CONNECTED_NOTICE,
+      message:
+        account ?
+          `${this.#name} is connected as ${account}.`
+        : `${this.#name} is connected.`,
+      params: { connector: this.#name, ...(account ? { account } : {}) },
+    })
   }
 
   #showTerms(): void {

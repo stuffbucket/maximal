@@ -53,13 +53,19 @@ account is kept. *Sign out* deletes the file and the key. Turning Work IQ off
 stops it and removes its tools but keeps the sign-in, the accepted terms and
 your tool permissions. A sign-in an older version saved unencrypted
 (`msal-token-cache.json`) is moved into the credential store when Maximal
-starts, and the old file is deleted.
+starts, and the old file is deleted once that worked.
 
 Without a usable credential store (most often Linux without a keyring, see
 [Maximal on Linux](linux.md)) Maximal never writes the sign-in to disk: it
-keeps it in memory, and you sign in again after Maximal restarts. Work IQ's
-status then shows *Sign-in: Kept until Maximal restarts* and what to
-install.
+keeps it in memory, and you sign in again after Maximal restarts. Turning Work
+IQ off and on keeps it. Work IQ's status then shows *Sign-in: Kept until
+Maximal restarts* and what to install. A keyring that was only locked is
+tried again a few minutes later, and the sign-in is saved once it answers. If
+the credential store doesn't answer at all (an unanswered prompt), the
+desktop app says so in a notification, and Work IQ carries on from memory.
+
+The desktop app also shows a notification when Work IQ starts working after a
+sign-in or after a problem, not on every start.
 
 ## When your organization limits Work IQ
 

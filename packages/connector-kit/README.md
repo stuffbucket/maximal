@@ -130,10 +130,19 @@ Credential Manager caps a value at 2.5 KB and an MSAL cache is bigger.
 `Bun.secrets` runs off the event loop and never puts a value on a command
 line. The key is read once per start and kept in memory. Sign-out deletes the
 file and the entry; a key missing from the store, or a file that fails to
-decrypt, means signed out. When the store can't be used (no Secret Service,
-access denied) the cache is kept in memory only until the connector stops —
-never written in plain text — and the `ready` status says so (a "Sign-in"
-fact and a `detail` naming what to install). Under `bun test` the OS store
+decrypt, means signed out. Every store call is bounded (`SECRET_STORE_TIMEOUT_MS`,
+60 s); `Bun.secrets` runs off the event loop, so only this cache's callers
+ever wait. When the store can't be used (no Secret Service, access denied, no
+answer) the newest cache is kept in memory for the rest of the process, under
+`AuthEnv.scope` (connector id and data directory), so it outlives the
+connector being turned off and on, and is never written in plain text; the
+`ready` status says so (a "Sign-in" fact and a `detail` naming what to
+install). The sealed file is never deleted because the store failed. A
+refused call is retried after `SECRET_STORE_RETRY_MS` (5 minutes), and the
+in-memory cache is sealed once the store works; a call that gets no answer
+stops store use until restart and raises a `sign-in-not-saved` notice
+(`AuthEnv.notify`). Tests reset the per-process state with
+`resetSealedCacheScopes()` from the testing export. Under `bun test` the OS store
 refuses every call, so a test that forgets to inject one gets the
 memory-only behaviour, never the real Keychain. MCP OAuth's state is sealed
 the same way.

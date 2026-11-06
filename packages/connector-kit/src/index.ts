@@ -33,6 +33,7 @@ export type {
   TextStore,
   TokenProvider,
 } from "./auth/token-provider"
+export { SIGN_IN_NOT_SAVED } from "./auth/token-provider"
 export {
   ADVANCED,
   configJsonSchema,
@@ -69,6 +70,7 @@ export type {
 } from "./manifest"
 export {
   ACTION_IDS,
+  CONNECTED_NOTICE,
   type ControllerWording,
   STATUS_CODES,
   TERMS_FILE,

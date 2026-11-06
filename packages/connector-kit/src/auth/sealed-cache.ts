@@ -61,10 +61,54 @@ export interface SealedCacheOptions {
   legacyFile?: string
   /** Entry name prefix in `secrets`; a random key id is appended. */
   keyName: string
+  /**
+   * What identifies this cache across instances in one process (connector id
+   * and data directory): a connector is rebuilt whenever it is turned off and
+   * on or reconfigured, and a sign-in kept in memory must survive that.
+   */
+  scope: string
+  /** Called once per scope and process when a store call times out. */
+  onTimeout?: (notice: CredentialNotice) => void
   logger?: PluginLogger
   /** For the memory-only wording (default `process.platform`). */
   platform?: string
+  /** Longest wait for one store call (default `SECRET_STORE_TIMEOUT_MS`). */
+  timeoutMs?: number
+  /** Wait before using the store again after it refused (default `SECRET_STORE_RETRY_MS`). */
+  retryMs?: number
+  now?: () => number
 }
+
+/**
+ * Longest wait for one call to the OS credential store. Long, because macOS
+ * may be waiting for the person to answer a Keychain prompt; the store runs
+ * off the event loop, so only this cache's callers wait.
+ */
+export const SECRET_STORE_TIMEOUT_MS = 60_000
+
+/** After the store refused a call (a keyring not unlocked yet), when to try again. */
+export const SECRET_STORE_RETRY_MS = 5 * 60_000
+
+/** What one scope keeps for the life of the process (see `SealedCacheOptions.scope`). */
+interface ScopeState {
+  /** The newest text that couldn't be sealed; it wins over the file until sealed. */
+  memory?: string
+  /** Why the store isn't used right now, and from when to try it again. */
+  unavailable?: { notice: CredentialNotice; retryAt: number }
+  /** Why the latest text lives in memory (shown while `memory` is set). */
+  notice?: CredentialNotice
+  /** A call timed out: the store is not used again in this process. */
+  timedOut?: boolean
+}
+
+const scopes = new Map<string, ScopeState>()
+
+/** Forget every scope's in-memory sign-in and store state (tests). */
+export function resetSealedCacheScopes(): void {
+  scopes.clear()
+}
+
+class StoreTimeoutError extends Error {}
 
 const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64")
 const fromBase64 = (text: string): Uint8Array<ArrayBuffer> =>
@@ -109,26 +153,40 @@ const message = (error: unknown) =>
  * cache exceeds; reading or writing the cache touches the store at most
  * once per key, so macOS asks about Keychain access at most once per start.
  *
- * When the store can't be used (no Secret Service on Linux, access denied),
- * the text is kept in memory only, for this instance's lifetime, and never
- * written in plain text; `memoryOnly` says so. Operations run one at a time.
+ * When the store can't be used (no Secret Service on Linux, access denied, a
+ * call that times out), the newest text is kept in memory for the rest of the
+ * process, under `scope`, and never written in plain text; `memoryOnly` says
+ * so. A refused call is retried after `retryMs`, and the text is sealed once
+ * the store works again; after a timeout the store isn't used again until
+ * Maximal restarts. The sealed file is never deleted because the store
+ * failed. Operations run one at a time, and no store call can hold them up
+ * for longer than `timeoutMs`.
  */
 export class SealedCache {
   readonly #options: SealedCacheOptions
+  readonly #now: () => number
   #queue: Promise<unknown> = Promise.resolve()
   #key: Key | undefined
   #migrated = false
-  /** Set once the store failed: from then on `#memory` is the cache. */
-  #unavailable: CredentialNotice | undefined
-  #memory: string | undefined
 
   constructor(options: SealedCacheOptions) {
     this.#options = options
+    this.#now = options.now ?? Date.now
   }
 
-  /** Set when the OS credential store can't be used and the text lives in memory only. */
+  get #state(): ScopeState {
+    let state = scopes.get(this.#options.scope)
+    if (!state) {
+      state = {}
+      scopes.set(this.#options.scope, state)
+    }
+    return state
+  }
+
+  /** Set while the sign-in lives in memory only (it won't survive a restart). */
   get memoryOnly(): CredentialNotice | undefined {
-    return this.#unavailable
+    const state = this.#state
+    return state.memory === undefined ? undefined : state.notice
   }
 
   /** Move a plaintext legacy file into the sealed file (no-op without one). */
@@ -150,7 +208,7 @@ export class SealedCache {
     })
   }
 
-  /** Delete the sealed file, any legacy file, and the key's entry. */
+  /** Delete the sealed file, any legacy file, the key's entry and any in-memory copy. */
   clear(): Promise<void> {
     return this.#serial(() => this.#clear())
   }
@@ -161,30 +219,57 @@ export class SealedCache {
     return next
   }
 
+  /** Whether the store may be called now (it isn't failing or timed out). */
+  #storeUsable(): boolean {
+    const state = this.#state
+    if (!state.unavailable) return true
+    if (this.#now() < state.unavailable.retryAt) return false
+    state.unavailable = undefined
+    return true
+  }
+
+  /** One store call, bounded by the timeout; a failure or timeout is recorded. */
+  async #call<T>(run: () => Promise<T>): Promise<T | typeof UNAVAILABLE> {
+    if (!this.#storeUsable()) return UNAVAILABLE
+    try {
+      return await this.#withTimeout(run())
+    } catch (error) {
+      this.#markUnavailable(error)
+      return UNAVAILABLE
+    }
+  }
+
   async #migrate(): Promise<void> {
     const legacy = this.#options.legacyFile
     if (this.#migrated || legacy === undefined) return
+    this.#migrated = true
     const { store, file } = this.#options
     const text = await store.readText(legacy)
-    if (text !== undefined) {
-      // A sealed file written since wins over the leftover plaintext.
-      if ((await store.readText(file)) === undefined) await this.#write(text)
-      await store.delete(legacy)
-      this.#options.logger?.info(
-        this.#unavailable ?
-          `Removed the plaintext ${legacy}; the sign-in is kept in memory until Maximal restarts.`
-        : `Moved the sign-in from the plaintext ${legacy} into the OS credential store.`,
+    if (text === undefined) return
+    // A sealed file written since wins over the leftover plaintext.
+    const sealedSince = (await store.readText(file)) !== undefined
+    if (!sealedSince) await this.#write(text)
+    if (!sealedSince && this.#state.memory !== undefined) {
+      // Not sealed: keep the plaintext for the next start to try again.
+      this.#options.logger?.warn(
+        `Could not move the sign-in in ${legacy} into the OS credential store; keeping it in memory and trying again next start.`,
       )
+      return
     }
-    this.#migrated = true
+    await store.delete(legacy)
+    this.#options.logger?.info(
+      `Moved the sign-in from the plaintext ${legacy} into the OS credential store.`,
+    )
   }
 
   async #read(): Promise<string | undefined> {
-    if (this.#unavailable) return this.#memory
+    const state = this.#state
+    // Newer than anything sealed: it couldn't be saved.
+    if (state.memory !== undefined) return state.memory
     const sealed = await this.#readSealed()
     if (!sealed) return undefined
     const key = await this.#keyNamed(sealed.key)
-    if (key === "unavailable") return this.#memory
+    if (key === UNAVAILABLE) return undefined
     if (!key) {
       this.#options.logger?.warn(
         `The key for ${this.#options.file} is gone from the OS credential store; sign in again.`,
@@ -213,39 +298,48 @@ export class SealedCache {
   }
 
   async #write(text: string): Promise<void> {
-    const { store, file } = this.#options
-    if (!this.#unavailable) {
-      const key = await this.#writeKey()
-      if (key) {
-        const iv = crypto.getRandomValues(new Uint8Array(12))
-        const data = await crypto.subtle.encrypt(
-          { name: "AES-GCM", iv, additionalData: additionalData(key.name) },
-          key.key,
-          new TextEncoder().encode(text),
-        )
-        const sealed: SealedFile = {
-          format: SEALED_FORMAT,
-          alg: "A256GCM",
-          key: key.name,
-          iv: toBase64(iv),
-          data: toBase64(new Uint8Array(data)),
-        }
-        await store.writeText(file, `${JSON.stringify(sealed)}\n`)
-        return
-      }
+    const state = this.#state
+    const key = await this.#writeKey()
+    if (!key) {
+      // Kept in memory; the sealed file (if any) stays for a later start.
+      state.memory = text
+      state.notice ??= this.#unavailableNotice()
+      return
     }
-    this.#memory = text
-    // A sealed file from before would bring back an older sign-in later.
-    await store.delete(file)
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const data = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: additionalData(key.name) },
+      key.key,
+      new TextEncoder().encode(text),
+    )
+    const sealed: SealedFile = {
+      format: SEALED_FORMAT,
+      alg: "A256GCM",
+      key: key.name,
+      iv: toBase64(iv),
+      data: toBase64(new Uint8Array(data)),
+    }
+    await this.#options.store.writeText(
+      this.#options.file,
+      `${JSON.stringify(sealed)}\n`,
+    )
+    if (state.memory !== undefined) {
+      state.memory = undefined
+      state.notice = undefined
+      this.#options.logger?.info(
+        "The OS credential store works again; the sign-in is saved.",
+      )
+    }
   }
 
   /** The key to seal with: the current one, the sealed file's, or a new one. */
   async #writeKey(): Promise<Key | undefined> {
     if (this.#key) return this.#key
+    if (!this.#storeUsable()) return undefined
     const sealed = await this.#readSealed()
     if (sealed) {
       const existing = await this.#keyNamed(sealed.key)
-      if (existing === "unavailable") return undefined
+      if (existing === UNAVAILABLE) return undefined
       if (existing) return existing
     }
     const raw = crypto.getRandomValues(new Uint8Array(32))
@@ -253,29 +347,26 @@ export class SealedCache {
       "hex",
     )
     const name = `${this.#options.keyName}/${id}`
-    try {
-      await this.#options.secrets.set(name, toBase64(raw))
-    } catch (error) {
-      this.#markUnavailable(error)
-      return undefined
-    }
+    const stored = await this.#call(() =>
+      this.#options.secrets.set(name, toBase64(raw)),
+    )
+    if (stored === UNAVAILABLE) return undefined
     this.#key = { name, key: await importKey(raw) }
     return this.#key
   }
 
-  /** The key stored under `name`: `undefined` when there is no such entry. */
-  async #keyNamed(name: string): Promise<Key | undefined | "unavailable"> {
+  /** The key stored under `name`: `undefined` when there is no usable entry. */
+  async #keyNamed(name: string): Promise<Key | undefined | typeof UNAVAILABLE> {
     if (this.#key?.name === name) return this.#key
-    let value: string | undefined
-    try {
-      value = await this.#options.secrets.get(name)
-    } catch (error) {
-      this.#markUnavailable(error)
-      return "unavailable"
-    }
+    const value = await this.#call(() => this.#options.secrets.get(name))
+    if (value === UNAVAILABLE) return UNAVAILABLE
     if (value === undefined) return undefined
     const raw = fromBase64(value)
-    if (raw.length !== 32) return undefined
+    if (raw.length !== 32) {
+      // Not a key of ours: remove it rather than leave it behind.
+      await this.#forgetKey(name)
+      return undefined
+    }
     this.#key = { name, key: await importKey(raw) }
     return this.#key
   }
@@ -294,8 +385,10 @@ export class SealedCache {
   }
 
   async #clear(): Promise<void> {
-    const { store, file, legacyFile, secrets } = this.#options
-    this.#memory = undefined
+    const { store, file, legacyFile } = this.#options
+    const state = this.#state
+    state.memory = undefined
+    state.notice = undefined
     const names = new Set<string>()
     const text = await store.readText(file)
     const sealed = text === undefined ? undefined : parseSealed(text)
@@ -304,26 +397,73 @@ export class SealedCache {
     this.#key = undefined
     await store.delete(file)
     if (legacyFile !== undefined) await store.delete(legacyFile)
-    if (this.#unavailable) return
-    for (const name of names) {
-      try {
-        await secrets.delete(name)
-      } catch (error) {
-        // The sealed file is gone, so the key alone unlocks nothing.
-        this.#options.logger?.debug(
-          `Could not remove ${name} from the OS credential store: ${message(error)}`,
-        )
-      }
+    for (const name of names) await this.#forgetKey(name)
+  }
+
+  /** Remove a key's entry, best effort: without its file it unlocks nothing. */
+  async #forgetKey(name: string): Promise<void> {
+    if (this.#state.timedOut) return
+    try {
+      await this.#withTimeout(this.#options.secrets.delete(name))
+    } catch (error) {
+      this.#options.logger?.debug(
+        `Could not remove ${name} from the OS credential store: ${message(error)}`,
+      )
     }
   }
 
-  #markUnavailable(error: unknown): void {
-    if (this.#unavailable) return
-    this.#unavailable = memoryOnlyNotice(
-      this.#options.platform ?? process.platform,
-    )
-    this.#options.logger?.warn(
-      `The OS credential store is unavailable (${message(error)}); keeping the sign-in in memory until Maximal restarts.`,
+  async #withTimeout<T>(promise: Promise<T>): Promise<T> {
+    const timeoutMs = this.#options.timeoutMs ?? SECRET_STORE_TIMEOUT_MS
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new StoreTimeoutError(`no answer in ${timeoutMs / 1000} s`))
+          }, timeoutMs)
+          // Never keeps the process alive on its own.
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- absent on some timer implementations
+          timer.unref?.()
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  #unavailableNotice(): CredentialNotice {
+    return (
+      this.#state.unavailable?.notice
+      ?? memoryOnlyNotice(this.#options.platform ?? process.platform)
     )
   }
+
+  #markUnavailable(error: unknown): void {
+    const state = this.#state
+    const timedOut = error instanceof StoreTimeoutError
+    const notice = memoryOnlyNotice(this.#options.platform ?? process.platform)
+    const first = !state.unavailable && !state.timedOut
+    state.unavailable = {
+      notice,
+      retryAt:
+        timedOut ?
+          Number.POSITIVE_INFINITY
+        : this.#now() + (this.#options.retryMs ?? SECRET_STORE_RETRY_MS),
+    }
+    if (timedOut && !state.timedOut) {
+      state.timedOut = true
+      this.#options.logger?.warn(
+        `The OS credential store didn't answer (${message(error)}); keeping the sign-in in memory until Maximal restarts.`,
+      )
+      this.#options.onTimeout?.(notice)
+      return
+    }
+    if (first)
+      this.#options.logger?.warn(
+        `The OS credential store is unavailable (${message(error)}); keeping the sign-in in memory and trying again later.`,
+      )
+  }
 }
+
+const UNAVAILABLE = Symbol("unavailable")

@@ -4,12 +4,13 @@ import { afterEach, describe, expect, test } from "bun:test"
 import type { AuthStrategy } from "../src/auth/token-provider"
 
 import { LEGACY_TOKEN_CACHE_FILE, TOKEN_CACHE_FILE } from "../src/auth/entra"
+import { resetSealedCacheScopes } from "../src/auth/sealed-cache"
 import {
   defineRemoteMcpConnector,
   type RemoteMcpConnectorOptions,
 } from "../src/define"
 import { ConnectorError } from "../src/errors"
-import { TERMS_FILE } from "../src/state"
+import { CONNECTED_NOTICE, TERMS_FILE } from "../src/state"
 import { ADA, fakeAuth, FakeTokenProvider } from "../src/testing/fake-auth"
 import {
   SAMPLE_TOOLS,
@@ -22,6 +23,8 @@ import { EXAMPLE_MANIFEST, TERMS_URL } from "./fixtures"
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
+  // Sign-ins kept in memory live per process; the test bed's directories repeat.
+  resetSealedCacheScopes()
 })
 
 const ACCEPTED = {
@@ -435,6 +438,61 @@ describe("connector lifecycle", () => {
     const names = [...secrets.entries.keys()]
     expect(names).toHaveLength(1)
     expect(names[0]).toMatch(/^example\/msal-token-cache\/[0-9a-f]{32}$/)
+  })
+
+  test("signing in raises a 'connected' notice; a cached sign-in at start doesn't", async () => {
+    const notices = (plugin: Awaited<ReturnType<typeof load>>) =>
+      plugin.testbed.events.flatMap((event) =>
+        event.notice ? [event.notice] : [],
+      )
+    const server = fake()
+    const cached = await load(server, new FakeTokenProvider(ADA), {
+      storage: ACCEPTED,
+    })
+    await waitFor(() => cached.status()?.code === "ready")
+    expect(notices(cached)).toEqual([])
+
+    const strategy = fakeAuth({ account: { username: "ada@contoso.com" } })
+    const plugin = await load(server, strategy, { storage: ACCEPTED })
+    await waitFor(() => plugin.status()?.code === "signin-needed")
+    await plugin.runAction("sign-in")
+    expect(plugin.status()?.code).toBe("ready")
+    expect(notices(plugin)).toEqual([
+      {
+        code: CONNECTED_NOTICE,
+        message: "Example is connected as ada@contoso.com.",
+        params: { connector: "Example", account: "ada@contoso.com" },
+      },
+    ])
+  })
+
+  test("a credential store that never answers holds up nothing: the connector loads and answers", async () => {
+    const secrets = memorySecretStore({ stalled: true })
+    // A saved sign-in, so the check has to ask the store for its key.
+    const saved = JSON.stringify({
+      format: "maximal-sealed/1",
+      alg: "A256GCM",
+      key: "msal-token-cache/0123456789abcdef0123456789abcdef",
+      iv: "AAAAAAAAAAAAAAAA",
+      data: "AAAA",
+    })
+    const plugin = await loadPlugin(
+      defineRemoteMcpConnector(EXAMPLE_MANIFEST, { secretStore: secrets }),
+      {},
+      {
+        storage: {
+          example: { ...ACCEPTED.example, [TOKEN_CACHE_FILE]: saved },
+        },
+      },
+    )
+    cleanups.push(() => plugin.dispose())
+    // The sign-in check waits on the store in the background (and gives up
+    // after its timeout); loading, status, actions and tools don't.
+    expect(plugin.status()?.code).toBe("working")
+    expect(plugin.actions()).toContain("sign-out")
+    expect(plugin.tools()).toEqual([])
+    await waitFor(() => secrets.calls.length > 0)
+    expect(plugin.status()?.code).toBe("working")
   })
 
   test("the fake strategy signs in instantly as its account", async () => {

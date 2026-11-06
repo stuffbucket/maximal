@@ -3,6 +3,7 @@ import type {
   ConnectorLimits,
   Context,
   PluginModule,
+  PluginNotice,
   PluginStatus,
   ToolDefinition,
   ToolDefinitionPublic,
@@ -296,6 +297,15 @@ function applyConnector(
   const toError = (error: unknown) => toConnectorError(error, errorContext)
   const store = storeOf(ctx)
   const lifetime = new AbortController()
+  const notify = (notice: PluginNotice) => {
+    try {
+      ctx.surface.notify(notice)
+    } catch (error) {
+      ctx.host.logger.warn(
+        `Could not raise a notification: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
   const tokens = strategy.create({
     displayName: name,
     endpoint: config.endpoint,
@@ -305,6 +315,8 @@ function applyConnector(
       options.secretStore ?? osSecretStore(),
       manifest.id,
     ),
+    scope: `${manifest.id}@${ctx.storage.dir}`,
+    notify,
     openBrowser: (url) => ctx.host.openExternal(url),
     logger: ctx.host.logger,
     signInTimeoutMs,
@@ -323,6 +335,7 @@ function applyConnector(
   const controller = new ConnectorController({
     name,
     setStatus: output.setStatus,
+    notify,
     setTools: output.setTools,
     storage: store,
     tokens,

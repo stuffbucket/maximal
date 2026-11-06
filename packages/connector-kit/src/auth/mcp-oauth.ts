@@ -25,6 +25,7 @@ import { abortable } from "../util"
 import { signInPage, stoppedSignIn } from "./entra"
 import { startLoopbackRedirect, type LoopbackRedirect } from "./loopback"
 import { SealedCache } from "./sealed-cache"
+import { signInNotSavedNotice } from "./token-provider"
 
 /**
  * Storage file holding this connector's OAuth state, encrypted with a key
@@ -64,6 +65,10 @@ export interface McpOAuthOptions {
   store: AuthEnv["store"]
   /** The OS credential store: holds the state's key (tests: an in-memory fake). */
   secrets: AuthEnv["secrets"]
+  /** `AuthEnv.scope`; without one this provider's in-memory sign-in is its own. */
+  scope?: string
+  /** Called once if the credential store stops answering. */
+  onStoreTimeout?: (notice: CredentialNotice) => void
   openBrowser(url: string): Promise<void>
   toError(error: unknown): ConnectorError
   logger?: AuthEnv["logger"]
@@ -256,6 +261,8 @@ class McpOAuthTokenProvider implements TokenProvider {
       file: OAUTH_FILE,
       legacyFile: LEGACY_OAUTH_FILE,
       keyName: OAUTH_KEY,
+      scope: `${options.scope ?? crypto.randomUUID()}:${OAUTH_FILE}`,
+      ...(options.onStoreTimeout ? { onTimeout: options.onStoreTimeout } : {}),
       ...(options.logger ? { logger: options.logger } : {}),
     })
     // Move older plaintext state off disk now, not at the first token lookup.
@@ -540,6 +547,10 @@ export function mcpOAuth(
         displayName: env.displayName,
         store: env.store,
         secrets: env.secrets,
+        scope: env.scope,
+        onStoreTimeout: (notice) => {
+          env.notify(signInNotSavedNotice(env.displayName, notice))
+        },
         openBrowser: env.openBrowser,
         toError: env.toError,
         logger: env.logger,

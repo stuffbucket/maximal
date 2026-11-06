@@ -384,6 +384,19 @@ async function bootAndSetUp(run: Run): Promise<string> {
     ).toBe(202)
     const status = await harness.waitForStatus(ID, "ready")
     expect(harness.opened).toEqual([BROWSER_URL])
+    // Working after a sign-in: one notice, which the desktop shell takes.
+    const notices = await run.api("POST", "/notices/plugins")
+    expect(notices.response).toEqual({
+      notices: [
+        {
+          plugin: ID,
+          name: "Work IQ",
+          code: "connected",
+          message: `Work IQ is connected as ${ACCOUNT.username}.`,
+          params: { connector: "Work IQ", account: ACCOUNT.username },
+        },
+      ],
+    })
     const facts = Object.fromEntries(
       (status?.facts ?? []).map((fact) => [fact.label, fact.value]),
     )
