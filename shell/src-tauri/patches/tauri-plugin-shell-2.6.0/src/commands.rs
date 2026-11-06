@@ -143,9 +143,9 @@ fn prepare_cmd<R: Runtime>(
     } else {
         match scope.prepare(&program, args) {
             Ok(cmd) => cmd,
-            Err(e) => {
+            Err(_error) => {
                 #[cfg(debug_assertions)]
-                eprintln!("{e}");
+                eprintln!("{_error}");
                 return Err(crate::Error::ProgramNotAllowed(PathBuf::from(program)));
             }
         }

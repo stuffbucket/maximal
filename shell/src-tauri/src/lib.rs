@@ -387,6 +387,8 @@ const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/windows/icon-at
 const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention@2x.png");
 
 mod menu_id {
+    #[cfg(target_os = "macos")]
+    pub const ABOUT: &str = "about_maximal";
     pub const SETTINGS: &str = "settings";
     pub const DASHBOARD: &str = "dashboard";
     pub const SESSIONS: &str = "sessions";
@@ -408,6 +410,7 @@ const SHELL_ACTION_PREFIX: &str = "--maximal-action=";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellAction {
     OpenDefault,
+    About,
     Settings,
     Dashboard,
     Sessions,
@@ -419,6 +422,7 @@ enum ShellAction {
 impl ShellAction {
     fn from_value(value: &str) -> Option<Self> {
         match value {
+            "about" => Some(Self::About),
             "settings" => Some(Self::Settings),
             "dashboard" => Some(Self::Dashboard),
             "sessions" => Some(Self::Sessions),
@@ -429,9 +433,11 @@ impl ShellAction {
         }
     }
 
+    #[cfg(any(target_os = "windows", test))]
     fn argument(self) -> Option<&'static str> {
         match self {
             Self::OpenDefault => None,
+            Self::About => Some("--maximal-action=about"),
             Self::Settings => Some("--maximal-action=settings"),
             Self::Dashboard => Some("--maximal-action=dashboard"),
             Self::Sessions => Some("--maximal-action=sessions"),
@@ -768,6 +774,8 @@ pub fn run() {
     } else {
         builder
     };
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(build_app_menu);
     let builder = builder
         .manage(profile)
         .manage(ManagedEndpoint::new())
@@ -1668,27 +1676,46 @@ fn install_windows_jump_list(app: &AppHandle) {
     use windows_jump_list::JumpListTask;
 
     let locale = app.state::<LocaleState>().get();
-    let mut actions = vec![
-        (ShellAction::Dashboard, "native-tray-dashboard"),
-        (ShellAction::Sessions, "native-tray-sessions"),
-        (ShellAction::Settings, "native-tray-settings"),
+    let task = |action: ShellAction, title: String| JumpListTask {
+        title,
+        argument: action
+            .argument()
+            .expect("Windows Jump List actions must have launch arguments"),
+    };
+    let mut tasks = vec![
+        task(
+            ShellAction::Dashboard,
+            native_i18n::tr(&locale, "native-tray-dashboard"),
+        ),
+        task(
+            ShellAction::Sessions,
+            native_i18n::tr(&locale, "native-tray-sessions"),
+        ),
+        task(
+            ShellAction::Settings,
+            native_i18n::tr(&locale, "native-tray-settings"),
+        ),
+        task(
+            ShellAction::About,
+            format!("About {}", app_display_name(app)),
+        ),
     ];
     if app.state::<AppProfile>().updates_enabled() {
-        actions.push((ShellAction::CheckUpdates, "native-tray-check-updates"));
+        tasks.push(task(
+            ShellAction::CheckUpdates,
+            native_i18n::tr(&locale, "native-tray-check-updates"),
+        ));
     }
-    actions.extend([
-        (ShellAction::ShowLogs, "native-tray-show-logs"),
-        (ShellAction::OpenConfig, "native-tray-open-config"),
+    tasks.extend([
+        task(
+            ShellAction::ShowLogs,
+            native_i18n::tr(&locale, "native-tray-show-logs"),
+        ),
+        task(
+            ShellAction::OpenConfig,
+            native_i18n::tr(&locale, "native-tray-open-config"),
+        ),
     ]);
-    let tasks = actions
-        .into_iter()
-        .map(|(action, key)| JumpListTask {
-            title: native_i18n::tr(&locale, key),
-            argument: action
-                .argument()
-                .expect("Windows Jump List actions must have launch arguments"),
-        })
-        .collect();
     windows_jump_list::install(tasks);
 }
 
@@ -2036,6 +2063,90 @@ fn tooltip_for(
     native_i18n::tr(locale, key)
 }
 
+fn app_display_name(app: &AppHandle) -> String {
+    app.config()
+        .product_name
+        .clone()
+        .unwrap_or_else(|| app.package_info().name.clone())
+}
+
+#[cfg(target_os = "macos")]
+fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::default(app)?;
+    let application_menu = menu
+        .items()?
+        .into_iter()
+        .next()
+        .and_then(|item| item.as_submenu().cloned());
+
+    if let Some(application_menu) = application_menu {
+        // Tauri's default macOS application menu always starts with its
+        // predefined About item. Replace only that item so the rest of the
+        // native Edit, Window, Help, hide, and quit behavior stays intact.
+        application_menu.remove_at(0)?;
+        let about = MenuItem::with_id(
+            app,
+            menu_id::ABOUT,
+            format!("About {}", app_display_name(app)),
+            true,
+            None::<&str>,
+        )?;
+        application_menu.insert(&about, 0)?;
+    }
+
+    Ok(menu)
+}
+
+fn open_about_window(app: &AppHandle) {
+    const ABOUT_WINDOW_LABEL: &str = "about";
+
+    dismiss_splash(app);
+    if let Some(existing) = app.get_webview_window(ABOUT_WINDOW_LABEL) {
+        present_window(app, &existing);
+        return;
+    }
+
+    let name = app_display_name(app);
+    let local_url = app
+        .state::<ManagedEndpoint>()
+        .current()
+        .map(SidecarEndpoint::browser_origin);
+    let config = serde_json::json!({
+        "name": &name,
+        "version": app_version(app),
+        "website": UPDATE_PAGE_URL,
+        "localUrl": local_url,
+    });
+    let initialization_script = format!("window.__MAXIMAL_ABOUT__ = {config};");
+    let result = WebviewWindowBuilder::new(
+        app,
+        ABOUT_WINDOW_LABEL,
+        WebviewUrl::App("splash.html".into()),
+    )
+    .title(format!("About {name}"))
+    .initialization_script(&initialization_script)
+    .inner_size(680.0, 360.0)
+    .resizable(false)
+    .minimizable(false)
+    .maximizable(false)
+    .decorations(false)
+    .transparent(true)
+    .shadow(true)
+    .skip_taskbar(true)
+    .visible(false)
+    .on_page_load(|window, payload| {
+        if payload.event() == PageLoadEvent::Finished {
+            present_window(window.app_handle(), &window);
+        }
+    })
+    .center()
+    .build();
+
+    if let Err(err) = result {
+        eprintln!("[shell] About window failed: {err}");
+    }
+}
+
 fn build_menu(
     app: &AppHandle,
     locale: &str,
@@ -2248,6 +2359,8 @@ fn build_menu(
 
 fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     match event.id().as_ref() {
+        #[cfg(target_os = "macos")]
+        menu_id::ABOUT => open_about_window(app),
         menu_id::SETTINGS => open_settings_window(app, None),
         menu_id::DASHBOARD => open_dashboard_window(app),
         menu_id::SESSIONS => open_sessions_window(app),
@@ -3224,6 +3337,7 @@ fn dispatch_or_queue_shell_action(app: &AppHandle, action: ShellAction) {
 fn dispatch_shell_action(app: &AppHandle, action: ShellAction) {
     match action {
         ShellAction::OpenDefault => focus_or_open_main_window(app),
+        ShellAction::About => open_about_window(app),
         ShellAction::Settings => open_settings_window(app, None),
         ShellAction::Dashboard => open_dashboard_window(app),
         ShellAction::Sessions => open_sessions_window(app),
@@ -3558,6 +3672,7 @@ mod tests {
         use super::{shell_action_from_args, ShellAction};
 
         for (value, expected) in [
+            ("about", ShellAction::About),
             ("settings", ShellAction::Settings),
             ("dashboard", ShellAction::Dashboard),
             ("sessions", ShellAction::Sessions),
@@ -3595,6 +3710,7 @@ mod tests {
         use super::{shell_action_from_args, ShellAction};
 
         for action in [
+            ShellAction::About,
             ShellAction::Settings,
             ShellAction::Dashboard,
             ShellAction::Sessions,

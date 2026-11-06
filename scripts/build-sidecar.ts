@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Compile Maximal's standalone binaries for the current host triple, dropping
 // them under shell/src-tauri/binaries/ for Tauri's externalBin resolver.
+// Pass --target-triple=<triple> for a Bun-supported cross-compile target.
 //
 // Each binary is skipped independently when it is newer than its watched
 // sources. Override with --force or MAXIMAL_FORCE_SIDECAR=1; release pipelines
@@ -37,7 +38,7 @@ if (process.cwd() !== REPO && process.cwd() !== BROKER_PACKAGE) {
   cleanBunBuildTemps(process.cwd())
 }
 
-const triple = hostTriple()
+const triple = targetTriple()
 const target = bunTarget(triple)
 const executableSuffix = triple.includes("pc-windows") ? ".exe" : ""
 const binaryDirectory = join(REPO, "shell/src-tauri/binaries")
@@ -138,6 +139,17 @@ for (const build of builds) {
     stdio: "inherit",
   })
   if (result.status !== 0) process.exit(result.status ?? 1)
+}
+
+function targetTriple(): string {
+  const prefix = "--target-triple="
+  const requested = process.argv.find((arg) => arg.startsWith(prefix))
+  if (requested) {
+    const triple = requested.slice(prefix.length).trim()
+    if (!triple) throw new Error("--target-triple requires a value")
+    return triple
+  }
+  return hostTriple()
 }
 
 function hostTriple(): string {
