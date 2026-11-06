@@ -59,7 +59,50 @@ describe("pricedModelIsPaid", () => {
     expect(pricedModelIsPaid({ input: Number.NaN })).toBeNull()
   })
 
-  test("tolerates extra/renamed keys via the index signature", () => {
-    expect(pricedModelIsPaid({ some_future_rate: 5 })).toBe(true)
+  test("reads the live nested catalog shape", () => {
+    expect(
+      pricedModelIsPaid({
+        batch_size: 1_000_000,
+        default: {
+          cache_read_price: 20,
+          cache_write_1h_price: 400,
+          cache_write_price: 250,
+          input_price: 200,
+          max_prompt_tokens: 200_000,
+          output_price: 1_000,
+        },
+        long_context: {
+          cache_read_price: 40,
+          cache_write_1h_price: 800,
+          cache_write_price: 500,
+          input_price: 400,
+          max_prompt_tokens: 936_000,
+          output_price: 1_500,
+        },
+        // Routing metadata observed in the live catalog; not a price.
+        preferred_tier: "long_context",
+      }),
+    ).toBe(true)
+  })
+
+  test("does not mistake counts and thresholds for prices", () => {
+    expect(
+      pricedModelIsPaid({
+        batch_size: 1_000_000,
+        default: {
+          input_price: 0,
+          output_price: 0,
+          max_prompt_tokens: 200_000,
+        },
+      }),
+    ).toBe(false)
+  })
+
+  test("tolerates future nested tiers and price keys", () => {
+    expect(
+      pricedModelIsPaid({
+        future_context: { some_future_price: 5 },
+      }),
+    ).toBe(true)
   })
 })
