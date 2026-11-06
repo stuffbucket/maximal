@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.3](https://github.com/stuffbucket/maximal/compare/v0.5.2...v0.5.3) (2026-11-06)
+
+
+### Features
+
+* redesign About dialog and add Windows developer tooling ([#596](https://github.com/stuffbucket/maximal/issues/596)) ([84c7def](https://github.com/stuffbucket/maximal/commit/84c7defd4f48b1a8dd65338e6414d4f1a1cf49d3))
+
+
+### Bug Fixes
+
+* **copilot:** normalize catalog pricing metadata ([#594](https://github.com/stuffbucket/maximal/issues/594)) ([fb19d33](https://github.com/stuffbucket/maximal/commit/fb19d33d00a2dff08f99a2fa2f680a764aac9a03))
+
 ## [0.5.2](https://github.com/stuffbucket/maximal/compare/v0.5.2-rc.4...v0.5.2) (2026-11-04)
 
 
