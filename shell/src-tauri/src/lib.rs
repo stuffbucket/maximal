@@ -387,6 +387,7 @@ const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/windows/icon-at
 const TRAY_ICON_ATTENTION: &[u8] = include_bytes!("../icons/tray/icon-attention@2x.png");
 
 mod menu_id {
+    #[cfg(target_os = "macos")]
     pub const ABOUT: &str = "about_maximal";
     pub const SETTINGS: &str = "settings";
     pub const DASHBOARD: &str = "dashboard";

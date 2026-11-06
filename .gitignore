@@ -47,6 +47,9 @@ reports/
 # bun --compile temp executables (live in cwd, ~60MB each)
 .*.bun-build
 dist-release/
+# Local-only cargo-xwin SDK/CRT cache and staged Windows VM payload.
+.cargo-xwin/
+dist-windows/
 
 *.dmg
 
