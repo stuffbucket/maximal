@@ -10,18 +10,30 @@ import {
 } from "@azure/msal-node"
 
 import type { EntraAuthManifest } from "../manifest"
+import type { SecretStore } from "./secret-store"
 import type {
   AuthStrategy,
   ConnectorAccount,
+  CredentialNotice,
   TextStore,
   TokenProvider,
 } from "./token-provider"
 
 import { ConnectorError, isAbort, signedOut } from "../errors"
 import { abortable, escapeHtml } from "../util"
+import { SealedCache } from "./sealed-cache"
 
-/** Storage file holding MSAL's serialized token cache (0600 via `ctx.storage`). */
-export const TOKEN_CACHE_FILE = "msal-token-cache.json"
+/**
+ * Storage file holding MSAL's serialized token cache, encrypted with a key
+ * kept in the OS credential store (see `SealedCache`).
+ */
+export const TOKEN_CACHE_FILE = "msal-token-cache.sealed.json"
+
+/** The plaintext cache older versions wrote; moved into `TOKEN_CACHE_FILE` on first start. */
+export const LEGACY_TOKEN_CACHE_FILE = "msal-token-cache.json"
+
+/** Entry name (before its random key id) of the cache key in the OS credential store. */
+const TOKEN_CACHE_KEY = "msal-token-cache"
 
 /** Reuse an access token until it is this close to expiry. */
 const TOKEN_REUSE_MARGIN_MS = 5 * 60_000
@@ -33,7 +45,10 @@ export interface MsalTokenProviderOptions {
   clientId: string
   authority: string
   scopes: ReadonlyArray<string>
+  /** The connector's private storage: holds the sealed cache file. */
   store: TextStore
+  /** The OS credential store: holds the cache's key (tests: an in-memory fake). */
+  secrets: SecretStore
   /** Opens the authorize URL in the system browser (`ctx.host.openExternal`). */
   openBrowser: (url: string) => Promise<void>
   /** Classifies MSAL failures with the connector's wording. */
@@ -67,21 +82,36 @@ export function signInPage(displayName: string, ok: boolean): string {
 <p>${text}</p></body></html>`
 }
 
-/** MSAL cache persistence over the plugin's private storage. */
-export function storageCachePlugin(
-  store: TextStore,
-  file = TOKEN_CACHE_FILE,
-): ICachePlugin {
+/** The text persistence MSAL's cache plugin needs (a `SealedCache`). */
+export interface CacheText {
+  read(): Promise<string | undefined>
+  write(text: string): Promise<void>
+}
+
+/** MSAL cache persistence: load before every cache access, save after a change. */
+export function sealedCachePlugin(cache: CacheText): ICachePlugin {
   return {
     async beforeCacheAccess(context: TokenCacheContext) {
-      const text = await store.readText(file)
+      const text = await cache.read()
       if (text) context.tokenCache.deserialize(text)
     },
     async afterCacheAccess(context: TokenCacheContext) {
       if (context.cacheHasChanged)
-        await store.writeText(file, context.tokenCache.serialize())
+        await cache.write(context.tokenCache.serialize())
     },
   }
+}
+
+/** The MSAL token cache of one connector, sealed with a key in the OS credential store. */
+function tokenCache(options: MsalTokenProviderOptions): SealedCache {
+  return new SealedCache({
+    store: options.store,
+    secrets: options.secrets,
+    file: TOKEN_CACHE_FILE,
+    legacyFile: LEGACY_TOKEN_CACHE_FILE,
+    keyName: TOKEN_CACHE_KEY,
+    ...(options.logger ? { logger: options.logger } : {}),
+  })
 }
 
 function toAccount(account: AccountInfo): ConnectorAccount {
@@ -115,6 +145,7 @@ async function releaseLoopback(redirectUri: string): Promise<void> {
 
 function createClient(
   options: MsalTokenProviderOptions,
+  cache: CacheText,
 ): PublicClientApplication {
   const logger = options.logger
   return new PublicClientApplication({
@@ -128,7 +159,7 @@ function createClient(
         { authorityMetadata: options.authorityMetadata }
       : {}),
     },
-    cache: { cachePlugin: storageCachePlugin(options.store) },
+    cache: { cachePlugin: sealedCachePlugin(cache) },
     system: {
       ...(options.networkClient ?
         { networkClient: options.networkClient }
@@ -149,7 +180,9 @@ function createClient(
 /**
  * Microsoft Entra sign-in with `@azure/msal-node`: interactive auth code +
  * PKCE through a loopback redirect, silent refresh for every token request,
- * and the token cache persisted to plugin storage. Only the most recently
+ * and the token cache kept in plugin storage, encrypted with a key in the OS
+ * credential store (in memory only when there is none). A plaintext cache
+ * from an older version is moved there on start. Only the most recently
  * signed-in account is kept.
  */
 export function createMsalTokenProvider(
@@ -168,6 +201,7 @@ class MsalTokenProvider implements TokenProvider {
   readonly #options: MsalTokenProviderOptions
   readonly #scopes: Array<string>
   readonly #pca: PublicClientApplication
+  readonly #cache: SealedCache
   /** Last silent result, so per-request token lookups skip MSAL's cache I/O. */
   #memo: { token: string; expiresAt: number } | undefined
   /** The upstream rejected a token: the next acquisition skips MSAL's access-token cache. */
@@ -190,7 +224,18 @@ class MsalTokenProvider implements TokenProvider {
   constructor(options: MsalTokenProviderOptions) {
     this.#options = options
     this.#scopes = [...options.scopes]
-    this.#pca = createClient(options)
+    this.#cache = tokenCache(options)
+    this.#pca = createClient(options, this.#cache)
+    // Move an older plaintext cache off disk now, not at the first sign-in check.
+    this.#cache.migrate().catch((error: unknown) => {
+      options.logger?.warn(
+        `Could not move the plaintext ${LEGACY_TOKEN_CACHE_FILE}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+  }
+
+  credentialNotice(): CredentialNotice | undefined {
+    return this.#cache.memoryOnly
   }
 
   async account(): Promise<ConnectorAccount | undefined> {
@@ -267,7 +312,7 @@ class MsalTokenProvider implements TokenProvider {
 
   /**
    * Keep only the account the user chose (none after sign-out, deleting
-   * the cache file). Also run after an acquisition that straddled a
+   * the cache file and its key). Also run after an acquisition that straddled a
    * sign-in or sign-out, which may have written the old account back into
    * MSAL's cache.
    */
@@ -277,7 +322,7 @@ class MsalTokenProvider implements TokenProvider {
     const cache = this.#pca.getTokenCache()
     for (const account of await this.#accounts())
       if (account.homeAccountId !== keep) await cache.removeAccount(account)
-    if (keep === undefined) await this.#options.store.delete(TOKEN_CACHE_FILE)
+    if (keep === undefined) await this.#cache.clear()
   }
 
   /** The account changed: nothing cached or in flight may be handed out. */
@@ -451,6 +496,7 @@ export function entraAuth(
         authority,
         scopes: manifest.scopes,
         store: env.store,
+        secrets: env.secrets,
         openBrowser: env.openBrowser,
         toError: env.toError,
         displayName: env.displayName,

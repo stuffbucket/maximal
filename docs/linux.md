@@ -90,6 +90,22 @@ ExecStart=
 ExecStart=/usr/bin/maximal start --account-type enterprise
 ```
 
+### Connector sign-ins and the keyring
+
+Connectors such as [Work IQ](workiq.md) keep their sign-in encrypted, with the
+key in your desktop keyring through the Secret Service (libsecret over D-Bus).
+Ubuntu's and Debian's GNOME desktops have one, unlocked when you log in. On
+another desktop, or if Work IQ's status says *Sign-in: Kept until Maximal
+restarts*, install a keyring and restart Maximal:
+
+```sh
+sudo apt install gnome-keyring libsecret-1-0
+```
+
+Without a keyring (headless, over SSH, or a service with no login session)
+Maximal never writes the sign-in to disk: it keeps it in memory, and you sign
+in again after each restart.
+
 ## Update
 
 Maximal checks for new versions on its own. When one is out:

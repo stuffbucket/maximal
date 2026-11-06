@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import type { AuthStrategy } from "../src/auth/token-provider"
 
-import { TOKEN_CACHE_FILE } from "../src/auth/entra"
+import { LEGACY_TOKEN_CACHE_FILE, TOKEN_CACHE_FILE } from "../src/auth/entra"
 import {
   defineRemoteMcpConnector,
   type RemoteMcpConnectorOptions,
@@ -16,6 +16,7 @@ import {
   startFakeRemoteMcp,
   type FakeRemoteMcp,
 } from "../src/testing/fake-server"
+import { memorySecretStore } from "../src/testing/secret-store"
 import { EXAMPLE_MANIFEST, TERMS_URL } from "./fixtures"
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -388,6 +389,52 @@ describe("connector lifecycle", () => {
     expect(plugin.status()?.code).toBe("working")
     await waitFor(() => plugin.status()?.code === "ready")
     expect(plugin.tools()).toHaveLength(3)
+  })
+
+  test("a sign-in kept in memory only says so, and why, when connected", async () => {
+    const server = fake()
+    const tokens = new FakeTokenProvider(ADA)
+    tokens.notice = {
+      fact: "Kept until Maximal restarts",
+      detail: "No keyring.",
+    }
+    const plugin = await load(server, tokens, { storage: ACCEPTED })
+    await waitFor(() => plugin.status()?.code === "ready")
+    expect(plugin.status()?.detail).toBe("No keyring.")
+    expect(plugin.status()?.facts).toContainEqual({
+      label: "Sign-in",
+      value: "Kept until Maximal restarts",
+    })
+  })
+
+  test("the Entra strategy moves a plaintext cache into the connector's credential entries at start", async () => {
+    const secrets = memorySecretStore()
+    const empty = JSON.stringify({
+      Account: {},
+      IdToken: {},
+      AccessToken: {},
+      RefreshToken: {},
+      AppMetadata: {},
+    })
+    const plugin = await loadPlugin(
+      defineRemoteMcpConnector(EXAMPLE_MANIFEST, { secretStore: secrets }),
+      {},
+      { storage: { example: { [LEGACY_TOKEN_CACHE_FILE]: empty } } },
+    )
+    cleanups.push(() => plugin.dispose())
+    await waitFor(
+      () =>
+        !Object.hasOwn(
+          plugin.testbed.storage.files("example"),
+          LEGACY_TOKEN_CACHE_FILE,
+        ),
+    )
+    expect(plugin.testbed.storage.files("example")[TOKEN_CACHE_FILE]).toContain(
+      "maximal-sealed/1",
+    )
+    const names = [...secrets.entries.keys()]
+    expect(names).toHaveLength(1)
+    expect(names[0]).toMatch(/^example\/msal-token-cache\/[0-9a-f]{32}$/)
   })
 
   test("the fake strategy signs in instantly as its account", async () => {

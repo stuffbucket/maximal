@@ -2,6 +2,7 @@ import type { FetchLike } from "@modelcontextprotocol/client"
 import type { PluginLogger } from "@stuffbucket/maximal-plugin-sdk"
 
 import type { ConnectorError } from "../errors"
+import type { SecretStore } from "./secret-store"
 
 /** Who the connector is signed in as (whatever the identity provider tells us). */
 export interface ConnectorAccount {
@@ -14,10 +15,19 @@ export interface ConnectorAccount {
   issuer?: string
 }
 
+/** Why a sign-in won't survive a restart (no usable OS credential store). */
+export interface CredentialNotice {
+  /** Short status fact value. */
+  fact: string
+  /** What happened and what to do, for the status detail. */
+  detail: string
+}
+
 /**
  * Everything a connector needs from an identity provider. Credentials live
- * in the connector's own `ctx.storage` and never leave the provider except
- * as the upstream `Authorization` header.
+ * in the connector's own `ctx.storage` (sealed with a key in the OS
+ * credential store, for Entra) and never leave the provider except as the
+ * upstream `Authorization` header.
  */
 export interface TokenProvider {
   /** The cached account, if any (no network). */
@@ -40,6 +50,8 @@ export interface TokenProvider {
    * same token share one refresh.
    */
   invalidate?(rejected?: string): Promise<boolean>
+  /** Set when credentials are kept in memory only, and why. */
+  credentialNotice?(): CredentialNotice | undefined
 }
 
 /** Text persistence credentials need (a subset of `ctx.storage`). */
@@ -59,6 +71,8 @@ export interface AuthEnv {
   config: Readonly<Record<string, unknown>>
   /** The connector's private storage. */
   store: TextStore
+  /** The OS credential store, scoped to this connector. */
+  secrets: SecretStore
   /** Opens a URL in the system browser (`ctx.host.openExternal`). */
   openBrowser: (url: string) => Promise<void>
   logger: PluginLogger

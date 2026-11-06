@@ -43,11 +43,23 @@ another account* when the problem is the account.
 Sign-in is the same as the Work IQ CLI's and agent-kit's tools (same app,
 authority `organizations`, scope `WorkIQAgent.Ask`, browser sign-in with
 PKCE), but Maximal keeps its own sign-in: it doesn't read or share their
-keychain-encrypted token cache. Maximal keeps the sign-in in its data
-directory (`<app dir>/plugins/workiq/`, readable only by you) and refreshes it
-silently. Only the most recently signed-in account is kept. *Sign out* deletes
-it. Turning Work IQ off stops it and removes its tools but keeps the sign-in,
-the accepted terms and your tool permissions.
+keychain-encrypted token cache. Maximal refreshes the sign-in silently and
+keeps it encrypted in its data directory
+(`<app dir>/plugins/workiq/msal-token-cache.sealed.json`, readable only by
+you), with the key in your system's credential store: the macOS Keychain,
+Windows Credential Manager, or the keyring (Secret Service) on Linux. The
+Keychain lists it as *Maximal connectors*. Only the most recently signed-in
+account is kept. *Sign out* deletes the file and the key. Turning Work IQ off
+stops it and removes its tools but keeps the sign-in, the accepted terms and
+your tool permissions. A sign-in an older version saved unencrypted
+(`msal-token-cache.json`) is moved into the credential store when Maximal
+starts, and the old file is deleted.
+
+Without a usable credential store (most often Linux without a keyring, see
+[Maximal on Linux](linux.md)) Maximal never writes the sign-in to disk: it
+keeps it in memory, and you sign in again after Maximal restarts. Work IQ's
+status then shows *Sign-in: Kept until Maximal restarts* and what to
+install.
 
 ## When your organization limits Work IQ
 

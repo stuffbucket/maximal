@@ -24,9 +24,11 @@ as the Work IQ CLI and agent-kit's tools:
 
 Interactive authorization code + PKCE in the system browser, a silent token
 for every request, only the signed-in account kept. The token cache is this
-connector's own (`<app dir>/plugins/workiq/msal-token-cache.json`, 0600): it
-does not read or share agent-kit's keychain-encrypted cache, and it is
-separate from Maximal's GitHub/Copilot sign-in. MCP clients never see it.
+connector's own: encrypted in `<app dir>/plugins/workiq/msal-token-cache.sealed.json`
+with a key in the OS credential store (the connector kit's sealed cache;
+memory only when there is no store). It does not read or share agent-kit's
+keychain-encrypted cache, and it is separate from Maximal's GitHub/Copilot
+sign-in. MCP clients never see it.
 
 ## Throttling
 

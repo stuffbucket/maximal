@@ -10,6 +10,7 @@ export {
   createMsalTokenProvider,
   entraAuth,
   type EntraAuthOverrides,
+  LEGACY_TOKEN_CACHE_FILE,
   type MsalTokenProviderOptions,
   SIGN_IN_TIMEOUT_MS,
   TOKEN_CACHE_FILE,
@@ -22,10 +23,12 @@ export {
   OAUTH_FILE,
 } from "./auth/mcp-oauth"
 export { noAuth } from "./auth/none"
+export { SECRET_SERVICE, type SecretStore } from "./auth/secret-store"
 export type {
   AuthEnv,
   AuthStrategy,
   ConnectorAccount,
+  CredentialNotice,
   TextStore,
   TokenProvider,
 } from "./auth/token-provider"

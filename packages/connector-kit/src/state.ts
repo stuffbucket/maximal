@@ -465,6 +465,7 @@ export class ConnectorController {
 
   #showReady(): void {
     const protocol = this.#options.protocol?.()
+    const notice = this.#options.tokens.credentialNotice?.()
     this.#show("ready", {
       state: "ready",
       code: STATUS_CODES.ready,
@@ -472,8 +473,10 @@ export class ConnectorController {
         this.#account?.username ?
           `Connected as ${this.#account.username}`
         : "Connected",
+      ...(notice ? { detail: notice.detail } : {}),
       facts: [
         ...this.#facts(),
+        ...(notice ? [{ label: "Sign-in", value: notice.fact }] : []),
         {
           label: "Tools",
           value:

@@ -12,19 +12,23 @@ import type {
 import { afterEach, describe, expect, test } from "bun:test"
 import { createServer } from "node:http"
 
+import type { SecretStore } from "../src/auth/secret-store"
 import type { TextStore } from "../src/auth/token-provider"
 
 import {
   createMsalTokenProvider,
   entraAuth,
-  storageCachePlugin,
+  LEGACY_TOKEN_CACHE_FILE,
+  sealedCachePlugin,
   TOKEN_CACHE_FILE,
 } from "../src/auth/entra"
+import { SealedCache } from "../src/auth/sealed-cache"
 import {
   ConnectorError,
   toConnectorError,
   type ConnectorErrorCode,
 } from "../src/errors"
+import { memorySecretStore } from "../src/testing/secret-store"
 import { createUpstreamFetch } from "../src/upstream/fetch"
 import { rejection } from "./rejection"
 
@@ -238,10 +242,28 @@ function browser(
   }
 }
 
+/** The cache as MSAL serialized it, decrypted with the key in `secrets`. */
+async function unsealed(
+  store: TextStore,
+  secrets: SecretStore,
+): Promise<string | undefined> {
+  return await new SealedCache({
+    store,
+    secrets,
+    file: TOKEN_CACHE_FILE,
+    keyName: "msal-token-cache",
+  }).read()
+}
+
 function provider(
   store: TextStore,
   entra: ReturnType<typeof fakeEntra>,
-  web: { open: (url: string) => Promise<void>; signInTimeoutMs?: number },
+  web: {
+    open: (url: string) => Promise<void>
+    signInTimeoutMs?: number
+    /** The OS credential store (default a fresh in-memory one). */
+    secrets?: SecretStore
+  },
 ) {
   return createMsalTokenProvider({
     clientId: CLIENT_ID,
@@ -250,6 +272,7 @@ function provider(
     displayName: "Example",
     toError: (error) => toConnectorError(error, { name: "Example" }),
     store,
+    secrets: web.secrets ?? memorySecretStore(),
     openBrowser: web.open,
     networkClient: entra.network,
     preferredPort: 0,
@@ -260,9 +283,10 @@ function provider(
 describe("MSAL token provider", () => {
   test("interactive auth code + PKCE via loopback, persisted cache, silent tokens", async () => {
     const store = memoryStore()
+    const secrets = memorySecretStore()
     const entra = fakeEntra()
     const web = browser(entra)
-    const tokens = provider(store, entra, web)
+    const tokens = provider(store, entra, { ...web, secrets })
 
     expect(await tokens.account()).toBeUndefined()
     expect(await rejection(tokens.getToken())).toMatchObject({
@@ -296,25 +320,38 @@ describe("MSAL token provider", () => {
 
     expect(await tokens.getToken()).toBe("at-1")
     expect(entra.state.tokenRequests).toHaveLength(1)
-    expect(store.files.has(TOKEN_CACHE_FILE)).toBe(true)
+    // On disk only ciphertext; the key is the one entry in the credential store.
+    const sealed = store.files.get(TOKEN_CACHE_FILE) ?? ""
+    expect(sealed).toContain('"format":"maximal-sealed/1"')
+    for (const secret of ["at-1", "rt-1", "ada@contoso.com", ADA_OID])
+      expect(sealed).not.toContain(secret)
+    expect(store.files.has(LEGACY_TOKEN_CACHE_FILE)).toBe(false)
+    const names = [...secrets.entries.keys()]
+    expect(names).toHaveLength(1)
+    expect(names[0]).toMatch(/^msal-token-cache\/[0-9a-f]{32}$/)
+    expect(await unsealed(store, secrets)).toContain("rt-1")
+    expect(tokens.credentialNotice?.()).toBeUndefined()
 
     // A new provider (next app start) reuses the persisted cache silently.
     const restarted = provider(store, entra, {
       open: () => Promise.reject(new Error("must not open a browser")),
+      secrets,
     })
     expect(await restarted.account()).toEqual(account)
     expect(await restarted.getToken()).toBe("at-1")
 
     await restarted.signOut()
     expect(store.files.has(TOKEN_CACHE_FILE)).toBe(false)
+    expect(secrets.entries.size).toBe(0)
     expect(await restarted.account()).toBeUndefined()
   })
 
   test("keeps only the most recently signed-in account", async () => {
     const store = memoryStore()
+    const secrets = memorySecretStore()
     const entra = fakeEntra()
     const web = browser(entra)
-    const tokens = provider(store, entra, web)
+    const tokens = provider(store, entra, { ...web, secrets })
     await tokens.signIn(new AbortController().signal)
     entra.state.user = GRACE
     const second = await tokens.signIn(new AbortController().signal)
@@ -326,7 +363,7 @@ describe("MSAL token provider", () => {
     expect(await tokens.account()).toMatchObject({
       username: "grace@contoso.com",
     })
-    const persisted = JSON.parse(store.files.get(TOKEN_CACHE_FILE) ?? "") as {
+    const persisted = JSON.parse((await unsealed(store, secrets)) ?? "") as {
       Account: Record<string, unknown>
     }
     expect(Object.keys(persisted.Account)).toHaveLength(1)
@@ -362,6 +399,102 @@ describe("MSAL token provider", () => {
     expect(
       await rejection(tokens.signIn(new AbortController().signal)),
     ).toMatchObject({ code: "sign-in-timeout" })
+  })
+})
+
+describe("MSAL token provider: sealed cache", () => {
+  test("the cache plugin writes only when MSAL changed the cache", async () => {
+    let saved: string | undefined
+    const plugin = sealedCachePlugin({
+      read: () => Promise.resolve(saved),
+      write: (text) => {
+        saved = text
+        return Promise.resolve()
+      },
+    })
+    let serialized = 0
+    let seen: string | undefined
+    const tokenCache = {
+      deserialize: (text: string) => void (seen = text),
+      serialize: () => {
+        serialized++
+        return "{}"
+      },
+    }
+    await plugin.beforeCacheAccess({
+      cacheHasChanged: false,
+      tokenCache,
+    } as never)
+    expect(seen).toBeUndefined()
+    await plugin.afterCacheAccess({
+      cacheHasChanged: false,
+      tokenCache,
+    } as never)
+    expect(serialized).toBe(0)
+    await plugin.afterCacheAccess({
+      cacheHasChanged: true,
+      tokenCache,
+    } as never)
+    expect(saved).toBe("{}")
+    await plugin.beforeCacheAccess({
+      cacheHasChanged: false,
+      tokenCache,
+    } as never)
+    expect(seen).toBe("{}")
+  })
+
+  test("moves a plaintext cache from an older version into the credential store", async () => {
+    const store = memoryStore()
+    const secrets = memorySecretStore()
+    const entra = fakeEntra()
+    const tokens = provider(store, entra, { ...browser(entra), secrets })
+    await tokens.signIn(new AbortController().signal)
+    // What an older version left behind: the same cache, in plain text.
+    store.files.set(
+      LEGACY_TOKEN_CACHE_FILE,
+      (await unsealed(store, secrets)) ?? "",
+    )
+    store.files.delete(TOKEN_CACHE_FILE)
+    secrets.entries.clear()
+
+    const upgraded = provider(store, entra, {
+      open: () => Promise.reject(new Error("must not open a browser")),
+      secrets,
+    })
+    expect(await upgraded.account()).toMatchObject({
+      username: "ada@contoso.com",
+    })
+    expect(store.files.has(LEGACY_TOKEN_CACHE_FILE)).toBe(false)
+    expect(store.files.get(TOKEN_CACHE_FILE)).not.toContain("rt-1")
+    expect(secrets.entries.size).toBe(1)
+    expect(await upgraded.getToken()).toBe("at-1")
+    expect(entra.state.tokenRequests).toHaveLength(1)
+
+    await upgraded.signOut()
+    expect([...store.files.keys()]).toEqual([])
+    expect(secrets.entries.size).toBe(0)
+  })
+
+  test("without a credential store the sign-in stays in memory, never on disk", async () => {
+    const store = memoryStore()
+    const secrets = memorySecretStore({
+      unavailable: new Error("Cannot autolaunch D-Bus without X11 $DISPLAY"),
+    })
+    const entra = fakeEntra()
+    const tokens = provider(store, entra, { ...browser(entra), secrets })
+    await tokens.signIn(new AbortController().signal)
+    expect(await tokens.getToken()).toBe("at-1")
+    expect(await tokens.account()).toMatchObject({
+      username: "ada@contoso.com",
+    })
+    expect([...store.files.keys()]).toEqual([])
+    expect(tokens.credentialNotice?.()).toMatchObject({
+      fact: "Kept until Maximal restarts",
+    })
+
+    // After a restart the user signs in again.
+    const restarted = provider(store, entra, { ...browser(entra), secrets })
+    expect(await restarted.account()).toBeUndefined()
   })
 })
 
@@ -474,7 +607,8 @@ describe("MSAL token provider: failures and refresh", () => {
   test("a token lookup that straddles sign-out neither refills the cache nor resurrects the account", async () => {
     const entra = fakeEntra()
     const store = memoryStore()
-    const tokens = provider(store, entra, browser(entra))
+    const secrets = memorySecretStore()
+    const tokens = provider(store, entra, { ...browser(entra), secrets })
     await tokens.signIn(new AbortController().signal)
     expect(await tokens.getToken()).toBe("at-1")
     await tokens.invalidate?.("at-1")
@@ -492,6 +626,7 @@ describe("MSAL token provider: failures and refresh", () => {
     })
     expect(await tokens.account()).toBeUndefined()
     expect(store.files.has(TOKEN_CACHE_FILE)).toBe(false)
+    expect(secrets.entries.size).toBe(0)
   })
 
   test("uses the registered redirect port and never falls back to another", async () => {
@@ -513,6 +648,7 @@ describe("MSAL token provider: failures and refresh", () => {
       endpoint: "https://mcp.example.com/mcp",
       config: {},
       store: memoryStore(),
+      secrets: memorySecretStore(),
       openBrowser: web.open,
       logger: { debug() {}, info() {}, warn() {}, error() {} },
       signInTimeoutMs: 10_000,
@@ -537,33 +673,5 @@ describe("MSAL token provider: failures and refresh", () => {
     expect(error).toMatchObject({ code: "port-in-use" })
     expect((error as Error).message).toContain(`port ${port}`)
     expect(web.opened).toHaveLength(1)
-  })
-
-  test("the cache plugin writes only when MSAL changed the cache", async () => {
-    const store = memoryStore()
-    const plugin = storageCachePlugin(store, "cache.json")
-    let serialized = 0
-    const tokenCache = {
-      deserialize: (text: string) => void store.files.set("seen", text),
-      serialize: () => {
-        serialized++
-        return "{}"
-      },
-    }
-    await plugin.afterCacheAccess({
-      cacheHasChanged: false,
-      tokenCache,
-    } as never)
-    expect(serialized).toBe(0)
-    await plugin.afterCacheAccess({
-      cacheHasChanged: true,
-      tokenCache,
-    } as never)
-    expect(store.files.get("cache.json")).toBe("{}")
-    await plugin.beforeCacheAccess({
-      cacheHasChanged: false,
-      tokenCache,
-    } as never)
-    expect(store.files.get("seen")).toBe("{}")
   })
 })

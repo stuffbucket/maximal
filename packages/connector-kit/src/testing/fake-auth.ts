@@ -2,6 +2,7 @@ import type {
   AuthEnv,
   AuthStrategy,
   ConnectorAccount,
+  CredentialNotice,
   TextStore,
   TokenProvider,
 } from "../auth/token-provider"
@@ -27,6 +28,8 @@ export class FakeTokenProvider implements TokenProvider {
   /** When true, a rejected token can be "refreshed" (`invalidate` → `true`), switching to `refreshedToken` if set. */
   refreshable = false
   refreshedToken: string | undefined
+  /** When set, the sign-in is "kept in memory only" (`credentialNotice`). */
+  notice: CredentialNotice | undefined
   signInCalls = 0
   signOutCalls = 0
   tokenCalls = 0
@@ -104,6 +107,10 @@ export class FakeTokenProvider implements TokenProvider {
     if (!this.refreshable || !this.signedIn) return Promise.resolve(false)
     if (this.refreshedToken) this.token = this.refreshedToken
     return Promise.resolve(true)
+  }
+
+  credentialNotice(): CredentialNotice | undefined {
+    return this.notice
   }
 
   signOut(): Promise<void> {

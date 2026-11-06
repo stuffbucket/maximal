@@ -26,4 +26,5 @@ export {
   SAMPLE_TOOLS,
   startFakeRemoteMcp,
 } from "./fake-server"
+export { memorySecretStore, type MemorySecretStore } from "./secret-store"
 export type { Tool as FakeTool } from "@modelcontextprotocol/server"

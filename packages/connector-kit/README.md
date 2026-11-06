@@ -59,7 +59,8 @@ local fake), `auth` (replace the manifest's strategy, e.g. `fakeAuth()`),
 step), `defaultToolPermission`, `migrateSettings`, `limits` and `throttle`
 (see *Rate limiting*), and seams (`retryDelaysMs`, `sleep`, `clock`,
 `random`, `fetch`, `sessionIdleMs`, `maxSessions`, `callTimeoutMs`,
-`requestTimeoutMs`, `signInTimeoutMs`).
+`requestTimeoutMs`, `signInTimeoutMs`, `secretStore` — the OS credential
+store, e.g. `memorySecretStore()` in tests).
 
 ## Sign-in strategies
 
@@ -75,7 +76,10 @@ replaces it.
   (the browser session decides); signing in again sends `select_account`.
   Every upstream request gets a token silently (MSAL cache / refresh token);
   only the most recently signed-in account is kept. Cache:
-  `msal-token-cache.json`. `config.authority` overrides the authority.
+  `msal-token-cache.sealed.json`, encrypted (see *Credentials* below); a
+  plaintext `msal-token-cache.json` from an older version is moved into it
+  when the connector starts and deleted. `config.authority` overrides the
+  authority.
 - **`mcp-oauth`** — `{ clientId?, scopes? }`. The MCP Authorization spec:
   protected-resource metadata (RFC 9728, from the endpoint) → authorization
   server metadata (RFC 8414 / OIDC discovery) → authorization code + PKCE
@@ -111,6 +115,25 @@ fetch does not follow redirects with it, except same-origin 307/308.
 Maximal's GitHub/Copilot sign-in and from every other connector. MCP clients
 never see upstream tokens: they talk to Maximal's `/mcp/<id>` with Maximal's
 key, and only the connector adds the upstream `Authorization` header.
+
+**Entra's token cache is sealed** (`SealedCache`, `src/auth/sealed-cache.ts`):
+the file holds AES-256-GCM ciphertext and the name of its key; the key (32
+random bytes) is an entry in the OS credential store through `Bun.secrets`
+(`src/auth/secret-store.ts`): macOS Keychain, Windows Credential Manager, or
+the Secret Service (libsecret over D-Bus) on Linux. The entry's service is
+`Maximal connectors` and its name `<id>/msal-token-cache/<random key id>`, so
+each data directory has its own. Only the key goes into the store because
+Credential Manager caps a value at 2.5 KB and an MSAL cache is bigger.
+`Bun.secrets` runs off the event loop and never puts a value on a command
+line. The key is read once per start and kept in memory. Sign-out deletes the
+file and the entry; a key missing from the store, or a file that fails to
+decrypt, means signed out. When the store can't be used (no Secret Service,
+access denied) the cache is kept in memory only until the connector stops —
+never written in plain text — and the `ready` status says so (a "Sign-in"
+fact and a `detail` naming what to install). Under `bun test` the OS store
+refuses every call, so a test that forgets to inject one gets the
+memory-only behaviour, never the real Keychain. MCP OAuth's `oauth.json` is
+still plain text (0600).
 
 ## Upstream
 
@@ -239,7 +262,7 @@ queued, concurrency and cool-down per lane for logs.
 | `working` | `working` | Starting, connecting, waiting for the browser | `sign-out` ("Cancel") while signing in |
 | `terms-needed` | `needs-setup` | `manifest.connector.terms` set and not accepted (acceptance of that URL, with time, in `terms.json`) | `accept-terms` |
 | `signin-needed` | `needs-setup` | No usable sign-in; a cancelled or timed-out sign-in | `sign-in` |
-| `ready` | `ready` | Connected. Facts: Account, Tenant (or "Signed in at"), Tools, Protocol | `sign-out` (interactive) |
+| `ready` | `ready` | Connected. Facts: Account, Tenant (or "Signed in at"), Sign-in (only when it is kept in memory, with the reason in `detail`), Tools, Protocol | `sign-out` (interactive) |
 | `error` | `error` | Sign-in blocked, not entitled, network, service failure | `retry`; `sign-in` for account problems; `sign-out` when signed in |
 
 Account-level failures carry the connector's `adminHint` in `detail`:
@@ -283,14 +306,19 @@ fresh token. Action failures are reported through the status, never thrown.
   (account, access and refresh token) in the connector's storage
   (`fake-token-cache.json` by default) so it survives reloads and sign-out
   deletes it; `browserUrl` is opened with `ctx.host.openExternal` on sign-in; `FakeTokenProvider` for finer control (manual
-  sign-in, token errors, `refreshable`).
+  sign-in, token errors, `refreshable`, `notice` for a memory-only sign-in).
+- `memorySecretStore({ unavailable? })` — an in-memory OS credential store
+  (`entries`, `calls`); set `unavailable` to an error to act like Linux
+  without a Secret Service.
 
 `bun test test` covers the state machine, terms gate, upstream relays,
 transport retries, the limiter and retry policy on a virtual clock (shared
 cool-down, caps, AIMD, queue limits, fairness, abort, progress cadence,
 write rules, batch splitting and partial re-issue, a token-bucket burst),
 protocol negotiation, Entra through the real MSAL flow (offline:
-injected network client, real loopback), MCP OAuth against the fake
+injected network client, real loopback), the sealed token cache (migration,
+sign-out, a missing or tampered key, no credential store) against
+`memorySecretStore()`, MCP OAuth against the fake
 authorization server, and the entitlement cases. Nothing touches the real
 network. Not exercised against real services: Microsoft Entra itself, a real
 MCP OAuth authorization server, a real 2026-07-28 server, and real

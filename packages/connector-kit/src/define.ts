@@ -10,6 +10,7 @@ import type {
 } from "@stuffbucket/maximal-plugin-sdk"
 import type { z } from "zod"
 
+import type { SecretStore } from "./auth/secret-store"
 import type {
   AuthStrategy,
   TextStore,
@@ -23,6 +24,7 @@ import type { Clock, Random, Sleep } from "./util"
 
 import { authStrategyFor } from "./auth"
 import { SIGN_IN_TIMEOUT_MS } from "./auth/entra"
+import { osSecretStore, scopedSecretStore } from "./auth/secret-store"
 import {
   configJsonSchema,
   connectorConfigSchema,
@@ -51,6 +53,12 @@ export interface RemoteMcpConnectorOptions {
   endpoint?: string
   /** Replaces the manifest-derived sign-in strategy (tests, bench). */
   auth?: AuthStrategy
+  /**
+   * Replaces the OS credential store that holds the key of the sealed token
+   * cache (tests: `memorySecretStore()` from the testing export). Entries
+   * are scoped to the connector id.
+   */
+  secretStore?: SecretStore
   /** Connector-specific wording for account-level and policy failures, and the admin hint. */
   errors?: ConnectorErrorWording
   /** Connector-specific status wording (terms step). Sign-in wording comes from the strategy. */
@@ -293,6 +301,10 @@ function applyConnector(
     endpoint: config.endpoint,
     config: { ...config },
     store,
+    secrets: scopedSecretStore(
+      options.secretStore ?? osSecretStore(),
+      manifest.id,
+    ),
     openBrowser: (url) => ctx.host.openExternal(url),
     logger: ctx.host.logger,
     signInTimeoutMs,
@@ -351,7 +363,8 @@ function applyConnector(
  * a config schema (`{ endpoint }`, plus `authority` for Entra), the setup
  * state machine (terms gate → sign-in → connect → ready), and the upstream
  * tool list mirrored as plugin tools. Credentials live only in the
- * connector's own `ctx.storage`; MCP clients never see upstream tokens.
+ * connector's own `ctx.storage` (Entra's token cache sealed with a key in
+ * the OS credential store); MCP clients never see upstream tokens.
  */
 export function defineRemoteMcpConnector(
   baseManifest: RemoteMcpConnectorManifest,
