@@ -3,8 +3,9 @@ import type { MutableRefObject } from "react";
 import { t } from "../../../i18n";
 import type { PluginView } from "../../../proxy/client";
 
+import { CLIENT_NAMES, standaloneClient } from "./clients";
 import { listStatus, typeLabel } from "./connector-state";
-import { CheckGlyph, ChevronGlyph, ConnectorTile } from "./glyphs";
+import { CheckGlyph, ChevronGlyph, ConnectorTile, NoticeGlyph } from "./glyphs";
 
 interface ConnectorListProps {
   connectors: Array<PluginView>;
@@ -32,6 +33,9 @@ export function ConnectorList({ connectors, onOpen, rowRefs }: ConnectorListProp
       <tbody>
         {connectors.map((connector) => {
           const status = listStatus(connector);
+          const standalone = standaloneClient(connector);
+          const notice =
+            standalone && t("connectors-standalone-mark", { client: CLIENT_NAMES[standalone.id] });
           return (
             // The row's button is the keyboard path; the row click is a
             // larger target for the pointer.
@@ -52,6 +56,11 @@ export function ConnectorList({ connectors, onOpen, rowRefs }: ConnectorListProp
                 >
                   <ConnectorTile />
                   <span className="connector-row__name">{connector.displayName}</span>
+                  {notice && (
+                    <span className="connector-notice__mark" role="img" aria-label={notice} title={notice}>
+                      <NoticeGlyph />
+                    </span>
+                  )}
                 </button>
               </td>
               <td className="connector-row__type">{typeLabel(connector)}</td>

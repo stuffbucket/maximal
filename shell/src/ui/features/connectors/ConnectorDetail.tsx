@@ -13,16 +13,12 @@ import { ConfigForm } from "./ConfigForm";
 import { connectorLine } from "./connector-state";
 import { ConnectorStatusBlock } from "./ConnectorStatusBlock";
 import { ConnectorText } from "./ConnectorText";
-import { BackGlyph, ConnectorTile } from "./glyphs";
+import { CLIENT_NAMES, standaloneText } from "./clients";
+import { BackGlyph, ConnectorTile, NoticeGlyph } from "./glyphs";
 import { ToolPermissions } from "./ToolPermissions";
 import { useConnectorDetail } from "./useConnectorDetail";
 
 const COPIED_FLASH_MS = 1400;
-
-/** Product names, not translated. */
-const CLIENT_NAMES: Record<PluginClientId, string> = {
-  "claude-code": "Claude Code",
-};
 
 interface Change {
   enabled: boolean;
@@ -192,6 +188,14 @@ export function ConnectorDetail({ summary, version, focusOnOpen, onFresh, onBack
                     onCheckedChange={(checked) => setClient(client.id, checked)}
                   />
                   {reason && <span className="connector-section__hint">{reason}</span>}
+                  {client.standalone && (
+                    <span className="connector-section__hint connector-notice">
+                      <span className="connector-notice__mark">
+                        <NoticeGlyph />
+                      </span>
+                      <span>{standaloneText(connector.displayName, client.id, client.standalone)}</span>
+                    </span>
+                  )}
                 </div>
               );
             })}

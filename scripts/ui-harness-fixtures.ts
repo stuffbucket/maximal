@@ -730,6 +730,8 @@ interface WorkiqOptions {
   claudeCodeUnavailable?: boolean
   /** Whether Claude Code is ticked. */
   selected?: boolean
+  /** Claude Code already runs its own Work IQ, so Maximal adds none. */
+  standalone?: { name: string; source: "server" | "plugin" }
   /** Not running live, but a catalog from an earlier sign-in is cached. */
   cached?: boolean
   /** The stored config (defaults when omitted; `null`: the settings file
@@ -743,6 +745,7 @@ export function workiqDetail({
   failed,
   claudeCodeUnavailable = false,
   selected = true,
+  standalone,
   cached = false,
   config = { endpoint: WORKIQ_ENDPOINT, authority: WORKIQ_AUTHORITY },
 }: WorkiqOptions = {}): PluginDetailView {
@@ -784,6 +787,7 @@ export function workiqDetail({
         ...(claudeCodeUnavailable
           ? { reason: "Claude Code isn’t routed through Maximal. Turn it on in Apps to add Work IQ to it." }
           : {}),
+        ...(standalone ? { standalone } : {}),
       },
     ],
     endpoint: "http://localhost:4141/mcp/workiq",
@@ -1573,6 +1577,16 @@ export const SCENARIOS = {
   "connectors-claude-code-off": {
     ...healthy("Connectors · Work IQ ready, Claude Code isn’t set up in Apps"),
     connectors: [workiqDetail({ stage: "ready", claudeCodeUnavailable: true })],
+  },
+
+  "connectors-standalone-server": {
+    ...healthy("Connectors · Claude Code already has its own Work IQ server"),
+    connectors: [workiqDetail({ stage: "ready", standalone: { name: "workiq", source: "server" } })],
+  },
+
+  "connectors-standalone-plugin": {
+    ...healthy("Connectors · Claude Code already has Work IQ from Microsoft’s plugin"),
+    connectors: [workiqDetail({ stage: "ready", standalone: { name: "workiq@work-iq", source: "plugin" } })],
   },
 
 } satisfies Record<string, Scenario>

@@ -63,6 +63,16 @@ export function MixedGlyph(): JSX.Element {
   );
 }
 
+/** Worth knowing: a ring with an exclamation mark. */
+export function NoticeGlyph(): JSX.Element {
+  return (
+    <Glyph>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.75v5M12 16.25h.01" />
+    </Glyph>
+  );
+}
+
 export function CheckGlyph(): JSX.Element {
   return (
     <Glyph>

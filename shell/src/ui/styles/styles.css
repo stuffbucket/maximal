@@ -2723,6 +2723,31 @@ html[data-os="macos"] .topbar {
   height: var(--size-sm);
 }
 
+/* Worth knowing, nothing wrong: an app already runs this connector itself
+   (see the Claude Code row on its page). The text says why; the mark
+   never stands alone. */
+.connector-notice__mark {
+  display: inline-flex;
+  flex: none;
+  color: var(--status-info);
+}
+
+.connector-notice__mark svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.connector-row__open .connector-notice__mark {
+  margin-inline-start: var(--space-1);
+}
+
+.connector-notice {
+  display: inline-flex;
+  flex-basis: 100%;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
 .connector-row__chevron {
   display: inline-flex;
   margin-inline-start: var(--space-2);
