@@ -92,13 +92,20 @@ async function buildDashboard(): Promise<void> {
   })
 }
 
-// Tauri's `frontendDist` (shell/dist) must hold the pre-boot splash it
-// loads via `WebviewUrl::App("splash.html")`, plus an index.html so the
-// bundler has a valid frontend root. The actual settings/dashboard UIs
-// are served by the sidecar at /ui/*, so this index is just a pointer.
+// Tauri's `frontendDist` (shell/dist) must hold the pre-boot splash and
+// branded About surface loaded via `WebviewUrl::App("splash.html")`, plus
+// their app mark and an index.html so the bundler has a valid frontend root.
+// The actual settings/dashboard UIs are served by the sidecar at /ui/*, so
+// this index is just a pointer.
 async function copyShellChrome(): Promise<void> {
   await mkdir(DIST_ROOT, { recursive: true })
-  await cp(join(SHELL_DIR, "splash.html"), join(DIST_ROOT, "splash.html"))
+  await Promise.all([
+    cp(join(SHELL_DIR, "splash.html"), join(DIST_ROOT, "splash.html")),
+    cp(join(SHELL_DIR, "src-tauri/icons/icon.png"), join(DIST_ROOT, "about-icon.png")),
+    cp(join(SHELL_DIR, "ui/settings/vendor/fonts"), join(DIST_ROOT, "fonts"), {
+      recursive: true,
+    }),
+  ])
   await Bun.write(
     join(DIST_ROOT, "index.html"),
     "<!doctype html><meta charset=utf-8><title>Maximal</title>"
@@ -109,7 +116,7 @@ async function copyShellChrome(): Promise<void> {
 async function buildAll(): Promise<void> {
   const t = Date.now()
   await Promise.all([buildSettings(), buildDashboard(), copyShellChrome()])
-  console.error(`[build-ui] built settings + dashboard → shell/dist/ui (${Date.now() - t}ms)`)
+  console.error(`[build-ui] built settings + dashboard + shell chrome (${Date.now() - t}ms)`)
 }
 
 // Everything a build reads from the repo (vendor/ included).
@@ -117,6 +124,7 @@ const INPUTS = [
   join(REPO, "shell/ui"),
   join(REPO, "shell/src"),
   join(SHELL_DIR, "splash.html"),
+  join(SHELL_DIR, "src-tauri/icons/icon.png"),
 ]
 const watching = process.argv.includes("--watch")
 // Taken before the first build, so a change made during it is caught below.
@@ -125,7 +133,7 @@ const initial = watching ? await inputSignature(INPUTS) : ""
 await buildAll()
 
 if (watching) {
-  console.error("[build-ui] watching shell/ui and shell/src for changes…")
+  console.error("[build-ui] watching UI and shell chrome for changes…")
   const rebuild = createRebuilder({
     signature: () => inputSignature(INPUTS),
     build: buildAll,

@@ -9,7 +9,8 @@
   shell/tools/gen-wordmark.py from the Fraunces variable font at
   opsz 16 / heavy / wonky — the brand H1 display cut). Outlining means
   the wordmark always renders as real Fraunces with zero font-loading
-  dependency, even at first paint before any network/font is available.
+  dependency. The About mode and splash status load the same bundled,
+  self-hosted Fraunces + Commissioner files as the main UI.
 
   Raw brand values are inlined (no reliable stylesheet link at boot);
   they MIRROR shell/src/tokens.css — keep in sync.
@@ -24,8 +25,53 @@
     <meta charset="UTF-8" />
     <title>Maximal</title>
     <style>
+      @font-face {
+        font-family: "Commissioner";
+        font-style: normal;
+        font-weight: 200 900;
+        font-display: block;
+        src: url("./fonts/commissioner-latin.woff2") format("woff2");
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC,
+          U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+          U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Commissioner";
+        font-style: normal;
+        font-weight: 200 900;
+        font-display: block;
+        src: url("./fonts/commissioner-latin-ext.woff2") format("woff2");
+        unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+          U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+          U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Fraunces";
+        font-style: normal;
+        font-weight: 300 900;
+        font-display: block;
+        src: url("./fonts/fraunces-latin.woff2") format("woff2");
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC,
+          U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+          U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Fraunces";
+        font-style: normal;
+        font-weight: 300 900;
+        font-display: block;
+        src: url("./fonts/fraunces-latin-ext.woff2") format("woff2");
+        unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+          U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+          U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+
       :root {
+        --font-display: "Fraunces", Georgia, "Times New Roman", serif;
         --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
+        --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
         --brand: #c8334a;     /* mirrors tokens.css --brand */
         --cream: #f0e9d6;     /* brand cream wordmark/text on red */
       }
@@ -119,11 +165,153 @@
         text-align: center;
       }
 
+      /* About uses the same branded panel as the launch splash, rearranged
+         into the familiar macOS About composition: a large mark at left and
+         the product details at right. Rust opens this mode in its own window. */
+      .about {
+        box-sizing: border-box;
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        gap: 36px;
+        padding: 38px 52px 38px 42px;
+        background: var(--brand);
+        border-radius: 14px;
+        color: var(--cream);
+        font-family: var(--font-body);
+      }
+      .about-mode .splash { display: none; }
+      .about-mode .about { display: flex; }
+
+      .about-mark {
+        width: 184px;
+        height: 184px;
+        flex: 0 0 184px;
+      }
+      .about-mark img {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .about-copy {
+        width: 100%;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .about-title {
+        margin: 0;
+        font-family: var(--font-display);
+        font-size: 40px;
+        font-weight: 650;
+        font-variation-settings: "opsz" 40, "WONK" 1;
+        line-height: 1.15;
+        letter-spacing: -0.015em;
+      }
+      .about-version {
+        margin: 5px 0 0;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1.4;
+        opacity: 0.72;
+      }
+      .about-details {
+        width: 100%;
+        margin: 20px 0 0;
+        display: grid;
+        gap: 7px;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .about-detail {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: baseline;
+        gap: 16px;
+      }
+      .about-detail dt {
+        opacity: 0.72;
+      }
+      .about-detail dd {
+        margin: 0;
+        font-weight: 600;
+        text-align: right;
+      }
+      .about-local-url {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .about-contributors {
+        width: 100%;
+        margin-top: 18px;
+      }
+      .about-contributors-label {
+        display: block;
+        margin-bottom: 5px;
+        font-size: 13px;
+        line-height: 1.4;
+        opacity: 0.72;
+      }
+      .about-contributors-list,
+      .about-links {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 7px 12px;
+      }
+      .about-links {
+        margin-top: 18px;
+      }
+      .about-link {
+        color: var(--cream);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.4;
+        text-decoration-color: color-mix(in srgb, currentColor 65%, transparent);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 4px;
+        cursor: pointer;
+        transition: opacity 150ms ease-out;
+      }
+      .about-link:hover { opacity: 0.75; }
+      .about-link:focus-visible,
+      .about-close:focus-visible {
+        outline: 2px solid var(--cream);
+        outline-offset: 3px;
+      }
+      .about-close {
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        padding: 0 0 2px;
+        border: 0;
+        border-radius: 9999px;
+        background: transparent;
+        color: var(--cream);
+        font: 400 24px/1 var(--font-body);
+        opacity: 0.58;
+        cursor: pointer;
+        transition: background-color 150ms ease-out, opacity 150ms ease-out;
+      }
+      .about-close:hover {
+        background: color-mix(in srgb, var(--cream) 12%, transparent);
+        opacity: 1;
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .splash,
         .status,
-        .hint {
-          transition: opacity 60ms linear;
+        .hint,
+        .about-link,
+        .about-close {
+          transition-duration: 60ms;
         }
       }
     </style>
@@ -135,8 +323,162 @@
       <div class="hint" id="hint"></div>
       <div class="version" id="version"></div>
     </main>
+    <section class="about" role="dialog" aria-labelledby="about-title" data-tauri-drag-region>
+      <button
+        class="about-close"
+        id="about-close"
+        type="button"
+        aria-label="Close"
+      >&times;</button>
+      <div class="about-mark" aria-hidden="true" data-tauri-drag-region>
+        <img src="about-icon.png" alt="" data-tauri-drag-region />
+      </div>
+      <section class="about-copy" data-tauri-drag-region>
+        <h1 class="about-title" id="about-title" data-tauri-drag-region>Maximal</h1>
+        <p class="about-version" id="about-version" data-tauri-drag-region></p>
+        <div class="about-links">
+          <a
+            class="about-link"
+            id="about-site"
+            href="https://mxml.sh/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >mxml.sh</a>
+          <a
+            class="about-link"
+            href="https://github.com/stuffbucket/maximal"
+            target="_blank"
+            rel="noopener noreferrer"
+          >github</a>
+        </div>
+        <dl class="about-details" data-tauri-drag-region>
+          <div class="about-detail" data-tauri-drag-region>
+            <dt data-tauri-drag-region>Local URL</dt>
+            <dd class="about-local-url" id="about-local-url" data-tauri-drag-region>Starting…</dd>
+          </div>
+          <div class="about-detail" data-tauri-drag-region>
+            <dt data-tauri-drag-region>Available models</dt>
+            <dd id="about-model-count" data-tauri-drag-region>—</dd>
+          </div>
+          <div class="about-detail" data-tauri-drag-region>
+            <dt data-tauri-drag-region>Upstream providers</dt>
+            <dd id="about-provider-count" data-tauri-drag-region>—</dd>
+          </div>
+        </dl>
+        <div class="about-contributors">
+          <span class="about-contributors-label" data-tauri-drag-region>Contributors</span>
+          <div class="about-contributors-list">
+            <a
+              class="about-link"
+              href="https://github.com/stuffbucket"
+              target="_blank"
+              rel="noopener noreferrer"
+            >stuffbucket</a>
+            <a
+              class="about-link"
+              href="https://github.com/melnychuk"
+              target="_blank"
+              rel="noopener noreferrer"
+            >melnychuk</a>
+            <a
+              class="about-link"
+              href="https://github.com/sso-ss"
+              target="_blank"
+              rel="noopener noreferrer"
+            >sso-ss</a>
+          </div>
+        </div>
+      </section>
+    </section>
     <script>
       (function () {
+        var aboutConfig = window.__MAXIMAL_ABOUT__;
+        if (aboutConfig) {
+          document.documentElement.classList.add("about-mode");
+          var aboutTitle = document.getElementById("about-title");
+          var aboutVersion = document.getElementById("about-version");
+          var aboutSite = document.getElementById("about-site");
+          var aboutClose = document.getElementById("about-close");
+          var aboutLocalUrl = document.getElementById("about-local-url");
+          var aboutModelCount = document.getElementById("about-model-count");
+          var aboutProviderCount = document.getElementById("about-provider-count");
+          var tauri = window.__TAURI__;
+          var closeWindow = function () {
+            if (tauri && tauri.window && typeof tauri.window.getCurrentWindow === "function") {
+              tauri.window.getCurrentWindow().close();
+              return;
+            }
+            window.close();
+          };
+
+          aboutTitle.textContent = aboutConfig.name || "Maximal";
+          aboutVersion.textContent =
+            aboutConfig.version && aboutConfig.version !== "0.0.0"
+              ? "Version " + aboutConfig.version
+              : "Development build";
+          aboutSite.href = aboutConfig.website || "https://mxml.sh/";
+          aboutLocalUrl.textContent = aboutConfig.localUrl || "Not bound";
+
+          var loadAboutStats = async function () {
+            if (
+              !aboutConfig.localUrl ||
+              !tauri ||
+              !tauri.core ||
+              typeof tauri.core.invoke !== "function"
+            ) return;
+
+            try {
+              var apiKey = await tauri.core.invoke("get_shell_api_key");
+              var response = await fetch(
+                aboutConfig.localUrl + "/settings/api/models",
+                {
+                  headers: {
+                    accept: "application/json",
+                    "x-api-key": apiKey,
+                  },
+                },
+              );
+              if (!response.ok) return;
+
+              var payload = await response.json();
+              var models = Array.isArray(payload.models) ? payload.models : [];
+              var modelCount = Number.isInteger(payload.count)
+                ? payload.count
+                : models.length;
+              var providers = new Set(
+                models
+                  .map(function (model) {
+                    return typeof model.vendor === "string"
+                      ? model.vendor.trim()
+                      : "";
+                  })
+                  .filter(Boolean),
+              );
+              aboutModelCount.textContent = String(modelCount);
+              aboutProviderCount.textContent = String(providers.size);
+            } catch (_) {
+              // Keep the quiet unavailable markers when the sidecar is not ready.
+            }
+          };
+          void loadAboutStats();
+
+          document.querySelectorAll(".about-link").forEach(function (link) {
+            link.addEventListener("click", function (event) {
+              if (!tauri || !tauri.core || typeof tauri.core.invoke !== "function") return;
+              event.preventDefault();
+              event.stopPropagation();
+              tauri.core.invoke("plugin:opener|open_url", { url: link.href }).catch(function () {
+                window.open(link.href, "_blank", "noopener,noreferrer");
+              });
+            });
+          });
+          aboutClose.addEventListener("click", closeWindow);
+          document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") closeWindow();
+          });
+          return;
+        }
+
         var splash = document.querySelector(".splash");
         var status = document.getElementById("status");
         var hint = document.getElementById("hint");
