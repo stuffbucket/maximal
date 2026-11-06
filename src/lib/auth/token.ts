@@ -12,7 +12,7 @@ import {
   makeAccountRecord,
   readDefaultRecord,
 } from "~/lib/auth/github-token-store"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/error"
+import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/http-errors"
 import { createTeeLogger } from "~/lib/platform/logger"
 import { isHeadless, openUrl } from "~/lib/platform/open-url"
 import { PATHS } from "~/lib/platform/paths"

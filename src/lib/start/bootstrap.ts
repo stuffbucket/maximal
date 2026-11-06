@@ -41,7 +41,7 @@ import {
 } from "~/lib/auth/secrets"
 import { logUser, setupCopilotToken } from "~/lib/auth/token"
 import { isAutoRecoverAccountEnabled } from "~/lib/config/config"
-import { CopilotAuthFatalError } from "~/lib/errors/error"
+import { CopilotAuthFatalError } from "~/lib/errors/http-errors"
 import { PATHS } from "~/lib/platform/paths"
 import { cacheModels } from "~/lib/platform/utils"
 import {
