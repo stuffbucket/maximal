@@ -15,11 +15,13 @@ bun run lint         # ESLint with cache (auto-fixes staged files pre-commit)
 bun run lint:all     # ESLint on entire project
 bun run lint:fast    # oxlint — mechanical pass, ~10ms full repo
 bun run typecheck    # tsc type check only (no emit)
+bun run casts        # inventory TypeScript assertions by source/target safety
+bun run casts:check  # fail on unexplained any→concrete boundary assertions
 bun test             # Run all tests
 bun test tests/foo.test.ts  # Run a single test file
 
 # Aggregates
-bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + lint:all + check:tokens (the per-edit inner loop)
+bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + lint:all + casts:check + check:tokens
 bun run check:deep   # check:fast + bun test + knip (end-of-task gate)
 bun run deps:check   # dependency-cruiser layer rules
 bun run knip         # find unused exports/files

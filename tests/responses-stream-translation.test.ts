@@ -197,7 +197,7 @@ describe("translateResponsesStreamEvent upstream failures", () => {
               "This model's maximum context length is 400000 tokens. However, your messages resulted in 412345 tokens.",
           },
         },
-      } as never,
+      },
       createResponsesStreamState(),
     )
     expect(errorOf(events)?.error).toEqual({

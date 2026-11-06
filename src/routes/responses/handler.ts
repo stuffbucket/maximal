@@ -13,6 +13,7 @@ import {
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { requestContext, setRequestUsage } from "~/lib/http/request-context"
+import { asRecord, readNestedUsage } from "~/lib/http/untrusted-frame"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
 import {
   modelMappingErrorBody,
@@ -42,7 +43,6 @@ import {
   createResponses as defaultCreateResponses,
   type ResponsesPayload,
   type ResponsesResult,
-  type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
 
 // Test-only DI shim. Lets tests/responses-handler.test.ts inject a stub
@@ -200,18 +200,21 @@ export const handleResponses = async (c: Context) => {
           || parsedEvent?.type === "response.failed"
           || parsedEvent?.type === "response.incomplete"
         ) {
-          usage = normalizeResponsesUsage(parsedEvent.response.usage)
+          usage = normalizeResponsesUsage(
+            readNestedUsage(parsedEvent, "response"),
+          )
         }
 
-        const processedData = fixStreamIds(
-          (chunk as { data?: string }).data ?? "",
-          (chunk as { event?: string }).event,
-          idTracker,
-        )
+        const chunkRecord = asRecord(chunk)
+        const chunkData =
+          typeof chunkRecord?.data === "string" ? chunkRecord.data : ""
+        const chunkEvent =
+          typeof chunkRecord?.event === "string" ? chunkRecord.event : undefined
+        const processedData = fixStreamIds(chunkData, chunkEvent, idTracker)
 
         await stream.writeSSE({
-          id: (chunk as { id?: string }).id,
-          event: (chunk as { event?: string }).event,
+          id: typeof chunkRecord?.id === "string" ? chunkRecord.id : undefined,
+          event: chunkEvent,
           data: processedData,
         })
       }
@@ -270,14 +273,14 @@ const isStreamingRequested = (payload: ResponsesPayload): boolean =>
 
 const parseResponsesStreamEvent = (
   chunk: unknown,
-): ResponseStreamEvent | null => {
-  const data = (chunk as { data?: string }).data
-  if (!data || data === "[DONE]") {
+): Record<string, unknown> | null => {
+  const data = asRecord(chunk)?.data
+  if (typeof data !== "string" || !data || data === "[DONE]") {
     return null
   }
 
   try {
-    return JSON.parse(data) as ResponseStreamEvent
+    return asRecord(JSON.parse(data)) ?? null
   } catch {
     return null
   }

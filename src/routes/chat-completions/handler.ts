@@ -6,6 +6,7 @@ import { getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { setRequestUsage } from "~/lib/http/request-context"
+import { asRecord, readUsage } from "~/lib/http/untrusted-frame"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
 import {
   modelMappingErrorBody,
@@ -33,7 +34,6 @@ import { responsesCacheTtlSeconds } from "~/lib/token-usage/request-meta"
 import { isNonStreaming } from "~/routes/streaming-predicates"
 import {
   createChatCompletions,
-  type ChatCompletionChunk,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
 
@@ -129,8 +129,9 @@ export async function handleCompletion(c: Context) {
     for await (const chunk of response) {
       debugJson(logger, "Streaming chunk:", chunk)
       const parsedChunk = parseChatCompletionChunk(chunk)
-      if (parsedChunk?.usage) {
-        usage = normalizeOpenAIUsage(parsedChunk.usage)
+      const chunkUsage = readUsage(parsedChunk)
+      if (chunkUsage) {
+        usage = normalizeOpenAIUsage(chunkUsage)
       }
       await stream.writeSSE(chunk as SSEMessage)
     }
@@ -139,16 +140,14 @@ export async function handleCompletion(c: Context) {
   })
 }
 
-const parseChatCompletionChunk = (
-  chunk: unknown,
-): ChatCompletionChunk | null => {
-  const data = (chunk as { data?: string }).data
-  if (!data || data === "[DONE]") {
+const parseChatCompletionChunk = (chunk: unknown): unknown => {
+  const data = asRecord(chunk)?.data
+  if (typeof data !== "string" || !data || data === "[DONE]") {
     return null
   }
 
   try {
-    return JSON.parse(data) as ChatCompletionChunk
+    return JSON.parse(data)
   } catch {
     return null
   }

@@ -28,6 +28,12 @@ describe("normalizeModelsResponse", () => {
     ).toThrow("expected a data array")
   })
 
+  test("rejects catalog entries without required identity fields", () => {
+    expect(() =>
+      normalizeModelsResponse({ data: [{ id: 7, name: "broken" }] }),
+    ).toThrow()
+  })
+
   test("defaults the object field and normalizes every catalog entry", () => {
     const response = normalizeModelsResponse({
       data: [
