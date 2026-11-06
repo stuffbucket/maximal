@@ -5,6 +5,7 @@ import {
   releasePluginClientOffline,
   syncPluginClient,
 } from "~/lib/plugins/clients/sync"
+import { notifyPluginsChanged } from "~/lib/plugins/runtime"
 
 import type { AppUninstallResult, ClientApp } from "../index"
 
@@ -69,6 +70,8 @@ export const claudeCodeApp: ClientApp = {
       setClaudeCodeRoutingIntent(true)
       // Restore the plugin MCP servers the user chose for Claude Code.
       await syncPluginClient(claudeCodePluginClient)
+      // Connectors list Claude Code as a client only while routing is on.
+      notifyPluginsChanged()
     }
     return { success, conflict }
   },
@@ -77,6 +80,7 @@ export const claudeCodeApp: ClientApp = {
     const result = revertProxyBaseUrl()
     setClaudeCodeRoutingIntent(false)
     await syncPluginClient(claudeCodePluginClient, { active: false })
+    notifyPluginsChanged()
     return { success: result.wrote }
   },
 
