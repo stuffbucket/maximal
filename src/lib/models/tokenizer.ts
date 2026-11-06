@@ -84,12 +84,8 @@ const calculateMessageTokens = (
     if (key === "name") {
       tokens += tokensPerName
     }
-    if (key === "tool_calls") {
-      tokens += calculateToolCallsTokens(
-        value as Array<ToolCall>,
-        encoder,
-        constants,
-      )
+    if (key === "tool_calls" && message.tool_calls) {
+      tokens += calculateToolCallsTokens(message.tool_calls, encoder, constants)
     }
     if (key === "content" && Array.isArray(value)) {
       tokens += calculateContentPartsTokens(

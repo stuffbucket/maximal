@@ -72,7 +72,7 @@ export function killOnCloseLimits(): Uint8Array {
  *  adapter, which shares this executable, never loads it. */
 export function loadKernel32(): JobObjectApi {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { dlopen, FFIType } = require("bun:ffi") as typeof BunFfi
+  const { dlopen, FFIType } = require("bun:ffi") as typeof BunFfi // casts-keep: trusted Bun built-in loaded only on the Windows containment path
   const { symbols } = dlopen("kernel32.dll", {
     CreateJobObjectW: {
       args: [FFIType.ptr, FFIType.ptr],

@@ -6,7 +6,6 @@ import { streamSSE } from "hono/streaming"
 import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
-  AnthropicStreamEventData,
 } from "~/lib/models/anthropic-types"
 
 import {
@@ -15,6 +14,11 @@ import {
 } from "~/lib/config/config"
 import { anthropicErrorBody } from "~/lib/errors/anthropic-error"
 import { HTTPError } from "~/lib/errors/error"
+import {
+  asRecord,
+  readNestedUsage,
+  readUsage,
+} from "~/lib/http/untrusted-frame"
 import { createHandlerLogger, debugJson } from "~/lib/platform/logger"
 import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {
@@ -149,20 +153,24 @@ const parseProviderStreamEvent = (
   providerConfig: ResolvedProviderConfig,
 ): { data: string; model?: string; usage: UsageTokens } | null => {
   try {
-    const parsed = JSON.parse(data) as AnthropicStreamEventData
-    if (parsed.type === "message_start") {
-      adjustInputTokens(providerConfig, parsed.message.usage)
+    const parsed: unknown = JSON.parse(data)
+    const parsedRecord = asRecord(parsed)
+    if (parsedRecord?.type === "message_start") {
+      const message = asRecord(parsedRecord.message)
+      const usage = readNestedUsage(parsedRecord, "message")
+      adjustInputTokens(providerConfig, usage)
       return {
         data: JSON.stringify(parsed),
-        model: parsed.message.model,
-        usage: normalizeAnthropicUsage(parsed.message.usage),
+        model: typeof message?.model === "string" ? message.model : undefined,
+        usage: normalizeAnthropicUsage(usage),
       }
     }
-    if (parsed.type === "message_delta") {
-      adjustInputTokens(providerConfig, parsed.usage)
+    if (parsedRecord?.type === "message_delta") {
+      const usage = readUsage(parsedRecord)
+      adjustInputTokens(providerConfig, usage)
       return {
         data: JSON.stringify(parsed),
-        usage: normalizeAnthropicUsage(parsed.usage),
+        usage: normalizeAnthropicUsage(usage),
       }
     }
     return { data: JSON.stringify(parsed), usage: {} }

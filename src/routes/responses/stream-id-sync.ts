@@ -1,27 +1,32 @@
 /**
  * Stream ID Synchronization for @ai-sdk/openai compatibility
  *
- * Problem: GitHub Copilot's Responses API returns different IDs for the same
- * item in 'added' vs 'done' events. This breaks @ai-sdk/openai which expects
- * consistent IDs across the stream lifecycle.
- *
- * Errors without this fix:
- * - "activeReasoningPart.summaryParts" undefined
- * - "text part not found"
- *
- * Use case: OpenCode (AI coding assistant) using Codex models (gpt-5.2-codex)
- * via @ai-sdk/openai provider requires the Responses API endpoint.
+ * GitHub Copilot's Responses API can return different IDs for the same item in
+ * `added` and `done` events. OpenAI-compatible clients expect one stable ID.
+ * Malformed frames pass through unchanged because this runs in the native
+ * Responses stream and must not terminate it.
  */
-
-import type {
-  ResponseOutputItemAddedEvent,
-  ResponseOutputItemDoneEvent,
-  ResponseStreamEvent,
-} from "~/services/copilot/create-responses"
 
 interface StreamIdTracker {
   outputItems: Map<number, string>
 }
+
+interface OutputItemFrame {
+  item: { id?: string }
+  output_index?: unknown
+}
+
+const asOutputItemFrame = (value: unknown): OutputItemFrame | undefined => {
+  if (typeof value !== "object" || value === null) return undefined
+  const item = (value as { item?: unknown }).item
+  if (typeof item !== "object" || item === null) return undefined
+  return value as OutputItemFrame
+}
+
+const readOutputIndex = (frame: {
+  output_index?: unknown
+}): number | undefined =>
+  typeof frame.output_index === "number" ? frame.output_index : undefined
 
 export const createStreamIdTracker = (): StreamIdTracker => ({
   outputItems: new Map(),
@@ -33,28 +38,32 @@ export const fixStreamIds = (
   tracker: StreamIdTracker,
 ): string => {
   if (!data) return data
-  const parsed = JSON.parse(data) as ResponseStreamEvent
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(data)
+  } catch {
+    return data
+  }
+
   switch (event) {
     case "response.output_item.added": {
-      return handleOutputItemAdded(
-        parsed as ResponseOutputItemAddedEvent,
-        tracker,
-      )
+      const frame = asOutputItemFrame(parsed)
+      return frame ? handleOutputItemAdded(frame, tracker) : data
     }
     case "response.output_item.done": {
-      return handleOutputItemDone(
-        parsed as ResponseOutputItemDoneEvent,
-        tracker,
-      )
+      const frame = asOutputItemFrame(parsed)
+      return frame ? handleOutputItemDone(frame, tracker) : data
     }
     default: {
-      return handleItemId(parsed, tracker)
+      if (typeof parsed !== "object" || parsed === null) return data
+      return handleItemId(parsed as Record<string, unknown>, tracker)
     }
   }
 }
 
 const handleOutputItemAdded = (
-  parsed: ResponseOutputItemAddedEvent,
+  parsed: OutputItemFrame,
   tracker: StreamIdTracker,
 ): string => {
   if (!parsed.item.id) {
@@ -62,20 +71,23 @@ const handleOutputItemAdded = (
     while (randomSuffix.length < 16) {
       randomSuffix += Math.random().toString(36).slice(2)
     }
-    parsed.item.id = `oi_${parsed.output_index}_${randomSuffix.slice(0, 16)}`
+    parsed.item.id = `oi_${String(parsed.output_index)}_${randomSuffix.slice(0, 16)}`
   }
 
-  const outputIndex = parsed.output_index
-  tracker.outputItems.set(outputIndex, parsed.item.id)
+  const outputIndex = readOutputIndex(parsed)
+  if (outputIndex !== undefined) {
+    tracker.outputItems.set(outputIndex, parsed.item.id)
+  }
   return JSON.stringify(parsed)
 }
 
 const handleOutputItemDone = (
-  parsed: ResponseOutputItemDoneEvent,
+  parsed: OutputItemFrame,
   tracker: StreamIdTracker,
 ): string => {
-  const outputIndex = parsed.output_index
-  const originalId = tracker.outputItems.get(outputIndex)
+  const outputIndex = readOutputIndex(parsed)
+  const originalId =
+    outputIndex === undefined ? undefined : tracker.outputItems.get(outputIndex)
   if (originalId) {
     parsed.item.id = originalId
   }
@@ -83,10 +95,10 @@ const handleOutputItemDone = (
 }
 
 const handleItemId = (
-  parsed: ResponseStreamEvent & { output_index?: number; item_id?: string },
+  parsed: Record<string, unknown>,
   tracker: StreamIdTracker,
 ): string => {
-  const outputIndex = parsed.output_index
+  const outputIndex = readOutputIndex(parsed)
   if (outputIndex !== undefined) {
     const itemId = tracker.outputItems.get(outputIndex)
     if (itemId) {

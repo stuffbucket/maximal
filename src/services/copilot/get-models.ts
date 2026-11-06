@@ -1,10 +1,110 @@
 import consola from "consola"
+import { z } from "zod"
 
 import { copilotBaseUrl, copilotModelsHeaders } from "~/lib/config/api-config"
 import { HTTPError } from "~/lib/errors/error"
 import { GITHUB_API_TIMEOUT_MS } from "~/lib/http/http-timeouts"
 import { sendRequest } from "~/lib/http/send-request"
 import { state } from "~/lib/runtime-state/state"
+
+const tokenPriceTierSchema = z
+  .object({
+    cache_read_price: z.number().optional(),
+    cache_write_1h_price: z.number().optional(),
+    cache_write_price: z.number().optional(),
+    input_price: z.number().optional(),
+    max_prompt_tokens: z.number().optional(),
+    output_price: z.number().optional(),
+  })
+  .catchall(z.number())
+
+const tokenPricesSchema = z
+  .object({
+    batch_size: z.number().optional(),
+    default: tokenPriceTierSchema.optional(),
+    long_context: tokenPriceTierSchema.optional(),
+    preferred_tier: z.string().optional(),
+    input: z.number().optional(),
+    cache_read: z.number().optional(),
+    cache_write: z.number().optional(),
+    output: z.number().optional(),
+  })
+  .catchall(z.union([z.number(), z.string(), tokenPriceTierSchema, z.null()]))
+
+const modelSchema = z
+  .object({
+    id: z.string(),
+    model_picker_enabled: z.boolean(),
+    name: z.string(),
+    object: z.string(),
+    preview: z.boolean(),
+    vendor: z.string(),
+    version: z.string(),
+    is_chat_default: z.boolean().optional(),
+    is_chat_fallback: z.boolean().optional(),
+    model_picker_category: z.string().optional(),
+    model_picker_price_category: z.string().optional(),
+    description: z.string().optional(),
+    info_messages: z
+      .array(z.object({ code: z.string(), message: z.string() }))
+      .optional(),
+    policy: z.object({ state: z.string(), terms: z.string() }).optional(),
+    supported_endpoints: z.array(z.string()).optional(),
+    billing: z
+      .object({
+        auto_discount: z.number().optional(),
+        restricted_to: z.array(z.string()).optional(),
+        is_premium: z.boolean().optional(),
+        multiplier: z.number().optional(),
+        token_prices: tokenPricesSchema.optional(),
+      })
+      .optional(),
+    capabilities: z
+      .object({
+        family: z.string().optional(),
+        object: z.string().optional(),
+        tokenizer: z.string().optional(),
+        type: z.string().optional(),
+        limits: z
+          .object({
+            max_context_window_tokens: z.number().optional(),
+            max_non_streaming_output_tokens: z.number().optional(),
+            max_output_tokens: z.number().optional(),
+            max_prompt_tokens: z.number().optional(),
+            max_inputs: z.number().optional(),
+            vision: z
+              .object({
+                max_prompt_image_size: z.number().optional(),
+                max_prompt_images: z.number().optional(),
+                supported_media_types: z.array(z.string()).optional(),
+              })
+              .optional(),
+          })
+          .loose()
+          .optional(),
+        supports: z
+          .object({
+            max_thinking_budget: z.number().optional(),
+            min_thinking_budget: z.number().optional(),
+            tool_calls: z.boolean().optional(),
+            parallel_tool_calls: z.boolean().optional(),
+            dimensions: z.boolean().optional(),
+            streaming: z.boolean().optional(),
+            structured_outputs: z.boolean().optional(),
+            vision: z.boolean().optional(),
+            adaptive_thinking: z.boolean().optional(),
+            context_editing: z.boolean().optional(),
+            prediction: z.boolean().optional(),
+            reasoning_effort: z.array(z.string()).optional(),
+            tool_search: z.boolean().optional(),
+          })
+          .loose()
+          .optional(),
+      })
+      .loose()
+      .optional(),
+  })
+  .loose()
 
 export const getModels = async () => {
   consola.info(`Fetching models from ${copilotBaseUrl(state)}/models`)
@@ -41,8 +141,25 @@ export function normalizeModelsResponse(raw: unknown): ModelsResponse {
   return {
     ...parsed,
     object: typeof parsed.object === "string" ? parsed.object : "list",
-    data: parsed.data.map((model) => normalizeModel(model as Model)),
+    data: parsed.data.map((model) => parseModel(model)),
   }
+}
+
+function parseModel(raw: unknown): Model {
+  const parsed = modelSchema.parse(raw)
+  const capabilities = parsed.capabilities ?? {}
+  return normalizeModel({
+    ...parsed,
+    capabilities: {
+      ...capabilities,
+      family: capabilities.family ?? "",
+      type: capabilities.type ?? "",
+      tokenizer: capabilities.tokenizer ?? "o200k_base",
+      object: capabilities.object ?? "model_capabilities",
+      limits: capabilities.limits ?? {},
+      supports: capabilities.supports ?? {},
+    },
+  })
 }
 
 /**

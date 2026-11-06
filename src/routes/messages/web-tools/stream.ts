@@ -49,14 +49,8 @@ import {
 import { translateAnthropicMessagesToResponsesPayload } from "~/routes/messages/responses-translation"
 import { getResponsesRequestOptions } from "~/routes/responses/utils"
 import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
-import {
-  createChatCompletions,
-  type ChatCompletionChunk,
-} from "~/services/copilot/create-chat-completions"
-import {
-  createResponses,
-  type ResponseStreamEvent,
-} from "~/services/copilot/create-responses"
+import { createChatCompletions } from "~/services/copilot/create-chat-completions"
+import { createResponses } from "~/services/copilot/create-responses"
 
 import { translateToOpenAI } from "../non-stream-translation"
 import { translateChunkToAnthropicEvents } from "../stream-translation"
@@ -341,7 +335,7 @@ async function* createChatTurnEventStream(
     if (rawEvent.data === "[DONE]") break
     if (!rawEvent.data) continue
 
-    const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
+    const chunk: unknown = JSON.parse(rawEvent.data)
     yield* translateChunkToAnthropicEvents(chunk, streamState)
   }
 }
@@ -385,7 +379,7 @@ async function* createResponsesTurnEventStream(
     }
     if (!rawEvent.data) continue
 
-    const event = JSON.parse(rawEvent.data) as ResponseStreamEvent
+    const event: unknown = JSON.parse(rawEvent.data)
     yield* translateResponsesStreamEvent(event, streamState)
     if (streamState.messageCompleted) break
   }

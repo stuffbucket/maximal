@@ -2,6 +2,7 @@ import {
   type AnthropicErrorType,
   contextOverflowMessage,
 } from "~/lib/errors/anthropic-error"
+import { asRecord } from "~/lib/http/untrusted-frame"
 import { type AnthropicStreamEventData } from "~/lib/models/anthropic-types"
 import {
   type ResponseCompletedEvent,
@@ -90,6 +91,18 @@ export const createResponsesStreamState = (): ResponsesStreamState => ({
 })
 
 export const translateResponsesStreamEvent = (
+  value: unknown,
+  state: ResponsesStreamState,
+): Array<AnthropicStreamEventData> => {
+  const rawEvent = asRecord(value)
+  if (!rawEvent) return []
+  return dispatchResponsesStreamEvent(
+    rawEvent as unknown as ResponseStreamEvent,
+    state,
+  )
+}
+
+const dispatchResponsesStreamEvent = (
   rawEvent: ResponseStreamEvent,
   state: ResponsesStreamState,
 ): Array<AnthropicStreamEventData> => {
@@ -154,6 +167,7 @@ const handleResponseCreated = (
   rawEvent: ResponseCreatedEvent,
   state: ResponsesStreamState,
 ): Array<AnthropicStreamEventData> => {
+  if (!asRecord(rawEvent.response)) return []
   return messageStart(state, rawEvent.response)
 }
 
@@ -197,6 +211,7 @@ const handleOutputItemDone = (
 ): Array<AnthropicStreamEventData> => {
   const events = new Array<AnthropicStreamEventData>()
   const item = rawEvent.item
+  if (!asRecord(item)) return events
   const itemType = item.type
   const outputIndex = rawEvent.output_index
 
@@ -274,7 +289,7 @@ const handleFunctionCallArgumentsDelta = (
   const outputIndex = rawEvent.output_index
   const deltaText = rawEvent.delta
 
-  if (!deltaText) {
+  if (typeof deltaText !== "string" || !deltaText) {
     return events
   }
 
@@ -469,7 +484,27 @@ const handleResponseCompleted = (
   const events = new Array<AnthropicStreamEventData>()
 
   closeAllOpenBlocks(state, events)
-  const anthropic = translateResponsesResultToAnthropic(response)
+  if (!asRecord(response)) {
+    events.push(
+      buildErrorEvent(
+        `Upstream sent ${rawEvent.type} with no response body; the stream cannot be completed.`,
+      ),
+    )
+    state.messageCompleted = true
+    return events
+  }
+  let anthropic
+  try {
+    anthropic = translateResponsesResultToAnthropic(response)
+  } catch {
+    events.push(
+      buildErrorEvent(
+        `Upstream sent malformed ${rawEvent.type} response data; the stream cannot be completed.`,
+      ),
+    )
+    state.messageCompleted = true
+    return events
+  }
   events.push(
     {
       type: "message_delta",
@@ -493,8 +528,11 @@ const handleResponseFailed = (
   const events = new Array<AnthropicStreamEventData>()
   closeAllOpenBlocks(state, events)
 
+  const errorMessage = asRecord(asRecord(response)?.error)?.message
   const message =
-    response.error?.message ?? "The response failed due to an unknown error."
+    typeof errorMessage === "string" ? errorMessage : (
+      "The response failed due to an unknown error."
+    )
 
   events.push(buildUpstreamErrorEvent(message))
   state.messageCompleted = true
@@ -742,6 +780,7 @@ const extractFunctionCallDetails = (
   rawEvent: ResponseOutputItemAddedEvent,
 ): FunctionCallDetails | undefined => {
   const item = rawEvent.item
+  if (!asRecord(item)) return undefined
   const itemType = item.type
   if (itemType !== "function_call") {
     return undefined

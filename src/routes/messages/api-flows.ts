@@ -10,8 +10,12 @@ import type { Model } from "~/services/copilot/get-models"
 import { getPromptCacheRetention } from "~/lib/config/config"
 import { setRequestUsage } from "~/lib/http/request-context"
 import {
+  asRecord,
+  readNestedUsage,
+  readUsage,
+} from "~/lib/http/untrusted-frame"
+import {
   type AnthropicMessagesPayload,
-  type AnthropicStreamEventData,
   type AnthropicStreamState,
 } from "~/lib/models/anthropic-types"
 import { debugJson, debugJsonTail, debugLazy } from "~/lib/platform/logger"
@@ -43,16 +47,12 @@ import {
   getResponsesRequestOptions,
 } from "~/routes/responses/utils"
 import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
-import {
-  createChatCompletions,
-  type ChatCompletionChunk,
-} from "~/services/copilot/create-chat-completions"
+import { createChatCompletions } from "~/services/copilot/create-chat-completions"
 import { createMessages } from "~/services/copilot/create-messages"
 import {
   createResponses,
   type ResponsesPayload,
   type ResponsesResult,
-  type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
 
 import {
@@ -145,9 +145,10 @@ export const handleWithChatCompletions = async (
           continue
         }
 
-        const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
-        if (chunk.usage) {
-          usage = normalizeOpenAIUsage(chunk.usage)
+        const chunk: unknown = JSON.parse(rawEvent.data)
+        const chunkUsage = readUsage(chunk)
+        if (chunkUsage) {
+          usage = normalizeOpenAIUsage(chunkUsage)
         }
         const events = translateChunkToAnthropicEvents(chunk, streamState)
 
@@ -223,13 +224,16 @@ export const handleWithResponsesApi = async (
           if (!data) continue
 
           debugLazy(logger, () => ["Responses raw stream event:", data])
-          const responseEvent = JSON.parse(data) as ResponseStreamEvent
+          const responseEvent: unknown = JSON.parse(data)
+          const responseEventType = asRecord(responseEvent)?.type
           if (
-            responseEvent.type === "response.completed"
-            || responseEvent.type === "response.failed"
-            || responseEvent.type === "response.incomplete"
+            responseEventType === "response.completed"
+            || responseEventType === "response.failed"
+            || responseEventType === "response.incomplete"
           ) {
-            usage = normalizeResponsesUsage(responseEvent.response.usage)
+            usage = normalizeResponsesUsage(
+              readNestedUsage(responseEvent, "response"),
+            )
           }
 
           for (const event of translateResponsesStreamEvent(
@@ -374,16 +378,18 @@ export const handleWithMessagesApi = async (
           }
           debugLazy(logger, () => ["Messages raw stream event:", data])
           const parsedEvent = parseAnthropicStreamEvent(data)
-          const resolvedEventName = eventName ?? parsedEvent?.type
-          if (parsedEvent?.type === "message_start") {
+          const parsedEventType =
+            typeof parsedEvent?.type === "string" ? parsedEvent.type : undefined
+          const resolvedEventName = eventName ?? parsedEventType
+          if (parsedEventType === "message_start") {
             usage = mergeAnthropicUsage(
               usage,
-              normalizeAnthropicUsage(parsedEvent.message.usage),
+              normalizeAnthropicUsage(readNestedUsage(parsedEvent, "message")),
             )
-          } else if (parsedEvent?.type === "message_delta") {
+          } else if (parsedEventType === "message_delta") {
             usage = mergeAnthropicUsage(
               usage,
-              normalizeAnthropicUsage(parsedEvent.usage),
+              normalizeAnthropicUsage(readUsage(parsedEvent)),
             )
           }
           await keepAlive.writeSSE(
@@ -391,7 +397,7 @@ export const handleWithMessagesApi = async (
               event: resolvedEventName,
               data,
             },
-            { isMessageStart: parsedEvent?.type === "message_start" },
+            { isMessageStart: parsedEventType === "message_start" },
           )
         }
       } catch (error) {
@@ -447,9 +453,9 @@ const getMetadataSessionId = (
 
 const parseAnthropicStreamEvent = (
   data: string,
-): AnthropicStreamEventData | null => {
+): Record<string, unknown> | null => {
   try {
-    return JSON.parse(data) as AnthropicStreamEventData
+    return asRecord(JSON.parse(data)) ?? null
   } catch {
     return null
   }

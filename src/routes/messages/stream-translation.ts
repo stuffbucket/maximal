@@ -1,3 +1,4 @@
+import { asRecord } from "~/lib/http/untrusted-frame"
 import {
   type AnthropicStreamEventData,
   type AnthropicStreamState,
@@ -21,18 +22,34 @@ function isToolBlockOpen(state: AnthropicStreamState): boolean {
   )
 }
 
+const readTranslatableChoice = (
+  chunk: unknown,
+): { chunk: ChatCompletionChunk; choice: Choice; delta: Delta } | undefined => {
+  const chunkRecord = asRecord(chunk)
+  const choices = chunkRecord?.choices
+  if (!chunkRecord || !Array.isArray(choices) || choices.length === 0) {
+    return undefined
+  }
+
+  const choice = asRecord(choices[0])
+  if (!choice) return undefined
+
+  return {
+    chunk: chunkRecord as unknown as ChatCompletionChunk,
+    choice: choice as unknown as Choice,
+    delta: (asRecord(choice.delta) as Delta | undefined) ?? {},
+  }
+}
+
 export function translateChunkToAnthropicEvents(
-  chunk: ChatCompletionChunk,
+  rawChunk: unknown,
   state: AnthropicStreamState,
 ): Array<AnthropicStreamEventData> {
   const events: Array<AnthropicStreamEventData> = []
+  const translatable = readTranslatableChoice(rawChunk)
+  if (!translatable) return events
 
-  if (chunk.choices.length === 0) {
-    return events
-  }
-
-  const choice = chunk.choices[0]
-  const { delta } = choice
+  const { chunk, choice, delta } = translatable
 
   handleMessageStart(state, events, chunk)
 
@@ -42,7 +59,7 @@ export function translateChunkToAnthropicEvents(
 
   handleToolCalls(delta, state, events)
 
-  handleFinish(choice, state, { events, chunk })
+  handleFinish(choice, state, { events, chunk, delta })
 
   return events
 }
@@ -53,10 +70,14 @@ function handleFinish(
   context: {
     events: Array<AnthropicStreamEventData>
     chunk: ChatCompletionChunk
+    delta: Delta
   },
 ) {
-  const { events, chunk } = context
-  if (choice.finish_reason && choice.finish_reason.length > 0) {
+  const { events, chunk, delta } = context
+  if (
+    typeof choice.finish_reason === "string"
+    && choice.finish_reason.length > 0
+  ) {
     if (state.thinkingBlockOpen) {
       events.push(
         {
@@ -64,7 +85,7 @@ function handleFinish(
           index: state.contentBlockIndex,
           delta: {
             type: "signature_delta",
-            signature: choice.delta.reasoning_opaque ?? "",
+            signature: delta.reasoning_opaque ?? "",
           },
         },
         {
@@ -115,12 +136,13 @@ function handleToolCalls(
   state: AnthropicStreamState,
   events: Array<AnthropicStreamEventData>,
 ) {
-  if (delta.tool_calls && delta.tool_calls.length > 0) {
+  if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) {
     closeThinkingBlockIfOpen(state, events)
 
     handleReasoningOpaqueInToolCalls(state, events, delta)
 
     for (const toolCall of delta.tool_calls) {
+      if (!asRecord(toolCall)) continue
       if (toolCall.id && toolCall.function?.name) {
         // New tool call starting.
         if (state.contentBlockOpen) {

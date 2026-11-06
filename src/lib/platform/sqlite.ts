@@ -79,6 +79,7 @@ export class UnsupportedNodeSqliteRuntimeError extends Error {
 
 async function openBunDatabase(dbPath: string): Promise<SqliteDatabase> {
   const specifier = ["bun", "sqlite"].join(":")
+  // casts-keep: module namespace from a trusted Bun runtime built-in
   const sqlite = (await import(specifier)) as {
     Database: new (filename: string) => SqliteDatabase
   }
@@ -95,6 +96,7 @@ async function loadNodeSqliteModule(): Promise<{
 
   const specifier = ["node", "sqlite"].join(":")
   try {
+    // casts-keep: module namespace from a trusted Node runtime built-in
     return (await import(specifier)) as {
       DatabaseSync: new (location: string) => SqliteDatabase
     }
