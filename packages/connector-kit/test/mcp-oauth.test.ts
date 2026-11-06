@@ -1,14 +1,17 @@
 import { loadPlugin, waitFor } from "@stuffbucket/maximal-plugin-sdk/testing"
 import { afterEach, describe, expect, test } from "bun:test"
 
+import type { SecretStore } from "../src/auth/secret-store"
 import type { TextStore } from "../src/auth/token-provider"
 
 import { startLoopbackRedirect } from "../src/auth/loopback"
 import {
   createMcpOAuthTokenProvider,
+  LEGACY_OAUTH_FILE,
   OAUTH_FILE,
   type McpOAuthOptions,
 } from "../src/auth/mcp-oauth"
+import { SealedCache } from "../src/auth/sealed-cache"
 import { defineRemoteMcpConnector } from "../src/define"
 import { ConnectorError, toConnectorError } from "../src/errors"
 import {
@@ -16,6 +19,7 @@ import {
   type FakeRemoteMcp,
   type FakeRemoteMcpOptions,
 } from "../src/testing/fake-server"
+import { memorySecretStore } from "../src/testing/secret-store"
 import { rejection } from "./rejection"
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -60,23 +64,44 @@ function browser() {
   }
 }
 
+/** The OAuth state as the provider sealed it, opened with the key in `secrets`. */
+function sealedState(store: TextStore, secrets: SecretStore): SealedCache {
+  return new SealedCache({
+    store,
+    secrets,
+    file: OAUTH_FILE,
+    keyName: "mcp-oauth",
+  })
+}
+
+async function stored(store: TextStore, secrets: SecretStore) {
+  const text = await sealedState(store, secrets).read()
+  return JSON.parse(text ?? "{}") as {
+    tokens?: { access_token: string; refresh_token?: string }
+    client?: { client_id: string }
+    expiresAt?: number
+  }
+}
+
 function provider(
   server: FakeRemoteMcp,
   overrides: Partial<McpOAuthOptions> = {},
 ) {
   const store = memoryStore()
+  const secrets = memorySecretStore()
   const web = browser()
   const tokens = createMcpOAuthTokenProvider({
     endpoint: server.url,
     displayName: "Example",
     store,
+    secrets,
     openBrowser: web.open,
     toError: (error) =>
       toConnectorError(error, { name: "Example", endpoint: server.url }),
     signInTimeoutMs: 10_000,
     ...overrides,
   })
-  return { tokens, store, web }
+  return { tokens, store, secrets, web }
 }
 
 const signal = () => new AbortController().signal
@@ -90,7 +115,7 @@ describe("mcp-oauth sign-in", () => {
         idTokenClaims: { preferred_username: "ada@contoso.com", name: "Ada" },
       },
     })
-    const { tokens, store, web } = provider(server, {
+    const { tokens, store, secrets, web } = provider(server, {
       clientId: "maximal-test",
       scopes: ["mcp.read", "mcp.write"],
     })
@@ -126,15 +151,19 @@ describe("mcp-oauth sign-in", () => {
 
     expect(await tokens.getToken()).toBe("token-1")
     expect(await tokens.account()).toEqual(account)
-    const stored = JSON.parse(store.files.get(OAUTH_FILE) ?? "") as {
-      tokens: { access_token: string; refresh_token: string }
-      client?: unknown
-    }
-    expect(stored.tokens.access_token).toBe("token-1")
-    expect(stored.client).toBeUndefined()
+    const state = await stored(store, secrets)
+    expect(state.tokens?.access_token).toBe("token-1")
+    expect(state.client).toBeUndefined()
+    // On disk only the sealed file, with no usable token in it; the key is
+    // in the credential store.
+    expect([...store.files.keys()]).toEqual([OAUTH_FILE])
+    expect(store.files.get(OAUTH_FILE)).not.toContain("token-1")
+    expect(secrets.entries.size).toBe(1)
+    expect(tokens.credentialNotice?.()).toBeUndefined()
 
     await tokens.signOut()
     expect(store.files.has(OAUTH_FILE)).toBe(false)
+    expect(secrets.entries.size).toBe(0)
     expect(await tokens.account()).toBeUndefined()
   })
 
@@ -153,17 +182,13 @@ describe("mcp-oauth sign-in", () => {
 
   test("a rejected refresh token means signing in again", async () => {
     const server = fake({ oauth: { clientId: "c" } })
-    const { tokens, store } = provider(server, { clientId: "c" })
+    const { tokens, store, secrets } = provider(server, { clientId: "c" })
     await tokens.signIn(signal())
-    const stored = JSON.parse(store.files.get(OAUTH_FILE) ?? "") as Record<
-      string,
-      unknown
-    > & { tokens: Record<string, unknown> }
-    store.files.set(
-      OAUTH_FILE,
+    const state = await stored(store, secrets)
+    await sealedState(store, secrets).write(
       JSON.stringify({
-        ...stored,
-        tokens: { ...stored.tokens, refresh_token: "revoked" },
+        ...state,
+        tokens: { ...state.tokens, refresh_token: "revoked" },
         expiresAt: 0,
       }),
     )
@@ -172,6 +197,7 @@ describe("mcp-oauth sign-in", () => {
       clientId: "c",
       displayName: "Example",
       store,
+      secrets,
       openBrowser: () => Promise.reject(new Error("no browser")),
       toError: (error) => toConnectorError(error, { name: "Example" }),
       signInTimeoutMs: 1000,
@@ -185,7 +211,7 @@ describe("mcp-oauth sign-in", () => {
 
   test("registers dynamically when there is no client id and the AS allows it", async () => {
     const server = fake({ oauth: { registration: true } })
-    const { tokens, store } = provider(server)
+    const { tokens, store, secrets } = provider(server)
     await tokens.signIn(signal())
     expect(server.oauth.registrations).toHaveLength(1)
     expect(server.oauth.registrations[0]).toMatchObject({
@@ -194,10 +220,7 @@ describe("mcp-oauth sign-in", () => {
       grant_types: ["authorization_code", "refresh_token"],
     })
     expect(server.oauth.authorizations[0].get("client_id")).toBe("dcr-1")
-    const stored = JSON.parse(store.files.get(OAUTH_FILE) ?? "") as {
-      client: { client_id: string }
-    }
-    expect(stored.client.client_id).toBe("dcr-1")
+    expect((await stored(store, secrets)).client?.client_id).toBe("dcr-1")
     expect(await tokens.getToken()).toBe("token-1")
   })
 
@@ -249,22 +272,60 @@ function heldRefresh() {
   return { fetchFn, release, held: () => held }
 }
 
-function stored(store: { files: Map<string, string> }) {
-  return JSON.parse(store.files.get(OAUTH_FILE) ?? "{}") as {
-    tokens?: { access_token: string; refresh_token?: string }
-  }
-}
+describe("mcp-oauth state at rest", () => {
+  test("an older plaintext oauth.json moves into the sealed file and is deleted", async () => {
+    const server = fake({ oauth: { clientId: "c" } })
+    const signedIn = provider(server, { clientId: "c" })
+    await signedIn.tokens.signIn(signal())
+    const plaintext = JSON.stringify(
+      await stored(signedIn.store, signedIn.secrets),
+    )
+    expect(plaintext).toContain("token-1")
+
+    // A data folder as an older Maximal left it.
+    const store = memoryStore()
+    store.files.set(LEGACY_OAUTH_FILE, plaintext)
+    const secrets = memorySecretStore()
+    const upgraded = createMcpOAuthTokenProvider({
+      endpoint: server.url,
+      clientId: "c",
+      displayName: "Example",
+      store,
+      secrets,
+      openBrowser: () => Promise.reject(new Error("no browser")),
+      toError: (error) => toConnectorError(error, { name: "Example" }),
+      signInTimeoutMs: 1000,
+    })
+    expect(await upgraded.getToken()).toBe("token-1")
+    expect([...store.files.keys()]).toEqual([OAUTH_FILE])
+    expect(store.files.get(OAUTH_FILE)).not.toContain("token-1")
+  })
+
+  test("without a credential store the sign-in stays in memory and nothing is written", async () => {
+    const server = fake({ oauth: { clientId: "c" } })
+    const secrets = memorySecretStore({
+      unavailable: new Error("libsecret not available"),
+    })
+    const { tokens, store } = provider(server, { clientId: "c", secrets })
+    await tokens.signIn(signal())
+    expect(await tokens.getToken()).toBe("token-1")
+    expect(store.files.size).toBe(0)
+    expect(tokens.credentialNotice?.()).toMatchObject({
+      fact: "Kept until Maximal restarts",
+    })
+  })
+})
 
 describe("mcp-oauth refresh", () => {
   test("a caller's abort leaves the shared refresh running, and the rotated tokens are saved", async () => {
     const server = fake({ oauth: { clientId: "c", expiresIn: 30 } })
     const hold = heldRefresh()
-    const { tokens, store } = provider(server, {
+    const { tokens, store, secrets } = provider(server, {
       clientId: "c",
       fetch: hold.fetchFn,
     })
     await tokens.signIn(signal())
-    const before = stored(store).tokens?.refresh_token
+    const before = (await stored(store, secrets)).tokens?.refresh_token
     server.token = "token-2"
     const impatient = new AbortController()
     const first = tokens.getToken(impatient.signal)
@@ -275,7 +336,7 @@ describe("mcp-oauth refresh", () => {
     hold.release()
     expect(await second).toBe("token-2")
     expect(hold.held()).toBe(1)
-    const rotated = stored(store).tokens?.refresh_token
+    const rotated = (await stored(store, secrets)).tokens?.refresh_token
     expect(rotated).toBeDefined()
     expect(rotated).not.toBe(before)
     // The rotated refresh token works for the next refresh (no invalid_grant).
@@ -331,18 +392,22 @@ describe("mcp-oauth connector", () => {
         idTokenClaims: { email: "grace@contoso.com" },
       },
     })
-    const module = defineRemoteMcpConnector({
-      id: "remote",
-      kind: "connector",
-      displayName: "Remote",
-      description: "A remote MCP server with MCP OAuth.",
-      settingsVersion: 1,
-      connector: {
-        transport: "streamable-http",
-        endpoint: server.url,
-        auth: { type: "mcp-oauth", clientId: "maximal-test" },
+    const secrets = memorySecretStore()
+    const module = defineRemoteMcpConnector(
+      {
+        id: "remote",
+        kind: "connector",
+        displayName: "Remote",
+        description: "A remote MCP server with MCP OAuth.",
+        settingsVersion: 1,
+        connector: {
+          transport: "streamable-http",
+          endpoint: server.url,
+          auth: { type: "mcp-oauth", clientId: "maximal-test" },
+        },
       },
-    })
+      { secretStore: secrets },
+    )
     expect(module.Config.parse({})).toEqual({ endpoint: server.url })
     const web = browser()
     const plugin = await loadPlugin(module, {}, { openExternal: web.open })
@@ -358,6 +423,10 @@ describe("mcp-oauth connector", () => {
     expect(plugin.testbed.host.opened).toHaveLength(1)
     expect(Object.keys(plugin.testbed.storage.files("remote"))).toEqual([
       OAUTH_FILE,
+    ])
+    // The key is in the (scoped) credential store, not on disk.
+    expect([...secrets.entries.keys()]).toEqual([
+      expect.stringMatching(/^remote\/mcp-oauth\//) as unknown as string,
     ])
 
     // The server rotates its accepted token; the connector refreshes once and retries.

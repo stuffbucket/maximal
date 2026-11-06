@@ -92,8 +92,11 @@ replaces it.
 whose `state` is not this sign-in's. A static `clientId` is used as is; without one the kit
   registers dynamically (RFC 7591) only if the server advertises it, and
   fails clearly otherwise. Account details come from an `id_token` when the
-  server sends one. State: `oauth.json` (client, tokens, discovery,
-  resource). A rejected refresh token means signing in again.
+  server sends one. State (client, tokens, discovery, resource) is sealed
+  like Entra's cache, below: `oauth.sealed.json`, key entry
+  `<id>/mcp-oauth/<key id>`; a plaintext `oauth.json` from an older version
+  is moved in at start and deleted. A rejected refresh token means signing
+  in again.
 - **`none`** — public server: no sign-in, no `Authorization` header, no
   sign-in/sign-out actions.
 
@@ -132,8 +135,8 @@ access denied) the cache is kept in memory only until the connector stops —
 never written in plain text — and the `ready` status says so (a "Sign-in"
 fact and a `detail` naming what to install). Under `bun test` the OS store
 refuses every call, so a test that forgets to inject one gets the
-memory-only behaviour, never the real Keychain. MCP OAuth's `oauth.json` is
-still plain text (0600).
+memory-only behaviour, never the real Keychain. MCP OAuth's state is sealed
+the same way.
 
 ## Upstream
 

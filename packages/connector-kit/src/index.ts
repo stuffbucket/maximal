@@ -17,6 +17,7 @@ export {
 } from "./auth/entra"
 export {
   createMcpOAuthTokenProvider,
+  LEGACY_OAUTH_FILE,
   mcpOAuth,
   type McpOAuthOptions,
   type McpOAuthOverrides,

@@ -16,6 +16,7 @@ import type {
   AuthEnv,
   AuthStrategy,
   ConnectorAccount,
+  CredentialNotice,
   TokenProvider,
 } from "./token-provider"
 
@@ -23,14 +24,24 @@ import { ConnectorError, isAbort, signedOut } from "../errors"
 import { abortable } from "../util"
 import { signInPage, stoppedSignIn } from "./entra"
 import { startLoopbackRedirect, type LoopbackRedirect } from "./loopback"
+import { SealedCache } from "./sealed-cache"
 
-/** Storage file holding this connector's OAuth state (0600 via `ctx.storage`). */
-export const OAUTH_FILE = "oauth.json"
+/**
+ * Storage file holding this connector's OAuth state, encrypted with a key
+ * kept in the OS credential store (see `SealedCache`).
+ */
+export const OAUTH_FILE = "oauth.sealed.json"
+
+/** The plaintext state older versions wrote; moved into `OAUTH_FILE` on first start. */
+export const LEGACY_OAUTH_FILE = "oauth.json"
+
+/** Entry name (before its random key id) of the state's key in the OS credential store. */
+const OAUTH_KEY = "mcp-oauth"
 
 /** Refresh an access token this close to its expiry. */
 const REFRESH_MARGIN_MS = 60_000
 
-/** What `oauth.json` holds. Tokens never leave this connector. */
+/** What the OAuth state holds. Tokens never leave this connector. */
 interface OAuthRecord {
   /** Client registered dynamically (absent with a manifest `clientId`). */
   client?: StoredOAuthClientInformation
@@ -49,7 +60,10 @@ export interface McpOAuthOptions {
   clientId?: string
   scopes?: ReadonlyArray<string>
   displayName: string
+  /** The connector's private storage: holds the sealed state file. */
   store: AuthEnv["store"]
+  /** The OS credential store: holds the state's key (tests: an in-memory fake). */
+  secrets: AuthEnv["secrets"]
   openBrowser(url: string): Promise<void>
   toError(error: unknown): ConnectorError
   logger?: AuthEnv["logger"]
@@ -231,9 +245,29 @@ class McpOAuthTokenProvider implements TokenProvider {
    */
   #epoch = 0
 
+  readonly #state: SealedCache
+
   constructor(options: McpOAuthOptions) {
     this.#options = options
     this.#now = options.now ?? Date.now
+    this.#state = new SealedCache({
+      store: options.store,
+      secrets: options.secrets,
+      file: OAUTH_FILE,
+      legacyFile: LEGACY_OAUTH_FILE,
+      keyName: OAUTH_KEY,
+      ...(options.logger ? { logger: options.logger } : {}),
+    })
+    // Move older plaintext state off disk now, not at the first token lookup.
+    this.#state.migrate().catch((error: unknown) => {
+      options.logger?.warn(
+        `Could not move the plaintext ${LEGACY_OAUTH_FILE}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+  }
+
+  credentialNotice(): CredentialNotice | undefined {
+    return this.#state.memoryOnly
   }
 
   async account(): Promise<ConnectorAccount | undefined> {
@@ -317,7 +351,7 @@ class McpOAuthTokenProvider implements TokenProvider {
   async signOut(): Promise<void> {
     this.#switch()
     this.#cached = {}
-    await this.#options.store.delete(OAUTH_FILE)
+    await this.#state.clear()
   }
 
   /** The account changes: drop the shared refresh and outdate saves already under way. */
@@ -398,14 +432,14 @@ class McpOAuthTokenProvider implements TokenProvider {
 
   async #load(): Promise<OAuthRecord> {
     if (this.#cached) return this.#cached
-    const text = await this.#options.store.readText(OAUTH_FILE)
+    const text = await this.#state.read()
     let parsed: OAuthRecord = {}
     if (text) {
       try {
         parsed = record(JSON.parse(text)) ?? {}
       } catch {
         this.#options.logger?.warn(
-          `Ignoring an unreadable ${OAUTH_FILE}; sign in again.`,
+          "Ignoring unreadable OAuth state; sign in again.",
         )
       }
     }
@@ -415,7 +449,7 @@ class McpOAuthTokenProvider implements TokenProvider {
 
   async #save(next: OAuthRecord): Promise<void> {
     this.#cached = next
-    await this.#options.store.writeText(OAUTH_FILE, `${JSON.stringify(next)}\n`)
+    await this.#state.write(`${JSON.stringify(next)}\n`)
   }
 
   #withTokens(current: OAuthRecord, tokens: StoredOAuthTokens): OAuthRecord {
@@ -505,6 +539,7 @@ export function mcpOAuth(
         ...(manifest.scopes ? { scopes: manifest.scopes } : {}),
         displayName: env.displayName,
         store: env.store,
+        secrets: env.secrets,
         openBrowser: env.openBrowser,
         toError: env.toError,
         logger: env.logger,
