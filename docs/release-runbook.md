@@ -163,8 +163,9 @@ It finishes with `site/scripts/verify-dist.mjs`.
   rebuilds the old pages under `site/` instead. To build a specific
   maximal-site ref, pass `-f content-ref=<ref>`.
 
-`build-mxml.yml` runs from maximal-site's `main`, so a change to that workflow
-takes effect on the next deploy here, whatever the tags say.
+`build-mxml.yml` is pinned to a maximal-site commit in `deploy-pages.yml`, like
+any action. A change to that workflow takes effect here only when a PR moves
+the pin; the content it builds still follows the tags.
 
 ## Recovery
 

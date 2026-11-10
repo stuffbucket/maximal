@@ -278,8 +278,8 @@ describe("pages (deploy-pages.yml)", () => {
 
   test("pages come from stuffbucket/maximal-site, picked by this deploy's manifest", () => {
     expect(content).toContain("if: inputs.source != 'legacy'")
-    expect(content).toContain(
-      "uses: stuffbucket/maximal-site/.github/workflows/build-mxml.yml@main",
+    expect(content).toMatch(
+      /uses: stuffbucket\/maximal-site\/\.github\/workflows\/build-mxml\.yml@[0-9a-f]{40} # v\d+\.\d+\.\d+\n/u,
     )
     expect(content).toContain(
       "manifest-path: site/public/updates/manifest.json",

@@ -141,12 +141,14 @@ jobs:
   # or below the stable version in site/public/updates/manifest.json (see that
   # repository's README, "How mxml.sh is published"). It uploads the same
   # `site` artifact the legacy build would; deploy adds what this repository
-  # serves on top. Skipped when dispatched with source=legacy.
+  # serves on top. Skipped when dispatched with source=legacy. The workflow
+  # itself is pinned like any action: a change to it reaches this deploy only
+  # when this pin moves.
   content:
     if: inputs.source != 'legacy'
     permissions:
       contents: read
-    uses: stuffbucket/maximal-site/.github/workflows/build-mxml.yml@main
+    uses: stuffbucket/maximal-site/.github/workflows/build-mxml.yml@3527fa87691a732dfb8eaa919da5fa5d595ca1da # v0.5.2
     with:
       manifest-path: site/public/updates/manifest.json
       ref: ${{ inputs.content-ref }}
