@@ -11,7 +11,7 @@
  * when the token is usable. The `usage` lookup is injectable for tests.
  */
 
-import { HTTPError } from "~/lib/errors/error"
+import { HTTPError } from "~/lib/errors/http-errors"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
 
 export type PreflightCopilotErrorFn = (

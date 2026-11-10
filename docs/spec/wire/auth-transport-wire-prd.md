@@ -83,18 +83,29 @@ without exposing those endpoints to remote callers.
 | Scenario | Status | Body / headers |
 |---|---|---|
 | Missing/invalid API key (enforce on) | `401` | `{ "error": { "message": "Unauthorized", "type": "authentication_error" } }` + `WWW-Authenticate: Bearer realm="copilot-api"` |
-| `requireGithubAuth` with no GitHub token | `401` | `{ "error": "not_authenticated", "hint": "Open Settings → Account to sign in, or run \`maximal auth\`." }` |
+| No GitHub token, inference route (`/v1/messages`, `/:provider/v1/messages` and their `count_tokens`) | `503` | `{ "type": "error", "error": { "type": "api_error", "message": "Maximal isn't signed in to GitHub, … Settings → Account …" } }` + `x-should-retry: false` |
+| No GitHub token, inference route (`/chat/completions`, `/responses`, with or without `/v1`) | `503` | `{ "error": { "message": "Maximal isn't signed in to GitHub, …", "type": "service_unavailable", "code": "maximal_not_signed_in" } }` + `x-should-retry: false` |
+| No GitHub token, other gated route (`/usage`, `/models`, `/embeddings`, with or without `/v1`; `/:provider/v1/models`) | `401` | `{ "error": "not_authenticated", "hint": "Open Settings → Account to sign in, or run \`maximal auth\`." }` |
 
 ## GitHub token gate (`requireGithubAuth`)
 
-Mounted on `/chat/completions(*)`, `/models(*)`, `/embeddings(*)`,
-`/responses(*)`, `/v1/*`, and `/:provider/v1/*` in `src/server.ts`.
+Mounted by the inference route modules themselves (messages, provider
+messages, chat completions, responses), and in `src/server.ts` on
+`/models(*)`, `/embeddings(*)`, `/usage(*)`, their `/v1` forms and
+`/:provider/v1/models(*)`.
 
 When the sidecar boots **without** a GitHub token, the HTTP server still
 listens (so the desktop shell can load Settings and trigger auth on
-demand), but every upstream-touching endpoint returns the
-`not_authenticated` 401 above instead of crashing or firing the
-device-code flow.
+demand), but every upstream-touching endpoint refuses instead of
+crashing or firing the device-code flow. The gate throws
+`NoUpstreamError`. On the inference routes it reaches the route's error
+handler (`src/lib/errors/proxy-errors.ts`), which answers `503` in the
+client's format with a sign-in instruction and `x-should-retry: false`:
+the person sees what to do at once, and the client doesn't retry. A `401`
+would not do: a client that gets its key from an `apiKeyHelper` (Claude
+Code, set up by Maximal) re-runs the helper and retries a 401 for minutes
+before showing anything. Elsewhere the error's own response is the
+`not_authenticated` 401 above, which the Dashboard reads on `/usage`.
 
 ## Upstream authentication (proxy → Copilot)
 
@@ -293,9 +304,10 @@ responses are held open for the duration of the stream.
 1. A request to `/v1/messages` with no `x-api-key` while
    `auth.enforce=true` → `401` `authentication_error` +
    `WWW-Authenticate`.
-2. A request to any upstream endpoint while the sidecar has no GitHub
-   token → `401` `not_authenticated` with the Settings hint; the server
-   stays up.
+2. A request to an inference endpoint while the sidecar has no GitHub
+   token → `503` with `x-should-retry: false` and the sign-in message in
+   the client's format; to any other upstream endpoint → `401`
+   `not_authenticated` with the Settings hint. The server stays up.
 3. A remote (non-loopback) `GET /usage` with a valid key succeeds; with
    no/invalid key → `401`. The same path from loopback succeeds without a
    key.

@@ -30,7 +30,7 @@ import {
   isOpencodeOauthApp,
 } from "~/lib/config/api-config"
 import { getAnthropicApiKey } from "~/lib/config/config"
-import { HTTPError } from "~/lib/errors/error"
+import { HTTPError } from "~/lib/errors/http-errors"
 import { state } from "~/lib/runtime-state/state"
 
 const ANTHROPIC_API_BASE_URL = "https://api.anthropic.com"
