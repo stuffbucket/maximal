@@ -229,7 +229,7 @@ describe("apt repository (deploy-pages.yml)", () => {
   })
 
   test("deploy publishes /apt only from sign-apt and the committed key, verified", () => {
-    expect(deploy).toContain("needs: [build, sign-apt]")
+    expect(deploy).toContain("needs: [build, content, sign-apt]")
     expect(deploy).toContain(
       "needs.sign-apt.result == 'success' || needs.sign-apt.result == 'skipped'",
     )
@@ -268,6 +268,57 @@ describe("apt repository (deploy-pages.yml)", () => {
   test("indexes are served by hash", () => {
     expect(APT_REPO).toContain("-o APT::FTPArchive::DoByHash=true")
     expect(APT_REPO).toContain("grep -qx 'Acquire-By-Hash: yes'")
+  })
+})
+
+describe("pages (deploy-pages.yml)", () => {
+  const build = job(DEPLOY, "build")
+  const content = job(DEPLOY, "content")
+  const deploy = job(DEPLOY, "deploy")
+
+  test("pages come from stuffbucket/maximal-site, picked by this deploy's manifest", () => {
+    expect(content).toContain("if: inputs.source != 'legacy'")
+    expect(content).toContain(
+      "uses: stuffbucket/maximal-site/.github/workflows/build-mxml.yml@main",
+    )
+    expect(content).toContain(
+      "manifest-path: site/public/updates/manifest.json",
+    )
+    expect(content).toContain("artifact-name: site")
+    // The pages build runs another repository's code: no secrets reach it.
+    expect(content).not.toContain("secrets:")
+    expect(content).not.toContain("secrets.")
+  })
+
+  test("the old site/ build only runs as the legacy rollback", () => {
+    for (const step of ["- name: Build Astro", "- name: Upload the site"]) {
+      const at = build.indexOf(step)
+      expect(at).toBeGreaterThan(-1)
+      expect(build.slice(at, build.indexOf("\n      - ", at + 1))).toContain(
+        "if: inputs.source == 'legacy'",
+      )
+    }
+  })
+
+  test("deploy adds this repository's files over the pages, then verifies", () => {
+    expect(deploy).toContain(
+      "needs.content.result == 'success' || needs.content.result == 'skipped'",
+    )
+    expect(deploy).toContain(
+      "rm -rf site/dist/CNAME site/dist/updates site/dist/maximal",
+    )
+    expect(deploy).toContain("cp src/site/public/CNAME site/dist/CNAME")
+    expect(deploy).toContain("cp -R src/site/public/updates site/dist/updates")
+    expect(deploy).toContain(
+      "cp src/site/public/maximal/index.html site/dist/maximal/index.html",
+    )
+    const overlay = deploy.indexOf("cp src/site/public/CNAME")
+    const verify = deploy.indexOf("node src/site/scripts/verify-dist.mjs")
+    expect(overlay).toBeGreaterThan(deploy.indexOf("name: site\n"))
+    expect(verify).toBeGreaterThan(overlay)
+    expect(verify).toBeLessThan(
+      deploy.indexOf("uses: actions/upload-pages-artifact@"),
+    )
   })
 })
 

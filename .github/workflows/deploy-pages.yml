@@ -23,7 +23,19 @@ on:
       - ".github/workflows/deploy-pages.yml"
       - "build/linux/apt-repo.sh"
       - "scripts/apt-repo-plan.ts"
+  # Also the way to publish a stuffbucket/maximal-site content change without a
+  # release: `gh workflow run deploy-pages.yml --ref main`.
   workflow_dispatch:
+    inputs:
+      source:
+        description: Where the pages come from. `legacy` rebuilds the old site/ here, as a rollback.
+        type: choice
+        options: [maximal-site, legacy]
+        default: maximal-site
+      content-ref:
+        description: Build this stuffbucket/maximal-site ref instead of the tag matching the stable version.
+        type: string
+        default: ""
 
 # Read-only by default; each job asks for what it needs.
 permissions:
@@ -39,9 +51,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Build the Astro site under ./site and decide what the apt repository
-  # carries. No secrets, and nothing it produces is signed: it runs project
-  # dependencies, so the packages and indexes are built in `sign-apt` instead.
+  # Decide what the apt repository carries, and with source=legacy build the
+  # old Astro site under ./site. No secrets, and nothing it produces is signed:
+  # it runs project dependencies, so the packages and indexes are built in
+  # `sign-apt` instead.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -53,6 +66,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
+        if: inputs.source == 'legacy'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.23.2"
@@ -62,6 +76,7 @@ jobs:
           bun-version: 1.4.3
 
       - name: Install site dependencies
+        if: inputs.source == 'legacy'
         working-directory: site
         run: bun install --frozen-lockfile
 
@@ -73,6 +88,7 @@ jobs:
       # rate-limit exposure here, and the build is deterministic + offline. #221's
       # runtime hydration still layers over this baked, fail-closed fallback.
       - name: Build Astro
+        if: inputs.source == 'legacy'
         working-directory: site
         run: bun run build
 
@@ -112,6 +128,7 @@ jobs:
       # `overwrite` keeps "Re-run failed jobs" working: a rerun replaces the
       # earlier attempt's artifact instead of failing on the name.
       - name: Upload the site
+        if: inputs.source == 'legacy'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: site
@@ -119,6 +136,21 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 1
+
+  # The pages, built from stuffbucket/maximal-site at the newest tag there at
+  # or below the stable version in site/public/updates/manifest.json (see that
+  # repository's README, "How mxml.sh is published"). It uploads the same
+  # `site` artifact the legacy build would; deploy adds what this repository
+  # serves on top. Skipped when dispatched with source=legacy.
+  content:
+    if: inputs.source != 'legacy'
+    permissions:
+      contents: read
+    uses: stuffbucket/maximal-site/.github/workflows/build-mxml.yml@main
+    with:
+      manifest-path: site/public/updates/manifest.json
+      ref: ${{ inputs.content-ref }}
+      artifact-name: site
 
   # Build and sign the apt repository: download the packages, write the
   # indexes, sign them. The only job that can read the signing secrets (they
@@ -188,13 +220,16 @@ jobs:
           overwrite: true
           retention-days: 1
 
-  # Deploy the built site, with the signed apt repository when there is one.
+  # Deploy the pages with what this repository serves on top (CNAME, /updates,
+  # the /maximal/ redirect), and the signed apt repository when there is one.
   deploy:
-    needs: [build, sign-apt]
-    # Runs after a successful build whether sign-apt ran or was skipped (no
-    # Linux packages yet); never after a failed or cancelled one.
+    needs: [build, content, sign-apt]
+    # Runs after a successful build and pages build (content, or build itself
+    # with source=legacy) whether sign-apt ran or was skipped (no Linux
+    # packages yet); never after a failed or cancelled one.
     if: >-
       ${{ !cancelled() && needs.build.result == 'success'
+      && (needs.content.result == 'success' || needs.content.result == 'skipped')
       && (needs.sign-apt.result == 'success' || needs.sign-apt.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -209,13 +244,17 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout the apt script and public key
+      - name: Checkout the apt script, public key and the files this repository serves
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: |
             build/linux/apt-repo.sh
             site/public/apt/maximal.asc
+            site/public/CNAME
+            site/public/updates
+            site/public/maximal/index.html
+            site/scripts/verify-dist.mjs
           sparse-checkout-cone-mode: false
           path: src
 
@@ -224,6 +263,18 @@ jobs:
         with:
           name: site
           path: site/dist
+
+      # The domain, the update manifests installed apps read, and the redirect
+      # old app builds link to come only from this repository, never from the
+      # pages build.
+      - name: Add the files this repository serves
+        run: |
+          set -euo pipefail
+          rm -rf site/dist/CNAME site/dist/updates site/dist/maximal
+          cp src/site/public/CNAME site/dist/CNAME
+          cp -R src/site/public/updates site/dist/updates
+          mkdir -p site/dist/maximal
+          cp src/site/public/maximal/index.html site/dist/maximal/index.html
 
       # /apt comes only from sign-apt and the repository's public key, never
       # from the site build.
@@ -262,6 +313,13 @@ jobs:
             echo "::error::Files over 95 MB (GitHub Pages allows 100 MB): $big"
             exit 1
           fi
+
+      # The assembled site: CNAME, the /maximal/ redirect, no /maximal/ asset
+      # paths, styles and favicon present.
+      - name: Verify the site
+        env:
+          DIST_DIR: site/dist
+        run: node src/site/scripts/verify-dist.mjs
 
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0

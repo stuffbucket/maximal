@@ -16,7 +16,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DIST = resolve(HERE, "..", "dist");
+// DIST_DIR points it at another tree: deploy-pages.yml checks the assembled
+// site (pages from stuffbucket/maximal-site plus this repository's files).
+const DIST = process.env.DIST_DIR
+  ? resolve(process.env.DIST_DIR)
+  : resolve(HERE, "..", "dist");
 const EXPECTED_CNAME = "mxml.sh";
 
 const errors = [];
