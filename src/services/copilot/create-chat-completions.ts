@@ -51,6 +51,7 @@ export const createChatCompletions = async (
   return finishUpstreamResponse<ChatCompletionResponse>(response, {
     stream: Boolean(payload.stream),
     errorMessage: "Failed to create chat completions",
+    call: { endpoint: "/chat/completions", model: payload.model },
   })
 }
 

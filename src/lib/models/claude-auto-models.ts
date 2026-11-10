@@ -38,16 +38,21 @@ interface ResolveClaudeAutoModelsInput {
   sessionModel?: string
 }
 
-const ROUTABLE_ENDPOINTS = new Set([
+/** Copilot endpoints the proxy can send an inference request to. */
+export const ROUTABLE_ENDPOINTS: ReadonlySet<string> = new Set([
   "/v1/messages",
   "/responses",
   "/chat/completions",
 ])
 
+/**
+ * Models Maximal may pick for a Claude Code tier: a non-embeddings,
+ * non-variant model that calls tools, streams and serves a routable endpoint.
+ * Copilot's picker visibility doesn't matter.
+ */
 export function isClaudeAutoModelEligible(model: Model): boolean {
   const sparse = model as {
     id?: unknown
-    model_picker_enabled?: unknown
     supported_endpoints?: unknown
     capabilities?: {
       type?: unknown
@@ -55,7 +60,6 @@ export function isClaudeAutoModelEligible(model: Model): boolean {
     }
   }
   if (typeof sparse.id !== "string" || sparse.id.length === 0) return false
-  if (sparse.model_picker_enabled !== true) return false
   if (sparse.capabilities?.type === "embeddings") return false
   if (isVariantId(sparse.id)) return false
   if (sparse.capabilities?.supports?.tool_calls !== true) return false

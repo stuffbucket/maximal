@@ -5,6 +5,7 @@ import type { Model } from "~/services/copilot/get-models"
 import {
   isClaudeTierClass,
   isGptClass,
+  isSmallClassName,
   isSmallGptClass,
 } from "~/lib/models/model-identity"
 
@@ -95,4 +96,20 @@ describe("small GPT identity", () => {
   ])("rejects partial or non-GPT small names %#", (id, family, vendor) => {
     expect(isSmallGptClass(identityModel(id, family, vendor))).toBe(false)
   })
+})
+
+describe("small-class names", () => {
+  test.each(["gpt-5-mini", "GPT-5.4-Nano", "phi_small", "mini"])(
+    "matches a bounded small token in %s",
+    (name) => {
+      expect(isSmallClassName(name)).toBe(true)
+    },
+  )
+
+  test.each(["gemini-x", "gpt-minimal", "gptnano", ""])(
+    "ignores %s",
+    (name) => {
+      expect(isSmallClassName(name)).toBe(false)
+    },
+  )
 })

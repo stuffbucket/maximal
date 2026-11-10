@@ -37,10 +37,16 @@ export function isGptClass(model: Model): boolean {
   )
 }
 
+const SMALL_CLASS_TOKEN = /(?:^|[-_.\s])(?:mini|nano|small)(?:$|[-_.\s])/u
+
+/** True when a model id or family carries a bounded `mini`, `nano` or `small`
+ *  token (so `gpt-5-mini` matches but `gemini` and `gpt-minimal` don't). */
+export function isSmallClassName(name: string): boolean {
+  return SMALL_CLASS_TOKEN.test(name.toLowerCase())
+}
+
 export function isSmallGptClass(model: Model): boolean {
   if (!isGptClass(model)) return false
   const { id, family } = identityParts(model)
-  return /(?:^|[-_.\s])(?:mini|nano|small)(?:$|[-_.\s])/u.test(
-    `${id} ${family}`,
-  )
+  return isSmallClassName(id) || isSmallClassName(family)
 }

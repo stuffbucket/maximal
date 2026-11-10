@@ -16,6 +16,7 @@
  * error falls through untouched (raw body forwarded, as before).
  */
 
+import type { UpstreamCall } from "~/lib/errors/http-errors"
 import type { Model } from "~/services/copilot/get-models"
 
 import { forwardId, isVariantId } from "~/lib/models/anthropic-id-rewrite"
@@ -34,6 +35,8 @@ export interface AdviceContext {
   upstream: UpstreamError
   /** Current model catalog, for advisors that suggest alternatives. */
   models: ReadonlyArray<Model>
+  /** The endpoint and model of the refused request, when known. */
+  call?: UpstreamCall
 }
 
 /** The two human-facing halves an advisor produces. The composer frames
@@ -118,6 +121,67 @@ function listAvailableModels(models: ReadonlyArray<Model>): Array<string> {
     .map((m) => `${m.name} (${forwardId(m.id)})`)
 }
 
+/** Copilot's 400 `model_not_supported`, by code or by message text. */
+function isModelNotSupported(upstream: UpstreamError): boolean {
+  if (upstream.status !== 400) return false
+  if (upstream.code === "model_not_supported") return true
+  return /model is not supported|model_not_supported/i.test(upstream.message)
+}
+
+/** The catalog entry of a refused call whose model is in the catalog but
+ *  doesn't list the called endpoint; null when that isn't known to be so. */
+function wrongEndpointModel({ models, call }: AdviceContext): Model | null {
+  if (!call?.model) return null
+  const model = models.find((m) => m.id === call.model)
+  const endpoints = model?.supported_endpoints
+  if (!model || !endpoints || endpoints.includes(call.endpoint)) return null
+  return model
+}
+
+const inlineCode = (text: string): string => `\`${text}\``
+
+/** The listed items, capped so the inline error stays readable. */
+function capped(items: ReadonlyArray<string>): string {
+  const shown = items.slice(0, MAX_LISTED).join(", ")
+  return items.length > MAX_LISTED ?
+      `${shown} and ${items.length - MAX_LISTED} more`
+    : shown
+}
+
+/**
+ * Copilot answers a model that's in the catalog but doesn't serve the called
+ * endpoint (a decisions model sent to `/v1/images/generations`, say) with the
+ * same `model_not_supported` as a model the plan lacks. The catalog's
+ * `supported_endpoints` tells them apart, so name the endpoint and the
+ * models that do serve it.
+ */
+const endpointNotSupportedAdvisor: ErrorAdvisor = {
+  id: "endpoint_not_supported",
+  matches: (ctx) =>
+    isModelNotSupported(ctx.upstream) && wrongEndpointModel(ctx) !== null,
+  advise: (ctx) => {
+    const model = wrongEndpointModel(ctx)
+    const endpoint = ctx.call?.endpoint ?? ""
+    const own = model?.supported_endpoints ?? []
+    const serves =
+      own.length > 0 ?
+        ` (it serves ${capped(own.map((e) => inlineCode(e)))})`
+      : ""
+    const alternatives = ctx.models
+      .filter(
+        (m) => !isVariantId(m.id) && m.supported_endpoints?.includes(endpoint),
+      )
+      .map((m) => inlineCode(forwardId(m.id)))
+    return {
+      context: `${inlineCode(forwardId(model?.id ?? ""))} doesn't support ${inlineCode(endpoint)}${serves}.`,
+      recovery:
+        alternatives.length > 0 ?
+          `Models that do: ${capped(alternatives)}.`
+        : `No model in your Copilot catalog supports ${inlineCode(endpoint)}.`,
+    }
+  },
+}
+
 /**
  * Copilot rejects a model the account's plan doesn't offer with a 400
  * `model_not_supported`. The proxy deliberately doesn't pin a model (that
@@ -126,11 +190,7 @@ function listAvailableModels(models: ReadonlyArray<Model>): Array<string> {
  */
 const modelNotSupportedAdvisor: ErrorAdvisor = {
   id: "model_not_supported",
-  matches: ({ upstream }) => {
-    if (upstream.status !== 400) return false
-    if (upstream.code === "model_not_supported") return true
-    return /model is not supported|model_not_supported/i.test(upstream.message)
-  },
+  matches: ({ upstream }) => isModelNotSupported(upstream),
   advise: ({ models }) => {
     const available = listAvailableModels(models)
     if (available.length === 0) {
@@ -157,8 +217,12 @@ const modelNotSupportedAdvisor: ErrorAdvisor = {
   },
 }
 
-/** The registry. Add an advisor here to handle a new error class. */
-const ADVISORS: ReadonlyArray<ErrorAdvisor> = [modelNotSupportedAdvisor]
+/** The registry, most specific first; the first match wins. Add an advisor
+ *  here to handle a new error class. */
+const ADVISORS: ReadonlyArray<ErrorAdvisor> = [
+  endpointNotSupportedAdvisor,
+  modelNotSupportedAdvisor,
+]
 
 // ── Composition ──────────────────────────────────────────────────────────
 
@@ -186,10 +250,10 @@ export function composeAdvisedMessage(
 export function adviseUpstreamError(
   status: number,
   body: string,
-  models: ReadonlyArray<Model>,
+  context: Omit<AdviceContext, "upstream">,
 ): string | null {
   const upstream = parseUpstreamError(status, body)
-  const ctx: AdviceContext = { upstream, models }
+  const ctx: AdviceContext = { ...context, upstream }
   const advisor = ADVISORS.find((a) => a.matches(ctx))
   if (!advisor) return null
   return composeAdvisedMessage(advisor.advise(ctx), upstream)

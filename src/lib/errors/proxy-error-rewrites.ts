@@ -27,14 +27,15 @@ export const notSignedIn: ProxyErrorRewrite = (reply, { error }) =>
   : undefined
 
 /** Recognizable upstream errors (Copilot's opaque `model_not_supported`,
- *  say) get context and a recovery step, the original kept inline. */
+ *  say) get context and a recovery step, the original kept inline. The
+ *  refused call, when known, lets the advice tell a model that doesn't serve
+ *  the endpoint from one the plan lacks. */
 export const upstreamAdvice: ProxyErrorRewrite = (reply, { upstream }) => {
   if (!upstream) return undefined
-  const advice = adviseUpstreamError(
-    upstream.status,
-    upstream.text,
-    state.models?.data ?? [],
-  )
+  const advice = adviseUpstreamError(upstream.status, upstream.text, {
+    models: state.models?.data ?? [],
+    call: upstream.call,
+  })
   return advice === null ? undefined : { ...reply, message: advice }
 }
 

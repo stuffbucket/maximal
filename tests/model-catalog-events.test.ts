@@ -40,6 +40,17 @@ function model(id: string, family: string): Model {
   }
 }
 
+/** A model Copilot hides from its chat picker. */
+function hidden(id: string, type: string, endpoints: Array<string>): Model {
+  const entry = model(id, "gpt")
+  return {
+    ...entry,
+    model_picker_enabled: false,
+    supported_endpoints: endpoints,
+    capabilities: { ...entry.capabilities, type },
+  }
+}
+
 const sonnet = model("claude-sonnet-4.7", "claude-sonnet")
 const haikuA = model("claude-haiku-4.6-a", "claude-haiku")
 const haikuB = model("claude-haiku-4.6-b", "claude-haiku")
@@ -97,6 +108,48 @@ describe("model catalog events", () => {
     expect(state.models?.data.map((entry) => entry.id)).toEqual([
       haikuA.id,
       sonnet.id,
+    ])
+  })
+
+  test("keeps hidden embeddings, image, decisions and routable chat models, drops other hidden ones", async () => {
+    state.copilotToken = "test-token"
+    state.copilotApiUrl = "https://models.test" as typeof state.copilotApiUrl
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        Response.json(
+          catalog([
+            sonnet,
+            hidden("text-embedding-3-small", "embeddings", []),
+            hidden("gpt-image-2.5-flare", "image", [
+              "/v1/images/generations",
+              "/v1/images/edits",
+            ]),
+            hidden("gpt-6-luna-decisions", "decisions", ["/v1/decisions"]),
+            hidden("microsoft-decision-1", "decisions", ["/v1/systemone"]),
+            hidden("gpt-5.4-nano", "chat", ["/responses", "ws:/responses"]),
+            hidden("gpt-4o", "chat", []),
+            {
+              ...hidden("gpt-3.5-turbo", "chat", []),
+              supported_endpoints: undefined,
+            },
+            hidden("gpt-4", "chat", ["/v1/audio"]),
+            hidden("gpt-41-copilot", "completion", []),
+            hidden("gpt-completion-routable", "completion", [
+              "/chat/completions",
+            ]),
+          ]),
+        ),
+      )) as unknown as typeof fetch
+
+    await cacheModels()
+
+    expect(state.models?.data.map((entry) => entry.id)).toEqual([
+      sonnet.id,
+      "text-embedding-3-small",
+      "gpt-image-2.5-flare",
+      "gpt-6-luna-decisions",
+      "microsoft-decision-1",
+      "gpt-5.4-nano",
     ])
   })
 

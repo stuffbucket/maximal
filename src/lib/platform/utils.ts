@@ -8,8 +8,9 @@ import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 
 import { getVSCodeDeviceId } from "~/lib/auth/deviceid"
 import { getConfig } from "~/lib/config/config"
+import { ROUTABLE_ENDPOINTS } from "~/lib/models/claude-auto-models"
 import { setModels, state } from "~/lib/runtime-state/state"
-import { getModels } from "~/services/copilot/get-models"
+import { getModels, type Model } from "~/services/copilot/get-models"
 
 export const sleep = (ms: number) =>
   new Promise((resolve) => {
@@ -20,6 +21,33 @@ export const isNullish = (value: unknown): value is null | undefined =>
   value === null || value === undefined
 
 let modelCacheGeneration = 0
+
+/**
+ * Model types kept even though Copilot hides them from its chat picker.
+ * Copilot serves these on their own endpoints: `embeddings`, `image`
+ * (`/v1/images/generations`, `/v1/images/edits`) and `decisions`
+ * (`/v1/decisions`, `/v1/systemone`).
+ */
+const NON_PICKER_TYPES = new Set(["embeddings", "image", "decisions"])
+
+/**
+ * Whether a Copilot model belongs in Maximal's catalog: anything in Copilot's
+ * chat picker, a hidden model of a `NON_PICKER_TYPES` type, or a hidden
+ * `chat` model that serves an endpoint the proxy can route (`/v1/messages`,
+ * `/responses`, `/chat/completions`). Hidden chat models with no routable
+ * endpoint (legacy GPT entries) and other hidden types stay out.
+ */
+function isCatalogModel(model: Model): boolean {
+  if (model.model_picker_enabled) return true
+  const type = model.capabilities.type
+  if (NON_PICKER_TYPES.has(type)) return true
+  return (
+    type === "chat"
+    && (model.supported_endpoints ?? []).some((endpoint) =>
+      ROUTABLE_ENDPOINTS.has(endpoint),
+    )
+  )
+}
 
 export async function cacheModels(): Promise<void> {
   const generation = ++modelCacheGeneration
@@ -33,10 +61,7 @@ export async function cacheModels(): Promise<void> {
   }
   setModels({
     ...models,
-    data: models.data.filter(
-      (model) =>
-        model.model_picker_enabled || model.capabilities.type === "embeddings",
-    ),
+    data: models.data.filter((model) => isCatalogModel(model)),
   })
 }
 

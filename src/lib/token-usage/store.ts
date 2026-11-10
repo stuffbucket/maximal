@@ -27,10 +27,13 @@ export type TokenUsageSource = "copilot" | "provider"
 
 export type TokenUsageEndpoint =
   | "chat_completions"
+  | "decisions"
   | "embeddings"
+  | "images"
   | "messages"
   | "provider_messages"
   | "responses"
+  | "systemone"
 
 export type TokenUsagePeriod = "day" | "week" | "month"
 
