@@ -85,7 +85,7 @@ describe("composeAdvisedMessage", () => {
 
 describe("adviseUpstreamError — model_not_supported", () => {
   test("matches by code and lists plan models with client-neutral recovery", () => {
-    const msg = adviseUpstreamError(400, COPILOT_BODY, [SONNET])
+    const msg = adviseUpstreamError(400, COPILOT_BODY, { models: [SONNET] })
     expect(msg).not.toBeNull()
     expect(msg).toContain("doesn't offer the requested model")
     // Client-neutral lead — the picker/explicit-id path, not a Claude-Code command.
@@ -105,30 +105,182 @@ describe("adviseUpstreamError — model_not_supported", () => {
     const body = JSON.stringify({
       error: { message: "The requested model is not supported." },
     })
-    expect(adviseUpstreamError(400, body, [SONNET])).not.toBeNull()
+    expect(adviseUpstreamError(400, body, { models: [SONNET] })).not.toBeNull()
   })
 
   test("degrades gracefully when the catalog is empty", () => {
-    const msg = adviseUpstreamError(400, COPILOT_BODY, [])
+    const msg = adviseUpstreamError(400, COPILOT_BODY, { models: [] })
     expect(msg).toContain("couldn't read your Copilot model catalog")
     expect(msg).not.toContain("•")
   })
 
   test("drops variant ids and picker-disabled models from the list", () => {
-    const msg = adviseUpstreamError(400, COPILOT_BODY, [
-      SONNET,
-      makeModel({ id: "claude-sonnet-4.5-high", name: "Sonnet (high)" }),
-      makeModel({ id: "x", name: "Hidden", model_picker_enabled: false }),
-    ])
+    const msg = adviseUpstreamError(400, COPILOT_BODY, {
+      models: [
+        SONNET,
+        makeModel({ id: "claude-sonnet-4.5-high", name: "Sonnet (high)" }),
+        makeModel({ id: "x", name: "Hidden", model_picker_enabled: false }),
+      ],
+    })
     expect(msg).toContain("Claude Sonnet 4.5")
     expect(msg).not.toContain("high")
     expect(msg).not.toContain("Hidden")
   })
 
   test("returns null for non-400, and unrelated 400s (no false positives)", () => {
-    expect(adviseUpstreamError(403, COPILOT_BODY, [SONNET])).toBeNull()
+    expect(
+      adviseUpstreamError(403, COPILOT_BODY, { models: [SONNET] }),
+    ).toBeNull()
     const quota = JSON.stringify({ error: { message: "model rate limited" } })
-    expect(adviseUpstreamError(400, quota, [SONNET])).toBeNull()
+    expect(adviseUpstreamError(400, quota, { models: [SONNET] })).toBeNull()
+  })
+})
+
+describe("adviseUpstreamError — model on the wrong endpoint", () => {
+  const LUNA = makeModel({
+    id: "gpt-6-luna-decisions",
+    name: "Luna Decisions",
+    model_picker_enabled: false,
+    supported_endpoints: ["/v1/decisions"],
+  })
+  const FLARE = makeModel({
+    id: "gpt-image-2.5-flare",
+    name: "Flare",
+    model_picker_enabled: false,
+    supported_endpoints: ["/v1/images/generations", "/v1/images/edits"],
+  })
+  const CATALOG = [SONNET, LUNA, FLARE]
+  const IMAGES = "/v1/images/generations"
+
+  test("names the model and endpoint and lists the models that serve it", () => {
+    const msg = adviseUpstreamError(400, COPILOT_BODY, {
+      models: CATALOG,
+      call: {
+        endpoint: IMAGES,
+        model: "gpt-6-luna-decisions",
+      },
+    })
+    expect(msg).toStartWith(
+      "`gpt-6-luna-decisions` doesn't support `/v1/images/generations` "
+        + "(it serves `/v1/decisions`).\n\n"
+        + "Models that do: `gpt-image-2.5-flare`.",
+    )
+    expect(msg).not.toContain("on your plan")
+    expect(msg).toContain(
+      "Upstream error (400): The requested model is not supported. "
+        + "[model_not_supported]",
+    )
+  })
+
+  test("applies to the inference endpoints, with variants dropped and ids as /v1/models shows them", () => {
+    const codex = makeModel({
+      id: "gpt-5.3-codex",
+      name: "Codex",
+      supported_endpoints: ["/responses"],
+    })
+    const sonnet = {
+      ...SONNET,
+      supported_endpoints: ["/v1/messages", "/chat/completions"],
+    }
+    const variant = makeModel({
+      id: "claude-sonnet-4.5-high",
+      name: "Sonnet (high)",
+      supported_endpoints: ["/chat/completions"],
+    })
+    const msg = adviseUpstreamError(400, COPILOT_BODY, {
+      models: [codex, sonnet, variant],
+      call: {
+        endpoint: "/chat/completions",
+        model: "gpt-5.3-codex",
+      },
+    })
+    expect(msg).toStartWith(
+      "`gpt-5.3-codex` doesn't support `/chat/completions` (it serves `/responses`).",
+    )
+    expect(msg).toContain("Models that do: `claude-sonnet-4-5-20260301`.")
+    expect(msg).not.toContain("high")
+  })
+
+  test("says so when no catalog model serves the endpoint", () => {
+    const msg = adviseUpstreamError(400, COPILOT_BODY, {
+      models: [SONNET, LUNA],
+      call: {
+        endpoint: IMAGES,
+        model: "gpt-6-luna-decisions",
+      },
+    })
+    expect(msg).toContain(
+      "No model in your Copilot catalog supports `/v1/images/generations`.",
+    )
+  })
+
+  test("caps a long list of alternatives", () => {
+    const many = Array.from({ length: 15 }, (_, i) =>
+      makeModel({
+        id: `img-${i}`,
+        name: `Img ${i}`,
+        supported_endpoints: [IMAGES],
+      }),
+    )
+    const msg = adviseUpstreamError(400, COPILOT_BODY, {
+      models: [LUNA, ...many],
+      call: {
+        endpoint: IMAGES,
+        model: "gpt-6-luna-decisions",
+      },
+    })
+    expect(msg).toContain("`img-11` and 3 more.")
+    expect(msg).not.toContain("`img-12`")
+  })
+
+  test("keeps the plan advice for a model the catalog doesn't have", () => {
+    const call = { endpoint: IMAGES, model: "gpt-nowhere" }
+    expect(
+      adviseUpstreamError(400, COPILOT_BODY, { models: CATALOG, call }),
+    ).toBe(adviseUpstreamError(400, COPILOT_BODY, { models: CATALOG }))
+    expect(
+      adviseUpstreamError(400, COPILOT_BODY, { models: CATALOG, call }),
+    ).toContain("doesn't offer the requested model on your plan")
+  })
+
+  test("keeps the plan advice when the model lists the endpoint or lists none", () => {
+    const plan = adviseUpstreamError(400, COPILOT_BODY, { models: CATALOG })
+    expect(
+      adviseUpstreamError(400, COPILOT_BODY, {
+        models: CATALOG,
+        call: {
+          endpoint: IMAGES,
+          model: "gpt-image-2.5-flare",
+        },
+      }),
+    ).toBe(plan)
+    // SONNET has no supported_endpoints: unknown, not wrong.
+    expect(
+      adviseUpstreamError(400, COPILOT_BODY, {
+        models: CATALOG,
+        call: {
+          endpoint: IMAGES,
+          model: "claude-sonnet-4.5",
+        },
+      }),
+    ).toBe(plan)
+    expect(
+      adviseUpstreamError(400, COPILOT_BODY, {
+        models: CATALOG,
+        call: { endpoint: IMAGES },
+      }),
+    ).toBe(plan)
+  })
+
+  test("leaves other errors alone", () => {
+    const call = { endpoint: IMAGES, model: "gpt-6-luna-decisions" }
+    expect(
+      adviseUpstreamError(403, COPILOT_BODY, { models: CATALOG, call }),
+    ).toBeNull()
+    const other = JSON.stringify({ error: { message: "bad prompt" } })
+    expect(
+      adviseUpstreamError(400, other, { models: CATALOG, call }),
+    ).toBeNull()
   })
 })
 
@@ -185,6 +337,33 @@ describe("forwardError integration", () => {
     expect(msg).toContain("Claude Sonnet 4.5 (claude-sonnet-4-5-20260301)")
     expect(msg).toContain("Upstream error (400):")
     expect(msg).toContain("model_not_supported")
+  })
+
+  test("the HTTPError's call reaches the advice", async () => {
+    state.models = {
+      object: "list",
+      data: [
+        SONNET,
+        makeModel({
+          id: "gpt-6-luna-decisions",
+          name: "Luna",
+          supported_endpoints: ["/v1/decisions"],
+        }),
+      ],
+    }
+    const { ctx, captured } = makeContextStub()
+    await forwardError(
+      ctx as unknown as Parameters<typeof forwardError>[0],
+      new HTTPError("nope", new Response(COPILOT_BODY, { status: 400 }), {
+        endpoint: "/v1/systemone",
+        model: "gpt-6-luna-decisions",
+      }),
+    )
+
+    expect(captured.status).toBe(400)
+    expect(messageOf(captured)).toStartWith(
+      "`gpt-6-luna-decisions` doesn't support `/v1/systemone`",
+    )
   })
 
   test("unrelated upstream errors forward verbatim", async () => {

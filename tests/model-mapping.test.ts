@@ -13,6 +13,7 @@ function makeModel(
   options: {
     enabled?: boolean
     endpoints?: Array<string>
+    type?: string
   } = {},
 ): Model {
   return {
@@ -30,7 +31,7 @@ function makeModel(
       object: "model_capabilities",
       supports: {},
       tokenizer: "o200k_base",
-      type: "chat",
+      type: options.type ?? "chat",
     },
   }
 }
@@ -169,34 +170,6 @@ describe("resolveModelMapping", () => {
     ).toMatchObject({ status: "resolved", resolvedModel: "gpt-5.6-luna" })
   })
 
-  it.each([
-    ["missing", [rule("exact", "alias", "missing")], models],
-    [
-      "disabled",
-      [rule("exact", "alias", "disabled")],
-      [...models, makeModel("disabled", { enabled: false })],
-    ],
-    [
-      "unsupported-endpoint",
-      [rule("exact", "alias", "chat-only")],
-      [...models, makeModel("chat-only", { endpoints: ["/chat/completions"] })],
-    ],
-  ] as const)("rejects a matched %s target", (reason, rules, liveModels) => {
-    expect(
-      resolveModelMapping({
-        requestedModel: "alias",
-        rules: [...rules],
-        models: [...liveModels],
-        endpoint: "/responses",
-      }),
-    ).toEqual({
-      status: "invalid-target",
-      reason,
-      requestedModel: "alias",
-      resolvedModel: rules[0].target,
-    })
-  })
-
   it("returns a structured local error for an unavailable mapped target", () => {
     const result = resolveModelMapping({
       requestedModel: "review-alias",
@@ -252,4 +225,66 @@ describe("resolveModelMapping", () => {
       model: target,
     })
   })
+})
+
+describe("resolveModelMapping target types", () => {
+  it.each([
+    ["missing", [rule("exact", "alias", "missing")], models],
+    [
+      "not-chat",
+      [rule("exact", "alias", "image")],
+      [
+        ...models,
+        makeModel("image", {
+          enabled: false,
+          endpoints: ["/responses"],
+          type: "image",
+        }),
+      ],
+    ],
+    [
+      "unsupported-endpoint",
+      [rule("exact", "alias", "chat-only")],
+      [...models, makeModel("chat-only", { endpoints: ["/chat/completions"] })],
+    ],
+  ] as const)("rejects a matched %s target", (reason, rules, liveModels) => {
+    expect(
+      resolveModelMapping({
+        requestedModel: "alias",
+        rules: [...rules],
+        models: [...liveModels],
+        endpoint: "/responses",
+      }),
+    ).toEqual({
+      status: "invalid-target",
+      reason,
+      requestedModel: "alias",
+      resolvedModel: rules[0].target,
+    })
+  })
+
+  it("resolves a target hidden from Copilot's picker", () => {
+    expect(
+      resolveModelMapping({
+        requestedModel: "alias",
+        rules: [rule("exact", "alias", "gpt-5.4-nano")],
+        models: [...models, makeModel("gpt-5.4-nano", { enabled: false })],
+        endpoint: "/responses",
+      }),
+    ).toMatchObject({ status: "resolved", resolvedModel: "gpt-5.4-nano" })
+  })
+
+  it.each(["embeddings", "image", "decisions"])(
+    "rejects a %s target on a route with no endpoint to check",
+    (type) => {
+      expect(
+        resolveModelMapping({
+          requestedModel: "alias",
+          rules: [rule("exact", "alias", type)],
+          models: [...models, makeModel(type, { enabled: false, type })],
+          endpoint: null,
+        }),
+      ).toMatchObject({ status: "invalid-target", reason: "not-chat" })
+    },
+  )
 })

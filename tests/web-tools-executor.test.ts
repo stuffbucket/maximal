@@ -299,7 +299,34 @@ describe("pickResponsesModel — resilient to model churn", () => {
     ).toBe("gpt-6-mini")
   })
 
-  it("falls through to any /responses model when no mini-class exists", () => {
+  it("prefers a nano-class model over a non-small first model", () => {
+    expect(
+      pickResponsesModel(
+        [m("gpt-5.3-codex"), m("gpt-5.5"), m("gpt-5.4-nano")],
+        "gpt-5-mini",
+      ),
+    ).toBe("gpt-5.4-nano")
+  })
+
+  it("honors the configured small model ahead of an earlier nano-class one", () => {
+    expect(
+      pickResponsesModel(
+        [m("gpt-5.4-nano"), m("gpt-5.3-codex"), m("gpt-5.5")],
+        "gpt-5.5",
+      ),
+    ).toBe("gpt-5.5")
+  })
+
+  it("matches the small class by token, not substring", () => {
+    expect(
+      pickResponsesModel(
+        [m("gpt-5.3-codex"), m("gpt-minimal"), m("gemini-x")],
+        "gpt-5-mini",
+      ),
+    ).toBe("gpt-5.3-codex")
+  })
+
+  it("falls through to any /responses model when no small-class model exists", () => {
     expect(
       pickResponsesModel([m("gpt-5.3-codex"), m("gpt-5.5")], "gpt-5-mini"),
     ).toBe("gpt-5.3-codex")

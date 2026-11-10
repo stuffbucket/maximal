@@ -285,3 +285,63 @@ describe("GET /v1/models — Anthropic shape on signal", () => {
     expect(body.data[0].max_tokens).toBe(0)
   })
 })
+
+/** A hidden model of a non-chat type, served on its own endpoints (or, for
+ *  embeddings, with none listed). */
+function passThroughOnly(
+  id: string,
+  type: string,
+  supported_endpoints?: Array<string>,
+): Model {
+  const base = richModel({ id, model_picker_enabled: false })
+  return {
+    ...base,
+    supported_endpoints,
+    capabilities: { ...base.capabilities, type },
+  }
+}
+
+describe("GET /v1/models — which models each shape lists", () => {
+  beforeEach(() => {
+    setModels({
+      object: "list",
+      data: [
+        richModel(),
+        passThroughOnly("gpt-image-test", "image", [
+          "/v1/images/generations",
+          "/v1/images/edits",
+        ]),
+        passThroughOnly("decisions-test", "decisions", ["/v1/decisions"]),
+        passThroughOnly("systemone-test", "decisions", ["/v1/systemone"]),
+        passThroughOnly("text-embedding-test", "embeddings"),
+      ],
+    })
+  })
+
+  test("the Anthropic list keeps only models /v1/messages can serve", async () => {
+    const res = await buildApp().request("/v1/models", {
+      headers: { "anthropic-version": "2023-06-01" },
+    })
+    const body = (await res.json()) as {
+      data: Array<Entry>
+      first_id: string | null
+      last_id: string | null
+    }
+    expect(body.data.map((entry) => entry.id)).toEqual([
+      "claude-opus-4-6-20260301",
+    ])
+    expect(body.last_id).toBe("claude-opus-4-6-20260301")
+  })
+
+  test("the OpenAI list keeps image, decisions and embeddings models", async () => {
+    const res = await buildApp().request("/v1/models")
+    const body = (await res.json()) as { data: Array<Entry> }
+    expect(body.data.map((entry) => entry.id)).toEqual([
+      "claude-opus-4-6-20260301",
+      "gpt-image-test",
+      "decisions-test",
+      "systemone-test",
+      "text-embedding-test",
+    ])
+  })
+})

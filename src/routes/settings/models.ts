@@ -12,8 +12,8 @@
  * actionable rather than silent.
  *
  * Auth-gated by the parent `/settings/api` middleware. This route only
- * reads `state.models` (already filtered to model_picker_enabled ||
- * embeddings by cacheModels) — it never exposes tokens.
+ * reads `state.models` (already filtered by `isCatalogModel` in
+ * cacheModels) — it never exposes tokens.
  */
 
 import type { Context } from "hono"

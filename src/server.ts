@@ -16,7 +16,9 @@ import { trackInFlight } from "./lib/token-usage/in-flight"
 import { BUILD_VERSION } from "./lib/update/build-info"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
+import { decisionsRoutes } from "./routes/decisions/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
+import { imagesRoutes } from "./routes/images/route"
 import { internalRoutes } from "./routes/internal/route"
 import { mcpRoutes } from "./routes/mcp/route"
 import { messageRoutes } from "./routes/messages/route"
@@ -26,6 +28,7 @@ import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
 import { settingsApiRoutes } from "./routes/settings/api"
 import { setupStatusRoute } from "./routes/setup-status"
+import { systemOneRoutes } from "./routes/systemone/route"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { uiRoutes } from "./routes/ui/route"
 import { usageRoute } from "./routes/usage/route"
@@ -147,8 +150,9 @@ server.route("/mcp", mcpRoutes)
 // the Tauri shell can load Settings and trigger auth on demand) but the
 // proxy endpoints refuse instead of crashing or firing the device-code
 // flow. These answer `401 not_authenticated`; the inference routes
-// (messages, chat completions, responses) gate themselves, so the refusal
-// reaches their error handler and is answered in the client's format.
+// (messages, chat completions, responses) and the images, decisions and
+// SystemOne pass-through routes gate themselves, so the refusal reaches their
+// error handler and is answered in the client's format.
 // `/x/*` also matches `/x` in Hono, so each path is mounted once.
 for (const path of [
   "/models",
@@ -182,12 +186,18 @@ server.route("/embeddings", embeddingRoutes)
 server.route("/usage", usageRoute)
 server.route("/token-usage", tokenUsageRoute)
 server.route("/responses", responsesRoutes)
+server.route("/images", imagesRoutes)
+server.route("/decisions", decisionsRoutes)
+server.route("/systemone", systemOneRoutes)
 
 // Compatibility with tools that expect v1/ prefix
 server.route("/v1/chat/completions", completionRoutes)
 server.route("/v1/models", modelRoutes)
 server.route("/v1/embeddings", embeddingRoutes)
 server.route("/v1/responses", responsesRoutes)
+server.route("/v1/images", imagesRoutes)
+server.route("/v1/decisions", decisionsRoutes)
+server.route("/v1/systemone", systemOneRoutes)
 
 // Anthropic compatible endpoints
 server.route("/v1/messages", messageRoutes)

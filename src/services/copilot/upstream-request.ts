@@ -15,7 +15,11 @@ import {
   parseCopilotErrorBody,
 } from "~/lib/errors/copilot-error-parser"
 import { logCopilotRateLimits } from "~/lib/errors/copilot-rate-limit"
-import { CopilotAuthFatalError, HTTPError } from "~/lib/errors/http-errors"
+import {
+  CopilotAuthFatalError,
+  HTTPError,
+  type UpstreamCall,
+} from "~/lib/errors/http-errors"
 import {
   clearLastUpstreamRejection,
   setLastUpstreamRejection,
@@ -84,11 +88,17 @@ export const buildCopilotHeaders = (
  * payload requested streaming) or the parsed JSON body.
  *
  * `stream` is the caller's already-resolved streaming flag so this helper
- * stays agnostic to how each payload spells it.
+ * stays agnostic to how each payload spells it. `call` names the endpoint and
+ * model, carried on the `HTTPError` so the error advice can tell a model that
+ * doesn't serve this endpoint from one the plan lacks.
  */
 export const finishUpstreamResponse = async <T>(
   response: Response,
-  { stream, errorMessage }: { stream: boolean; errorMessage: string },
+  {
+    stream,
+    errorMessage,
+    call,
+  }: { stream: boolean; errorMessage: string; call: UpstreamCall },
 ): Promise<T | ReturnType<typeof events>> => {
   logCopilotRateLimits(response.headers)
 
@@ -108,7 +118,7 @@ export const finishUpstreamResponse = async <T>(
       remediationUrl: parsed.remediationUrl,
       status: response.status,
     })
-    throw new HTTPError(errorMessage, response)
+    throw new HTTPError(errorMessage, response, call)
   }
 
   clearLastUpstreamRejection()

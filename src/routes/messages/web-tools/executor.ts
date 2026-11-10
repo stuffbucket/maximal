@@ -21,6 +21,7 @@ import TurndownService from "turndown"
 import type { ResponsesPayload } from "~/services/copilot/create-responses"
 
 import { getSmallModel } from "~/lib/config/config"
+import { isSmallClassName } from "~/lib/models/model-identity"
 import { Cache } from "~/lib/runtime-state/cache"
 import { hasCopilotToken, state } from "~/lib/runtime-state/state"
 import {
@@ -823,8 +824,9 @@ export function chooseExecutor(
  * deprecated model (e.g. gpt-5-mini retired by GitHub) simply drops out and
  * selection moves on. Order of preference:
  *   1. the configured small model, if it supports /responses (honor the user);
- *   2. else a "mini"-class /responses model — tracks the cheap tier by class,
- *      not a pinned string, so it survives gpt-5-mini → gpt-6-mini renames;
+ *   2. else a small-class (`mini`, `nano` or `small`) /responses model —
+ *      tracks the cheap tier by class, not a pinned string, so it survives
+ *      gpt-5-mini → gpt-6-mini renames;
  *   3. else any /responses-capable model, so search still works.
  */
 export function resolveResponsesModel(): string | undefined {
@@ -853,9 +855,9 @@ export function pickResponsesModel(
   if (responsesModels.some((m) => m.id === configuredSmall)) {
     return configuredSmall
   }
-  // 2. Prefer the cheap "mini" tier by class (not a frozen id).
-  const mini = responsesModels.find((m) => m.id.toLowerCase().includes("mini"))
-  if (mini) return mini.id
+  // 2. Prefer the cheap small tier by class (not a frozen id).
+  const small = responsesModels.find((m) => isSmallClassName(m.id))
+  if (small) return small.id
   // 3. Any /responses-capable model keeps search working.
   return responsesModels[0].id
 }
