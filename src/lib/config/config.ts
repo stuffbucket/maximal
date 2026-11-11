@@ -1,6 +1,7 @@
 import consola from "consola"
 import fs from "node:fs"
 
+import type { BudgetConfig } from "~/lib/budget/schema"
 import type { McpBrokerConfig } from "~/lib/mcp-broker/types"
 
 import {
@@ -90,6 +91,8 @@ export interface AppConfig {
   editorVersion?: string
   apps?: AppsConfig
   mcpBroker?: McpBrokerConfig
+  /** Spend limits and the unit costs are shown in. Amounts are nano-AIU. */
+  budget?: BudgetConfig
 }
 
 export interface AppsConfig {

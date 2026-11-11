@@ -20,6 +20,8 @@ import { z } from "zod"
 
 import type { AppConfig } from "~/lib/config/config"
 
+import { BudgetConfigSchema } from "~/lib/budget/schema"
+
 const ProviderAuthTypeSchema = z.enum(["authorization", "x-api-key"])
 
 const ModelConfigSchema = z.object({
@@ -423,6 +425,8 @@ export const AppConfigSchema = z
       })
       .optional(),
     mcpBroker: McpBrokerConfigSchema.optional(),
+    /** Spend limits and how costs are shown (`~/lib/budget/schema`). */
+    budget: BudgetConfigSchema.optional(),
   })
   // passthrough: keep unknown keys in the parsed output. Lets older
   // proxies tolerate config files written by newer ones.

@@ -39,6 +39,7 @@ import { accountsRoutes } from "./accounts"
 import { apiKeysRoutes } from "./api-keys"
 import { appsRoutes } from "./apps"
 import { authRoutes } from "./auth"
+import { budgetRoutes } from "./budget"
 import { clientsRoutes } from "./clients"
 import { eventsRoutes } from "./events"
 import { ghRoutes } from "./gh"
@@ -173,6 +174,7 @@ settingsApiRoutes.route("/accounts", accountsRoutes)
 settingsApiRoutes.route("/api-keys", apiKeysRoutes)
 settingsApiRoutes.route("/clients", clientsRoutes)
 settingsApiRoutes.route("/apps", appsRoutes)
+settingsApiRoutes.route("/budget", budgetRoutes)
 settingsApiRoutes.route("/mcp", mcpRoutes)
 settingsApiRoutes.route("/models", modelsRoutes)
 settingsApiRoutes.route("/notices", noticesRoutes)

@@ -484,3 +484,90 @@ describe("mcpBroker.catalog", () => {
     }
   })
 })
+
+function issuePaths(raw: unknown): Array<string> {
+  try {
+    validateAppConfig(raw)
+  } catch (error) {
+    if (error instanceof ConfigValidationError) {
+      return error.issues.map((issue) => issue.path)
+    }
+    throw error
+  }
+  return []
+}
+
+describe("budget", () => {
+  const budget = {
+    display: { unit: "usd", creditUsd: 0.01 },
+    limits: [
+      {
+        id: "everything",
+        scope: { kind: "global" },
+        limit: 200_000_000_000,
+        limitReset: { follow: "copilot:premium_interactions" },
+        warnAt: 0.8,
+        action: "warn",
+      },
+      {
+        id: "codex",
+        scope: { kind: "key", id: "codex" },
+        limit: 50_000_000_000,
+        limitReset: "weekly",
+        action: "block",
+      },
+      {
+        id: "images-daily",
+        label: "Images",
+        scope: { kind: "plugin", id: "images" },
+        limit: 30_000_000_000,
+        limitReset: "daily",
+        warnAt: 0.8,
+        action: "block",
+      },
+    ],
+  }
+
+  it("accepts limits, the display unit and the conversion override", () => {
+    const parsed: unknown = validateAppConfig({ budget })
+    expect(parsed).toEqual({ budget })
+    const empty: unknown = validateAppConfig({ budget: {} })
+    expect(empty).toEqual({ budget: {} })
+  })
+
+  it("keeps keys a newer version wrote", () => {
+    const newer = {
+      budget: {
+        ...budget,
+        notify: true,
+        limits: [{ ...budget.limits[1], holdTimeoutMs: 5 }],
+      },
+    }
+    const parsed: unknown = validateAppConfig(newer)
+    expect(parsed).toEqual(newer)
+  })
+
+  it("rejects bad limits with the offending path", () => {
+    const limit = budget.limits[1]
+    expect(
+      issuePaths({ budget: { limits: [limit, { ...limit, limit: 1 }] } }),
+    ).toEqual(["budget.limits.1.id"])
+    expect(
+      issuePaths({
+        budget: { limits: [{ ...limit, scope: { kind: "key" } }] },
+      }),
+    ).toEqual(["budget.limits.0.scope.id"])
+    expect(
+      issuePaths({ budget: { limits: [{ ...limit, limitReset: "monthly" }] } }),
+    ).toEqual(["budget.limits.0.limitReset"])
+    expect(
+      issuePaths({ budget: { limits: [{ ...limit, limit: -1 }] } }),
+    ).toEqual(["budget.limits.0.limit"])
+    expect(
+      issuePaths({ budget: { display: { unit: "premium_requests" } } }),
+    ).toEqual(["budget.display.unit"])
+    expect(issuePaths({ budget: { display: { creditUsd: 0 } } })).toEqual([
+      "budget.display.creditUsd",
+    ])
+  })
+})
