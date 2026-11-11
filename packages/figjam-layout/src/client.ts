@@ -4,6 +4,10 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 const PORT = process.env.FIGJAM_BRIDGE_PORT ?? "4150"
+// PORT goes into the 127.0.0.1 URL that carries the pairing token, so it must be a bare port number.
+if (!/^\d{1,5}$/.test(PORT) || Number(PORT) < 1 || Number(PORT) > 65535) {
+  throw new Error(`FIGJAM_BRIDGE_PORT must be a port number from 1 to 65535, not ${JSON.stringify(PORT)}.`)
+}
 const AGENT = process.env.FIGJAM_AGENT ?? "layout"
 
 // No default board: the bridge can serve several FigJam files at once, and a
@@ -33,7 +37,14 @@ export async function tool(name: string, input: Record<string, unknown>): Promis
   if (t) headers.authorization = `Bearer ${t}`
   const res = await fetch(`http://127.0.0.1:${PORT}/tool`, {
     method: "POST",
+    redirect: "error",
+    // By design: the operator-opted-in pairing token goes only to the bridge:
+    // a fixed 127.0.0.1 host, a numeric port and no redirects. See ADR-0001.
+    // codeql[js/file-access-to-http]
     headers,
+    // By design: layouts the operator passes as files become tool input for the
+    // same local bridge. See ADR-0001.
+    // codeql[js/file-access-to-http]
     body: JSON.stringify({ board: board(), agent: AGENT, name, input }),
   })
   const body = await res.json()

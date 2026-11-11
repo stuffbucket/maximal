@@ -41,11 +41,15 @@ const response = await fetch(url, {
 in-source suppression, honored by the JavaScript/TypeScript analyzer. The
 directive must stand alone on its line; rationale appended inside the
 directive (e.g. `// codeql[rule] -- reason`) makes the current analyzer
-ignore it. CodeQL emits a recognized directive as a SARIF `suppressions`
-entry with `@kind: IN_SOURCE`; GitHub code scanning then shows the alert as
-resolved. The directive sits immediately before the dataflow **sink**, while
+ignore it. The directive sits immediately before the dataflow **sink**, while
 the adjacent ordinary comment keeps the rationale greppable at the exact
 point of concern.
+
+The directive alone does not close the alert: the `security-extended`
+analysis in `codeql.yml` still reports the result, and the alert stays open.
+So each suppressed alert is also dismissed in the Security tab (*won't fix*,
+or *used in tests* for test code) with a comment that gives the same
+rationale and cites this ADR.
 
 The current suppressed sites (grep `codeql\[` to enumerate):
 
@@ -55,6 +59,9 @@ The current suppressed sites (grep `codeql\[` to enumerate):
 | `js/file-access-to-http` | `src/lib/http/send-request.ts` | **Single mechanism** — every authenticated GitHub/Copilot/Anthropic/provider request funnels through it, and it attaches the disk-read token (see below) |
 | `js/http-to-file-access` | `src/lib/auth/github-token-store.ts` | Persist OAuth token to 0o600 file |
 | `js/http-to-file-access` | `scripts/sync-homebrew-formula.ts` | Release tooling renders a formula |
+| `js/file-access-to-http` | `packages/figjam-layout/src/client.ts` | The opted-in pairing token, and layouts the operator passes as files, go only to the FigJam bridge: a fixed 127.0.0.1 host, a validated numeric port and no redirects |
+| `js/file-access-to-http` | `packages/figjam-bridge/test/pairing.test.ts` | Test reads a throwaway bridge's admin token from its temp data directory |
+| `js/client-side-request-forgery` | `packages/figjam-plugin/src/legacy/ui.html` | The panel fetches image URLs for the Figma sandbox; Figma enforces the manifest's `networkAccess` hosts as the iframe's CSP |
 
 ## One HTTP mechanism owns token attachment
 
@@ -90,11 +97,10 @@ header:
 - **A suppression cannot drift.** The comment is attached to the sink
   line itself; when the code moves, the comment moves with it. There is
   no external `file:line` registry to fall out of sync.
-- **No moving parts.** No reconcile script, no extra workflow, no
-  `security-events: write` API writes. The single `codeql.yml` analysis
-  honors the comments directly.
-- **Reversing a suppression is a one-line diff:** delete the comment.
-  The next analysis re-opens the alert.
+- **Few moving parts.** No reconcile script and no extra workflow. The
+  one manual step is the Security-tab dismissal described above.
+- **Reversing a suppression** is a one-line diff (delete the comment)
+  plus reopening the dismissed alert.
 - **A new alert on an un-annotated sink is real signal** — it surfaces
   in the Security tab and gets either a code fix or a reviewed inline
   suppression, in the same PR that introduces it.

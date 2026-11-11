@@ -36,8 +36,20 @@
 
 import { loadPairingToken, pairingTokenPath } from "./chats-store"
 
+// The port goes into the 127.0.0.1 URL that carries the pairing token, so it
+// must be a bare port number.
+function bridgePort(raw: string): number {
+  if (!/^\d{1,5}$/.test(raw) || Number(raw) < 1 || Number(raw) > 65535) {
+    console.error(
+      `The bridge port must be a number from 1 to 65535, not ${JSON.stringify(raw)}.`,
+    )
+    process.exit(2)
+  }
+  return Number(raw)
+}
+
 const args = process.argv.slice(2)
-let port = Number(process.env.FIGJAM_BRIDGE_PORT ?? 4150)
+let port = bridgePort(process.env.FIGJAM_BRIDGE_PORT ?? "4150")
 let inline = false
 let board = process.env.FIGJAM_BOARD || undefined
 let agent = process.env.FIGJAM_AGENT || "cli"
@@ -48,7 +60,7 @@ const rest: Array<string> = []
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
     case "--port": {
-      port = Number(args[++i])
+      port = bridgePort(args[++i] ?? "")
       break
     }
     case "--board": {
@@ -89,7 +101,7 @@ const fetch = (input: string, init: RequestInit = {}): Promise<Response> => {
   const headers = new Headers(init.headers)
   const token = loadPairingToken({ create: false })
   if (token) headers.set("authorization", `Bearer ${token}`)
-  return realFetch(input, { ...init, headers })
+  return realFetch(input, { ...init, headers, redirect: "error" })
 }
 
 function print(value: unknown): void {

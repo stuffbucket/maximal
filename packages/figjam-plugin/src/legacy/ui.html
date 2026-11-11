@@ -448,6 +448,8 @@ const DEFAULT_BASE = "http://localhost:4141";
 const PREFERRED_MODELS = ["claude-sonnet", "claude-opus", "claude-fable", "gpt-6", "gpt-5"];
 const MAX_STEPS = 30;
 const BRIDGE_URL = "ws://localhost:4150/plugin";
+// Maximal runs on this computer, so the panel only calls a loopback host.
+const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
 const DEFAULT_EFFORT = "high";
 const COMPACT = { width: 300, height: 48 };
@@ -570,6 +572,10 @@ function applyToolGate() {
 // code.js asks the panel to fetch image bytes (only hosts the manifest allows).
 async function fetchForSandbox(msg) {
   try {
+    // By design: create_image's url can name any image, and the sandbox has no
+    // network of its own. Figma enforces the manifest's networkAccess list as
+    // this iframe's CSP, so only those hosts are reachable. See ADR-0001.
+    // codeql[js/client-side-request-forgery]
     const res = await fetch(msg.url, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const bytes = new Uint8Array(await res.arrayBuffer());
@@ -652,6 +658,9 @@ function settleWaiters(msg) {
 }
 
 window.onmessage = (event) => {
+  // Plugin messages come from Figma, the frame hosting this panel (or the top
+  // window when Figma nests it); ignore messages from any other window.
+  if (event.source !== window.parent && event.source !== window.top) return;
   const msg = event.data && event.data.pluginMessage;
   if (!msg) return;
   if (msg.type === "init") {
@@ -696,7 +705,7 @@ window.onmessage = (event) => {
     const resolve = pendingTools.get(msg.id);
     const target = msg.result && msg.result.target;
     if (target && target.pageName && target.pageName !== agentPage) { agentPage = String(target.pageName); showContext(); }
-    if (resolve) {
+    if (typeof resolve === "function") {
       pendingTools.delete(msg.id);
       resolve(msg);
     }
@@ -1618,6 +1627,27 @@ let connectRetry = null;
 let connectFails = 0;
 let connectGen = 0;
 
+// Maximal's origin rebuilt from checked parts: http(s), a loopback host and a
+// numeric port, with no path, query or credentials. "" for anything else.
+function maximalOrigin(value) {
+  let url;
+  try { url = new URL(String(value)); } catch { return ""; }
+  const scheme = ["http:", "https:"].find((s) => s === url.protocol);
+  const host = LOOPBACK_HOSTS.find((h) => h === url.hostname);
+  const port = url.port ? Number(url.port) : scheme === "https:" ? 443 : 80;
+  if (!scheme || !host || !Number.isInteger(port) || port < 1 || port > 65535) return "";
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) return "";
+  return `${scheme}//${host}:${port}`;
+}
+
+function maximalUrl(path) {
+  const origin = maximalOrigin(settings.baseUrl);
+  if (origin) return origin + path;
+  const error = new Error(`Maximal's address has to be on this computer, like ${DEFAULT_BASE}. Check it in Settings.`);
+  error.name = "AddressError";
+  throw error;
+}
+
 async function connect() {
   clearTimeout(connectRetry);
   const gen = ++connectGen;
@@ -1628,7 +1658,7 @@ async function connect() {
     setStatus("Connecting to Maximal…");
   }
   try {
-    const res = await fetch(`${settings.baseUrl}/v1/models`, { headers: headers(), signal: AbortSignal.timeout(8000) });
+    const res = await fetch(maximalUrl("/v1/models"), { headers: headers(), signal: AbortSignal.timeout(8000) });
     if (gen !== connectGen) return;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
@@ -1654,16 +1684,18 @@ async function connect() {
     const host = settings.baseUrl.replace(/^https?:\/\//, "");
     const why = error.name === "TimeoutError" ? "no answer in 8s" : error.message;
     const unreachable = error.name === "TimeoutError" || error instanceof TypeError;
+    const badAddress = error.name === "AddressError";
     let short;
-    if (unreachable) short = `Maximal isn't running on ${host} · retrying…`;
+    if (badAddress) short = "Maximal's address isn't on this computer — check Settings";
+    else if (unreachable) short = `Maximal isn't running on ${host} · retrying…`;
     else if (/^HTTP 40[13]/.test(error.message)) short = `Maximal refused the API key (${error.message}) — check Settings`;
     else if (error.message === "no models") short = `Maximal on ${host} has no models`;
     else short = `Maximal on ${host} answered ${error.message}`;
     // The hint line above the input says this (and counts down), so no log note.
     connectFails++;
     const delay = backoff(connectFails);
-    setStatus(`Can't reach Maximal at ${settings.baseUrl} (${why}). Is it running?`, "bad", short);
-    setNet("maximal", "down", { hint: unreachable ? "Can't reach Maximal" : /^HTTP 40[13]/.test(error.message) ? "Maximal refused the API key" : error.message === "no models" ? "Maximal has no models" : `Maximal answered ${error.message}`, attempt: connectFails, nextAt: Date.now() + delay });
+    setStatus(badAddress ? error.message : `Can't reach Maximal at ${settings.baseUrl} (${why}). Is it running?`, "bad", short);
+    setNet("maximal", "down", { hint: badAddress ? "Maximal's address isn't local" : unreachable ? "Can't reach Maximal" : /^HTTP 40[13]/.test(error.message) ? "Maximal refused the API key" : error.message === "no models" ? "Maximal has no models" : `Maximal answered ${error.message}`, attempt: connectFails, nextAt: Date.now() + delay });
     connectRetry = setTimeout(connect, delay);
   }
 }
@@ -1732,7 +1764,7 @@ els.modelBtn.onclick = () => {
 async function callModel(signal) {
   const body = { model: modelId, max_tokens: 4096, system: SYSTEM, tools: TOOLS, messages };
   if (effort) body.output_config = { effort };
-  const res = await fetch(`${settings.baseUrl}/v1/messages`, {
+  const res = await fetch(maximalUrl("/v1/messages"), {
     method: "POST",
     headers: headers(),
     signal,
