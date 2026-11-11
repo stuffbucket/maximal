@@ -3,6 +3,8 @@ import type { PluginSettings } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import consola from "consola"
 import fs from "node:fs"
 
+import type { BudgetConfig } from "~/lib/budget/schema"
+
 import {
   ConfigValidationError,
   detectUnknownKeys,
@@ -83,6 +85,8 @@ export interface AppConfig {
   /** The parked MCP broker's config (`parked/mcp`). Accepted and preserved,
    *  never interpreted by the build. */
   mcpBroker?: unknown
+  /** Spend limits and the unit costs are shown in. Amounts are nano-AIU. */
+  budget?: BudgetConfig
 }
 
 export interface AppsConfig {

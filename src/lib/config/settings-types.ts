@@ -16,6 +16,16 @@
 
 import { z } from "zod"
 
+import {
+  BudgetDisplayUnit,
+  BudgetLimitAction,
+  BudgetLimitId,
+  BudgetLimitReset,
+  BudgetScope,
+  BudgetWarnAt,
+  CreditUsdRate,
+  NanoAiuAmount,
+} from "../budget/schema"
 import { ClaudeAutoTierState } from "../models/claude-auto-model-types"
 
 export { ClaudeAutoTierState } from "../models/claude-auto-model-types"
@@ -727,6 +737,114 @@ export const PluginToolPermissionsRequest = z
 export type PluginToolPermissionsRequest = z.infer<
   typeof PluginToolPermissionsRequest
 >
+
+// ── Budget (/settings/api/budget) ───────────────────────────────────────
+//
+// Amounts are integer nano-AIU (10⁻⁹ AI credit); each limit also carries
+// them in the display unit (`display.unit`) so the shell never converts.
+
+export const BudgetLimitState = z.enum(["ok", "warning", "exhausted"])
+
+/** One limit with its spend in the current period. */
+export const BudgetLimitStatus = z.object({
+  id: BudgetLimitId,
+  label: z.string().nullable(),
+  scope: BudgetScope,
+  action: BudgetLimitAction,
+  warn_at: BudgetWarnAt,
+  limit: NanoAiuAmount,
+  limit_reset: BudgetLimitReset,
+  limit_remaining: NanoAiuAmount,
+  /** Spend in the current period. */
+  usage: NanoAiuAmount,
+  /** Spend since 00:00 UTC today, and since Monday 00:00 UTC. */
+  usage_daily: NanoAiuAmount,
+  usage_weekly: NanoAiuAmount,
+  period_start: z.string(),
+  /** Null for a limit that never resets. */
+  resets_at: z.string().nullable(),
+  /** `provider`: the followed window's reset; `fixed`: daily, weekly or
+   *  never; `fallback`: daily, standing in for a window with no usable
+   *  reset. */
+  reset_basis: z.enum(["fixed", "provider", "fallback"]),
+  /** The period boundaries are Maximal's estimate, not the provider's. */
+  reset_estimated: z.boolean(),
+  state: BudgetLimitState,
+  display: z.object({
+    limit: z.number().min(0),
+    usage: z.number().min(0),
+    limit_remaining: z.number().min(0),
+  }),
+})
+export type BudgetLimitStatus = z.infer<typeof BudgetLimitStatus>
+
+/** A quota window a provider reported. Its counters are context only. */
+export const ProviderQuotaWindowStatus = z.object({
+  provider: z.string(),
+  id: z.string(),
+  label: z.string(),
+  unit: z.string(),
+  used: z.number().nullable(),
+  limit: z.number().nullable(),
+  percent_remaining: z.number().nullable(),
+  resets_at: z.string().nullable(),
+  previous_resets_at: z.string().nullable(),
+  kind: z.enum(["fixed", "rolling"]).nullable(),
+  duration_ms: z.number().nullable(),
+  scope: z
+    .object({
+      models: z.array(z.string()).nullable(),
+      model_class: z.string().nullable(),
+    })
+    .nullable(),
+  overage: z
+    .object({
+      used: z.number().nullable(),
+      permitted: z.boolean().nullable(),
+    })
+    .nullable(),
+  observed_at: z.string(),
+  source: z.enum(["header", "endpoint"]),
+})
+export type ProviderQuotaWindowStatus = z.infer<
+  typeof ProviderQuotaWindowStatus
+>
+
+/** GET /settings/api/budget, and the reply to every limit change. */
+export const BudgetStatusResponse = z.object({
+  display: z.object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate }),
+  /** False when there is no usage database: every spend reads 0. */
+  storage_enabled: z.boolean(),
+  /** Widest scope first: global, provider, plugin, key. */
+  budgets: z.array(BudgetLimitStatus),
+  /** The blocking limit a request would hit first, or null. */
+  effective_budget: BudgetLimitId.nullable(),
+  provider_windows: z.array(ProviderQuotaWindowStatus),
+})
+export type BudgetStatusResponse = z.infer<typeof BudgetStatusResponse>
+
+/** Body of PUT /settings/api/budget/limits/:id, which creates or replaces
+ *  the limit. Give the amount as `limit` (nano-AIU) or as `amount` in the
+ *  display unit, not both. */
+export const BudgetLimitPutRequest = z
+  .object({
+    label: z.string().trim().min(1).max(128).optional(),
+    scope: BudgetScope,
+    limit: NanoAiuAmount.optional(),
+    amount: z.number().min(0).optional(),
+    limit_reset: BudgetLimitReset,
+    warn_at: BudgetWarnAt.optional(),
+    action: BudgetLimitAction,
+  })
+  .strict()
+  .refine(
+    (body) => (body.limit === undefined) !== (body.amount === undefined),
+    {
+      message: "give exactly one of limit (nano-AIU) or amount (display unit)",
+      path: ["limit"],
+    },
+  )
+export type BudgetLimitPutRequest = z.infer<typeof BudgetLimitPutRequest>
 
 /** One validation problem. `path` is dotted and relative to the request
  *  body (`"config.endpoint"`, `"permissions.fetch"`; `""` = the body). */

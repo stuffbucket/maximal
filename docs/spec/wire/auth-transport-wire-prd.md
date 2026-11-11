@@ -265,6 +265,14 @@ on every upstream response (`logCopilotRateLimits()` in
 `src/lib/errors/copilot-rate-limit.ts`); it does not surface them to the
 client except when relaying a 429 (below).
 
+Copilot also returns one `x-quota-snapshot-<id>` header per quota
+(`premium_interactions`, …), formatted as a query string with `ent`,
+`crUsed`, `rem`, `rst`, `ov` and `ovPerm`. `finishUpstreamResponse()`
+records each as a provider quota window for budget periods
+(`observeCopilotQuotaHeaders()` in `src/lib/budget/copilot-windows.ts`);
+like the rate-limit headers, they are not surfaced to the client except
+when relaying a 429.
+
 ## Upstream error contract
 
 `finishUpstreamResponse()` (`src/services/copilot/upstream-request.ts`)

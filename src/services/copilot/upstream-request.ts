@@ -5,6 +5,7 @@ import type { CompactType } from "~/lib/models/compact"
 import type { State } from "~/lib/runtime-state/state"
 import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 
+import { observeCopilotQuotaHeaders } from "~/lib/budget/copilot-windows"
 import {
   copilotHeaders,
   prepareForCompact,
@@ -82,7 +83,8 @@ export const buildCopilotHeaders = (
 }
 
 /**
- * Shared tail of every upstream call: log rate limits, translate a non-OK
+ * Shared tail of every upstream call: log rate limits, record the quota
+ * windows Copilot reports (`x-quota-snapshot-*`), translate a non-OK
  * response into the right error (auth-fatal vs generic) while recording the
  * last upstream rejection, then either hand back the SSE stream (when the
  * payload requested streaming) or the parsed JSON body.
@@ -101,6 +103,7 @@ export const finishUpstreamResponse = async <T>(
   }: { stream: boolean; errorMessage: string; call: UpstreamCall },
 ): Promise<T | ReturnType<typeof events>> => {
   logCopilotRateLimits(response.headers)
+  observeCopilotQuotaHeaders(response.headers)
 
   if (!response.ok) {
     consola.error(errorMessage, response)
