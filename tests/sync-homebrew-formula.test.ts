@@ -75,10 +75,7 @@ describe("renderFormula", () => {
     expect(out).toMatch(/^class Maximal < Formula$/m)
     expect(out).toMatch(/^\s*def install$/m)
     expect(out).toContain('bin.install "maximal"')
-    expect(out).toContain('bin.install "maximal-mcp-broker"')
-    expect(out).toContain(
-      'assert_predicate bin/"maximal-mcp-broker", :executable?',
-    )
+    expect(out).not.toContain("maximal-mcp-broker")
     expect(out).toMatch(/^\s*service do$/m)
     expect(out).toMatch(/^\s*test do$/m)
     expect(out).toMatch(/^end$/m)

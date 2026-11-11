@@ -1,8 +1,9 @@
+import type { PluginSettings } from "@stuffbucket/maximal-plugin-sdk/gateway"
+
 import consola from "consola"
 import fs from "node:fs"
 
 import type { BudgetConfig } from "~/lib/budget/schema"
-import type { McpBrokerConfig } from "~/lib/mcp-broker/types"
 
 import {
   ConfigValidationError,
@@ -11,17 +12,6 @@ import {
 } from "~/lib/config/config-schema"
 import { parseJsonText } from "~/lib/platform/json-text"
 import { PATHS } from "~/lib/platform/paths"
-
-export type {
-  McpBrokerConfig,
-  McpElicitationAction,
-  McpElicitationMechanism,
-  McpElicitationRule,
-  McpInteractionMode,
-  McpOwnershipMode,
-  McpProtocolMode,
-  McpServerConfig,
-} from "~/lib/mcp-broker/types"
 
 export interface ApiKeyEntry {
   id: string
@@ -90,7 +80,11 @@ export interface AppConfig {
   checkUpdates?: boolean
   editorVersion?: string
   apps?: AppsConfig
-  mcpBroker?: McpBrokerConfig
+  /** Built-in plugins by id: on/off, plugin config, client connections. */
+  plugins?: PluginSettings
+  /** The parked MCP broker's config (`parked/mcp`). Accepted and preserved,
+   *  never interpreted by the build. */
+  mcpBroker?: unknown
   /** Spend limits and the unit costs are shown in. Amounts are nano-AIU. */
   budget?: BudgetConfig
 }
@@ -104,7 +98,8 @@ export interface AppsConfig {
     /** Proxy routing applied to Claude Code (env.ANTHROPIC_BASE_URL in
      *  ~/.claude/settings.json). */
     enabled?: boolean
-    /** MCP endpoint ids Maximal added to Claude Code's user scope. */
+    /** Legacy: entry names older versions wrote into Claude Code's user
+     *  scope. The next plugin client sync removes them and this list. */
     mcpServers?: Array<string>
     /** Explicit model for Claude Code's Haiku alias. Missing means Automatic. */
     fastModel?: string

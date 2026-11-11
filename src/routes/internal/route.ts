@@ -7,10 +7,9 @@
  * release `:4141` cleanly.
  *
  * `POST /_internal/reload` tells the running instance that another process
- * (e.g. `maximal mcp`) changed `config.json`: it re-reads the file and
- * restarts the MCP broker if its section changed, then brings client apps'
- * MCP entries in line with it. Idempotent, so a repeat or stray call
- * changes nothing.
+ * changed `config.json`: it re-reads the file, starts or stops plugins to
+ * match, and brings client apps' plugin MCP entries in line. Idempotent, so
+ * a repeat or stray call changes nothing.
  *
  * Loopback enforcement is non-negotiable here. The auth middleware in
  * `server.ts` already exempts loopback callers from API-key checks (via
@@ -25,27 +24,25 @@ import type { Context } from "hono"
 import consola from "consola"
 import { Hono } from "hono"
 
-import { syncAllMcpClients } from "~/apps/mcp"
 import { defaultGetRequestIp, isLoopbackAddress } from "~/lib/auth/request-auth"
 import { reloadConfig } from "~/lib/config/config"
 import { requestContext } from "~/lib/http/request-context"
-import { reconfigureBrokerAfterSetupCheck } from "~/lib/mcp-broker/workiq"
+import { applyPluginSettings } from "~/lib/plugins/runtime"
 
 interface InternalRoutesOptions {
   /** Injectable for tests so we don't actually exit the runner. */
   exit?: (code: number) => void
   /** Injectable so tests can simulate non-loopback requests. */
   getRequestIp?: (c: Context) => string | null
-  /** Injectable so tests don't touch the real broker. */
+  /** Injectable so tests don't re-read the real config. */
   reload?: () => Promise<void>
 }
 
 async function reloadFromDisk(): Promise<void> {
-  const config = reloadConfig()
-  await reconfigureBrokerAfterSetupCheck(config.mcpBroker ?? {})
-  // Rewrite client entries from this process, which knows the port it
-  // actually listens on.
-  await syncAllMcpClients()
+  reloadConfig()
+  // Start/stop plugins to match, and rewrite client entries from this
+  // process, which knows the port it actually listens on.
+  await applyPluginSettings()
 }
 
 export function createInternalRoutes(

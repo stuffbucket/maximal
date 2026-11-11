@@ -485,270 +485,257 @@ export type ClaudeDesktopToggleRequest = z.infer<
   typeof ClaudeDesktopToggleRequest
 >
 
-// ── Brokered MCP endpoints (/settings/api/mcp) ──────────────────────────
+// ── Plugins / Connectors (/settings/api/plugins) ────────────────────────
+// The wire contract of Settings → Integrations → Connectors. Mirrors
+// `PluginSnapshot` / `PluginToolView` in packages/plugin-sdk/src/gateway.ts
+// (the gateway's own view), plus Maximal's client connections and endpoint.
+// camelCase like the snapshot it carries.
+//
+//   GET   /settings/api/plugins                        → PluginsListResponse
+//   GET   /settings/api/plugins/:id                    → PluginDetailView
+//   PATCH /settings/api/plugins/:id                    PluginUpdateRequest → PluginDetailView
+//   PUT   /settings/api/plugins/:id/tool-permissions   PluginToolPermissionsRequest → PluginDetailView
+//   POST  /settings/api/plugins/:id/actions/:actionId  → 202 PluginActionResponse
+//   SSE   `plugins.changed` on /settings/api/events (lifecycle, status, tools
+//         or settings moved; the UI refetches the list and any open detail)
+//
+// Errors use the Settings API's `{ error: { message, type } }` body; a 400
+// for a body that fails validation (including a config the plugin's own
+// `Config` rejects) adds `issues` (PluginValidationErrorResponse). 404 for
+// an unknown plugin or action, 409 when an action needs the plugin running.
+//
+// Response schemas are applied with `respondValidated`, which answers with
+// the *parsed* payload: zod strips keys a schema doesn't declare, so the
+// public manifest subset below is what keeps auth details (client ids,
+// authorities, scopes) and the config schema off the list endpoint.
 
-export const McpClientId = z.enum(["claude-code", "claude-desktop"])
-export type McpClientId = z.infer<typeof McpClientId>
+export const PluginClientId = z.enum(["claude-code"])
+export type PluginClientId = z.infer<typeof PluginClientId>
 
-export const McpClientOffer = z.object({
-  id: McpClientId,
-  name: z.string(),
-  /** Maximal's integration for this client is on, so it can be offered. */
-  available: z.boolean(),
-  /** When not available, a more specific reason than "integration off":
-   *  Claude Desktop has another provider's gateway profile applied, or
-   *  Maximal found no Claude Code program it can run. */
-  unavailableReason: z
-    .enum(["other-provider-profile", "cli-missing"])
+/** A connector exposes tools to MCP clients and gets host-managed tool
+ *  permissions; an extension doesn't. Settings lists connectors only. */
+export const PluginKind = z.enum(["connector", "extension"])
+export type PluginKind = z.infer<typeof PluginKind>
+
+/** Where the plugin comes from: shipped with Maximal (`built-in`, shown as
+ *  "Built-in") or installed separately (`external`, shown as "Plugin"). */
+export const PluginSource = z.enum(["built-in", "external"])
+export type PluginSource = z.infer<typeof PluginSource>
+
+/** Per-tool permission: `allow`, `ask` (a person approves every call) or
+ *  `block` (listed as turned off, calls refused). */
+export const ToolPermission = z.enum(["allow", "ask", "block"])
+export type ToolPermission = z.infer<typeof ToolPermission>
+
+/** Permission group, from the tool's annotations: `readOnlyHint === true` ⇒
+ *  `read-only`; else `destructiveHint === true` ⇒ `write-delete`; else `other`. */
+export const ToolGroup = z.enum(["read-only", "write-delete", "other"])
+export type ToolGroup = z.infer<typeof ToolGroup>
+
+/** Where a tool's effective permission came from: the user's explicit
+ *  choice, the plugin's `defaultToolPermission`, or the host default. */
+export const ToolPermissionSource = z.enum(["user", "plugin", "default"])
+export type ToolPermissionSource = z.infer<typeof ToolPermissionSource>
+
+/** Where `tools` come from: the running plugin, the last non-empty tool set
+ *  it registered (cached in its settings file), or nothing yet. */
+export const PluginToolsSource = z.enum(["live", "cache", "none"])
+export type PluginToolsSource = z.infer<typeof PluginToolsSource>
+
+/** A JSON Schema object (MCP `inputSchema` / `outputSchema`, a plugin's
+ *  `configSchema`). Every other keyword passes through untouched. */
+export const JsonSchemaObject = z.looseObject({ type: z.literal("object") })
+export type JsonSchemaObject = z.infer<typeof JsonSchemaObject>
+
+export const PluginToolAnnotations = z.object({
+  title: z.string().optional(),
+  readOnlyHint: z.boolean().optional(),
+  destructiveHint: z.boolean().optional(),
+  idempotentHint: z.boolean().optional(),
+  openWorldHint: z.boolean().optional(),
+})
+export type PluginToolAnnotations = z.infer<typeof PluginToolAnnotations>
+
+export const PluginStatus = z.object({
+  state: z.enum(["ready", "needs-setup", "working", "error"]),
+  code: z.string(),
+  summary: z.string(),
+  detail: z.string().optional(),
+  facts: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
+  actions: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        kind: z.enum(["primary", "secondary", "destructive"]).optional(),
+        confirm: z.string().optional(),
+      }),
+    )
     .optional(),
-  /** Maximal currently has this endpoint written into the client. */
-  configured: z.boolean(),
 })
-export type McpClientOffer = z.infer<typeof McpClientOffer>
+export type PluginStatus = z.infer<typeof PluginStatus>
 
-/** Where Work IQ is, step by step (see `workIqState` in
- *  src/lib/mcp-broker/workiq.ts):
- *   not-installed   its executable is gone
- *   eula-needed     the user hasn't accepted Microsoft's terms
- *   signin-needed   nobody has signed in on this account
- *   starting        Maximal is (re)starting it
- *   ready           signed in, and it offers its Microsoft 365 tools
- *   consent-needed  signed in, but it offers only its local tools: usually
- *                   the organization hasn't approved Work IQ */
-export const WorkIqState = z.enum([
-  "not-installed",
-  "eula-needed",
-  "signin-needed",
-  "starting",
-  "ready",
-  "consent-needed",
-])
-export type WorkIqState = z.infer<typeof WorkIqState>
-
-/** The sign-in Maximal runs for the user: `waiting` for them in the
- *  browser, `restarting` Work IQ afterwards; the rest say how the last one
- *  ended (`idle`: none, or it worked). */
-export const WorkIqSignIn = z.enum([
-  "idle",
-  "waiting",
-  "restarting",
-  "failed",
-  "timed-out",
-  "cancelled",
-])
-export type WorkIqSignIn = z.infer<typeof WorkIqSignIn>
-
-export const WorkIqStatus = z.object({
-  state: WorkIqState,
-  eulaAccepted: z.boolean(),
-  signedInBefore: z.boolean(),
-  /** Sign-in uses the browser (`disableBrokeredAuth=true`). */
-  browserSignIn: z.boolean(),
-  /** On macOS the UI offers browser sign-in and mentions the keychain. */
-  macos: z.boolean(),
-  signIn: WorkIqSignIn,
-  /** The last line Work IQ wrote that reads like a problem. Server text. */
-  lastProblem: z.string().nullable(),
+export const PluginClientView = z.object({
+  id: PluginClientId,
+  /** The user's choice: register the plugin's endpoint with this client. */
+  selected: z.boolean(),
+  /** Maximal can write to this client now (its integration is on). */
+  available: z.boolean(),
+  /** English reason when not available. */
+  reason: z.string().optional(),
+  /**
+   * The client already runs this service without Maximal: a server or
+   * plugin named after the connector (`workiq`). Maximal then adds no
+   * `maximal-<id>` entry of its own, even when `selected`.
+   */
+  standalone: z
+    .object({
+      /** Its name in the client: a server name, or `plugin@marketplace`. */
+      name: z.string(),
+      source: z.enum(["server", "plugin"]),
+    })
+    .optional(),
 })
-export type WorkIqStatus = z.infer<typeof WorkIqStatus>
+export type PluginClientView = z.infer<typeof PluginClientView>
 
-export const McpEndpointEntry = z.object({
+/** A connector's upstream, from `manifest.connector`. Public facts only:
+ *  the auth *type* is shown ("Signs in with Microsoft Entra ID"); client
+ *  ids, authorities, scopes and redirect URIs are never sent. */
+export const PluginConnectorInfo = z.object({
+  transport: z.literal("streamable-http"),
+  /** The upstream MCP server URL in effect: the plugin's config override
+   *  when it has one, else the manifest default. */
+  endpoint: z.string(),
+  auth: z.object({ type: z.enum(["entra", "mcp-oauth", "none"]) }),
+  /** Terms the user accepts before first use (host-managed gate). */
+  terms: z.object({ url: z.string(), label: z.string().optional() }).optional(),
+})
+export type PluginConnectorInfo = z.infer<typeof PluginConnectorInfo>
+
+/** The plugin's static `manifest` export, minus `configSchema` (detail
+ *  only) and auth secrets. `connector` is present iff `kind === "connector"`. */
+export const PluginManifestView = z.object({
   id: z.string(),
-  label: z.string(),
-  enabled: z.boolean(),
-  /** Remembered client choices, used to pre-check the prompt. */
-  clients: z.array(McpClientId),
-  offered: z.array(McpClientOffer),
-  /** Work IQ endpoints that are on: where its sign-in stands. */
-  workiq: WorkIqStatus.optional(),
+  kind: PluginKind,
+  displayName: z.string(),
+  description: z.string(),
+  homepage: z.string().optional(),
+  connector: PluginConnectorInfo.optional(),
 })
-export type McpEndpointEntry = z.infer<typeof McpEndpointEntry>
+export type PluginManifestView = z.infer<typeof PluginManifestView>
 
-export const WorkIqSignInRequest = z.object({
-  /** The user chose to switch Work IQ to browser sign-in first. */
-  useBrowserSignIn: z.boolean(),
-})
-export type WorkIqSignInRequest = z.infer<typeof WorkIqSignInRequest>
+const toolCount = z.number().int().nonnegative()
 
-export const WorkIqActionResponse = z.object({ workiq: WorkIqStatus })
-export type WorkIqActionResponse = z.infer<typeof WorkIqActionResponse>
-
-/** The process that runs every MCP endpoint, as the Settings UI needs it:
- *  whether anything is wrong and whether Maximal is already fixing it.
- *   off         no endpoint is on
- *   starting    coming up (first start, or after a change)
- *   running     serving
- *   recovering  stopped unexpectedly; Maximal is restarting it on its own
- *   stuck       kept stopping; Maximal paused retries for a minute
- *   unavailable can't run on this install — `problem` says why */
-export const McpBrokerHealth = z.object({
-  state: z.enum([
-    "off",
-    "starting",
-    "running",
-    "recovering",
-    "stuck",
-    "unavailable",
-  ]),
-  problem: z.enum(["not-installed", "containment-unavailable"]).nullable(),
-})
-export type McpBrokerHealth = z.infer<typeof McpBrokerHealth>
-
-/** A known MCP server Maximal looked for that isn't an endpoint yet. */
-export const McpCatalogItem = z.object({
-  id: z.string(),
-  label: z.string(),
-  status: z.enum(["ready", "not-installed"]),
-  /** Absolute path of the executable Maximal found. */
-  command: z.string().optional(),
-  version: z.string().optional(),
-  install: z.object({
-    command: z.string(),
-    url: z.string(),
-    /** Host of the registry the command downloads from; null when nothing
-     *  confirms one (the card then doesn't name a host). */
-    registry: z.string().nullable(),
+/** Tools per permission group, for the list (the full tools are detail-only). */
+export const PluginToolCounts = z.object({
+  total: toolCount,
+  byGroup: z.object({
+    "read-only": toolCount,
+    "write-delete": toolCount,
+    other: toolCount,
   }),
 })
-export type McpCatalogItem = z.infer<typeof McpCatalogItem>
+export type PluginToolCounts = z.infer<typeof PluginToolCounts>
 
-export const McpEndpointsListResponse = z.object({
-  endpoints: z.array(McpEndpointEntry),
-  broker: McpBrokerHealth,
-  /** Known servers to offer adding, installed or not. */
-  available: z.array(McpCatalogItem),
-})
-export type McpEndpointsListResponse = z.infer<typeof McpEndpointsListResponse>
-
-export const McpEndpointToggleRequest = z.object({
-  enabled: z.boolean(),
-  /** Omitted when turning off, so the remembered choice is kept. */
-  clients: z.array(McpClientId).max(2).optional(),
-})
-export type McpEndpointToggleRequest = z.infer<typeof McpEndpointToggleRequest>
-
-/** Where the broker got to before the apps were updated (see
- *  BrokerReadiness in src/lib/mcp-broker/supervisor.ts): `starting` means
- *  the wait ran out first, `failed` that it gave up, `off` that nothing
- *  runs it in this process, `setup-needed` that the endpoint is held back
- *  from the broker until its setup is done (Work IQ's terms and sign-in). */
-export const McpBrokerReadiness = z.enum([
-  "ready",
-  "starting",
-  "failed",
-  "off",
-  "setup-needed",
-])
-export type McpBrokerReadiness = z.infer<typeof McpBrokerReadiness>
-
-export const McpEndpointToggleResponse = z.object({
-  endpoint: McpEndpointEntry,
-  /** Clients that already had an entry with this name; left unchanged. */
-  skipped: z.array(z.object({ client: McpClientId, name: z.string() })),
-  /** Clients Maximal couldn't add it to on this install, and why:
-   *  `adapter-missing` = Claude Desktop needs maximal-mcp-broker, which
-   *  wasn't found. */
-  unavailable: z.array(
-    z.object({
-      client: McpClientId,
-      name: z.string(),
-      reason: z.enum(["adapter-missing"]),
-    }),
-  ),
-  /** Clients whose config Maximal changed for it (added or took it out). */
-  updated: z.array(z.object({ client: McpClientId, name: z.string() })),
-  broker: McpBrokerReadiness,
-  /** The app whose own entry for this server the endpoint now runs. */
-  adoptedFrom: z.string().optional(),
-  /** Environment names from that entry that were not copied. */
-  droppedEnvironment: z.array(z.string()).optional(),
-})
-export type McpEndpointToggleResponse = z.infer<
-  typeof McpEndpointToggleResponse
->
-
-export const McpEndpointAddRequest = z.object({ catalogId: z.string().min(1) })
-export type McpEndpointAddRequest = z.infer<typeof McpEndpointAddRequest>
-
-export const McpEndpointAddResponse = z.object({ endpoint: McpEndpointEntry })
-export type McpEndpointAddResponse = z.infer<typeof McpEndpointAddResponse>
-
-export const McpEndpointRemoveResponse = z.object({
-  /** Apps Maximal took this server's entry out of. */
-  removedFrom: z.array(z.object({ client: McpClientId, name: z.string() })),
-})
-export type McpEndpointRemoveResponse = z.infer<
-  typeof McpEndpointRemoveResponse
->
-
-/** One field of a form an MCP server asked the user to fill in, normalized
- *  from its JSON Schema. Titles, descriptions and options are server text. */
-export const PendingRequestField = z.object({
-  name: z.string(),
-  kind: z.enum(["boolean", "string", "number", "integer", "enum"]),
-  title: z.string().optional(),
-  description: z.string().optional(),
-  required: z.boolean(),
-  default: z.union([z.string(), z.number(), z.boolean()]).optional(),
-  minLength: z.number().optional(),
-  maxLength: z.number().optional(),
-  format: z.enum(["email", "uri", "date", "date-time"]).optional(),
-  minimum: z.number().optional(),
-  maximum: z.number().optional(),
-  /** For `enum`: the allowed values and how to show them. */
-  options: z
-    .array(z.object({ value: z.string(), label: z.string() }))
-    .optional(),
-})
-export type PendingRequestField = z.infer<typeof PendingRequestField>
-
-/** An MCP server's request for user input, waiting for an answer in
- *  Maximal: a form to fill in, or a URL to open. */
-export const PendingRequest = z.object({
+/** One item of `GET /settings/api/plugins`. `id`, `kind`, `displayName`,
+ *  `description` and `homepage` equal the manifest's (kept top-level, the
+ *  v1 shape). */
+export const PluginView = z.object({
   id: z.string(),
-  /** The MCP server (endpoint) asking, and its display name. */
-  endpointId: z.string(),
-  label: z.string(),
-  /** The tool call the request belongs to, when known. */
-  toolName: z.string().optional(),
-  mode: z.enum(["form", "url"]),
-  /** The server's message to the user. Untrusted; show as plain text. */
-  message: z.string(),
-  fields: z.array(PendingRequestField),
-  url: z.string().optional(),
-  /** Host of `url`, for showing where the link goes. */
-  urlHost: z.string().optional(),
-  receivedAt: z.string(),
-  expiresAt: z.string(),
+  kind: PluginKind,
+  source: PluginSource,
+  displayName: z.string(),
+  description: z.string(),
+  homepage: z.string().optional(),
+  manifest: PluginManifestView,
+  /** Desired state (config.json → plugins.<id>.enabled). */
+  enabled: z.boolean(),
+  lifecycle: z.enum(["disabled", "starting", "active", "failed"]),
+  /** Why it failed (unreadable settings file, path-qualified config
+   *  issues, apply error). Only with `lifecycle: "failed"`. */
+  error: z.string().optional(),
+  /** The running plugin's own report (`ctx.surface.setStatus`). */
+  status: PluginStatus.optional(),
+  /** Counts over the same tools the detail's `tools` lists (live or cached). */
+  toolCounts: PluginToolCounts,
+  toolsSource: PluginToolsSource,
+  clients: z.array(PluginClientView),
+  /** The plugin's MCP endpoint on this Maximal. */
+  endpoint: z.string(),
 })
-export type PendingRequest = z.infer<typeof PendingRequest>
+export type PluginView = z.infer<typeof PluginView>
 
-export const PendingRequestsResponse = z.object({
-  requests: z.array(PendingRequest),
+/** A tool as Settings shows it: the full MCP definition (schemas verbatim)
+ *  plus its group and effective permission. Ordered as the plugin
+ *  registered them. */
+export const PluginToolView = z.object({
+  name: z.string(),
+  title: z.string().optional(),
+  description: z.string(),
+  inputSchema: JsonSchemaObject,
+  outputSchema: JsonSchemaObject.optional(),
+  annotations: PluginToolAnnotations.optional(),
+  group: ToolGroup,
+  permission: ToolPermission,
+  permissionSource: ToolPermissionSource,
 })
-export type PendingRequestsResponse = z.infer<typeof PendingRequestsResponse>
+export type PluginToolView = z.infer<typeof PluginToolView>
 
-/** What the shell polls: enough to notice a new request, nothing more. */
-export const PendingRequestsSummary = z.object({
-  pending: z.number().int().nonnegative(),
-  /** The most recent request's id, so a new one is noticed even when the
-   *  count stays the same. */
-  newestId: z.string().nullable(),
+/** `GET /settings/api/plugins/:id`, and the reply to PATCH and PUT
+ *  tool-permissions: the list item plus config and the full tools. */
+export const PluginDetailView = PluginView.extend({
+  /** The plugin's settings version (`manifest.settingsVersion`). */
+  settingsVersion: z.number().int().positive(),
+  /** The `config` from the plugin's settings file: validated (defaults
+   *  applied) when valid, else as stored so the form can show what to fix;
+   *  absent when the file is unreadable or has no config yet. */
+  config: z.record(z.string(), z.unknown()).optional(),
+  /** JSON Schema of the plugin's `Config` for the Settings form. Supported:
+   *  an object of string (incl. `format: "uri"`), boolean, number/integer
+   *  and enum properties with `title` / `description` / `default`, and the
+   *  custom `"x-maximal-advanced": true` to fold a field under Advanced.
+   *  Anything else is shown read-only as JSON. Absent ⇒ nothing to set. */
+  configSchema: JsonSchemaObject.optional(),
+  /** Every tool with its permission: live when the plugin is active and has
+   *  registered some, else the cached catalog (`toolsSource`). */
+  tools: z.array(PluginToolView),
+  /** When the cached catalog was last refreshed (ISO 8601). Set whenever a
+   *  catalog exists; the UI shows it when `toolsSource === "cache"`. */
+  catalogUpdatedAt: z.string().optional(),
 })
-export type PendingRequestsSummary = z.infer<typeof PendingRequestsSummary>
+export type PluginDetailView = z.infer<typeof PluginDetailView>
 
-export const PendingRequestAnswer = z.object({
-  action: z.enum(["accept", "decline", "cancel"]),
-  /** Form values, only with `accept` on a form. */
-  content: z
-    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
-    .optional(),
-})
-export type PendingRequestAnswer = z.infer<typeof PendingRequestAnswer>
+export const PluginsListResponse = z.object({ plugins: z.array(PluginView) })
+export type PluginsListResponse = z.infer<typeof PluginsListResponse>
 
-export const PendingRequestAnswerResponse = z.object({ ok: z.literal(true) })
-export type PendingRequestAnswerResponse = z.infer<
-  typeof PendingRequestAnswerResponse
+/** `PATCH /settings/api/plugins/:id`. `config` replaces the plugin's whole
+ *  config (validated by the plugin's `Config`; on success it is written to
+ *  the settings file and an enabled plugin reloads). Omitted keys are left
+ *  as they are. → PluginDetailView, or 400 PluginValidationErrorResponse. */
+export const PluginUpdateRequest = z
+  .object({
+    enabled: z.boolean().optional(),
+    clients: z.array(PluginClientId).max(8).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+export type PluginUpdateRequest = z.infer<typeof PluginUpdateRequest>
+
+/** `PUT /settings/api/plugins/:id/tool-permissions`. Keys are tool names;
+ *  `null` clears the user's choice (back to the default). Names need not be
+ *  currently registered: choices are kept for tools that come back. A group
+ *  bulk-set sends every tool of the group. Never reloads the plugin.
+ *  → PluginDetailView. */
+export const PluginToolPermissionsRequest = z
+  .object({
+    permissions: z.record(
+      z.string().regex(/^[\w-]{1,64}$/),
+      ToolPermission.nullable(),
+    ),
+  })
+  .strict()
+export type PluginToolPermissionsRequest = z.infer<
+  typeof PluginToolPermissionsRequest
 >
 
 // ── Budget (/settings/api/budget) ───────────────────────────────────────
@@ -858,3 +845,27 @@ export const BudgetLimitPutRequest = z
     },
   )
 export type BudgetLimitPutRequest = z.infer<typeof BudgetLimitPutRequest>
+
+/** One validation problem. `path` is dotted and relative to the request
+ *  body (`"config.endpoint"`, `"permissions.fetch"`; `""` = the body). */
+export const PluginValidationIssue = z.object({
+  path: z.string(),
+  message: z.string(),
+})
+export type PluginValidationIssue = z.infer<typeof PluginValidationIssue>
+
+/** The 400 body of PATCH / PUT tool-permissions when validation fails.
+ *  `error.message` joins the issues into one sentence for generic display. */
+export const PluginValidationErrorResponse = z.object({
+  error: z.object({
+    message: z.string(),
+    type: z.literal("invalid_request_error"),
+  }),
+  issues: z.array(PluginValidationIssue),
+})
+export type PluginValidationErrorResponse = z.infer<
+  typeof PluginValidationErrorResponse
+>
+
+export const PluginActionResponse = z.object({ ok: z.literal(true) })
+export type PluginActionResponse = z.infer<typeof PluginActionResponse>

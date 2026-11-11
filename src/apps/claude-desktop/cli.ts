@@ -2,13 +2,10 @@ import consola from "consola"
 import fs from "node:fs"
 import path from "node:path"
 
-import { syncMcpClient } from "~/lib/mcp-broker/client-sync"
-
 import type { AppCli, AppCliOp } from "../index"
 
 import { generateManagedProfile } from "./config"
 import { claudeAppInstalled, claudeAppCandidates } from "./detect"
-import { claudeDesktopMcp } from "./mcp"
 import { enableClaudeDesktopRouting } from "./reconcile"
 
 const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"
@@ -33,7 +30,7 @@ export const claudeDesktopCli: AppCli = {
     },
   },
 
-  async handle(op: AppCliOp, args: Record<string, unknown>): Promise<boolean> {
+  handle(op: AppCliOp, args: Record<string, unknown>): boolean {
     if (op !== "enable") return false
 
     if (args.managed === true) {
@@ -51,12 +48,12 @@ export const claudeDesktopCli: AppCli = {
       return true
     }
 
-    await apply()
+    apply()
     return true
   },
 }
 
-async function apply(): Promise<void> {
+function apply(): void {
   try {
     const result = enableClaudeDesktopRouting()
     if (result.conflict) {
@@ -78,11 +75,6 @@ async function apply(): Promise<void> {
       consola.info(
         `  workspace folders: ${result.ensuredWorkspaceFolders.join(", ")}`,
       )
-    }
-    const mcp = await syncMcpClient(claudeDesktopMcp)
-    const changed = [...mcp.added, ...mcp.removed]
-    if (changed.length > 0) {
-      consola.info(`  MCP servers updated: ${changed.join(", ")}`)
     }
     consola.info(
       "  Quit & relaunch Claude Desktop for the change to take effect.",

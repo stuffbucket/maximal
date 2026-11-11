@@ -104,6 +104,8 @@ export const focusRing = {
 export const layout = {
   sidebarWidth: "200px",
   contentMax: "640px",
+  /** Max height of an inline code block that scrolls on its own. */
+  codeBlockMax: "320px",
 } as const;
 
 /**

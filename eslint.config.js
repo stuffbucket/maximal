@@ -26,12 +26,10 @@ const tokenAttachmentGuard = {
     // Loopback smoke test sends a DUMMY x-api-key ("anything") to its own
     // server — not a real credential.
     "src/setup.ts",
-    // MCP gateway forwards to the isolated broker with that broker's random
-    // per-generation loopback key, not a GitHub/Copilot/provider credential.
-    "src/routes/mcp/route.ts",
-    // Writes an MCP endpoint's Authorization header into Claude Code's own
-    // config file; no request is sent from here.
-    "src/apps/claude-code/mcp.ts",
+    // Writes a plugin endpoint's Authorization header into Claude Code's own
+    // config file (the user's Maximal key for Claude Code); no request is
+    // sent from here.
+    "src/lib/plugins/clients/claude-code.ts",
     "**/*.test.ts",
   ],
   rules: {
@@ -147,9 +145,13 @@ export default [
       "docs/**",
       "scripts/**",
       "shell/**",
-      // Isolated pnpm packages, each with its own lockfile, tsconfig, and
-      // toolchain (`mise -C packages/<name>`).
-      "packages/**",
+      // Storybook is an isolated pnpm package with its own lockfile, tsconfig,
+      // and toolchain (`mise -C packages/storybook`). The plugin packages
+      // (packages/plugin-*, packages/connector-kit) are root Bun workspaces
+      // and are linted here.
+      "packages/storybook/**",
+      // Parked code (kept in git, not part of the build): see parked/mcp/README.md.
+      "parked/**",
       "site/**",
       ".dependency-cruiser.cjs",
       ".pnpmfile.cjs",

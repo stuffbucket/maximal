@@ -11,9 +11,9 @@
 # a windows-2022 runner:
 #
 #   1. Build the embedded settings/dashboard UI + the ui-embed manifest.
-#   2. Compile the proxy and isolated broker sidecars for win-x64 via
-#      scripts/build-sidecar.ts, which stages both target-triple externalBin
-#      inputs under shell/src-tauri/binaries/.
+#   2. Compile the proxy sidecar for win-x64 via scripts/build-sidecar.ts,
+#      which stages its target-triple externalBin input under
+#      shell/src-tauri/binaries/.
 #   3. Run the native shell tests under Windows, including quit ordering.
 #   4. `bun run tauri build` for Windows → NSIS per-user installer (+ the
 #      bare .exe). NSIS is chosen over WiX/MSI to match the macOS per-user,
@@ -56,9 +56,6 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 30
     env:
-      # The root mise.toml pins Rust and the broker inherits it; nothing in
-      # this job builds Rust through mise, so don't download the toolchain.
-      MISE_DISABLE_TOOLS: rust
       MAXIMAL_VERSION: ${{ github.event.inputs.version }}
       MAXIMAL_GIT_SHA: ${{ github.sha }}
       MAXIMAL_GIT_BRANCH: ${{ github.ref_name }}
@@ -77,10 +74,6 @@ jobs:
           bun-version: 1.4.3
           cache-dependencies: "true"
 
-      - uses: ./.github/actions/setup-mise
-        with:
-          mise-version: v2026.9.5
-
       # Pinned Rust + the Cargo cache warmed from main by
       # windows-rust-cache.yml (restore only, shared with the release job).
       - name: Set up Rust
@@ -98,17 +91,6 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             if bun install --frozen-lockfile; then break; fi
-            if (( attempt == 3 )); then exit 1; fi
-            sleep "$((attempt * 15))"
-          done
-
-      - name: Install isolated broker dependencies
-        shell: bash
-        run: |
-          mise trust packages/mcp-broker/mise.toml
-          mise -C packages/mcp-broker install
-          for attempt in 1 2 3; do
-            if mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile; then break; fi
             if (( attempt == 3 )); then exit 1; fi
             sleep "$((attempt * 15))"
           done
@@ -134,9 +116,9 @@ jobs:
           bun run build:ui
           bun run scripts/gen-ui-embed.ts
 
-      # Compile both sidecars for win-x64 and place their target-triple inputs
+      # Compile the sidecar for win-x64 and place its target-triple input
       # under shell/src-tauri/binaries/ for Tauri's externalBin resolver.
-      - name: Build win-x64 sidecars (externalBin)
+      - name: Build win-x64 sidecar (externalBin)
         shell: bash
         run: bun run scripts/build-sidecar.ts --force
 
@@ -148,11 +130,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $dir = 'shell/src-tauri/binaries'
           $triple = 'x86_64-pc-windows-msvc'
-          foreach ($name in @('maximal', 'maximal-mcp-broker')) {
-            $exe = Join-Path $dir "$name-$triple.exe"
-            if (-not (Test-Path $exe)) { throw "sidecar not found: $exe" }
-            Write-Host "sidecar OK: $exe ($((Get-Item $exe).Length) bytes)"
-          }
+          $exe = Join-Path $dir "maximal-$triple.exe"
+          if (-not (Test-Path $exe)) { throw "sidecar not found: $exe" }
+          Write-Host "sidecar OK: $exe ($((Get-Item $exe).Length) bytes)"
           Get-ChildItem $dir
 
       # Compile and exercise the lifecycle code with target_os = "windows",
@@ -239,7 +219,7 @@ jobs:
           $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'
           if (-not (Test-Path $installRoot)) { throw "install dir missing: $installRoot" }
           Get-ChildItem $installRoot | ForEach-Object { Write-Host "  installed: $($_.Name)" }
-          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+          foreach ($binary in @('maximal.exe')) {
             $binaryPath = Join-Path $installRoot $binary
             if (-not (Test-Path $binaryPath)) { throw "$binary missing at $binaryPath" }
           }
@@ -947,7 +927,7 @@ jobs:
             -ArgumentList '/S', "_?=$installRoot" -PassThru
           if (-not $p.WaitForExit(60000)) {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-            Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker' `
+            Get-Process -Name 'maximal-shell', 'maximal' `
               -ErrorAction SilentlyContinue |
               Stop-Process -Force -ErrorAction SilentlyContinue
             throw "uninstaller timed out with Maximal running"
@@ -957,7 +937,7 @@ jobs:
           $deadline = (Get-Date).AddSeconds(10)
           do {
             $remaining = @(
-              Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker' `
+              Get-Process -Name 'maximal-shell', 'maximal' `
                 -ErrorAction SilentlyContinue
             )
             if ($remaining.Count -eq 0) { break }
@@ -968,7 +948,7 @@ jobs:
             throw "Maximal processes remain after uninstall: $details"
           }
 
-          foreach ($binary in @('maximal-shell.exe', 'maximal.exe', 'maximal-mcp-broker.exe')) {
+          foreach ($binary in @('maximal-shell.exe', 'maximal.exe')) {
             $binaryPath = Join-Path $installRoot $binary
             if (Test-Path $binaryPath) { throw "$binary still present: $binaryPath" }
           }
@@ -1080,7 +1060,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker' `
+          Get-Process -Name 'maximal-shell', 'maximal' `
             -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction SilentlyContinue
           $installRoot = Join-Path $env:LOCALAPPDATA 'Maximal'

@@ -517,90 +517,6 @@ pub(super) enum RejectionTransition {
     Changed,
 }
 
-/// MCP servers' requests for user input waiting in Settings → Requests, as
-/// last reported by `/settings/api/requests/summary`: a count and the newest
-/// id, never contents (those stay in Settings). Drives the ATTENTION icon,
-/// a tray item, and one notification per new request.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(super) struct RequestsSnapshot {
-    pub(super) pending: u64,
-    newest_id: Option<String>,
-}
-
-/// How many recent newest ids to remember, so one that becomes newest
-/// again (a later one was answered first) isn't taken for a new arrival.
-const SEEN_REQUEST_IDS: usize = 64;
-
-#[derive(Default)]
-struct RequestsState {
-    snapshot: RequestsSnapshot,
-    seen: std::collections::VecDeque<String>,
-}
-
-pub(super) struct PendingRequests(Mutex<RequestsState>);
-
-impl PendingRequests {
-    pub(super) fn new() -> Self {
-        Self(Mutex::new(RequestsState::default()))
-    }
-
-    pub(super) fn get(&self) -> RequestsSnapshot {
-        self.0
-            .lock()
-            .expect("requests mutex poisoned")
-            .snapshot
-            .clone()
-    }
-
-    pub(super) fn set(&self, next: RequestsSnapshot) -> RequestsTransition {
-        let mut guard = self.0.lock().expect("requests mutex poisoned");
-        let transition = requests_transition(&guard.snapshot, &next, &guard.seen);
-        if let Some(id) = &next.newest_id {
-            if !guard.seen.contains(id) {
-                guard.seen.push_back(id.clone());
-                if guard.seen.len() > SEEN_REQUEST_IDS {
-                    guard.seen.pop_front();
-                }
-            }
-        }
-        guard.snapshot = next;
-        transition
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RequestsTransition {
-    Unchanged,
-    /// A request arrived that wasn't there before: notify once.
-    Arrived,
-    /// Fewer or none waiting: refresh the tray, don't notify.
-    Changed,
-}
-
-/// A newest id not seen before means a request arrived; anything else that
-/// differs is requests being answered, withdrawn or expiring.
-fn requests_transition(
-    prev: &RequestsSnapshot,
-    next: &RequestsSnapshot,
-    seen: &std::collections::VecDeque<String>,
-) -> RequestsTransition {
-    if prev == next {
-        return RequestsTransition::Unchanged;
-    }
-    match &next.newest_id {
-        Some(id) if next.pending > 0 && !seen.contains(id) => RequestsTransition::Arrived,
-        _ => RequestsTransition::Changed,
-    }
-}
-
-fn parse_requests_summary(payload: &serde_json::Value) -> Option<RequestsSnapshot> {
-    let pending = payload.get("pending")?.as_u64()?;
-    let newest_id = match payload.get("newestId")? {
-        serde_json::Value::Null => None,
-        value => Some(value.as_str()?.to_owned()),
-    };
-    Some(RequestsSnapshot { pending, newest_id })
-}
 /// The latest available release, as last reported by the sidecar's
 /// `/settings/api/update-status`. None = up to date (or unknown). Drives the
 /// "Update to X.Y.Z…" tray item and a one-shot OS notification when a newer
@@ -964,8 +880,6 @@ pub(super) fn spawn_sidecar(app: &AppHandle) -> tauri::Result<()> {
         // Shell plugin 2.6+ contains ordinary descendants in a POSIX process
         // group / Windows Job Object. Maximal's local plugin patch configures
         // the Windows job as kill-on-close before this suspended child starts.
-        // The deliberately detached MCP broker also has its own containment,
-        // IPC, and parent-watchdog shutdown contract.
         .set_process_group(true)
         .env("HOST", LOOPBACK_HOST)
         .env("MAXIMAL_APP_PROFILE", profile.as_env())
@@ -1463,21 +1377,7 @@ fn parse_rejection_from_status(payload: &serde_json::Value) -> Option<RejectionS
         remediation_url,
     })
 }
-/// `/settings/api/requests/summary`; None when unreachable or malformed, so
-/// a transient blip doesn't clear the tray.
-pub(super) async fn fetch_requests_summary(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    url: &str,
-) -> Option<RequestsSnapshot> {
-    let key = app.state::<ShellApiKey>().value().to_owned();
-    let resp = client.get(url).header("x-api-key", key).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let payload: serde_json::Value = resp.json().await.ok()?;
-    parse_requests_summary(&payload)
-}
+
 /// What a sidecar `/settings/api/update-status` payload says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum UpdateCheck {
@@ -1734,48 +1634,6 @@ pub(super) fn respawn_sidecar(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::extract_error_reason;
-
-    #[test]
-    fn reads_the_requests_summary() {
-        use super::{parse_requests_summary, RequestsSnapshot};
-        assert_eq!(
-            parse_requests_summary(&serde_json::json!({ "pending": 2, "newestId": "elicit-9" })),
-            Some(RequestsSnapshot {
-                pending: 2,
-                newest_id: Some("elicit-9".into())
-            })
-        );
-        assert_eq!(
-            parse_requests_summary(&serde_json::json!({ "pending": 0, "newestId": null })),
-            Some(RequestsSnapshot {
-                pending: 0,
-                newest_id: None
-            })
-        );
-        assert_eq!(
-            parse_requests_summary(&serde_json::json!({ "pending": "x" })),
-            None
-        );
-    }
-
-    #[test]
-    fn notifies_only_when_a_new_request_arrives() {
-        use super::{PendingRequests, RequestsSnapshot, RequestsTransition};
-        let snap = |pending: u64, newest: Option<&str>| RequestsSnapshot {
-            pending,
-            newest_id: newest.map(str::to_owned),
-        };
-        let state = PendingRequests::new();
-        assert_eq!(state.set(snap(0, None)), RequestsTransition::Unchanged);
-        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Arrived);
-        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Unchanged);
-        assert_eq!(state.set(snap(2, Some("b"))), RequestsTransition::Arrived);
-        // Answering the newest makes the older one newest again: not new.
-        assert_eq!(state.set(snap(1, Some("a"))), RequestsTransition::Changed);
-        assert_eq!(state.set(snap(0, None)), RequestsTransition::Changed);
-        // One answered and another arrived: still news.
-        assert_eq!(state.set(snap(1, Some("c"))), RequestsTransition::Arrived);
-    }
 
     #[test]
     fn classifies_profiles_from_the_final_identifier() {

@@ -57,9 +57,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # The root mise.toml pins Rust and the broker inherits it; nothing in
-      # this job builds Rust through mise, so don't download the toolchain.
-      MISE_DISABLE_TOOLS: rust
       VERSION: ${{ github.event.inputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,21 +65,11 @@ jobs:
         with:
           bun-version: 1.4.3
 
-      - uses: ./.github/actions/setup-mise
-        with:
-          mise-version: v2026.9.5
-
       - name: Configure package registry
         run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
-      - name: Install isolated broker dependencies
-        run: |
-          mise trust packages/mcp-broker/mise.toml
-          mise -C packages/mcp-broker install
-          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
 
       # The embedded settings/dashboard UI lives in shell/ with its own
       # manifest; the root install doesn't cover it. Without it `build:ui`
@@ -112,9 +99,6 @@ jobs:
             --define "__MAXIMAL_GIT_BRANCH__=\"${MAXIMAL_GIT_BRANCH}\"" \
             --define "__MAXIMAL_CHANNEL__=\"dev\"" \
             src/main.ts --outfile staging/maximal.exe
-          mise -C packages/mcp-broker exec -- pnpm build:target \
-            --target=bun-windows-x64 \
-            --outfile="$GITHUB_WORKSPACE/staging/maximal-mcp-broker.exe"
 
       # Pack with the canonical release artifact name + sha256 so the MSI
       # job's download/verify mirrors the release path exactly.
@@ -123,8 +107,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist-bin
           ZIP="maximal-v${VERSION}-windows-x64.zip"
-          ( cd staging && zip -q -X "../dist-bin/${ZIP}" \
-              maximal.exe maximal-mcp-broker.exe )
+          ( cd staging && zip -q -X "../dist-bin/${ZIP}" maximal.exe )
           ( cd dist-bin && sha256sum "${ZIP}" > "${ZIP}.sha256" && sha256sum -c "${ZIP}.sha256" )
           ls -lh dist-bin
 
@@ -157,7 +140,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $zip = Get-ChildItem -Path dist-bin -Filter '*.zip' | Select-Object -First 1
           Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
-          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+          foreach ($binary in @('maximal.exe')) {
             if (-not (Test-Path (Join-Path 'staging' $binary))) {
               Write-Error "$binary missing from $($zip.Name)"
               exit 1
@@ -218,7 +201,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
-          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+          foreach ($binary in @('maximal.exe')) {
             $binaryPath = Join-Path $installRoot $binary
             if (-not (Test-Path $binaryPath)) { throw "$binary missing at $binaryPath" }
             Write-Host "$binary present ($((Get-Item $binaryPath).Length) bytes)"
@@ -313,7 +296,7 @@ jobs:
       - name: Stop proxy before uninstall
         shell: pwsh
         run: |
-          Get-Process -Name 'maximal', 'maximal-mcp-broker' `
+          Get-Process -Name 'maximal' `
             -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 2
@@ -337,7 +320,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
-          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+          foreach ($binary in @('maximal.exe')) {
             $binaryPath = Join-Path $installRoot $binary
             if (Test-Path $binaryPath) {
               throw "$binary still present after uninstall: $binaryPath"
@@ -403,7 +386,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
-          foreach ($binary in @('maximal.exe', 'maximal-mcp-broker.exe')) {
+          foreach ($binary in @('maximal.exe')) {
             $binaryPath = Join-Path $installRoot $binary
             if (-not (Test-Path $binaryPath)) { throw "$binary missing at $binaryPath" }
           }
@@ -536,7 +519,7 @@ jobs:
           # failed. A green path reaches this step with nothing left to remove.
           Get-ScheduledTask -TaskName 'maximal' -ErrorAction SilentlyContinue |
             Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
-          Stop-Process -Name 'maximal', 'maximal-mcp-broker' -Force `
+          Stop-Process -Name 'maximal' -Force `
             -ErrorAction SilentlyContinue
           Remove-Item `
             'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\maximal' `

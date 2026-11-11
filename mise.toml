@@ -1,8 +1,7 @@
 # Project toolchain. Bun's version lives only in .bun-version (see
 # docs/bun-version-policy.md); mise reads it from there. Node and pnpm run the
 # isolated pnpm packages under packages/: packages/storybook uses these root
-# pins, while packages/mcp-broker pins its own in its mise.toml. Rust builds and
-# tests the Tauri shell (`bun run shell:test`).
+# pins. Rust builds and tests the Tauri shell (`bun run shell:test`).
 [settings]
 idiomatic_version_file_enable_tools = ["bun"]
 

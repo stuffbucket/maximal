@@ -79,6 +79,26 @@ function retryHeaders(relay: (status: number) => boolean): ProxyErrorRewrite {
   }
 }
 
+/** A bounded upstream read (`sendRequest`'s `timeoutMs`, an
+ *  `AbortSignal.timeout`) that ran out of time: 504 with a plain message,
+ *  not a 500 carrying the runtime's "The operation timed out.". Every bounded
+ *  read behind `forwardError` is a GitHub or Copilot API call
+ *  (`services/github`, `services/copilot`), hence the wording. Only
+ *  `forwardError` runs it; the inference routes keep their own mapping. */
+export const upstreamTimeout: ProxyErrorRewrite = (
+  reply,
+  { error, upstream },
+) =>
+  !upstream && error instanceof Error && error.name === "TimeoutError" ?
+    {
+      ...reply,
+      status: 504,
+      type: "api_error",
+      message: "GitHub didn't respond in time. Try again in a moment.",
+      openai: { ...reply.openai, type: "upstream_timeout" },
+    }
+  : undefined
+
 /** The rewrites for each wire, in order. */
 export const PROXY_ERROR_REWRITES: Record<
   ProxyWire,

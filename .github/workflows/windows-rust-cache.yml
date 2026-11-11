@@ -85,7 +85,6 @@ jobs:
           set -euo pipefail
           mkdir -p src-tauri/binaries
           : > src-tauri/binaries/maximal-x86_64-pc-windows-msvc.exe
-          : > src-tauri/binaries/maximal-mcp-broker-x86_64-pc-windows-msvc.exe
           bun run tauri build --no-bundle \
             --config '{"build":{"beforeBuildCommand":""}}'
 

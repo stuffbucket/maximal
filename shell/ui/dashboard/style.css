@@ -69,9 +69,7 @@
   /* ---- Font stacks ---- */
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-    monospace;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Auto-injected tokens */
   --text-xs: 0.75rem;
@@ -126,6 +124,7 @@
   --focus-ring: 0 0 0 2px var(--surface-base), 0 0 0 4px var(--accent);
   --sidebar-width: 200px;
   --content-max: 640px;
+  --code-block-max: 320px;
 }
 
 /* ---- Theme colors ----
@@ -755,16 +754,12 @@ html[data-embedded="true"] .lang-picker {
   flex-direction: column;
   gap: var(--space-3);
 }
-.usage-loading {
-  margin: 0;
+/* The quotas aren't available right now (GitHub hasn't answered yet, or the
+   last read failed): one quiet line above them, no banner and nothing to
+   click; Maximal keeps retrying on its own. */
+.usage-status {
+  margin: 0 0 var(--space-3);
   color: var(--text-muted);
-  font-size: var(--text-sm);
-}
-.usage-error {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  color: var(--status-error);
   font-size: var(--text-sm);
 }
 .usage-signed-out {
@@ -882,6 +877,22 @@ html[data-embedded="true"] .lang-picker {
   background-color: var(--border-strong);
 }
 .quota-progress--unknown::-moz-progress-bar {
+  background-color: var(--border-strong);
+}
+/* Out-of-date numbers (or placeholders before the first read) keep their
+   layout but drop to neutral ink: muted text and a --border-strong meter
+   fill, so nothing reads as current. Tokens rather than opacity, which would
+   compound with --text-muted and fall below AA. */
+.usage-quotas--unavailable .usage-panel__title,
+.usage-quotas--unavailable .usage-panel__headline,
+.usage-quotas--unavailable .quota-more__title,
+.usage-quotas--unavailable .meter-state svg {
+  color: var(--text-muted);
+}
+.usage-quotas--unavailable .quota-progress::-webkit-progress-value {
+  background-color: var(--border-strong);
+}
+.usage-quotas--unavailable .quota-progress::-moz-progress-bar {
   background-color: var(--border-strong);
 }
 .live {

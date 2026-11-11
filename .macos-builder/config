@@ -9,5 +9,5 @@ entitlements = bun-runtime
 artifact = dmg,updater
 updater_name = maximal-{tag}-darwin-arm64.app.tar.gz
 
-# The builder signs both nested Bun sidecars after the isolated producer exits.
-sign_nested = Contents/MacOS/maximal:bun-runtime,Contents/MacOS/maximal-mcp-broker:bun-runtime
+# The builder signs the nested Bun sidecar after the isolated producer exits.
+sign_nested = Contents/MacOS/maximal:bun-runtime

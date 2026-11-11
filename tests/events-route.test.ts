@@ -69,9 +69,6 @@ function bodyReader(res: Response): StreamReader {
   return body.getReader()
 }
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms))
-
 describe("GET /settings/api/events (SSE)", () => {
   test("responds with an event-stream content type", async () => {
     const app = mount()
@@ -109,10 +106,6 @@ describe("GET /settings/api/events (SSE)", () => {
     const reader = bodyReader(res)
     // Drain the initial snapshot first.
     await readUntil(reader, "event: auth.changed")
-    // Let the handler's post-snapshot bus subscription register before we
-    // publish, so the event can't race ahead of the subscriber.
-    await sleep(25)
-
     const status: AuthStatus = {
       state: "authenticated",
       account_login: "octocat-sse-probe",
@@ -122,6 +115,29 @@ describe("GET /settings/api/events (SSE)", () => {
     const frame = await readUntil(reader, "octocat-sse-probe")
     expect(frame).toContain("octocat-sse-probe")
     expect(frame).toContain('"state":"authenticated"')
+    controller.abort()
+    await reader.cancel().catch(() => undefined)
+  })
+})
+
+describe("GET /settings/api/events subscribes before the snapshot", () => {
+  test("an event published right after connecting is not lost", async () => {
+    const app = mount()
+    const controller = new AbortController()
+    const res = await app.request(SSE_EVENTS_PATH, {
+      signal: controller.signal,
+    })
+    const reader = bodyReader(res)
+    // No wait: the snapshots are still being built and written. The
+    // subscriptions must already be live, or this event falls in the gap.
+    settingsEventBus.publish("plugins.changed", { plugins: [] })
+    settingsEventBus.publish("auth.changed", {
+      state: "authenticated",
+      account_login: "gap-probe-auth",
+    })
+    const text = await readUntil(reader, "gap-probe-auth")
+    // No gateway is installed, so no snapshot of plugins precedes this.
+    expect(text).toContain("event: plugins.changed")
     controller.abort()
     await reader.cancel().catch(() => undefined)
   })

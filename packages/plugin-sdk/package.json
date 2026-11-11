@@ -1,0 +1,23 @@
+{
+  "name": "@stuffbucket/maximal-plugin-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The maximal plugin contract: types, runtime, gateway seam and test helpers",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./gateway": "./src/gateway.ts",
+    "./runtime": "./src/runtime/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@standard-schema/spec": "1.1.0"
+  }
+}

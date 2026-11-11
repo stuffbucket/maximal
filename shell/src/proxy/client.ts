@@ -33,24 +33,42 @@ import type {
   ClaudeCodeInstallStatus,
   DiagnosticsResponse,
   ModelsListResponse,
-  PendingRequest,
-  PendingRequestAnswer,
-  PendingRequestField,
-  PendingRequestsResponse,
+  PluginActionResponse,
+  PluginDetailView,
+  PluginsListResponse,
+  PluginStatus,
+  PluginToolPermissionsRequest,
+  PluginUpdateRequest,
+  PluginValidationErrorResponse,
+  PluginValidationIssue,
   UpdateStatusResponse,
   UpstreamRejection,
 } from "../../../src/lib/config/settings-types"
 
 // Re-export so existing shell call sites that pull the type from
 // "./api" keep working. AuthStatus is owned by src/lib/settings-types
-// (ADR-0005/0006) — the shell does NOT redeclare it.
+// (ADR-0005/0006) — the shell does NOT redeclare it. The plugin
+// (Connectors) contract is owned there too.
 export type { AuthStatus, ClaudeCodeInstallStatus, UpstreamRejection }
 export type {
-  PendingRequest,
-  PendingRequestAnswer,
-  PendingRequestField,
-  PendingRequestsResponse,
-}
+  JsonSchemaObject,
+  PluginClientId,
+  PluginClientView,
+  PluginConnectorInfo,
+  PluginDetailView,
+  PluginStatus,
+  PluginToolView,
+  PluginUpdateRequest,
+  PluginValidationErrorResponse,
+  PluginValidationIssue,
+  PluginView,
+  ToolGroup,
+  ToolPermission,
+} from "../../../src/lib/config/settings-types"
+
+/** One action button a plugin's status offers. */
+export type PluginStatusAction = NonNullable<PluginStatus["actions"]>[number]
+export type PluginStatusState = PluginStatus["state"]
 
 const TIMEOUT_MS = 5000
 
@@ -157,118 +175,6 @@ interface AppsListResponse {
   apps: Array<AppEntry>
 }
 
-/**
- * Brokered MCP endpoints (`/settings/api/mcp`). Mirrors
- * `McpEndpointEntry` and friends in `src/lib/config/settings-types.ts` by
- * name, like the Apps types above.
- */
-export type McpClientId = "claude-code" | "claude-desktop"
-
-export interface McpClientOffer {
-  id: McpClientId
-  name: string
-  /** Maximal's integration for this client is on, so it can be offered. */
-  available: boolean
-  /** When not available, a more specific reason than "integration off":
-   *  Claude Desktop has another provider's gateway profile applied, or
-   *  Maximal found no Claude Code program it can run. */
-  unavailableReason?: "other-provider-profile" | "cli-missing"
-  /** Maximal currently has this endpoint written into the client. */
-  configured: boolean
-}
-
-export interface McpEndpointEntry {
-  id: string
-  label: string
-  enabled: boolean
-  /** Remembered client choices, used to pre-check the prompt. */
-  clients: Array<McpClientId>
-  offered: Array<McpClientOffer>
-  /** Work IQ endpoints that are on: where its sign-in stands. */
-  workiq?: WorkIqStatus
-}
-
-/** Where Work IQ is (see WorkIqState in src/lib/config/settings-types.ts
- *  for what each state means). */
-export type WorkIqState =
-  | "not-installed"
-  | "eula-needed"
-  | "signin-needed"
-  | "starting"
-  | "ready"
-  | "consent-needed"
-
-export interface WorkIqStatus {
-  state: WorkIqState
-  eulaAccepted: boolean
-  signedInBefore: boolean
-  /** Sign-in uses the browser (`disableBrokeredAuth=true`). */
-  browserSignIn: boolean
-  /** On macOS the UI offers browser sign-in and mentions the keychain. */
-  macos: boolean
-  /** The sign-in Maximal runs: `waiting` for the user in the browser,
-   *  `restarting` Work IQ after; the rest say how the last one ended. */
-  signIn: "idle" | "waiting" | "restarting" | "failed" | "timed-out" | "cancelled"
-  /** The last line Work IQ wrote that reads like a problem. Server text. */
-  lastProblem: string | null
-}
-
-interface WorkIqActionResponse {
-  workiq: WorkIqStatus
-}
-
-/** The process that runs every MCP endpoint (see McpBrokerHealth in
- *  src/lib/config/settings-types.ts for what each state means). */
-export interface McpBrokerHealth {
-  state: "off" | "starting" | "running" | "recovering" | "stuck" | "unavailable"
-  problem: "not-installed" | "containment-unavailable" | null
-}
-
-/** A known MCP server Maximal looked for that isn't an endpoint yet. */
-export interface McpCatalogItem {
-  id: string
-  label: string
-  status: "ready" | "not-installed"
-  /** Absolute path of the executable Maximal found. */
-  command?: string
-  version?: string
-  /** `registry`: host the command downloads from; null when unconfirmed. */
-  install: { command: string; url: string; registry: string | null }
-}
-
-interface McpEndpointsListResponse {
-  endpoints: Array<McpEndpointEntry>
-  broker: McpBrokerHealth
-  /** Known servers to offer adding, installed or not. */
-  available: Array<McpCatalogItem>
-}
-
-interface McpEndpointAddResponse {
-  endpoint: McpEndpointEntry
-}
-
-export interface McpEndpointRemoveResponse {
-  /** Apps Maximal took this server's entry out of. */
-  removedFrom: Array<{ client: McpClientId; name: string }>
-}
-
-export interface McpEndpointToggleResponse {
-  endpoint: McpEndpointEntry
-  /** Clients that already had an entry with this name; left unchanged. */
-  skipped: Array<{ client: McpClientId; name: string }>
-  /** Clients Maximal couldn't add it to on this install, and why
-   *  (`adapter-missing`: maximal-mcp-broker wasn't found). */
-  unavailable: Array<{ client: McpClientId; name: string; reason: "adapter-missing" }>
-  /** Clients whose config Maximal changed for it (added or took it out). */
-  updated: Array<{ client: McpClientId; name: string }>
-  /** Where the broker got to before the apps were updated (see
-   *  McpBrokerReadiness in src/lib/config/settings-types.ts). */
-  broker: "ready" | "starting" | "failed" | "off" | "setup-needed"
-  /** The app whose own entry for this server the endpoint now runs. */
-  adoptedFrom?: string
-  /** Environment names from that entry that were not copied. */
-  droppedEnvironment?: Array<string>
-}
 
 /** Endpoint catalog — adding a new call means adding a member here
  *  plus a `ResponseFor` mapping. Splitting the request shape from
@@ -407,55 +313,6 @@ type Endpoint =
       body: { enabled: boolean }
     }
   | {
-      kind: "mcp-list"
-      method: "GET"
-      path: "/settings/api/mcp"
-    }
-  | {
-      kind: "mcp-toggle"
-      method: "POST"
-      path: `/settings/api/mcp/${string}`
-      body: { enabled: boolean; clients?: Array<McpClientId> }
-    }
-  | {
-      kind: "mcp-add"
-      method: "POST"
-      path: "/settings/api/mcp"
-      body: { catalogId: string }
-    }
-  | {
-      kind: "mcp-remove"
-      method: "DELETE"
-      path: `/settings/api/mcp/${string}`
-    }
-  | {
-      kind: "mcp-workiq-accept-eula"
-      method: "POST"
-      path: `/settings/api/mcp/${string}/workiq/accept-eula`
-    }
-  | {
-      kind: "mcp-workiq-sign-in"
-      method: "POST"
-      path: `/settings/api/mcp/${string}/workiq/sign-in`
-      body: { useBrowserSignIn: boolean }
-    }
-  | {
-      kind: "mcp-workiq-cancel-sign-in"
-      method: "DELETE"
-      path: `/settings/api/mcp/${string}/workiq/sign-in`
-    }
-  | {
-      kind: "requests-list"
-      method: "GET"
-      path: "/settings/api/requests"
-    }
-  | {
-      kind: "requests-answer"
-      method: "POST"
-      path: `/settings/api/requests/${string}`
-      body: PendingRequestAnswer
-    }
-  | {
       kind: "claude-code-install-status"
       method: "GET"
       path: "/settings/api/apps/claude-code/install"
@@ -471,6 +328,33 @@ type Endpoint =
       method: "POST"
       path: "/settings/api/apps/codex/toggle"
       body: { enabled: boolean }
+    }
+  | {
+      kind: "plugins-list"
+      method: "GET"
+      path: "/settings/api/plugins"
+    }
+  | {
+      kind: "plugins-detail"
+      method: "GET"
+      path: `/settings/api/plugins/${string}`
+    }
+  | {
+      kind: "plugins-update"
+      method: "PATCH"
+      path: `/settings/api/plugins/${string}`
+      body: PluginUpdateRequest
+    }
+  | {
+      kind: "plugins-tool-permissions"
+      method: "PUT"
+      path: `/settings/api/plugins/${string}/tool-permissions`
+      body: PluginToolPermissionsRequest
+    }
+  | {
+      kind: "plugins-action"
+      method: "POST"
+      path: `/settings/api/plugins/${string}/actions/${string}`
     }
 
 type EndpointKind = Endpoint["kind"]
@@ -498,17 +382,13 @@ interface ResponseFor {
   "claude-code-toggle": AppEntry
   "claude-desktop-toggle": AppEntry
   "codex-toggle": AppEntry
+  "plugins-list": PluginsListResponse
+  "plugins-detail": PluginDetailView
+  "plugins-update": PluginDetailView
+  "plugins-tool-permissions": PluginDetailView
+  "plugins-action": PluginActionResponse
   "claude-code-install-status": ClaudeCodeInstallStatus
   "claude-code-install-start": ClaudeCodeInstallStatus
-  "mcp-list": McpEndpointsListResponse
-  "mcp-toggle": McpEndpointToggleResponse
-  "mcp-add": McpEndpointAddResponse
-  "mcp-remove": McpEndpointRemoveResponse
-  "mcp-workiq-accept-eula": WorkIqActionResponse
-  "mcp-workiq-sign-in": WorkIqActionResponse
-  "mcp-workiq-cancel-sign-in": WorkIqActionResponse
-  "requests-list": PendingRequestsResponse
-  "requests-answer": { ok: true }
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
   "models-auto-update": ModelsListResponse
@@ -656,28 +536,83 @@ export async function subscribeAuthEvents(handlers: {
 }
 
 /**
- * Subscribe to `requests.changed` on the same stream: MCP servers' requests
- * waiting for an answer, the same shape as GET /settings/api/requests. A
- * separate EventSource keeps each surface's subscription independent; the
- * sidecar sends every event on every connection.
+ * Subscribe to `plugins.changed` on the same stream: a plugin's lifecycle,
+ * status or tool list changed. The frame is only a nudge; the listener
+ * refetches GET /settings/api/plugins. `onOpen` fires on every (re)connect so
+ * the caller can resync what it missed while the stream was down.
  */
-export async function subscribeRequestEvents(handlers: {
-  onRequests: (requests: PendingRequestsResponse) => void
+export async function subscribePluginEvents(handlers: {
+  onChanged: () => void
+  onOpen?: () => void
   onError?: () => void
 }): Promise<EventSubscription> {
   const apiKey = await resolveApiKey()
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
   const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
 
+  source.addEventListener("open", () => handlers.onOpen?.())
   source.addEventListener("error", () => handlers.onError?.())
-  source.addEventListener("requests.changed", (event) => {
-    const message = event as MessageEvent<string>
-    try {
-      handlers.onRequests(JSON.parse(message.data) as PendingRequestsResponse)
-    } catch {
-      // Malformed frame: drop it; the next event or a GET resyncs.
-    }
-  })
+  source.addEventListener("plugins.changed", () => handlers.onChanged())
 
   return { close: () => source.close() }
+}
+
+export function listPlugins(): Promise<ApiResult<PluginsListResponse>> {
+  return apiCall({ kind: "plugins-list", method: "GET", path: "/settings/api/plugins" })
+}
+
+const pluginPath = (id: string): `/settings/api/plugins/${string}` =>
+  `/settings/api/plugins/${encodeURIComponent(id)}`
+
+/** One plugin with its config, config schema and every tool's permission. */
+export function getPlugin(id: string): Promise<ApiResult<PluginDetailView>> {
+  return apiCall({ kind: "plugins-detail", method: "GET", path: pluginPath(id) })
+}
+
+/** Turn a plugin on/off, choose the clients it is registered with, and/or
+ *  replace its config. A config the plugin rejects answers 400 with
+ *  `issues` (see `pluginValidationIssues`). */
+export function updatePlugin(
+  id: string,
+  body: PluginUpdateRequest,
+): Promise<ApiResult<PluginDetailView>> {
+  return apiCall({ kind: "plugins-update", method: "PATCH", path: pluginPath(id), body })
+}
+
+/** Set tool permissions by tool name; `null` returns a tool to its default. */
+export function setToolPermissions(
+  id: string,
+  permissions: PluginToolPermissionsRequest["permissions"],
+): Promise<ApiResult<PluginDetailView>> {
+  return apiCall({
+    kind: "plugins-tool-permissions",
+    method: "PUT",
+    path: `${pluginPath(id)}/tool-permissions`,
+    body: { permissions },
+  })
+}
+
+/** Start one of the plugin's status actions. Answers 202 at once; how it
+ *  goes (sign-in can take minutes) arrives through `plugins.changed`. */
+export function runPluginAction(
+  id: string,
+  actionId: string,
+): Promise<ApiResult<PluginActionResponse>> {
+  return apiCall({
+    kind: "plugins-action",
+    method: "POST",
+    path: `${pluginPath(id)}/actions/${encodeURIComponent(actionId)}`,
+  })
+}
+
+/** The `issues` of a 400 validation reply, or `null` when the failure is
+ *  something else (the raw body travels in `ApiFailure.error`). */
+export function pluginValidationIssues(failure: ApiFailure): Array<PluginValidationIssue> | null {
+  if (failure.status !== 400) return null
+  try {
+    const body = JSON.parse(failure.error) as Partial<PluginValidationErrorResponse>
+    return Array.isArray(body.issues) ? body.issues : null
+  } catch {
+    return null
+  }
 }

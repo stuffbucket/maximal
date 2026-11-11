@@ -9,8 +9,8 @@
 
   The minted MSI:
 
-    - Installs maximal.exe and maximal-mcp-broker.exe as siblings under
-      %LocalAppData%\Programs\maximal (per-user; no UAC prompt, no admin needed).
+    - Installs maximal.exe under %LocalAppData%\Programs\maximal (per-user;
+      no UAC prompt, no admin needed).
     - Adds the install dir to the user's PATH.
     - Registers an Add/Remove Programs entry (MajorUpgrade + UpgradeCode)
       so upgrades and uninstall work.
@@ -50,8 +50,10 @@
     </Feature>
 
     <!--
-      Stop running copies of both executables before files are touched, so an
-      upgrade doesn't hit the MSI "files in use" prompt. taskkill returns 128
+      Stop running copies of the executable before files are touched, so an
+      upgrade doesn't hit the MSI "files in use" prompt. The broker kill is
+      only for upgrades from older versions that shipped maximal-mcp-broker.exe;
+      this version doesn't install it. taskkill returns 128
       when nothing matches; Return="ignore" treats that as success. SystemFolder
       resolves to C:\Windows\System32 at run time.
     -->
@@ -98,12 +100,6 @@
             Part="last"
             Action="set"
             System="no" />
-      </Component>
-      <Component Id="McpBrokerExe" Bitness="always64">
-        <File
-            Id="maximal_mcp_broker_exe"
-            Source="maximal-mcp-broker.exe"
-            KeyPath="yes" />
       </Component>
       <!--
         Per-user HKCU keypath that doubles as an "installed" marker the

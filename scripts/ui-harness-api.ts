@@ -14,13 +14,23 @@
  * Mutations (toggles, key create/delete, sign-in) update per-backend state so
  * the UI reacts like the real thing within a session. A fresh backend reseeds.
  */
-import type { AuthStatus } from "../src/lib/config/settings-types"
+import type { AuthStatus, PluginDetailView } from "../src/lib/config/settings-types"
 
-import { ClaudeAutoModelsUpdateRequest } from "../src/lib/config/settings-types"
+import {
+  ClaudeAutoModelsUpdateRequest,
+  PluginToolPermissionsRequest,
+  PluginUpdateRequest,
+} from "../src/lib/config/settings-types"
 import {
   type ResolvedScenario,
   type ScenarioId,
+  type WorkiqStage,
+  listItem,
   resolveScenario,
+  toolCounts,
+  workiqStatus,
+  workiqDefaultPermission,
+  workiqToolViews,
 } from "./ui-harness-fixtures"
 
 export interface MockBackend {
@@ -31,6 +41,9 @@ export interface MockBackend {
   handle: (req: Request) => Promise<Response | null>
   /** Called whenever a mutation changes `auth`. Returns an unsubscribe. */
   onAuthChange: (listener: (auth: AuthStatus) => void) => () => void
+  /** Called whenever a plugin's lifecycle, status, tools or settings change
+   *  (the SSE `plugins.changed` frame). Returns an unsubscribe. */
+  onPluginsChange: (listener: () => void) => () => void
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -58,22 +71,98 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     apiKeys: fixture.apiKeys,
     accounts: fixture.accounts,
     models: fixture.models,
-    mcp: fixture.mcp,
-    requests: fixture.requests,
+    connectors: fixture.connectors,
   }) as {
     auth: AuthStatus
     apps: ResolvedScenario["apps"]
     apiKeys: ResolvedScenario["apiKeys"]
     accounts: ResolvedScenario["accounts"]
     models: ResolvedScenario["models"]
-    mcp: ResolvedScenario["mcp"]
-    requests: ResolvedScenario["requests"]
+    connectors: Array<PluginDetailView>
+  }
+  const pluginListeners = new Set<() => void>()
+  const pluginsChanged = (): void => {
+    for (const l of pluginListeners) l()
+  }
+  // Where each connector's setup stands, so enabling it again picks up where
+  // the user left off (the real connector keeps this in its own storage).
+  const stages = new Map<string, WorkiqStage>()
+  for (const connector of fixture.connectors) {
+    const code = connector.status?.code
+    const stage: WorkiqStage | undefined =
+      code === "terms-needed" ? "terms-needed"
+      : code === "signin-needed" || code === "signing-in" ? "signin-needed"
+      : code === "ready" ? "ready"
+      : code === "consent-needed" ? "error"
+      : undefined
+    stages.set(connector.id, stage ?? "terms-needed")
   }
   const listeners = new Set<(auth: AuthStatus) => void>()
   const setAuth = (next: AuthStatus): void => {
     state.auth = next
     for (const l of listeners) l(next)
   }
+
+  const findConnector = (id: string): PluginDetailView | undefined =>
+    state.connectors.find((c) => c.id === id)
+
+  /** Tools follow the stage: live once ready (catalog refreshed), else the
+   *  last catalog stays as a cache; the user's permissions are kept. */
+  const syncTools = (connector: PluginDetailView): void => {
+    const live = connector.lifecycle === "active" && stages.get(connector.id) === "ready"
+    if (live && connector.tools.length === 0) {
+      connector.tools = workiqToolViews([])
+    }
+    if (live) connector.catalogUpdatedAt = new Date().toISOString()
+    connector.toolsSource = live ? "live" : connector.tools.length > 0 ? "cache" : "none"
+    connector.toolCounts = toolCounts(connector.tools)
+  }
+
+  /** Move a (running) connector to a setup stage, as its own status would. */
+  const setStage = (id: string, stage: WorkiqStage): void => {
+    const connector = findConnector(id)
+    if (!connector) return
+    stages.set(id, stage)
+    connector.status = workiqStatus(stage)
+    syncTools(connector)
+    pluginsChanged()
+  }
+
+  /** The connector kit's config check: endpoint and authority are http(s) URLs. */
+  const configIssues = (config: Record<string, unknown>): Array<{ path: string; message: string }> => {
+    const issues: Array<{ path: string; message: string }> = []
+    for (const key of ["endpoint", "authority"]) {
+      const value = config[key]
+      if (value === undefined) continue
+      let ok = false
+      if (typeof value === "string") {
+        try {
+          ok = /^https?:$/.test(new URL(value).protocol)
+        } catch {
+          ok = false
+        }
+      }
+      if (!ok) issues.push({ path: `config.${key}`, message: "Invalid URL. Enter an http(s) address, e.g. https://example.com/mcp." })
+    }
+    for (const key of Object.keys(config)) {
+      if (key !== "endpoint" && key !== "authority") {
+        issues.push({ path: `config.${key}`, message: `Unrecognized key: "${key}"` })
+      }
+    }
+    return issues
+  }
+
+  const invalid = (issues: Array<{ path: string; message: string }>): Response =>
+    json(
+      {
+        error: {
+          message: issues.map((issue) => `${issue.path}: ${issue.message}`).join("; "),
+          type: "invalid_request_error",
+        },
+        issues,
+      },
+      400,
+    )
 
   async function handle(req: Request): Promise<Response | null> {
     const url = new URL(req.url)
@@ -133,15 +222,6 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (path === "/settings/api/apps") return json(state.apps)
     if (path === "/settings/api/models" && method === "GET")
       return json(state.models)
-    if (path === "/settings/api/mcp" && method === "GET") return json(state.mcp)
-    if (path === "/settings/api/requests" && method === "GET")
-      return json(state.requests)
-    if (path === "/settings/api/requests/summary") {
-      return json({
-        pending: state.requests.requests.length,
-        newestId: state.requests.requests.at(-1)?.id ?? null,
-      })
-    }
     if (path === "/settings/api/gh/status") return json(fixture.ghStatus)
     if (path === "/settings/api/clients") return json(fixture.clients)
 
@@ -178,85 +258,98 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       return json(app)
     }
 
-    // --- mcp add (move a found catalog server into the endpoints, off) ---
-    if (path === "/settings/api/mcp" && method === "POST") {
-      const { catalogId } = await body()
-      const item = state.mcp.available.find((a) => a.id === catalogId)
-      if (!item) return json({ error: { message: "no such server" } }, 404)
-      if (item.status !== "ready")
-        return json({ error: { message: "not installed" } }, 409)
-      const endpoint = {
-        id: item.id,
-        label: item.label,
-        enabled: false,
-        clients: [],
-        offered: [
-          {
-            id: "claude-code" as const,
-            name: "Claude Code",
-            available: true,
-            configured: false,
-          },
-          {
-            id: "claude-desktop" as const,
-            name: "Claude Desktop",
-            available: false,
-            configured: false,
-          },
-        ],
-      }
-      state.mcp.endpoints.push(endpoint)
-      state.mcp.available = state.mcp.available.filter((a) => a.id !== item.id)
-      return json({ endpoint })
+    // --- connectors (plugins): list, detail, change, permissions, actions ---
+    if (path === "/settings/api/plugins" && method === "GET") {
+      return json({ plugins: state.connectors.map(listItem) })
     }
-
-    // --- answer a waiting request (it leaves the list) ---
-    const requestAnswer = /^\/settings\/api\/requests\/([^/]+)$/.exec(path)
-    if (requestAnswer && method === "POST") {
-      const id = decodeURIComponent(requestAnswer[1])
-      const before = state.requests.requests.length
-      state.requests.requests = state.requests.requests.filter(
-        (r) => r.id !== id,
-      )
-      if (state.requests.requests.length === before) {
-        return new Response("This request is no longer waiting", {
-          status: 404,
-        })
-      }
-      return json({ ok: true })
+    const pluginPath = /^\/settings\/api\/plugins\/([^/]+)$/.exec(path)
+    if (pluginPath && method === "GET") {
+      const connector = findConnector(decodeURIComponent(pluginPath[1]))
+      if (!connector) return json({ error: { message: "no such plugin" } }, 404)
+      return json(connector)
     }
-
-    // --- mcp remove ---
-    const mcpRemove = /^\/settings\/api\/mcp\/([^/]+)$/.exec(path)
-    if (mcpRemove && method === "DELETE") {
-      const id = decodeURIComponent(mcpRemove[1])
-      const endpoint = state.mcp.endpoints.find((e) => e.id === id)
-      if (!endpoint)
-        return json({ error: { message: "no such endpoint" } }, 404)
-      state.mcp.endpoints = state.mcp.endpoints.filter((e) => e.id !== id)
-      const removedFrom = endpoint.offered
-        .filter((o) => o.configured)
-        .map((o) => ({ client: o.id, name: o.name }))
-      return json({ removedFrom })
-    }
-
-    // --- mcp toggle (flip enabled, remember the client choice) ---
-    const mcpToggle = /^\/settings\/api\/mcp\/([^/]+)$/.exec(path)
-    if (mcpToggle && method === "POST") {
-      const id = decodeURIComponent(mcpToggle[1])
-      const endpoint = state.mcp.endpoints.find((e) => e.id === id)
-      if (!endpoint)
-        return json({ error: { message: "no such endpoint" } }, 404)
-      const b = await body()
-      endpoint.enabled = !!b.enabled
-      if (Array.isArray(b.clients)) endpoint.clients = b.clients
-      for (const offer of endpoint.offered) {
-        offer.configured =
-          endpoint.enabled &&
-          endpoint.clients.includes(offer.id) &&
-          offer.available
+    if (pluginPath && method === "PATCH") {
+      const id = decodeURIComponent(pluginPath[1])
+      const connector = findConnector(id)
+      if (!connector) return json({ error: { message: "no such plugin" } }, 404)
+      const parsed = PluginUpdateRequest.safeParse(await body())
+      if (!parsed.success) {
+        return invalid(parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })))
       }
-      return json({ endpoint, skipped: [] })
+      const b = parsed.data
+      if (b.config) {
+        const issues = configIssues(b.config)
+        if (issues.length > 0) return invalid(issues)
+        connector.config = b.config
+        if (connector.manifest.connector && typeof b.config.endpoint === "string") {
+          connector.manifest.connector.endpoint = b.config.endpoint
+        }
+        // A valid config restarts a connector that failed on its old one.
+        if (connector.enabled && connector.lifecycle === "failed") {
+          connector.lifecycle = "active"
+          delete connector.error
+          connector.status = workiqStatus(stages.get(id) ?? "terms-needed")
+        }
+      }
+      if (typeof b.enabled === "boolean" && b.enabled !== connector.enabled) {
+        connector.enabled = b.enabled
+        delete connector.error
+        if (b.enabled) {
+          connector.lifecycle = "active"
+          connector.status = workiqStatus(stages.get(id) ?? "terms-needed")
+        } else {
+          connector.lifecycle = "disabled"
+          delete connector.status
+        }
+      }
+      if (b.clients) {
+        for (const client of connector.clients) client.selected = b.clients.includes(client.id)
+      }
+      syncTools(connector)
+      pluginsChanged()
+      return json(connector)
+    }
+    const permissionsPath = /^\/settings\/api\/plugins\/([^/]+)\/tool-permissions$/.exec(path)
+    if (permissionsPath && method === "PUT") {
+      const connector = findConnector(decodeURIComponent(permissionsPath[1]))
+      if (!connector) return json({ error: { message: "no such plugin" } }, 404)
+      const parsed = PluginToolPermissionsRequest.safeParse(await body())
+      if (!parsed.success) {
+        return invalid(parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })))
+      }
+      for (const [name, value] of Object.entries(parsed.data.permissions)) {
+        const tool = connector.tools.find((t) => t.name === name)
+        if (!tool) continue
+        Object.assign(
+          tool,
+          value === null ? workiqDefaultPermission(tool) : { permission: value, permissionSource: "user" },
+        )
+      }
+      pluginsChanged()
+      return json(connector)
+    }
+    const pluginAction = /^\/settings\/api\/plugins\/([^/]+)\/actions\/([^/]+)$/.exec(path)
+    if (pluginAction && method === "POST") {
+      const id = decodeURIComponent(pluginAction[1])
+      const actionId = decodeURIComponent(pluginAction[2])
+      const connector = findConnector(id)
+      if (!connector) return json({ error: { message: "no such plugin" } }, 404)
+      if (connector.lifecycle !== "active") {
+        return json({ error: { message: "plugin is not running" } }, 409)
+      }
+      if (!connector.status?.actions?.some((a) => a.id === actionId)) {
+        return json({ error: { message: "no such action" } }, 404)
+      }
+      if (actionId === "accept-terms") setStage(id, "signin-needed")
+      else if (actionId === "cancel-sign-in" || actionId === "sign-out") setStage(id, "signin-needed")
+      else if (actionId === "sign-in") {
+        // Signing in takes a while; the outcome arrives as a status change.
+        setStage(id, "working")
+        setTimeout(() => {
+          if (stages.get(id) === "working") setStage(id, "ready")
+        }, 2500)
+      }
+      return json({ ok: true }, 202)
     }
 
     // --- Claude Code model settings ---
@@ -366,6 +459,10 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     onAuthChange(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
+    },
+    onPluginsChange(listener) {
+      pluginListeners.add(listener)
+      return () => pluginListeners.delete(listener)
     },
   }
 }

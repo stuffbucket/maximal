@@ -2,7 +2,7 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { getConfig, isMessagesApiEnabled } from "~/lib/config/config"
+import { getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { requestContext, setRequestUsage } from "~/lib/http/request-context"
@@ -40,6 +40,10 @@ import {
   handleWithResponsesApi,
   resolveMessagesUsageSessionId,
 } from "./api-flows"
+import {
+  shouldUseMessagesApi,
+  shouldUseResponsesApi,
+} from "./endpoint-selection"
 import {
   getCompactType,
   mergeToolResultForClaude,
@@ -279,23 +283,4 @@ export async function handleCompletion(c: Context) {
     compactType,
     logger,
   })
-}
-
-const RESPONSES_ENDPOINT = "/responses"
-const MESSAGES_ENDPOINT = "/v1/messages"
-
-const shouldUseResponsesApi = (selectedModel: Model | undefined): boolean => {
-  return (
-    selectedModel?.supported_endpoints?.includes(RESPONSES_ENDPOINT) ?? false
-  )
-}
-
-const shouldUseMessagesApi = (selectedModel: Model | undefined): boolean => {
-  const useMessagesApi = isMessagesApiEnabled()
-  if (!useMessagesApi) {
-    return false
-  }
-  return (
-    selectedModel?.supported_endpoints?.includes(MESSAGES_ENDPOINT) ?? false
-  )
 }

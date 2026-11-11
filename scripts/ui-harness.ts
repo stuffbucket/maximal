@@ -52,9 +52,9 @@ import {
   AppsListResponse,
   AuthStatus,
   DiagnosticsResponse,
-  McpEndpointsListResponse,
-  PendingRequestsResponse,
   ModelsListResponse,
+  PluginDetailView,
+  PluginsListResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
 import { SessionsResponse } from "../src/lib/token-usage/sessions-schema"
@@ -64,6 +64,7 @@ import {
   SCENARIOS,
   type ScenarioId,
   defaultScenarioId,
+  listItem,
   resolveScenario,
 } from "./ui-harness-fixtures"
 
@@ -93,8 +94,8 @@ function assertFixtures(): void {
       ["api-keys", ApiKeysListResponse, (s) => s.apiKeys],
       ["apps", AppsListResponse, (s) => s.apps],
       ["models", ModelsListResponse, (s) => s.models],
-      ["mcp", McpEndpointsListResponse, (s) => s.mcp],
-      ["requests", PendingRequestsResponse, (s) => s.requests],
+      ["plugins", PluginsListResponse, (s) => ({ plugins: s.connectors.map(listItem) })],
+      ["plugins/:id", PluginDetailView.array(), (s) => s.connectors],
       ["token-usage/sessions", SessionsResponse, (s) => s.dashboard.sessions()],
     ]
   let failures = 0
@@ -153,6 +154,18 @@ function broadcastAuth(): void {
   }
 }
 backend.onAuthChange(broadcastAuth)
+
+function broadcastPlugins(): void {
+  const frame = enc.encode("event: plugins.changed\ndata: {}\n\n")
+  for (const c of sseClients) {
+    try {
+      c.enqueue(frame)
+    } catch {
+      // client gone; the cancel handler prunes it
+    }
+  }
+}
+backend.onPluginsChange(broadcastPlugins)
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -267,7 +280,9 @@ function serve(): ReturnType<typeof Bun.serve> {
             activeScenario = b.id as ScenarioId
             backend = createMockBackend(activeScenario)
             backend.onAuthChange(broadcastAuth)
+            backend.onPluginsChange(broadcastPlugins)
             broadcastAuth()
+            broadcastPlugins()
           }
           return json({ ok: true, active: activeScenario })
         }

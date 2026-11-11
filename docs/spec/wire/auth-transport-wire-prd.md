@@ -66,7 +66,7 @@ prefix itself or anything under `<prefix>/`.
 |---|---|---|
 | **Unauthenticated (exact)** | `/`, `/status`, `/_debug/state`, `/setup-status`, and the legacy 301 redirects (`LEGACY_REDIRECTS` in `src/server.ts`: `/usage-viewer`, `/settings`, each with and without a trailing slash) | No key required. |
 | **Unauthenticated prefix** | `/ui/*` | The settings + dashboard UI shells and their assets load without a key. |
-| **Own-route auth** | `/mcp/*` | Skips the global middleware; `src/routes/mcp/route.ts` authenticates itself. An endpoint with its own `apiKey` accepts exactly that key; otherwise the same main-port rules apply. Requests must also come from loopback with no foreign `Origin`. No GitHub token required. |
+| **Own-route auth** | `/mcp/*` | Skips the global middleware; the plugin MCP endpoint route authenticates itself with the same main-port rules. No GitHub token required. |
 | **Require-auth prefix** | `/settings/api/*` | Data endpoints require a key (overrides any unauthenticated prefix). |
 | **Loopback-exempt** | `/usage`, `/token-usage`, `/token-usage/events` | Auth is **skipped for loopback callers**; a remote caller still needs a valid key. |
 | **Loopback-only** | `/_internal/shutdown`, `/_internal/reload` | Auth is skipped for loopback callers, and the handlers in `src/routes/internal/route.ts` reject any non-loopback caller with `404`, even one holding a valid key. |
@@ -297,6 +297,7 @@ provider-scoped messages route), both in `src/lib/errors/error.ts`:
 |---|---|---|---|---|
 | **Auth-fatal** | upstream status (401/403) | `{ "error": { "message", "type": "auth_fatal", "remediation_url"? } }` | Anthropic error envelope; remediation URL appended to the message | `markAuthDegraded()` stops the refresh loop, drops the live tokens, and flags the account `needsReauth` on disk. The saved credential is **retained**, so a restart retries it. |
 | **HTTP error** | upstream status, except that `forwardAnthropicError()` turns transient `500`/`502`/`503`/`504` into `529 overloaded_error` and a 4xx (not 429) context overflow into a `400` with a `prompt is too long: …` message | `{ "error": { "message", "type": "error" } }` | `{ "type": "error", "error": { "type", "message" } }` | On `429` (and, for Anthropic routes, transient 5xx), `retry-after` and all `x-*` upstream headers are copied to the client response. Recognizable errors get advice text from `adviseUpstreamError()`: a `400 model_not_supported` for a catalog model whose `supported_endpoints` lacks the called endpoint names that endpoint and the catalog models that serve it; for any other model it lists the plan's picker models. Token **not** cleared. |
+| **Timed out** (a bounded GitHub read hit its `AbortSignal.timeout`, below) | `forwardError()`: `504`; `forwardAnthropicError()` and the inference routes' `onError`: `500` (generic) | `{ "error": { "message": "GitHub didn't respond in time. Try again in a moment.", "type": "upstream_timeout" } }` | generic `api_error` envelope | — |
 | **Generic** (any other exception, e.g. missing Copilot token) | `500` | `{ "error": { "message", "type": "error" } }` | `api_error` envelope | — |
 
 ## Timeouts

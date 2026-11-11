@@ -1,0 +1,249 @@
+import type {
+  AuthEnv,
+  AuthStrategy,
+  ConnectorAccount,
+  CredentialNotice,
+  TextStore,
+  TokenProvider,
+} from "../auth/token-provider"
+
+import { ConnectorError, signedOut } from "../errors"
+
+export const ADA: ConnectorAccount = {
+  username: "ada@contoso.com",
+  name: "Ada Lovelace",
+  tenantId: "00000000-0000-4000-8000-0000000000aa",
+}
+
+/** In-memory `TokenProvider`: no identity provider, controllable sign-in. */
+export class FakeTokenProvider implements TokenProvider {
+  token = "token-1"
+  /** Account `signIn` completes as (unless `completeSignIn` names another). */
+  defaultAccount: ConnectorAccount
+  signedIn: ConnectorAccount | undefined
+  /** When set, `getToken` fails with this (e.g. an expired refresh token). */
+  tokenError: Error | undefined
+  /** When true, `signIn` waits until `completeSignIn()` or abort. */
+  manualSignIn = false
+  /** When true, a rejected token can be "refreshed" (`invalidate` → `true`), switching to `refreshedToken` if set. */
+  refreshable = false
+  refreshedToken: string | undefined
+  /** When set, the sign-in is "kept in memory only" (`credentialNotice`). */
+  notice: CredentialNotice | undefined
+  signInCalls = 0
+  signOutCalls = 0
+  tokenCalls = 0
+  invalidateCalls = 0
+  #pending:
+    | {
+        resolve(account: ConnectorAccount): void
+        reject(error: unknown): void
+      }
+    | undefined
+
+  constructor(
+    signedIn?: ConnectorAccount,
+    options: { account?: ConnectorAccount; token?: string } = {},
+  ) {
+    this.signedIn = signedIn
+    this.defaultAccount = options.account ?? signedIn ?? ADA
+    if (options.token) this.token = options.token
+  }
+
+  account(): Promise<ConnectorAccount | undefined> {
+    return Promise.resolve(this.signedIn)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await -- async so synchronous throws (abort, signed out) surface as rejections like the real provider
+  async getToken(signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted()
+    this.tokenCalls++
+    if (this.tokenError) throw this.tokenError
+    if (!this.signedIn) throw signedOut()
+    return this.token
+  }
+
+  async signIn(signal: AbortSignal): Promise<ConnectorAccount> {
+    this.signInCalls++
+    if (!this.manualSignIn) {
+      this.signedIn = this.defaultAccount
+      return this.defaultAccount
+    }
+    return await new Promise<ConnectorAccount>((resolve, reject) => {
+      signal.addEventListener(
+        "abort",
+        () =>
+          reject(
+            new ConnectorError("sign-in-cancelled", "Sign-in was cancelled."),
+          ),
+        { once: true },
+      )
+      this.#pending = {
+        resolve: (account) => {
+          this.signedIn = account
+          resolve(account)
+        },
+        reject,
+      }
+    })
+  }
+
+  get signInPending(): boolean {
+    return this.#pending !== undefined
+  }
+
+  completeSignIn(account: ConnectorAccount = this.defaultAccount): void {
+    this.#pending?.resolve(account)
+    this.#pending = undefined
+  }
+
+  failSignIn(error: unknown): void {
+    this.#pending?.reject(error)
+    this.#pending = undefined
+  }
+
+  invalidate(): Promise<boolean> {
+    this.invalidateCalls++
+    if (!this.refreshable || !this.signedIn) return Promise.resolve(false)
+    if (this.refreshedToken) this.token = this.refreshedToken
+    return Promise.resolve(true)
+  }
+
+  credentialNotice(): CredentialNotice | undefined {
+    return this.notice
+  }
+
+  signOut(): Promise<void> {
+    this.signOutCalls++
+    this.signedIn = undefined
+    return Promise.resolve()
+  }
+}
+
+/** Where a persisted fake sign-in lives, like a real strategy's token cache. */
+export interface FakeAuthCache {
+  /** File in the connector's storage (default `fake-token-cache.json`). */
+  file?: string
+  /** Refresh token written next to the access token (default `fake-refresh-1`). */
+  refreshToken?: string
+}
+
+/**
+ * A `FakeTokenProvider` whose sign-in survives plugin reloads: it is kept in
+ * the connector's `ctx.storage` (account, access and refresh token, as a
+ * real cache would hold them) and removed on sign-out.
+ */
+class PersistedFakeTokenProvider extends FakeTokenProvider {
+  readonly #store: TextStore
+  readonly #file: string
+  readonly #refreshToken: string
+  #loaded: Promise<void> | undefined
+
+  constructor(
+    store: TextStore,
+    cache: FakeAuthCache,
+    options: { account: ConnectorAccount; token?: string },
+  ) {
+    super(undefined, options)
+    this.#store = store
+    this.#file = cache.file ?? "fake-token-cache.json"
+    this.#refreshToken = cache.refreshToken ?? "fake-refresh-1"
+  }
+
+  #load(): Promise<void> {
+    this.#loaded ??= this.#store.readText(this.#file).then((text) => {
+      if (text === undefined) return
+      const saved = JSON.parse(text) as { account?: ConnectorAccount }
+      if (saved.account) this.signedIn = saved.account
+    })
+    return this.#loaded
+  }
+
+  override async account(): Promise<ConnectorAccount | undefined> {
+    await this.#load()
+    return await super.account()
+  }
+
+  override async getToken(signal?: AbortSignal): Promise<string> {
+    await this.#load()
+    return await super.getToken(signal)
+  }
+
+  override async signIn(signal: AbortSignal): Promise<ConnectorAccount> {
+    await this.#load()
+    const account = await super.signIn(signal)
+    await this.#store.writeText(
+      this.#file,
+      `${JSON.stringify({ account, accessToken: this.token, refreshToken: this.#refreshToken })}\n`,
+    )
+    return account
+  }
+
+  override async signOut(): Promise<void> {
+    await this.#load()
+    await super.signOut()
+    await this.#store.delete(this.#file)
+  }
+}
+
+export interface FakeAuthOptions {
+  /** Who "signs in" (default Ada Lovelace at contoso.com). */
+  account?: ConnectorAccount
+  /** Bearer token handed upstream (default `token-1`, the fake server's default). */
+  token?: string
+  /** Start signed in (default `false`: the user clicks Sign in, which completes instantly). */
+  signedIn?: boolean
+  /**
+   * Keep the sign-in in the connector's storage (a token cache with the
+   * access and refresh token), so it survives reloads and sign-out deletes
+   * it. Default: in memory only.
+   */
+  cache?: FakeAuthCache | true
+  /** Open this URL with `ctx.host.openExternal` on sign-in, as a browser flow would. */
+  browserUrl?: string
+}
+
+/**
+ * A sign-in strategy that signs in instantly as `account`, for tests and the
+ * bench. Each plugin instance gets a fresh `FakeTokenProvider`; `providers`
+ * lists them so tests can drive or inspect them.
+ */
+export function fakeAuth(
+  options: FakeAuthOptions = {},
+): AuthStrategy & { readonly providers: Array<FakeTokenProvider> } {
+  const providers: Array<FakeTokenProvider> = []
+  const account = options.account ?? ADA
+  const token = options.token ? { token: options.token } : {}
+  const make = (env: AuthEnv): FakeTokenProvider => {
+    if (options.cache === undefined) {
+      return new FakeTokenProvider(options.signedIn ? account : undefined, {
+        account,
+        ...token,
+      })
+    }
+    const cache = options.cache === true ? {} : options.cache
+    return new PersistedFakeTokenProvider(env.store, cache, {
+      account,
+      ...token,
+    })
+  }
+  return {
+    type: "fake",
+    interactive: true,
+    signInPrompt: `Sign in as ${account.username ?? "the test account"}`,
+    providers,
+    create(env) {
+      const provider = make(env)
+      const { browserUrl } = options
+      if (browserUrl !== undefined) {
+        const signIn = provider.signIn.bind(provider)
+        provider.signIn = async (signal) => {
+          await env.openBrowser(browserUrl)
+          return await signIn(signal)
+        }
+      }
+      providers.push(provider)
+      return provider
+    },
+  }
+}

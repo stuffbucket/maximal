@@ -236,7 +236,7 @@ describe("runStreamingAgent", () => {
       stream,
       executor: exec,
       options: baseOptions,
-      upstreamCall,
+      deps: { createChatCompletions: upstreamCall },
     })
 
     expect(exec.searchCalls).toEqual(["shannon"])
@@ -306,7 +306,7 @@ describe("runStreamingAgent", () => {
       stream,
       executor: exec,
       options: baseOptions,
-      upstreamCall,
+      deps: { createChatCompletions: upstreamCall },
     })
 
     // First call should hit the executor; the second should be
@@ -337,7 +337,7 @@ describe("runStreamingAgent", () => {
       stream,
       executor: exec,
       options: baseOptions,
-      upstreamCall,
+      deps: { createChatCompletions: upstreamCall },
     })
 
     expect(exec.searchCalls).toEqual([])
@@ -368,7 +368,7 @@ describe("runStreamingAgent", () => {
       stream,
       executor: exec,
       options: baseOptions,
-      upstreamCall,
+      deps: { createChatCompletions: upstreamCall },
     })
 
     expect(exec.searchCalls).toEqual([])
@@ -419,7 +419,7 @@ describe("runStreamingAgent — usage + keepalive", () => {
       stream,
       executor: exec,
       options: baseOptions,
-      upstreamCall,
+      deps: { createChatCompletions: upstreamCall },
     })
 
     const deltas = events.filter((e) => e.event === "message_delta")
@@ -451,7 +451,7 @@ describe("runStreamingAgent — usage + keepalive", () => {
       stream,
       executor: exec,
       options: baseOptions,
-      upstreamCall,
+      deps: { createChatCompletions: upstreamCall },
       heartbeatIntervalMs: 10,
     })
 

@@ -1,0 +1,6 @@
+{
+  "name": "@stuffbucket/maximal-mcp-parked",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Parked generic MCP broker strategy. Kept in git, excluded from build, typecheck, lint, test, CI and packaging."
+}

@@ -10,6 +10,7 @@
 import { Hono } from "hono"
 
 import { getConfig } from "~/lib/config/config"
+import { getPluginGateway } from "~/lib/plugins/gateway"
 import { allCacheMetrics } from "~/lib/runtime-state/cache"
 import { modelsCached, state, tokenPresence } from "~/lib/runtime-state/state"
 import { getGitVersion } from "~/lib/update/version"
@@ -54,6 +55,14 @@ debugRoutes.get("/state", (c) => {
     config: summarizeConfig(config),
     executor: describeExecutor(),
     caches: allCacheMetrics(),
+    plugins: (getPluginGateway()?.list() ?? []).map((plugin) => ({
+      id: plugin.id,
+      enabled: plugin.enabled,
+      lifecycle: plugin.lifecycle,
+      status: plugin.status?.code ?? null,
+      error: plugin.error ?? null,
+      tools: plugin.tools.length,
+    })),
     secrets: collectSecretStatuses(config),
   })
 })
