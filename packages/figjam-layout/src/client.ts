@@ -33,7 +33,13 @@ export async function tool(name: string, input: Record<string, unknown>): Promis
   if (t) headers.authorization = `Bearer ${t}`
   const res = await fetch(`http://127.0.0.1:${PORT}/tool`, {
     method: "POST",
+    // By design: the operator-opted-in pairing token goes only to the bridge on
+    // 127.0.0.1, which checks it. See ADR-0001.
+    // codeql[js/file-access-to-http]
     headers,
+    // By design: layouts the operator passes as files become tool input for the
+    // local bridge. See ADR-0001.
+    // codeql[js/file-access-to-http]
     body: JSON.stringify({ board: board(), agent: AGENT, name, input }),
   })
   const body = await res.json()

@@ -84,6 +84,45 @@ const runCode = (code, actor) => call("run_code", { code, confirm: true }, actor
   assert.equal(relayedActor({ toString: () => "panel:x" }), "agent:anonymous")
   for (const a of ["panel:x", "agent:a b", "x".repeat(200)]) assert.ok(relayedActor(a).startsWith("agent:"))
 
+  // The panel takes plugin messages only from Figma's frames, and calls
+  // Maximal only on a loopback origin it rebuilt from checked parts.
+  assert.ok(
+    ui.includes("if (event.source !== window.parent && event.source !== window.top) return;"),
+    "window.onmessage must ignore messages from other windows",
+  )
+  const hostsText = ui.match(/const LOOPBACK_HOSTS = \[.*\];/)
+  const originText = ui.match(/function maximalOrigin\(value\) \{[\s\S]*?\n\}/)
+  assert.ok(hostsText && originText, "maximalOrigin not found in ui.html")
+  const maximalOrigin = new Function(`${hostsText[0]} return ${originText[0]}`)()
+  const allowed = {
+    "http://localhost:4141": "http://localhost:4141",
+    "http://localhost:4141/": "http://localhost:4141",
+    "http://127.0.0.1:5141": "http://127.0.0.1:5141",
+    "http://[::1]:4141": "http://[::1]:4141",
+    "https://localhost": "https://localhost:443",
+    "http://localhost": "http://localhost:80",
+    "HTTP://LOCALHOST:4141": "http://localhost:4141",
+  }
+  for (const [input, origin] of Object.entries(allowed)) assert.equal(maximalOrigin(input), origin, input)
+  for (const input of [
+    "http://example.com:4141",
+    "http://localhost.example.com:4141",
+    "http://127.0.0.2:4141",
+    "http://localhost@example.com:4141",
+    "http://me@localhost:4141",
+    "http://localhost:4141/proxy",
+    "http://localhost:4141?x=1",
+    "http://localhost:4141#x",
+    "ws://localhost:4141",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "localhost:4141",
+    "",
+    undefined,
+    null,
+  ]) assert.equal(maximalOrigin(input), "", String(input))
+  assert.ok(!/fetch\(`\$\{settings\.baseUrl\}/.test(ui), "Maximal requests must go through maximalUrl")
+
   console.log("all security checks passed")
   process.exit(0)
 })().catch(e => { console.error(e); process.exit(1) })

@@ -55,6 +55,9 @@ The current suppressed sites (grep `codeql\[` to enumerate):
 | `js/file-access-to-http` | `src/lib/http/send-request.ts` | **Single mechanism** — every authenticated GitHub/Copilot/Anthropic/provider request funnels through it, and it attaches the disk-read token (see below) |
 | `js/http-to-file-access` | `src/lib/auth/github-token-store.ts` | Persist OAuth token to 0o600 file |
 | `js/http-to-file-access` | `scripts/sync-homebrew-formula.ts` | Release tooling renders a formula |
+| `js/file-access-to-http` | `packages/figjam-layout/src/client.ts` | The opted-in pairing token, and layouts the operator passes as files, go only to the FigJam bridge on 127.0.0.1 |
+| `js/file-access-to-http` | `packages/figjam-bridge/test/pairing.test.ts` | Test reads a throwaway bridge's admin token from its temp data directory |
+| `js/client-side-request-forgery` | `packages/figjam-plugin/src/legacy/ui.html` | The panel fetches image URLs for the Figma sandbox; Figma enforces the manifest's `networkAccess` hosts as the iframe's CSP |
 
 ## One HTTP mechanism owns token attachment
 

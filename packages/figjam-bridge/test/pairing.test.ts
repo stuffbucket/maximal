@@ -32,6 +32,9 @@ async function admin(
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`http://localhost:${PORT}${route}`, {
     method: "POST",
+    // By design: the test reads the throwaway bridge's admin token from its
+    // temp data directory and calls that bridge on localhost. See ADR-0001.
+    // codeql[js/file-access-to-http]
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${token}`,
