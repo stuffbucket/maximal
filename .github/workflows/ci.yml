@@ -80,7 +80,6 @@ jobs:
       head_sha: ${{ steps.changes.outputs.head_sha }}
       mode: ${{ steps.changes.outputs.mode }}
       trusted_generated: ${{ steps.changes.outputs.trusted_generated }}
-      windows_broker: ${{ steps.changes.outputs.windows_broker }}
     steps:
       - name: Verify dispatched SHA
         if: github.event_name == 'workflow_dispatch' && github.sha != inputs.expected_sha
@@ -110,10 +109,9 @@ jobs:
           MODE: ${{ steps.changes.outputs.mode }}
           CHANGED_COUNT: ${{ steps.changes.outputs.changed_count }}
           TRUSTED_GENERATED: ${{ steps.changes.outputs.trusted_generated }}
-          WINDOWS_BROKER: ${{ steps.changes.outputs.windows_broker }}
         run: |
-          printf 'mode=%s changed=%s trusted_generated=%s windows_broker=%s\n' \
-            "$MODE" "$CHANGED_COUNT" "$TRUSTED_GENERATED" "$WINDOWS_BROKER"
+          printf 'mode=%s changed=%s trusted_generated=%s\n' \
+            "$MODE" "$CHANGED_COUNT" "$TRUSTED_GENERATED"
 
       - name: Verify trusted generated tree scope
         if: >-
@@ -265,6 +263,9 @@ jobs:
       - name: Check unsafe type assertions
         run: bun run casts:check
 
+      - name: Type check plugin packages
+        run: bun run plugins:typecheck
+
       - name: Build
         run: bun run build
 
@@ -277,9 +278,6 @@ jobs:
       && needs.deduplicate.outputs.duplicate != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      # Root tests exercise the isolated broker package, but do not build Rust.
-      MISE_DISABLE_TOOLS: rust
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -294,66 +292,17 @@ jobs:
         with:
           bun-version: 1.4.3
 
-      - uses: ./.github/actions/setup-mise
-        with:
-          mise-version: v2026.9.5
-
       - name: Configure package registry
         run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
 
       - name: Install dependencies
         run: bun install
 
-      # tests/mcp-adapter-end-to-end.test.ts intentionally skips when mcp-proxy
-      # is unavailable, so install the broker package before the root suite.
-      - name: Install isolated broker dependencies
-        run: |
-          mise trust packages/mcp-broker/mise.toml
-          mise -C packages/mcp-broker install
-          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
-
       - name: Run tests
         run: bun test
 
-  broker:
-    needs: [classify, deduplicate]
-    if: >-
-      always()
-      && needs.classify.result == 'success'
-      && (needs.deduplicate.result == 'success' || needs.deduplicate.result == 'skipped')
-      && needs.deduplicate.outputs.duplicate != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      # The root mise.toml pins Rust and the broker inherits it; nothing in
-      # this job builds Rust through mise, so don't download the toolchain.
-      MISE_DISABLE_TOOLS: rust
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: ./.github/actions/setup-mise
-        with:
-          mise-version: v2026.9.5
-
-      - name: Configure package registry
-        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
-
-      - name: Install isolated broker dependencies
-        run: |
-          mise trust packages/mcp-broker/mise.toml
-          mise -C packages/mcp-broker install
-          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
-
-      - name: Check isolated broker
-        run: |
-          mise -C packages/mcp-broker exec -- pnpm typecheck
-          mise -C packages/mcp-broker exec -- pnpm build
-          MAXIMAL_MCP_BROKER_BINARY="$PWD/packages/mcp-broker/dist/maximal-mcp-broker" mise -C packages/mcp-broker exec -- pnpm test
-          # The release cross-compiles the broker for Windows; catch a Bun
-          # that can't before a release run does.
-          mise -C packages/mcp-broker exec -- pnpm build:target \
-            --target=bun-windows-x64 \
-            --outfile="$RUNNER_TEMP/maximal-mcp-broker-windows-x64.exe"
+      - name: Run plugin package tests
+        run: bun run plugins:test
 
   storybook:
     needs: [classify, deduplicate]
@@ -402,7 +351,7 @@ jobs:
   test:
     name: test
     if: always()
-    needs: [classify, deduplicate, quality, unit-tests, broker, storybook]
+    needs: [classify, deduplicate, quality, unit-tests, storybook]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -413,7 +362,6 @@ jobs:
           DUPLICATE: ${{ needs.deduplicate.outputs.duplicate || 'false' }}
           QUALITY: ${{ needs.quality.result }}
           UNIT_TESTS: ${{ needs.unit-tests.result }}
-          BROKER: ${{ needs.broker.result }}
           STORYBOOK: ${{ needs.storybook.result }}
         run: |
           set -euo pipefail
@@ -438,7 +386,6 @@ jobs:
           for result in \
             "quality=$QUALITY" \
             "unit-tests=$UNIT_TESTS" \
-            "broker=$BROKER" \
             "storybook=$STORYBOOK"; do
             if [[ "$result" != *="$expected" ]]; then
               echo "::error::$result (expected $expected)"
@@ -446,84 +393,3 @@ jobs:
             fi
           done
           exit "$failed"
-
-  # The broker contains MCP servers on Windows with a kill-on-close Job
-  # Object, which only a Windows machine can check: build the broker there
-  # and run its tests, including test/windows-containment.test.ts, against
-  # the compiled executable. Manual, scheduled, merge-group, and unknown
-  # changes classify as full and always run both architectures.
-  windows-broker:
-    name: windows-broker (${{ matrix.runner }})
-    needs: [classify, deduplicate]
-    if: >-
-      always()
-      && needs.classify.result == 'success'
-      && (needs.deduplicate.result == 'success' || needs.deduplicate.result == 'skipped')
-      && needs.deduplicate.outputs.duplicate != 'true'
-      && needs.classify.outputs.windows_broker == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [windows-latest, windows-11-arm]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
-    env:
-      # The broker inherits the root mise.toml's Rust pin; nothing here
-      # builds Rust.
-      MISE_DISABLE_TOOLS: rust
-      # An emulated x64 process can't tell it's on an Arm PC (it sees AMD64),
-      # so the workflow says so. PowerShell takes about 42 seconds to launch
-      # there, too slow for the PowerShell-parent adapter test.
-      MAXIMAL_TEST_SKIP_POWERSHELL_PARENT: ${{ matrix.runner == 'windows-11-arm' && '1' || '' }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: ./.github/actions/setup-mise
-        with:
-          mise-version: v2026.9.5
-
-      - name: Configure package registry
-        run: printf '%s\n' 'registry=https://packagefeedproxy.microsoft.io/npm/' > "$HOME/.npmrc"
-
-      - name: Install isolated broker dependencies
-        run: |
-          mise trust mise.toml
-          mise trust packages/mcp-broker/mise.toml
-          mise install
-          mise -C packages/mcp-broker install
-          mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
-
-      - name: Build the broker
-        run: mise -C packages/mcp-broker exec -- pnpm build
-
-      - name: Test the broker on Windows
-        working-directory: packages/mcp-broker
-        run: |
-          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/maximal-mcp-broker.exe")" \
-            mise exec -- bun test
-
-      # Releases ship the minified x64 cross-compile (release.yml's
-      # build:target), so check the adapter, the command line and containment
-      # against exactly that build as well. On the Arm runner it runs under
-      # emulation, as it does on an Arm PC.
-      - name: Test the release build
-        if: always()
-        working-directory: packages/mcp-broker
-        run: |
-          mise exec -- pnpm build:target \
-            --target=bun-windows-x64 \
-            --outfile="$PWD/dist/release/maximal-mcp-broker.exe"
-          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/dist/release/maximal-mcp-broker.exe")" \
-            mise exec -- bun test test/cli.test.ts test/stdio-adapter.test.ts test/windows-adapter-pipes.test.ts test/windows-containment.test.ts
-
-      # Claude Desktop's path end to end: a Node parent runs the release
-      # adapter against Maximal's /mcp route, which forwards to a broker.
-      - name: Test the release adapter through Maximal's /mcp route
-        if: always()
-        run: |
-          mise exec -- bun install --frozen-lockfile
-          MAXIMAL_MCP_BROKER_BINARY="$(cygpath -w "$PWD/packages/mcp-broker/dist/release/maximal-mcp-broker.exe")" \
-            mise exec -- bun test tests/mcp-adapter-end-to-end.test.ts

@@ -6,9 +6,8 @@
  * order, including the Claude Code revert step, is documented inline
  * in initiateShutdown().
  *
- * Coverage matrix for the Claude Code base-URL revert (and the removal of
- * Maximal-added MCP servers from Claude Code; Claude Desktop keeps its
- * entries because it reads its config only at launch):
+ * Coverage matrix for the Claude Code base-URL revert (the connector MCP
+ * servers Maximal added to Claude Code stay; see `plugins/clients`):
  *   - SIGTERM / SIGINT          → initiateShutdown ✓
  *   - process.exit(n) anywhere  → `exit` event safety net ✓
  *   - uncaught exception        → `exit` event safety net ✓
@@ -22,7 +21,6 @@ import type { serve } from "srvx"
 
 import consola from "consola"
 
-import { removeMcpClientsOnShutdown } from "~/apps/mcp"
 import { runAppShutdownHooks } from "~/apps/registry"
 import { removePidfile } from "~/lib/platform/replace-running"
 
@@ -39,14 +37,6 @@ function runAppCleanup(phase: string): void {
     `shutdown: ${phase} app hooks finished`
       + ` (${result.completed.length} completed, ${result.failed.length} failed)`,
   )
-}
-
-function removeMcpClientsBestEffort(phase: string): void {
-  try {
-    removeMcpClientsOnShutdown()
-  } catch (error) {
-    consola.warn(`shutdown: ${phase} MCP client cleanup failed`, error)
-  }
 }
 
 function clearSessionRunningBestEffort(phase: string): void {
@@ -75,11 +65,6 @@ export async function initiateShutdown(
   // the next boot re-applies it. Synchronous + best-effort — a slow/failed
   // file write must not delay or block the drain.
   runAppCleanup("graceful")
-  // Same for the MCP servers Maximal added to Claude Code, so a new session
-  // doesn't point at a stopped Maximal. Claude Desktop keeps its entries: it
-  // reads its config only at launch. Boot re-adds from the recorded choices.
-  // File-only and synchronous.
-  removeMcpClientsBestEffort("graceful")
 
   // Fail-safe: if close() hangs, hard-exit after 2.5s. .unref() so the
   // timer itself never holds the loop open in the happy path.
@@ -142,7 +127,6 @@ export function installShutdownHandlers(
   // (the boot-time stale-session warning surfaces them after the fact).
   process.on("exit", () => {
     runAppCleanup("exit safety-net")
-    removeMcpClientsBestEffort("exit safety-net")
     clearSessionRunningBestEffort("exit safety-net")
   })
 

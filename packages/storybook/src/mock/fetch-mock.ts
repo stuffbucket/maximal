@@ -66,7 +66,8 @@ export function installMockApi(win: Window & typeof globalThis, params: MockApiP
   }) as typeof fetch;
 
   // The real client opens one EventSource on /settings/api/events and listens
-  // for `auth.changed`. Emulate exactly that; pass any other URL through.
+  // for `auth.changed` and `plugins.changed`. Emulate exactly that; pass any
+  // other URL through.
   class MockEventSource extends EventTarget {
     static readonly CONNECTING = 0;
     static readonly OPEN = 1;
@@ -77,7 +78,7 @@ export function installMockApi(win: Window & typeof globalThis, params: MockApiP
     onopen: ((ev: Event) => void) | null = null;
     onmessage: ((ev: MessageEvent) => void) | null = null;
     onerror: ((ev: Event) => void) | null = null;
-    private unsubscribe: () => void = () => {};
+    private unsubscribers: Array<() => void> = [];
 
     constructor(url: string | URL, init?: EventSourceInit) {
       super();
@@ -91,7 +92,12 @@ export function installMockApi(win: Window & typeof globalThis, params: MockApiP
         this.readyState = 1;
         this.dispatchEvent(new Event("open"));
         this.emit(backend.auth);
-        this.unsubscribe = backend.onAuthChange((auth) => this.emit(auth));
+        this.unsubscribers = [
+          backend.onAuthChange((auth) => this.emit(auth)),
+          backend.onPluginsChange(() =>
+            this.dispatchEvent(new MessageEvent("plugins.changed", { data: "{}" })),
+          ),
+        ];
       }, 0);
     }
 
@@ -101,7 +107,7 @@ export function installMockApi(win: Window & typeof globalThis, params: MockApiP
 
     close(): void {
       this.readyState = 2;
-      this.unsubscribe();
+      for (const unsubscribe of this.unsubscribers) unsubscribe();
     }
   }
   win.EventSource = MockEventSource as unknown as typeof EventSource;

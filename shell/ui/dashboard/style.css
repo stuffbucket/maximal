@@ -69,9 +69,7 @@
   /* ---- Font stacks ---- */
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   --font-body: "Commissioner", "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-    monospace;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Auto-injected tokens */
   --text-xs: 0.75rem;
@@ -126,6 +124,7 @@
   --focus-ring: 0 0 0 2px var(--surface-base), 0 0 0 4px var(--accent);
   --sidebar-width: 200px;
   --content-max: 640px;
+  --code-block-max: 320px;
 }
 
 /* ---- Theme colors ----

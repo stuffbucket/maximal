@@ -3,6 +3,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
+import { rejectUntrustedOrigin } from "./lib/auth/origin"
 import {
   createAuthMiddleware,
   requireGithubAuth,
@@ -10,6 +11,7 @@ import {
 import { traceIdMiddleware } from "./lib/http/trace"
 import { staleRefreshMiddleware } from "./lib/models/refresh-models"
 import { cacheModels } from "./lib/platform/utils"
+import { onPluginsStopping } from "./lib/plugins/runtime"
 import { getModelsLoadedAtMs } from "./lib/runtime-state/state"
 import { buildStatus } from "./lib/runtime-state/status"
 import { trackInFlight } from "./lib/token-usage/in-flight"
@@ -20,9 +22,9 @@ import { decisionsRoutes } from "./routes/decisions/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
 import { imagesRoutes } from "./routes/images/route"
 import { internalRoutes } from "./routes/internal/route"
-import { mcpRoutes } from "./routes/mcp/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
+import { pluginMcpRoutes } from "./routes/plugins/mcp"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
@@ -64,6 +66,12 @@ server.use(async (c, next) => {
 })
 server.use(logger())
 server.use(cors())
+// `cors()` lets any page script the proxy, and with `auth.enforce` off the
+// settings API needs no key — so a page the user visits could rewrite plugin
+// settings (e.g. point a connector at its own host and collect its tokens).
+// Browser requests to the settings API must come from Maximal's own UI;
+// requests with no `Origin` (CLI, Tauri shell calls) are unaffected.
+server.use("/settings/api/*", rejectUntrustedOrigin)
 server.use(
   "*",
   createAuthMiddleware({
@@ -76,7 +84,7 @@ server.use(
     ],
     // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
-    // /mcp/* applies endpoint keys or these same rules in its own route.
+    // /mcp/* (plugin MCP endpoints) applies these same rules in its own route.
     allowUnauthenticatedPrefixes: ["/ui", "/mcp"],
     requireAuthPrefixes: ["/settings/api"],
     // The dashboard at /ui/dashboard fetches these endpoints from the
@@ -141,9 +149,12 @@ server.route("/settings/api", settingsApiRoutes)
 // `/ui/*` serves the settings + dashboard UI (embedded in prod, from
 // shell/dist in dev). See src/routes/ui/route.ts.
 server.route("/ui", uiRoutes)
-// `/mcp/<id>` forwards to the isolated MCP broker. It authenticates itself
-// (endpoint key or the main-port rules) and needs no GitHub token.
-server.route("/mcp", mcpRoutes)
+// `/mcp/<plugin id>` serves a plugin's tools over MCP (Streamable HTTP). It
+// authenticates itself (the main-port rules, loopback only) and needs no
+// GitHub token.
+server.route("/mcp", pluginMcpRoutes.app)
+// Close MCP sessions deterministically when the plugins stop.
+onPluginsStopping(() => pluginMcpRoutes.closeAll())
 
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so

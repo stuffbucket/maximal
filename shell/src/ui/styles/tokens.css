@@ -79,6 +79,7 @@
   /* ---- Layout constants ---- */
   --sidebar-width: 200px;
   --content-max: 640px;
+  --code-block-max: 320px;
 }
 
 /* ---- Theme colors ----

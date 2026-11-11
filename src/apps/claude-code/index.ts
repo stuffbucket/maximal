@@ -1,6 +1,8 @@
 import type { AppEntry } from "~/lib/config/settings-types"
 
-import { syncMcpClient } from "~/lib/mcp-broker/client-sync"
+import { claudeCodePluginClient } from "~/lib/plugins/clients/claude-code"
+import { removePluginClientEntries } from "~/lib/plugins/clients/sync"
+import { notifyPluginsChanged, syncPluginClients } from "~/lib/plugins/runtime"
 
 import type { AppUninstallResult, ClientApp } from "../index"
 
@@ -13,7 +15,6 @@ import {
 } from "./config"
 import { detectClaudeInstalls } from "./detect"
 import { claudeCodeInstallHint } from "./install"
-import { claudeCodeMcp } from "./mcp"
 import {
   reconcileClaudeCodeOnBoot,
   reconcileClaudeCodeOnShutdown,
@@ -25,7 +26,6 @@ export const claudeCodeApp: ClientApp = {
   name: "Claude Code",
   kind: "config",
   apiKeyLabel: HELPER_LABEL,
-  mcp: claudeCodeMcp,
 
   async detect() {
     const installs = await detectClaudeInstalls()
@@ -50,7 +50,7 @@ export const claudeCodeApp: ClientApp = {
     }
   },
 
-  async enable() {
+  enable() {
     const result = applyProxyBaseUrl()
     const conflict =
       (
@@ -65,34 +65,37 @@ export const claudeCodeApp: ClientApp = {
     // not configure.
     if (success) {
       setClaudeCodeRoutingIntent(true)
-      // Restore the MCP endpoints the user chose for Claude Code.
-      await syncMcpClient(claudeCodeMcp)
+      // Add the connectors the user chose for Claude Code, and tell
+      // Settings, which offers Claude Code as a client only while it's on.
+      syncPluginClients()
+      notifyPluginsChanged()
     }
-    return { success, conflict }
+    return Promise.resolve({ success, conflict })
   },
 
-  async disable() {
+  disable() {
     const result = revertProxyBaseUrl()
     setClaudeCodeRoutingIntent(false)
-    await syncMcpClient(claudeCodeMcp, { active: false })
-    return { success: result.wrote }
+    syncPluginClients()
+    notifyPluginsChanged()
+    return Promise.resolve({ success: result.wrote })
   },
 
-  async uninstall(): Promise<AppUninstallResult> {
-    // Ownership-guarded: removes only the ANTHROPIC_BASE_URL block and the MCP
-    // servers we wrote, no-op when absent or foreign. The installer PATH block
-    // is maximal's own artifact (not an app integration), so the uninstaller
-    // handles that.
+  uninstall(): Promise<AppUninstallResult> {
+    // Ownership-guarded: removes only the ANTHROPIC_BASE_URL block and the
+    // plugin MCP servers we wrote, no-op when absent or foreign. The
+    // installer PATH block is maximal's own artifact (not an app
+    // integration), so the uninstaller handles that.
     const reverted: Array<string> = []
     const result = revertProxyBaseUrl()
     if (result.wrote) {
       reverted.push(`reverted ${getClaudeCodeSettingsPath()}`)
     }
-    const mcp = await syncMcpClient(claudeCodeMcp, { active: false })
+    const mcp = removePluginClientEntries(claudeCodePluginClient)
     if (mcp.removed.length > 0) {
       reverted.push(`removed our MCP servers: ${mcp.removed.join(", ")}`)
     }
-    return { reverted }
+    return Promise.resolve({ reverted })
   },
 
   isEnabled() {

@@ -32,11 +32,11 @@ describe("config.json with a byte order mark", () => {
   test("is read, not replaced by the defaults", () => {
     fs.writeFileSync(
       PATHS.CONFIG_PATH,
-      `${BOM}${JSON.stringify({ smallModel: "bom-model", mcpBroker: { enabled: true } })}`,
+      `${BOM}${JSON.stringify({ smallModel: "bom-model", checkUpdates: false })}`,
     )
     const config = reloadConfig()
     expect(config.smallModel).toBe("bom-model")
-    expect(config.mcpBroker?.enabled).toBe(true)
+    expect(config.checkUpdates).toBe(false)
   })
 
   test("parseJsonText drops only a leading byte order mark", () => {

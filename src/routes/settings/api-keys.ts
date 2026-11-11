@@ -36,6 +36,7 @@ import {
   ApiKeyUpdateRequest,
   type ApiKeyEntry,
 } from "~/lib/config/settings-types"
+import { syncPluginClients } from "~/lib/plugins/runtime"
 
 export const apiKeysRoutes = new Hono()
 
@@ -102,6 +103,8 @@ apiKeysRoutes.post("/", async (c) => {
   refreshClaudeCodeApiKeyHelper()
   refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
+  // Connector entries in Claude Code carry the Claude Code key too.
+  syncPluginClients()
 
   return c.json(entry, 201)
 })
@@ -195,6 +198,8 @@ apiKeysRoutes.patch("/:id", async (c) => {
   refreshClaudeCodeApiKeyHelper()
   refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
+  // Connector entries in Claude Code carry the Claude Code key too.
+  syncPluginClients()
 
   return c.json(updated)
 })
@@ -217,5 +222,7 @@ apiKeysRoutes.delete("/:id", (c) => {
   refreshClaudeCodeApiKeyHelper()
   refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
+  // Connector entries in Claude Code carry the Claude Code key too.
+  syncPluginClients()
   return c.body(null, 204)
 })

@@ -10,8 +10,7 @@
 # create a Start Menu shortcut. The Tauri tray app (the NSIS installer,
 # maximal-<ver>-windows-x64-setup.exe) is the canonical Windows experience
 # and owns running the proxy, auto-start, and first-run setup — like the
-# macOS menu-bar app. This installer puts the `maximal` CLI and its isolated
-# broker sibling on PATH.
+# macOS menu-bar app. This installer puts the `maximal` CLI on PATH.
 #
 # Windows Authenticode signing remains deferred. On first launch,
 # Windows SmartScreen will warn; the Pages site carries the
@@ -52,6 +51,8 @@ if (-not $Repo) {
 
 $InstallDir      = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
 $BinPath         = Join-Path $InstallDir 'maximal.exe'
+# Older versions shipped an MCP broker beside the CLI; this version doesn't, so
+# an upgrade removes a leftover copy and the uninstaller removes it too.
 $BrokerPath      = Join-Path $InstallDir 'maximal-mcp-broker.exe'
 $UninstallerPath = Join-Path $InstallDir 'uninstall.ps1'
 $DownloadDir     = Join-Path $env:TEMP "maximal-install-$(Get-Random)"
@@ -112,7 +113,7 @@ function Write-Uninstaller {
   param([string]$Path)
   # The installed helper owns only artifacts created by this PowerShell
   # installer. `maximal uninstall` first reverts application integrations and
-  # stops the isolated broker; after that process exits, the helper can remove
+  # stops a broker left by an older version; after that process exits, the helper can remove
   # the formerly-running executable, its own file, the user PATH entry, and the
   # PowerShell installer's ARP key. MSI installs continue to be owned by
   # msiexec and never use this helper.
@@ -145,7 +146,8 @@ if (Test-Path -LiteralPath $BinPath) {
 }
 
 # The CLI performs graceful, ownership-aware cleanup first. Terminate any
-# remaining manually-started proxy or broker before deleting locked files.
+# remaining manually-started proxy (or a broker left by an older version)
+# before deleting locked files.
 Get-Process -Name 'maximal', 'maximal-mcp-broker' -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
@@ -240,7 +242,8 @@ Download-File -Url $shaUrl -Dest $shaPath
 Verify-Sha256 -File $zipPath -ExpectedSha256File $shaPath
 
 # 2. Best-effort process termination if a previous copy is still up, so
-#    file locks release before we overwrite either executable.
+#    file locks release before we overwrite the executable (and a broker an
+#    older version left behind, which is then removed).
 Get-Process -Name 'maximal', 'maximal-mcp-broker' -ErrorAction SilentlyContinue |
   ForEach-Object {
     $_ | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -251,12 +254,11 @@ Write-Host "Unpacking to $InstallDir ..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
 
-foreach ($binaryPath in @($BinPath, $BrokerPath)) {
-  if (-not (Test-Path $binaryPath)) {
-    throw "Install failed: $binaryPath not present after unpack"
-  }
-  Write-Host "  ✓ Installed $binaryPath" -ForegroundColor Green
+if (-not (Test-Path $BinPath)) {
+  throw "Install failed: $BinPath not present after unpack"
 }
+Write-Host "  ✓ Installed $BinPath" -ForegroundColor Green
+Remove-Item -LiteralPath $BrokerPath -Force -ErrorAction SilentlyContinue
 
 # 4. PATH + dedicated PowerShell uninstaller + Add/Remove Programs entry
 Add-UserPath -Dir $InstallDir

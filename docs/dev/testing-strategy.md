@@ -86,6 +86,8 @@ breaks down into these layers:
 | **Contract** | The shape of a wire payload or a public response matches a published schema — or a single source of truth still agrees with its mirrors | `auth-status-contract.test.ts`, `config-schema.test.ts`, diagnostics schema round-trip in `settings-api-diagnostics.test.ts`, `i18n-catalog-parity.test.ts` |
 | **Route / handler (in-process)** | A Hono route, exercised via `server.request(...)` / `app.fetch(...)` — no network, no listening port | `*-route.test.ts`, `*-handler.test.ts`, `debug-route.test.ts` |
 | **Behavioral / lifecycle** | Stateful subsystems (auth controller, recovery, rate limit) across event sequences | `auth-controller-lifecycle.test.ts`, `auth-recovery.test.ts`, `copilot-rate-limit.test.ts` |
+| **Plugin conformance** | Every plugin package runs `runPluginConformance` (`@stuffbucket/maximal-plugin-host/testing`): manifest/config shape, enable, reload, disable and shutdown leave nothing behind, settings migration and isolation | `packages/plugin-host/test/testing.test.ts`, `packages/plugin-workiq/test/conformance.test.ts` |
+| **End-to-end, in-process** | A plugin through its whole lifecycle in the real app, every boundary recorded and compared with a golden transcript (below) | `e2e-plugin-lifecycle.test.ts`, `bench-connectors.test.ts` |
 | **Mutation (manual, targeted)** | Whether tests *would fail* if the logic were wrong — see §6 | run on demand via `bun run mutate` |
 
 `tests/i18n-catalog-parity.test.ts` is a contract test of the second kind: it
@@ -94,6 +96,36 @@ as the single source of truth for OS-conditional terminology (see
 [`i18n.md`](i18n.md)). The Rust tray side hand-mirrors the `app-container`
 noun via `cfg!(target_os)` instead of an ICU runtime, and this test fails if
 that mirror or the catalog spelling drifts.
+
+**Plugin lifecycle e2e.** `tests/e2e-plugin-lifecycle.test.ts` (also
+`bun run test:e2e:plugins`; part of plain `bun test`) runs the Work IQ
+connector in the real app (`server` on a loopback port + `startPlugins({ gateway })`,
+the connectors-bench seam; `runServer` itself exits the process on shutdown,
+so the bench covers it) with a host built by the lifecycle harness, the fake
+Work IQ upstream and a fake sign-in with a token cache. Claude Code is a
+fake `claude` first on PATH (`tests/helpers/fake-claude-cli.ts`, found by
+Maximal's own install detection) and a temp `CLAUDE_CONFIG_DIR`. It walks
+boot (an older Maximal's `config.json` value and Claude Code `workiq` entry
+migrated) → enable → terms → sign-in → Claude Code routing on → Work IQ sent
+to Claude Code (`maximal-workiq`, the user's own servers untouched) → the
+user's own `workiq` taking precedence (Settings' `standalone`) and then
+removed → tools mirrored over a client connected with exactly the URL and
+headers of Maximal's entry (compared field by field with the fixture) → Settings detail →
+block/unblock → calls (exact upstream request and downstream result,
+progress + elicitation, a throttled result retried, a policy 403) → config
+PATCH (rejected, then a reload) → sign-out → disable (the Claude Code entry
+removed) → shutdown, asserting
+invariants at each step and that the fake bearer/refresh tokens never reach
+MCP clients, Settings, SSE or the logs. Each step's exchanges — plugin
+transcript, Settings API, last `plugins.changed` frame (views as deltas),
+downstream MCP messages, upstream requests, storage names, settings.json,
+config.json and Claude Code's `mcpServers` — are normalised and compared with
+`tests/__snapshots__/e2e-plugin-lifecycle.test.ts.snap`, so any change in
+what crosses a boundary shows up in review. What races by nature is kept
+out of the ordered sequences (list_changed and progress notifications, the
+upstream event-stream GET, parallel DELETEs, PATCH fields set in the
+background). Update it with `bun test tests/e2e-plugin-lifecycle.test.ts --update-snapshots`
+and review the diff.
 
 **Not present today** (gaps, see §8):
 - No end-to-end test against a real (or recorded) Copilot backend.
@@ -399,19 +431,13 @@ merge gate. Steps, in order:
 3. Pinned Bun setup (`.github/actions/setup-bun`).
 4. **Check Conventional Commit subjects** — on pull requests, the PR title and
    every commit subject (`bun scripts/check-commit-msg.ts --subjects`).
-5. mise setup (`.github/actions/setup-mise`).
-6. Configure the package registry, then `bun install`.
-7. **Check pnpm lockfiles for rotating feed hosts**
+5. Configure the package registry, then `bun install`.
+6. **Check pnpm lockfiles for rotating feed hosts**
    (`bun scripts/strip-lockfile-hosts.ts --check`).
-8. Install the isolated broker's dependencies (`packages/mcp-broker`, via
-   mise + `pnpm install --frozen-lockfile`).
-9. **Check the isolated broker** — `pnpm typecheck`, `pnpm build`,
-   `pnpm test` against the built binary, and a `bun-windows-x64`
-   cross-compile (`pnpm build:target`).
-10. **`bun run lint:all`** (full-tree ESLint, `eslint --cache .`).
-11. **`bun run typecheck`** (`tsc`).
-12. **`bun test`** (full suite).
-13. **`bun run build`**.
+7. **`bun run lint:all`** (full-tree ESLint, `eslint --cache .`).
+8. **`bun run typecheck`** (`tsc`).
+9. **`bun test`** (full suite).
+10. **`bun run build`**.
 
 Security workflows (CodeQL, trufflehog) and, on release, the gated
 build/sign/publish pipeline (macOS dmg, Windows MSI verify, checksums, smoke)

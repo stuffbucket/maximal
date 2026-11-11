@@ -90,6 +90,23 @@ ExecStart=
 ExecStart=/usr/bin/maximal start --account-type enterprise
 ```
 
+### Connector sign-ins and the keyring
+
+Connectors such as [Work IQ](workiq.md) keep their sign-in encrypted, with the
+key in your desktop keyring through the Secret Service (libsecret over D-Bus).
+Ubuntu's and Debian's GNOME desktops have one, unlocked when you log in. The
+`maximal` package recommends `libsecret-1-0`, so apt installs the library with
+it. On another desktop, or if Work IQ's status says *Sign-in: Kept until
+Maximal restarts*, install a keyring and restart Maximal:
+
+```sh
+sudo apt install gnome-keyring libsecret-1-0
+```
+
+Without a keyring (headless, over SSH, or a service with no login session)
+Maximal never writes the sign-in to disk: it keeps it in memory (turning Work IQ
+off and on keeps it), and you sign in again after each restart.
+
 ## Update
 
 Maximal checks for new versions on its own. When one is out:
@@ -146,7 +163,7 @@ the armored key directly from `Signed-By`.
 
 | Path | Package |
 |---|---|
-| `/usr/bin/maximal`, `/usr/bin/maximal-mcp-broker` | `maximal` |
+| `/usr/bin/maximal` | `maximal` |
 | `/usr/lib/systemd/user/maximal.service` (not enabled) | `maximal` |
 | `/usr/lib/maximal/installed-by-apt` | `maximal` |
 | `/usr/bin/maximal-desktop`, its `.desktop` entry and icons | `maximal-desktop` |
@@ -166,8 +183,7 @@ mxml.sh, so apt can always install the version the apps announce.
 
 **Other ways to run it.** The release page also has the raw binaries
 (`maximal-vX.Y.Z-linux-x64.tar.gz`, `-linux-arm64.tar.gz`). To build from
-source, see [commands](commands.md) and the source build in
-[Work IQ on Linux](linux-workiq.md#build-from-source).
+source, see [commands](commands.md).
 
 **How it's built.** `build/linux/` holds the packaging, the container smoke
 test and the apt repository scripts; the release and Pages workflows are

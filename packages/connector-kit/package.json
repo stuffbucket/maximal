@@ -1,0 +1,27 @@
+{
+  "name": "@stuffbucket/maximal-connector-kit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Build maximal connectors for remote MCP servers: upstream sessions, sign-in strategies, setup status and tool mirroring",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@azure/msal-node": "7.1.2",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

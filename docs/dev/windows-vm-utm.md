@@ -106,19 +106,14 @@ hardcoding a timestamp.
 ## Iteration loop
 
 ```
-# 1. Cross-compile both Windows binaries on the Mac. The MSI installs
-#    maximal.exe and its sibling maximal-mcp-broker.exe; the broker is
-#    built from packages/mcp-broker (as release.yml does).
+# 1. Cross-compile the Windows binary on the Mac. The MSI installs maximal.exe.
 bun build --compile --target=bun-windows-x64 src/main.ts \
   --outfile dist-bin/maximal.exe
-mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
-mise -C packages/mcp-broker exec -- pnpm build:target \
-  --target=bun-windows-x64 --outfile="$PWD/dist-bin/maximal-mcp-broker.exe"
 
-# 2. Drop both binaries + the WiX .wxs into the VM's shared folder
-#    (maximal.wxs expects both .exe files next to it).
+# 2. Drop the binary + the WiX .wxs into the VM's shared folder
+#    (maximal.wxs expects maximal.exe next to it).
 #    UTM Settings → Sharing → "Shared Directory" → ~/maximal-share
-cp dist-bin/maximal.exe dist-bin/maximal-mcp-broker.exe ~/maximal-share/
+cp dist-bin/maximal.exe ~/maximal-share/
 cp build/windows/maximal.wxs ~/maximal-share/
 
 # 3. In the VM (PowerShell):

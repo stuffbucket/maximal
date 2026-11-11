@@ -95,7 +95,7 @@ rules, in order:
 1. **Recover before reporting.** Loads retry transient failures
    (Maximal not answering, 429, 5xx) on their own via `withRetry`; only
    what's still wrong afterwards is shown. If Maximal is already fixing
-   something (e.g. restarting the MCP broker), say so in one quiet
+   something (e.g. a plugin still starting), say so in one quiet
    `.panel-status` line — no banner, nothing to click — and poll.
 2. **Name the cause in plain words.** "Maximal isn't responding", "You're
    not signed in to GitHub Copilot", "Maximal isn't allowed to change
@@ -112,15 +112,15 @@ rules, in order:
 ## Empty states
 
 Where a list will be, an `EmptyState` (`components/EmptyState.tsx`,
-`.empty`) says what's missing and how to get it: a title ("No MCP
-servers yet"), a sentence or two, and the one action that fills it if
+`.empty`) says what's missing and how to get it: a title ("No connectors
+available"), a sentence or two, and the one action that fills it if
 the user can take it here. Dashed border, not a card — it holds no
 entity. Don't show an empty state and an error at the same time; the
 error wins.
 
 ## Checkbox groups with "All"
 
-For one entity offered to several targets (an MCP server to each app):
+For one entity offered to several targets (a plugin to each app):
 an "All …" checkbox heads the group, the targets indent under it by
 `--space-5`, rows split by a hairline. "All" shows the mixed
 (indeterminate) state when some are checked. Each target row is a
@@ -134,7 +134,7 @@ text ("Added"): the tick says it. Anything worth saying about a row
 after a save (e.g. the app already had its own entry) is a notice
 `Callout` under the list. Changes save as made — no confirm step.
 
-When the group only matters while the entity is on (an MCP server's
+When the group only matters while the entity is on (a plugin's
 apps), the card is an accordion: a ghost icon button (`btn--icon`,
 chevron-down, rotates 180° open) sits at the far right of the card head,
 after the switch. Switching on opens it; switching off closes it and
@@ -142,11 +142,59 @@ disables the twirldown. While on, the twirldown folds the group away.
 The button carries `aria-expanded` / `aria-controls`; the group is
 `hidden` when closed, not just visually collapsed.
 
-The card's other actions (an MCP server's Refresh and Remove) sit just left
+The card's other actions (e.g. Refresh or Remove) sit just left
 of the switch as ghost icon buttons (`btn--icon`), each with an `aria-label`
 naming the entity and a quiet `title` tooltip. A destructive one reads
 red (`btn--ghost-destructive`) and always confirms in a `ConfirmDialog`
 (`tone="danger"`) before acting.
+
+## Connectors
+
+Settings → Integrations → Connectors (`shell/src/ui/features/connectors/`).
+
+**List.** A `.table` with Connector (glyph tile + name), Type ("Built-in"
+or "Plugin") and Status columns. The name is the row's button (the Tab
+stop; Enter opens), and a click anywhere on the row opens it too. Status
+is a tick (`--status-success`, named for screen readers) when the
+connector is ready, else a `.connector-dot` in a status token plus a
+short word (Off, Needs setup, Signing in, Starting, Error, Failed), and a
+quiet chevron.
+
+**Page.** Opening a row replaces the list in place (`#connectors/<id>`,
+mirrored with `replaceState`); "← Your connectors" goes back and returns
+focus to the row. Opening from the list moves focus to the page's heading.
+No cards: the page is the entity, laid out as hairline-divided
+typographic sections:
+
+- Head: tile, name, on/off switch; then the description and the
+  connector's own report — status line, detail, facts (`.kv`), action
+  buttons. The connector's `kind` of action picks the button (primary,
+  secondary, or destructive as a ghost that reads red); an action with
+  `confirm` asks in a `ConfirmDialog` first. One that failed to start
+  shows an error `Callout` instead. Off shows no status line.
+- Connect to apps: a `LinkCheckbox` per client and the endpoint address
+  with a Copy button.
+- Tool permissions: the tools in three groups (Read-only, Write/delete,
+  Other), each a twirl with a `.count-badge` and a menu button (Always
+  allow / Ask every time / Blocked set the whole group; Custom marks a mixed
+  group, checked and never an action). A tool row has its title, a
+  three-state `.perm-seg` radio group (Allowed / Asks / Blocked: glyph-only,
+  so each option has a name and a tooltip; arrow keys move and choose; a
+  chosen Asks reads in `--status-warning`), its description
+  clamped to two lines with Show more, and twirls for its inputs and,
+  nested, its full input schema (`--code-block-max`, scrolls inside).
+  Changes save as made and show at once; a failed save puts the control
+  back and says why in a `ProblemCallout`. Tools from the cached catalog
+  carry a quiet `.panel-status` line saying when they were last seen.
+- Configuration: a `.form` generated from the connector's config schema;
+  advanced fields fold under a twirl (open when the connector failed to
+  start). Save / Revert; the connector's validation lands as a caption
+  under the field it names.
+- About: where it connects, how it signs in, its terms and website.
+
+Text a connector supplies is shown as written; only http(s) addresses in
+it become links, opened in the system browser. Glyphs are Maximal's own
+(`glyphs.tsx`).
 
 ## Focus rings
 

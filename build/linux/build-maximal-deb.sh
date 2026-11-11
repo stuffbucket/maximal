@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Build the `maximal` Debian package (CLI, proxy, MCP broker) from the release
-# binaries.
+# Build the `maximal` Debian package (CLI and proxy) from the release
+# binary.
 #
 #   build/linux/build-maximal-deb.sh <version> <arch> <bin-dir> <out-dir>
 #
 # <version> is the release version without the leading v (0.5.0, 0.5.0-rc.1);
-# <arch> is amd64 or arm64; <bin-dir> holds the compiled `maximal` and
-# `maximal-mcp-broker`. Writes <out-dir>/maximal_<version>_<arch>.deb.
+# <arch> is amd64 or arm64; <bin-dir> holds the compiled `maximal`.
+# Writes <out-dir>/maximal_<version>_<arch>.deb.
 #
 # The package installs:
-#   /usr/bin/maximal, /usr/bin/maximal-mcp-broker
+#   /usr/bin/maximal
 #   /usr/lib/systemd/user/maximal.service   (not enabled)
 #   /usr/lib/maximal/installed-by-apt       (tells maximal to offer apt updates)
 #   /usr/share/doc/maximal/                 (copyright)
@@ -33,13 +33,11 @@ source "$here/deb-common.sh"
 
 check_arch "$arch"
 debver="$(deb_version "$version")"
-for binary in maximal maximal-mcp-broker; do
-  if [ ! -f "$bindir/$binary" ]; then
-    echo "missing $bindir/$binary" >&2
-    exit 1
-  fi
-  check_elf_arch "$bindir/$binary" "$arch"
-done
+if [ ! -f "$bindir/maximal" ]; then
+  echo "missing $bindir/maximal" >&2
+  exit 1
+fi
+check_elf_arch "$bindir/maximal" "$arch"
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
@@ -51,7 +49,6 @@ install -d -m 0755 \
   "$root/usr/lib/maximal" \
   "$root/usr/share/doc/maximal"
 install -m 0755 "$bindir/maximal" "$root/usr/bin/maximal"
-install -m 0755 "$bindir/maximal-mcp-broker" "$root/usr/bin/maximal-mcp-broker"
 install -m 0644 "$here/maximal.service" "$root/usr/lib/systemd/user/maximal.service"
 printf 'maximal\n' > "$root/usr/lib/maximal/installed-by-apt"
 chmod 0644 "$root/usr/lib/maximal/installed-by-apt"
@@ -77,13 +74,14 @@ Architecture: $arch
 Maintainer: stuffbucket <apt@mxml.sh>
 Installed-Size: $(installed_size "$root")
 Depends: libc6 (>= 2.39)
+Recommends: libsecret-1-0
 Section: utils
 Priority: optional
 Homepage: https://mxml.sh
 Description: local proxy to the models in GitHub Copilot
  Maximal connects AI tools such as Claude Code, Codex and opencode to the
  models in your GitHub Copilot subscription. This package has the command
- line, the proxy and the MCP broker. Run it as a user service with
+ line and the proxy. Run it as a user service with
  "systemctl --user enable --now maximal", or install maximal-desktop for
  the tray app.
 EOF

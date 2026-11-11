@@ -19,7 +19,7 @@
 
 import type {
   AuthStatus,
-  PendingRequestsResponse,
+  PluginsListResponse,
 } from "~/lib/config/settings-types"
 
 import { EventBus } from "~/lib/runtime-state/event-bus"
@@ -27,9 +27,9 @@ import { EventBus } from "~/lib/runtime-state/event-bus"
 export interface SettingsEventMap {
   /** The full new auth status, identical to GET /settings/api/auth/github/status. */
   "auth.changed": AuthStatus
-  /** MCP servers' requests waiting for an answer, identical to
-   *  GET /settings/api/requests. */
-  "requests.changed": PendingRequestsResponse
+  /** A plugin's lifecycle, status, tools or client choice changed; identical
+   *  to GET /settings/api/plugins. */
+  "plugins.changed": PluginsListResponse
 }
 
 export const settingsEventBus = new EventBus<SettingsEventMap>()

@@ -25,7 +25,7 @@
  * the same contract holds on Windows and Linux.
  */
 
-import { getBrokerSupervisorSnapshot } from "~/lib/mcp-broker/supervisor"
+import { getPluginGateway } from "~/lib/plugins/gateway"
 import {
   hasCopilotToken,
   hasGithubToken,
@@ -52,19 +52,12 @@ export interface ModelsSubsystemStatus {
   cached: number
 }
 
-export interface McpBrokerSubsystemStatus {
-  /** Coarse supervisor state; endpoint details remain authenticated. */
-  state:
-    | "disabled"
-    | "starting"
-    | "ready"
-    | "degraded"
-    | "backoff"
-    | "circuit-open"
-    | "stopping"
-    | "unavailable"
-  /** Number of enabled configured endpoints, never their identities. */
-  enabled_endpoints: number
+/** Plugin counts only; which plugins and why stay behind Settings auth. */
+export interface PluginsSubsystemStatus {
+  /** Plugins running now. */
+  active: number
+  /** Plugins that are on but failed to start (bad config, apply threw). */
+  failed: number
 }
 
 export interface UpdateSubsystemStatus {
@@ -93,7 +86,7 @@ export interface StatusResponse {
   subsystems: {
     copilot: CopilotSubsystemStatus
     models: ModelsSubsystemStatus
-    mcp_broker: McpBrokerSubsystemStatus
+    plugins: PluginsSubsystemStatus
     update: UpdateSubsystemStatus
   }
 }
@@ -108,8 +101,8 @@ export interface StatusResponse {
 export function buildStatus(startMs: number): StatusResponse {
   const authenticated = hasGithubToken()
   const ready = authenticated && hasCopilotToken()
-  const broker = getBrokerSupervisorSnapshot()
   const update = peekUpdateStatus()
+  const plugins = getPluginGateway()?.list() ?? []
 
   return {
     service: "maximal",
@@ -125,9 +118,9 @@ export function buildStatus(startMs: number): StatusResponse {
       models: {
         cached: modelsCached(),
       },
-      mcp_broker: {
-        state: broker.state,
-        enabled_endpoints: broker.enabledEndpoints,
+      plugins: {
+        active: plugins.filter((p) => p.lifecycle === "active").length,
+        failed: plugins.filter((p) => p.lifecycle === "failed").length,
       },
       update: {
         latest: update?.latest ?? null,

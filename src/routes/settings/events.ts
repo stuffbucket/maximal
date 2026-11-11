@@ -23,7 +23,8 @@ import { streamSSE } from "hono/streaming"
 
 import { getAuthStatus } from "~/lib/auth/auth-controller"
 import { settingsEventBus } from "~/lib/config/settings-events"
-import { pendingRequests } from "~/lib/mcp-broker/pending-requests"
+import { getPluginGateway } from "~/lib/plugins/gateway"
+import { listPluginViews } from "~/lib/plugins/view"
 
 /** Keep-alive cadence. Proxies and idle-connection reapers close silent
  *  streams; a periodic comment line keeps the channel warm at negligible
@@ -34,18 +35,9 @@ export const eventsRoutes = new Hono()
 
 eventsRoutes.get("/", (c) =>
   streamSSE(c, async (stream) => {
-    // Initial snapshot so a freshly-connected shell renders immediately,
-    // even if it skipped the GET-on-mount.
-    await stream.writeSSE({
-      event: "auth.changed",
-      data: JSON.stringify(getAuthStatus()),
-    })
-
-    await stream.writeSSE({
-      event: "requests.changed",
-      data: JSON.stringify(pendingRequests.list()),
-    })
-
+    // Subscribe before sending the snapshots: an event published while a
+    // snapshot is being built or written is then delivered after it, instead
+    // of falling into the gap between the two.
     const unsubscribeAuth = settingsEventBus.subscribe(
       "auth.changed",
       (status) => {
@@ -55,30 +47,55 @@ eventsRoutes.get("/", (c) =>
         })
       },
     )
-    const unsubscribeRequests = settingsEventBus.subscribe(
-      "requests.changed",
-      (requests) => {
+
+    const unsubscribePlugins = settingsEventBus.subscribe(
+      "plugins.changed",
+      (plugins) => {
         void stream.writeSSE({
-          event: "requests.changed",
-          data: JSON.stringify(requests),
+          event: "plugins.changed",
+          data: JSON.stringify(plugins),
         })
       },
     )
 
+    // Held until the stream ends; also released if a snapshot write throws
+    // (client gone), so a failed connect doesn't leak the subscriptions.
     const heartbeat = setInterval(() => {
       // A comment-only line (": ping") is ignored by EventSource but resets
       // idle timers on intermediaries. writeSSE emits it as a comment.
       void stream.writeSSE({ data: "", event: "ping" })
     }, HEARTBEAT_MS)
+    const cleanup = () => {
+      clearInterval(heartbeat)
+      unsubscribeAuth()
+      unsubscribePlugins()
+    }
+
+    try {
+      // Initial snapshot so a freshly-connected shell renders immediately,
+      // even if it skipped the GET-on-mount.
+      await stream.writeSSE({
+        event: "auth.changed",
+        data: JSON.stringify(getAuthStatus()),
+      })
+      const gateway = getPluginGateway()
+      if (gateway) {
+        await stream.writeSSE({
+          event: "plugins.changed",
+          data: JSON.stringify(await listPluginViews(gateway)),
+        })
+      }
+    } catch (error) {
+      cleanup()
+      throw error
+    }
 
     // Hold the stream open until the client disconnects (webview closed,
     // navigated away, sidecar reboot). Cleaning up the subscription and the
     // heartbeat here prevents a leak per reconnect.
     await new Promise<void>((resolve) => {
       stream.onAbort(() => {
-        clearInterval(heartbeat)
-        unsubscribeAuth()
-        unsubscribeRequests()
+        cleanup()
         resolve()
       })
     })

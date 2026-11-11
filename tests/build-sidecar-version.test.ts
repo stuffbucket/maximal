@@ -27,10 +27,9 @@ describe("sidecar build version", () => {
     expect(resolveSidecarVersion("0.4.41", "")).toBe("0.4.41-dev+unknown")
   })
 
-  test("builds the isolated MCP broker for Tauri", () => {
-    expect(BUILD_SCRIPT).toContain("packages/mcp-broker")
-    expect(BUILD_SCRIPT).toContain("maximal-mcp-broker-${triple}")
-    expect(BUILD_SCRIPT).toContain('join(BROKER_PACKAGE, "src/main.ts")')
+  test("does not build the parked MCP broker", () => {
+    expect(BUILD_SCRIPT).not.toContain("mcp-broker")
+    expect(BUILD_SCRIPT).not.toContain("BROKER_PACKAGE")
   })
 })
 

@@ -67,12 +67,12 @@ mod sidecar_runtime;
 mod windows_jump_list;
 
 use sidecar_runtime::{
-    begin_exit, extract_error_reason, fetch_rejection, fetch_requests_summary, fetch_setup_status,
+    begin_exit, extract_error_reason, fetch_rejection, fetch_setup_status,
     fetch_update_payload, kill_sidecar, manual_check_outcome, parse_update_status,
     profile_data_override, read_preferred_port, runtime_event_channel, spawn_sidecar,
     update_status_endpoint, AppDataDir, AppProfile, AppStatus, LastRejection, LastSidecarError,
-    LatestUpdate, ManagedEndpoint, ManualCheck, PendingRequests, RejectionSnapshot,
-    RejectionTransition, RequestsSnapshot, RequestsTransition, RuntimeEvent, RuntimeExiting,
+    LatestUpdate, ManagedEndpoint, ManualCheck, RejectionSnapshot, RejectionTransition,
+    RuntimeEvent, RuntimeExiting,
     SetupStatusResponse, ShellApiKey, Sidecar, SidecarEndpoint, SidecarFailureStop, SidecarHandoff,
     SidecarRestarting, SidecarState, TokenUsageEvent, UpdateCheck, UpdateSnapshot,
     DASHBOARD_WINDOW_LABEL, LOOPBACK_HOST, SETTINGS_WINDOW_LABEL, UPDATE_PAGE_URL,
@@ -401,7 +401,6 @@ mod menu_id {
     pub const RETRY: &str = "retry";
     pub const OPEN_CONFIG: &str = "open_config";
     pub const UPGRADE: &str = "upgrade";
-    pub const REQUESTS: &str = "requests";
     pub const CHECK_UPDATES: &str = "check_updates";
 }
 
@@ -467,11 +466,9 @@ where
 }
 
 /// Where Settings should open when the user reaches for the app without
-/// saying where: waiting requests first (they expire), then sign-in.
+/// saying where: sign-in, when it's needed.
 fn default_settings_section(app: &AppHandle) -> Option<&'static str> {
-    if app.state::<PendingRequests>().get().pending > 0 {
-        Some("requests")
-    } else if app.state::<AppStatus>().get() == SidecarState::RunningUnauthenticated {
+    if app.state::<AppStatus>().get() == SidecarState::RunningUnauthenticated {
         Some("account")
     } else {
         None
@@ -795,7 +792,6 @@ pub fn run() {
         .manage(LatestUpdate::new())
         .manage(UpdateInstall::new())
         .manage(SidecarHandoff::new())
-        .manage(PendingRequests::new())
         .manage(LastSidecarError::new())
         .manage(LocaleState::new())
         .manage(MainSurfaceState::new())
@@ -1023,7 +1019,7 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
         .updates_enabled()
         .then(|| update_status_endpoint(endpoint, false));
     let working_notice_url = endpoint.http_url("/settings/api/notices/working");
-    let requests_summary_url = endpoint.http_url("/settings/api/requests/summary");
+    let plugin_notices_url = endpoint.http_url("/settings/api/notices/plugins");
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
     // `next_update_check` is when the next check is due (None = now, so the
@@ -1049,9 +1045,7 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
             apply_rejection(&app, rejection);
         }
         check_working_notice(&app, &client, &working_notice_url).await;
-        if let Some(requests) = fetch_requests_summary(&app, &client, &requests_summary_url).await {
-            apply_requests(&app, requests);
-        }
+        check_plugin_notices(&app, &client, &plugin_notices_url).await;
         let update_due = next_update_check.is_none_or(|t| std::time::Instant::now() >= t);
         if update_due {
             if let Some(update_url) = update_status_url.as_deref() {
@@ -1112,36 +1106,6 @@ async fn check_working_notice(app: &AppHandle, client: &reqwest::Client, url: &s
     fire_working_notification(app, &names);
 }
 
-/// Records the latest summary. A newly arrived request notifies once; any
-/// change refreshes the tray. Nothing here opens or focuses a window.
-fn apply_requests(app: &AppHandle, next: RequestsSnapshot) {
-    match app.state::<PendingRequests>().set(next) {
-        RequestsTransition::Unchanged => return,
-        RequestsTransition::Arrived => fire_requests_notification(app),
-        RequestsTransition::Changed => {}
-    }
-    let current_state = app.state::<AppStatus>().get();
-    if let Err(err) = refresh_tray(app, current_state) {
-        eprintln!("[shell] tray refresh after requests change failed: {err}");
-    }
-}
-
-/// "An MCP server is waiting for your answer". No server text: what it asks
-/// can be private, and a notification is on screen for anyone to read.
-fn fire_requests_notification(app: &AppHandle) {
-    use tauri_plugin_notification::NotificationExt;
-    let locale = app.state::<LocaleState>().get();
-    if let Err(err) = app
-        .notification()
-        .builder()
-        .title(native_i18n::tr(&locale, "native-notify-requests-title"))
-        .body(native_i18n::tr(&locale, "native-notify-requests-body"))
-        .show()
-    {
-        eprintln!("[shell] requests notification failed: {err}");
-    }
-}
-
 /// "Maximal is working", naming the apps that were just set up if any.
 /// Best-effort like the other notifications.
 fn fire_working_notification(app: &AppHandle, apps: &[&str]) {
@@ -1160,6 +1124,92 @@ fn fire_working_notification(app: &AppHandle, apps: &[&str]) {
     };
     if let Err(err) = app.notification().builder().title(title).body(body).show() {
         eprintln!("[shell] working notification failed: {err}");
+    }
+}
+
+/// Plugin notices: a connector working again after a sign-in, or a sign-in
+/// that won't survive a restart. POST takes (and clears) the sidecar's queue
+/// (src/lib/plugins/notices.ts); each becomes one notification, worded here
+/// for the codes we know and in the plugin's own English otherwise.
+/// Unreachable, failed, or nothing queued → nothing to do.
+async fn check_plugin_notices(app: &AppHandle, client: &reqwest::Client, url: &str) {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let Ok(resp) = client.post(url).header("x-api-key", key).send().await else {
+        return;
+    };
+    if !resp.status().is_success() {
+        return;
+    }
+    let Ok(payload) = resp.json::<serde_json::Value>().await else {
+        return;
+    };
+    let Some(notices) = payload
+        .get("notices")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    for notice in notices {
+        fire_plugin_notification(app, notice);
+    }
+}
+
+/// One plugin notice as a notification. Best-effort like the others.
+fn fire_plugin_notification(app: &AppHandle, notice: &serde_json::Value) {
+    use tauri_plugin_notification::NotificationExt;
+    let field = |name: &str| {
+        notice
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    };
+    let param = |name: &str| {
+        notice
+            .get("params")
+            .and_then(|params| params.get(name))
+            .and_then(serde_json::Value::as_str)
+    };
+    let name = field("name");
+    let connector = param("connector").unwrap_or(name);
+    let locale = app.state::<LocaleState>().get();
+    let (title, body) = match field("code") {
+        "connected" => (
+            native_i18n::t(
+                &locale,
+                "native-notify-connector-connected-title",
+                &[("connector", connector)],
+            ),
+            match param("account") {
+                Some(account) => native_i18n::t(
+                    &locale,
+                    "native-notify-connector-connected-body",
+                    &[("account", account)],
+                ),
+                None => native_i18n::tr(
+                    &locale,
+                    "native-notify-connector-connected-body-noaccount",
+                ),
+            },
+        ),
+        "sign-in-not-saved" => (
+            native_i18n::t(
+                &locale,
+                "native-notify-connector-not-saved-title",
+                &[("connector", connector)],
+            ),
+            native_i18n::t(
+                &locale,
+                "native-notify-connector-not-saved-body",
+                &[("connector", connector)],
+            ),
+        ),
+        _ => (name.to_owned(), field("message").to_owned()),
+    };
+    if title.is_empty() || body.is_empty() {
+        return;
+    }
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
+        eprintln!("[shell] plugin notification failed: {err}");
     }
 }
 
@@ -1725,19 +1775,13 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     };
     let locale = app.state::<LocaleState>().get();
     let rejection = app.state::<LastRejection>().get();
-    let waiting = app.state::<PendingRequests>().get().pending > 0;
     let menu = build_menu(app, &locale, state)?;
     tray.set_menu(Some(menu))?;
     tray.set_icon_with_as_template(
-        Some(icon_for(state, rejection.is_some() || waiting)?),
+        Some(icon_for(state, rejection.is_some())?),
         cfg!(target_os = "macos"),
     )?;
-    tray.set_tooltip(Some(tooltip_for(
-        &locale,
-        state,
-        rejection.as_ref(),
-        waiting,
-    )))?;
+    tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref())))?;
     #[cfg(target_os = "macos")]
     refresh_dock_menu(app, &locale, state);
     Ok(())
@@ -1813,18 +1857,6 @@ fn build_muda_dock_menu(
     });
     let sep_upgrade = PredefinedMenuItem::separator();
 
-    let requests_item = if app.state::<PendingRequests>().get().pending > 0 {
-        Some(MenuItem::with_id(
-            menu_id::REQUESTS,
-            native_i18n::tr(locale, "native-tray-requests"),
-            true,
-            None,
-        ))
-    } else {
-        None
-    };
-    let sep_requests = PredefinedMenuItem::separator();
-
     match state {
         SidecarState::Starting => {
             let starting = MenuItem::with_id(
@@ -1843,10 +1875,6 @@ fn build_muda_dock_menu(
                 None,
             );
             menu.append(&sign_in)?;
-            if let Some(answer) = &requests_item {
-                menu.append(&sep_requests)?;
-                menu.append(answer)?;
-            }
             if let Some(up) = &upgrade_item {
                 menu.append(&sep_upgrade)?;
                 menu.append(up)?;
@@ -1861,10 +1889,6 @@ fn build_muda_dock_menu(
                 None,
             );
             menu.append(&info)?;
-            if let Some(answer) = &requests_item {
-                menu.append(&sep_requests)?;
-                menu.append(answer)?;
-            }
             if let Some(up) = &upgrade_item {
                 menu.append(&sep_upgrade)?;
                 menu.append(up)?;
@@ -2002,8 +2026,7 @@ fn set_dock_icon() {
 }
 
 fn icon_for(state: SidecarState, needs_attention: bool) -> tauri::Result<Image<'static>> {
-    // A pending upstream rejection or a request waiting for an answer
-    // while authenticated promotes the icon to ATTENTION so the user
+    // A pending upstream rejection while authenticated promotes the icon to ATTENTION so the user
     // notices without opening Settings.
     // Other states already drive the icon themselves (Starting,
     // RunningUnauthenticated also use ATTENTION, etc.); the rejection
@@ -2029,17 +2052,7 @@ fn tooltip_for(
     locale: &str,
     state: SidecarState,
     rejection: Option<&RejectionSnapshot>,
-    requests_waiting: bool,
 ) -> String {
-    // A request waiting for an answer comes first: it expires.
-    if requests_waiting
-        && matches!(
-            state,
-            SidecarState::RunningAuthenticated | SidecarState::RunningUnauthenticated
-        )
-    {
-        return native_i18n::tr(locale, "native-tooltip-requests");
-    }
     // Rejection wins over the bare "maximal" idle tooltip when the
     // user is authenticated — the tray badge is meaningless without
     // a hint as to why. Other states keep their own tooltip; the
@@ -2216,21 +2229,6 @@ fn build_menu(
     )?;
     let sep_upgrade = PredefinedMenuItem::separator(app)?;
 
-    // "Answer requests…" while an MCP server is waiting for an answer;
-    // opens Settings → Requests.
-    let requests_item = if app.state::<PendingRequests>().get().pending > 0 {
-        Some(MenuItem::with_id(
-            app,
-            menu_id::REQUESTS,
-            native_i18n::tr(locale, "native-tray-requests"),
-            true,
-            None::<&str>,
-        )?)
-    } else {
-        None
-    };
-    let sep_requests = PredefinedMenuItem::separator(app)?;
-
     match state {
         SidecarState::Starting => {
             let starting = MenuItem::with_id(
@@ -2253,10 +2251,6 @@ fn build_menu(
             let sep2 = PredefinedMenuItem::separator(app)?;
             let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
             items.push(&sign_in);
-            if let Some(answer) = &requests_item {
-                items.push(&sep_requests);
-                items.push(answer);
-            }
             // Updates are their own section BELOW the primary action — never
             // above sign-in: "Update to X.Y.Z…" when one is available, then
             // "Check for updates".
@@ -2290,10 +2284,6 @@ fn build_menu(
             let sep2 = PredefinedMenuItem::separator(app)?;
             let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
             items.push(&info);
-            if let Some(answer) = &requests_item {
-                items.push(&sep_requests);
-                items.push(answer);
-            }
             // Updates are their own section BELOW the account line — never
             // above it: "Update to X.Y.Z…" when one is available, then
             // "Check for updates".
@@ -2370,7 +2360,6 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::RETRY => retry_startup(app),
         menu_id::UPGRADE => start_update(app),
         menu_id::CHECK_UPDATES => check_updates_from_tray(app),
-        menu_id::REQUESTS => open_settings_window(app, Some("requests")),
         menu_id::QUIT => request_quit(app),
         _ => {}
     }

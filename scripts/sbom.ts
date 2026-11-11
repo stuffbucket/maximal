@@ -6,7 +6,7 @@
  * Usage:
  *
  *   bun scripts/sbom.ts
- *   bun scripts/sbom.ts --root . --root packages/mcp-broker
+ *   bun scripts/sbom.ts --root . --root packages/storybook
  *   bun scripts/sbom.ts --output PATH
  *   bun scripts/sbom.ts --no-fail-on-license
  *
