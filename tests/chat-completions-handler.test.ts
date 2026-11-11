@@ -10,6 +10,7 @@ const originalConfig = getConfig()
 const originalState = {
   accountType: state.accountType,
   copilotToken: state.copilotToken,
+  githubToken: state.githubToken,
   lastRequestTimestamp: state.lastRequestTimestamp,
   manualApprove: state.manualApprove,
   models: state.models,
@@ -90,6 +91,8 @@ beforeEach(() => {
   writeConfig({ modelMappings: [] })
   state.accountType = "individual"
   state.copilotToken = "test-token"
+  // The routes refuse without a GitHub sign-in (`requireGithubAuth`).
+  state.githubToken = "test-github-token"
   state.manualApprove = false
   state.verbose = false
   state.vsCodeVersion = "1.0.0"
@@ -106,6 +109,7 @@ beforeEach(() => {
 afterEach(() => {
   state.accountType = originalState.accountType
   state.copilotToken = originalState.copilotToken
+  state.githubToken = originalState.githubToken
   state.manualApprove = originalState.manualApprove
   state.verbose = originalState.verbose
   state.vsCodeVersion = originalState.vsCodeVersion

@@ -18,7 +18,9 @@ import { trackInFlight } from "./lib/token-usage/in-flight"
 import { BUILD_VERSION } from "./lib/update/build-info"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
+import { decisionsRoutes } from "./routes/decisions/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
+import { imagesRoutes } from "./routes/images/route"
 import { internalRoutes } from "./routes/internal/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
@@ -28,6 +30,7 @@ import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
 import { settingsApiRoutes } from "./routes/settings/api"
 import { setupStatusRoute } from "./routes/setup-status"
+import { systemOneRoutes } from "./routes/systemone/route"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { uiRoutes } from "./routes/ui/route"
 import { usageRoute } from "./routes/usage/route"
@@ -156,20 +159,22 @@ onPluginsStopping(() => pluginMcpRoutes.closeAll())
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so
 // the Tauri shell can load Settings and trigger auth on demand) but the
-// proxy endpoints 401 with `not_authenticated` instead of crashing or
-// firing the device-code flow.
-server.use("/chat/completions", requireGithubAuth)
-server.use("/chat/completions/*", requireGithubAuth)
-server.use("/models", requireGithubAuth)
-server.use("/models/*", requireGithubAuth)
-server.use("/embeddings", requireGithubAuth)
-server.use("/embeddings/*", requireGithubAuth)
-server.use("/usage", requireGithubAuth)
-server.use("/usage/*", requireGithubAuth)
-server.use("/responses", requireGithubAuth)
-server.use("/responses/*", requireGithubAuth)
-server.use("/v1/*", requireGithubAuth)
-server.use("/:provider/v1/*", requireGithubAuth)
+// proxy endpoints refuse instead of crashing or firing the device-code
+// flow. These answer `401 not_authenticated`; the inference routes
+// (messages, chat completions, responses) and the images, decisions and
+// SystemOne pass-through routes gate themselves, so the refusal reaches their
+// error handler and is answered in the client's format.
+// `/x/*` also matches `/x` in Hono, so each path is mounted once.
+for (const path of [
+  "/models",
+  "/embeddings",
+  "/usage",
+  "/v1/models",
+  "/v1/embeddings",
+  "/:provider/v1/models",
+]) {
+  server.use(`${path}/*`, requireGithubAuth)
+}
 
 // Track the requests that stream a model response, so the live view can tell
 // which sessions are mid-stream. After auth; /models, /embeddings and the UI
@@ -192,12 +197,18 @@ server.route("/embeddings", embeddingRoutes)
 server.route("/usage", usageRoute)
 server.route("/token-usage", tokenUsageRoute)
 server.route("/responses", responsesRoutes)
+server.route("/images", imagesRoutes)
+server.route("/decisions", decisionsRoutes)
+server.route("/systemone", systemOneRoutes)
 
 // Compatibility with tools that expect v1/ prefix
 server.route("/v1/chat/completions", completionRoutes)
 server.route("/v1/models", modelRoutes)
 server.route("/v1/embeddings", embeddingRoutes)
 server.route("/v1/responses", responsesRoutes)
+server.route("/v1/images", imagesRoutes)
+server.route("/v1/decisions", decisionsRoutes)
+server.route("/v1/systemone", systemOneRoutes)
 
 // Anthropic compatible endpoints
 server.route("/v1/messages", messageRoutes)

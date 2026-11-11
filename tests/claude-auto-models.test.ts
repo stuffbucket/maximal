@@ -79,13 +79,26 @@ describe("isClaudeAutoModelEligible", () => {
     }
   })
 
-  test("rejects embeddings and picker-disabled models", () => {
+  test("rejects embeddings models", () => {
     expect(
       isClaudeAutoModelEligible(model("embedding", { type: "embeddings" })),
     ).toBe(false)
+  })
+
+  test("accepts a picker-hidden model only on a routable endpoint", () => {
     expect(isClaudeAutoModelEligible(model("hidden", { picker: false }))).toBe(
-      false,
+      true,
     )
+    expect(
+      isClaudeAutoModelEligible(
+        model("hidden-legacy", { picker: false, endpoints: [] }),
+      ),
+    ).toBe(false)
+    expect(
+      isClaudeAutoModelEligible(
+        model("hidden-ws", { picker: false, endpoints: ["ws:/responses"] }),
+      ),
+    ).toBe(false)
   })
 
   test("rejects internal Claude variants", () => {
@@ -407,7 +420,7 @@ describe("resolveClaudeAutoModels precedence and empty states", () => {
   })
 
   test("returns only eligible choices in the resolution", () => {
-    const ineligible = model("hidden", { picker: false })
+    const ineligible = model("hidden", { picker: false, endpoints: [] })
     const result = resolveClaudeAutoModels({ models: [ineligible, haiku] })
     expect(result.eligibleModels.map((entry) => entry.id)).toEqual([haiku.id])
   })
@@ -502,5 +515,50 @@ describe("resolveClaudeAutoModels precedence and empty states", () => {
     expect(result.classifier).toEqual(result.fast)
     expect(result.eligibleModels).toEqual([])
     expect(result.classifierEligibleModels).toEqual([])
+  })
+})
+
+describe("picker-hidden models in automatic selection", () => {
+  test("fills the small-GPT buckets with a picker-hidden free nano model", () => {
+    const hiddenNano = model("gpt-5.4-nano", {
+      vendor: "openai",
+      picker: false,
+      endpoints: ["/responses", "ws:/responses"],
+      prices: { input: 0, output: 0 },
+    })
+    const pricedGpt = model("gpt-5.3-codex", {
+      vendor: "openai",
+      prices: { input: 1, output: 4 },
+    })
+
+    const result = resolveClaudeAutoModels({ models: [pricedGpt, hiddenNano] })
+
+    expect(result.fast).toMatchObject({
+      effective: hiddenNano.id,
+      reason: "small-gpt",
+    })
+    expect(result.capable).toMatchObject({
+      effective: pricedGpt.id,
+      reason: "gpt",
+    })
+    expect(result.classifier).toMatchObject({
+      effective: hiddenNano.id,
+      reason: "small-gpt",
+    })
+  })
+
+  test("still prefers Haiku over a picker-hidden nano model", () => {
+    const hiddenNano = model("gpt-5.4-nano", {
+      vendor: "openai",
+      picker: false,
+      prices: { input: 0, output: 0 },
+    })
+
+    const result = resolveClaudeAutoModels({ models: [hiddenNano, haiku] })
+
+    expect(result.fast).toMatchObject({
+      effective: haiku.id,
+      reason: "haiku",
+    })
   })
 })

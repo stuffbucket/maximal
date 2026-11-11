@@ -51,7 +51,7 @@ import {
   emitAuthChanged,
   registerAuthStatusProjector,
 } from "~/lib/config/settings-events"
-import { CopilotAuthFatalError } from "~/lib/errors/error"
+import { CopilotAuthFatalError } from "~/lib/errors/http-errors"
 import { createTeeLogger } from "~/lib/platform/logger"
 import { PATHS } from "~/lib/platform/paths"
 import { registerProcessCleanup } from "~/lib/platform/process-cleanup"

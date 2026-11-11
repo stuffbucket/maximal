@@ -45,7 +45,8 @@ config anchor this document names is currently true.
 ## 1. What this project is (context for the test strategy)
 
 `maximal` is a local HTTP proxy that presents an Anthropic-compatible API
-(`/v1/messages`, `/chat/completions`, `/responses`, `/models`, `/embeddings`)
+(`/v1/messages`, `/chat/completions`, `/responses`, `/models`, `/embeddings`,
+`/images`, `/decisions`, `/systemone`)
 and brokers requests to GitHub Copilot's backend (Bedrock-hosted Claude and
 GPT models), translating protocols, rewriting payloads, and managing auth. It
 ships as:

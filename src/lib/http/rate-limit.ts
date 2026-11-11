@@ -2,7 +2,7 @@ import consola from "consola"
 
 import type { State } from "~/lib/runtime-state/state"
 
-import { HTTPError } from "~/lib/errors/error"
+import { HTTPError } from "~/lib/errors/http-errors"
 import { sleep } from "~/lib/platform/utils"
 
 export async function checkRateLimit(state: State) {

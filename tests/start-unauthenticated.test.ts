@@ -6,13 +6,15 @@
  * the GitHub device-code flow (opening a browser) *before* binding loopback,
  * so the dashboard couldn't load to let the user recover. The fix: boot
  * the server unconditionally, leave `state.githubToken` undefined when
- * absent, and gate `/v1/*` and friends with `requireGithubAuth`.
+ * absent, and gate the upstream-touching routes with `requireGithubAuth`.
  *
  * This test starts the real `start` subprocess against a fresh
  * `COPILOT_API_HOME` (so no token record exists) and asserts:
  *   1. The port binds within 5s (no auth blocking startup).
  *   2. `/_debug/state` reports `github_token_present: false`.
- *   3. Upstream-touching routes 401 with `{ error: "not_authenticated" }`.
+ *   3. The inference routes answer 503 with no retry and a sign-in message
+ *      in the client's format; other upstream-touching routes 401 with
+ *      `{ error: "not_authenticated" }`.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "node:fs"
@@ -154,27 +156,37 @@ describe("start in unauthenticated mode", () => {
     expect(body.runtime.github_token_present).toBe(false)
   })
 
-  test("POST /v1/messages returns 401 not_authenticated", async () => {
+  test("POST /v1/messages tells the client to sign in, without retrying", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "claude-3-5-sonnet", messages: [] }),
     })
-    expect(res.status).toBe(401)
-    const body = (await res.json()) as { error: string; hint: string }
-    expect(body.error).toBe("not_authenticated")
-    expect(body.hint).toContain("Settings")
+    expect(res.status).toBe(503)
+    expect(res.headers.get("x-should-retry")).toBe("false")
+    const body = (await res.json()) as {
+      type: string
+      error: { type: string; message: string }
+    }
+    expect(body.type).toBe("error")
+    expect(body.error.type).toBe("api_error")
+    expect(body.error.message).toContain("Settings → Account")
   })
 
-  test("GET /chat/completions also gates on github auth", async () => {
+  test("POST /chat/completions answers in OpenAI's format", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "gpt-4o", messages: [] }),
     })
-    expect(res.status).toBe(401)
-    const body = (await res.json()) as { error: string }
-    expect(body.error).toBe("not_authenticated")
+    expect(res.status).toBe(503)
+    expect(res.headers.get("x-should-retry")).toBe("false")
+    const body = (await res.json()) as {
+      error: { type: string; code: string; message: string }
+    }
+    expect(body.error.type).toBe("service_unavailable")
+    expect(body.error.code).toBe("maximal_not_signed_in")
+    expect(body.error.message).toContain("Settings → Account")
   })
 
   test("GET /usage returns 401 not_authenticated", async () => {
