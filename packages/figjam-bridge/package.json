@@ -1,0 +1,20 @@
+{
+  "name": "@stuffbucket/maximal-figjam-bridge",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Local bridge between the FigJam agent plugin and coding agents: pairing, chats, change feed, claims and tool calls over HTTP and WebSocket",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./chats-store": "./src/chats-store.ts"
+  },
+  "bin": {
+    "figjam": "./src/cli.ts"
+  },
+  "scripts": {
+    "cli": "bun src/cli.ts",
+    "start": "bun src/bridge.ts",
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
+  }
+}

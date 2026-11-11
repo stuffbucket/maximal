@@ -61,6 +61,17 @@
         "@deepseek-ai/cordis": "4.0.2",
       },
     },
+    "packages/figjam-bridge": {
+      "name": "@stuffbucket/maximal-figjam-bridge",
+      "version": "0.7.0",
+      "bin": {
+        "figjam": "./src/cli.ts",
+      },
+    },
+    "packages/figjam-plugin": {
+      "name": "@stuffbucket/maximal-figjam-plugin",
+      "version": "0.10.1",
+    },
     "packages/plugin-host": {
       "name": "@stuffbucket/maximal-plugin-host",
       "version": "0.0.0",
@@ -378,6 +389,10 @@
     "@stryker-mutator/util": ["@stryker-mutator/util@9.6.1", "https://packagefeedproxy.microsoft.io/npm/@stryker-mutator/util/-/util-9.6.1.tgz", {}, "sha512-Lk/ALVctJjFv1vvwR+CFoKzDCWvsBlq7flDUnmnpuwTrGbm156EdZD1Jjq4o8KdOap0ezUZqQNE9OAI1m2+pUQ=="],
 
     "@stuffbucket/maximal-connector-kit": ["@stuffbucket/maximal-connector-kit@workspace:packages/connector-kit"],
+
+    "@stuffbucket/maximal-figjam-bridge": ["@stuffbucket/maximal-figjam-bridge@workspace:packages/figjam-bridge"],
+
+    "@stuffbucket/maximal-figjam-plugin": ["@stuffbucket/maximal-figjam-plugin@workspace:packages/figjam-plugin"],
 
     "@stuffbucket/maximal-plugin-host": ["@stuffbucket/maximal-plugin-host@workspace:packages/plugin-host"],
 

@@ -41,6 +41,24 @@
         "src/**/*.ts",
         "test/**/*.ts"
       ]
+    },
+    "packages/figjam-plugin": {
+      "entry": [
+        "test/**/*.test.ts"
+      ],
+      "project": [
+        "scripts/**/*.ts",
+        "test/**/*.ts"
+      ]
+    },
+    "packages/figjam-bridge": {
+      "entry": [
+        "test/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+      ]
     }
   },
   "ignoreBinaries": [

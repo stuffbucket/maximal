@@ -1,4 +1,9 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["parked/**"]
+  "ignorePatterns": [
+    "parked/**",
+    "packages/figjam-plugin/src/legacy/**",
+    "packages/figjam-plugin/test/sandbox/**",
+    "packages/figjam-layout/**"
+  ]
 }

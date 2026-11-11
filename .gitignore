@@ -59,3 +59,5 @@ src/generated/
 # Storybook (packages/storybook): staged UI + static build
 packages/storybook/.ui/
 packages/storybook/storybook-static/
+# FigJam layout engine (packages/figjam-layout): plans, previews and exports
+packages/figjam-layout/out/
