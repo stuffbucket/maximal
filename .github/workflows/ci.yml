@@ -266,6 +266,9 @@ jobs:
       - name: Type check plugin packages
         run: bun run plugins:typecheck
 
+      - name: Type check FigJam packages
+        run: bun run figjam:typecheck
+
       - name: Build
         run: bun run build
 
@@ -303,6 +306,9 @@ jobs:
 
       - name: Run plugin package tests
         run: bun run plugins:test
+
+      - name: Run FigJam package tests
+        run: bun run figjam:test
 
   storybook:
     needs: [classify, deduplicate]
