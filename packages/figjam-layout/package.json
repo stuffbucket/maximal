@@ -6,7 +6,9 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "cli": "bun src/cli.ts"
+    "cli": "bun src/cli.ts",
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "elkjs": "^0.12.1",

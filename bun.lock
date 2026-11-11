@@ -68,6 +68,14 @@
         "figjam": "./src/cli.ts",
       },
     },
+    "packages/figjam-layout": {
+      "name": "@stuffbucket/maximal-figjam-layout",
+      "version": "0.0.0",
+      "dependencies": {
+        "elkjs": "^0.12.1",
+        "libavoid-js": "0.5.0-beta.5",
+      },
+    },
     "packages/figjam-plugin": {
       "name": "@stuffbucket/maximal-figjam-plugin",
       "version": "0.10.1",
@@ -392,6 +400,8 @@
 
     "@stuffbucket/maximal-figjam-bridge": ["@stuffbucket/maximal-figjam-bridge@workspace:packages/figjam-bridge"],
 
+    "@stuffbucket/maximal-figjam-layout": ["@stuffbucket/maximal-figjam-layout@workspace:packages/figjam-layout"],
+
     "@stuffbucket/maximal-figjam-plugin": ["@stuffbucket/maximal-figjam-plugin@workspace:packages/figjam-plugin"],
 
     "@stuffbucket/maximal-plugin-host": ["@stuffbucket/maximal-plugin-host@workspace:packages/plugin-host"],
@@ -619,6 +629,8 @@
     "ecdsa-sig-formatter": ["ecdsa-sig-formatter@1.0.11", "https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz", { "dependencies": { "safe-buffer": "^5.0.1" } }, "sha1-rg8PothQRe8UqBfao86azQSJ5b8="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.353", "https://packagefeedproxy.microsoft.io/npm/electron-to-chromium/-/electron-to-chromium-1.5.353.tgz", {}, "sha512-kOrWphBi8TOZyiJZqsgqIle0lw+tzmnQK83pV9dZUd01Nm2POECSyFQMAuarzZdYqQW7FH9RaYOuaRo3h+bQ3w=="],
+
+    "elkjs": ["elkjs@0.12.1", "https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/elkjs/-/elkjs-0.12.1.tgz", {}, "sha512-IhMYKHE4S2vtx0QrhBP3lYOIKDeIiJXBrdq9MGYkuB8ZHqhrBnHNfSUndjXFewrX1CPK8chwq+2NA0K0hliYuw=="],
 
     "emoji-regex": ["emoji-regex@10.6.0", "https://packagefeedproxy.microsoft.io/npm/emoji-regex/-/emoji-regex-10.6.0.tgz", {}, "sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A=="],
 
@@ -955,6 +967,8 @@
     "language-tags": ["language-tags@1.0.9", "https://packagefeedproxy.microsoft.io/npm/language-tags/-/language-tags-1.0.9.tgz", { "dependencies": { "language-subtag-registry": "^0.3.20" } }, "sha512-MbjN408fEndfiQXbFQ1vnd+1NoLDsnQW41410oQBXiyXDMYH5z505juWa4KUE1LqxRC7DgOgZDbKLxHIwm27hA=="],
 
     "levn": ["levn@0.4.1", "https://packagefeedproxy.microsoft.io/npm/levn/-/levn-0.4.1.tgz", { "dependencies": { "prelude-ls": "^1.2.1", "type-check": "~0.4.0" } }, "sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ=="],
+
+    "libavoid-js": ["libavoid-js@0.5.0-beta.5", "https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/libavoid-js/-/libavoid-js-0.5.0-beta.5.tgz", {}, "sha1-vGvdVhkEtn/rEoZitD6/Dt1wHYk="],
 
     "lint-staged": ["lint-staged@16.4.0", "https://packagefeedproxy.microsoft.io/npm/lint-staged/-/lint-staged-16.4.0.tgz", { "dependencies": { "commander": "^14.0.3", "listr2": "^9.0.5", "picomatch": "^4.0.3", "string-argv": "^0.3.2", "tinyexec": "^1.0.4", "yaml": "^2.8.2" }, "bin": { "lint-staged": "bin/lint-staged.js" } }, "sha512-lBWt8hujh/Cjysw5GYVmZpFHXDCgZzhrOm8vbcUdobADZNOK/bRshr2kM3DfgrrtR1DQhfupW9gnIXOfiFi+bw=="],
 

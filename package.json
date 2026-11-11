@@ -30,7 +30,8 @@
     "packages/plugin-host",
     "packages/plugin-workiq",
     "packages/figjam-plugin",
-    "packages/figjam-bridge"
+    "packages/figjam-bridge",
+    "packages/figjam-layout"
   ],
   "scripts": {
     "app:build": "MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar && bun run scripts/predmg-cleanup.ts && cd shell && bun run tauri build --bundles app,dmg",
@@ -48,8 +49,8 @@
     "build:ui": "bun run scripts/build-ui.ts",
     "casts": "bun run scripts/find-casts.ts",
     "casts:check": "bun run scripts/find-casts.ts --check",
-    "check:deep": "bun run check:fast && bun test && bun run plugins:test && bun run knip",
-    "check:fast": "bun run ensure:ui-embed && bun run lint:fast && bun run typecheck && bun run plugins:typecheck && bun run lint:all && bun run casts:check && bun run check:tokens",
+    "check:deep": "bun run check:fast && bun test && bun run plugins:test && bun run figjam:test && bun run knip",
+    "check:fast": "bun run ensure:ui-embed && bun run lint:fast && bun run typecheck && bun run plugins:typecheck && bun run figjam:typecheck && bun run lint:all && bun run casts:check && bun run check:tokens",
     "check:tokens": "bun scripts/check-design-tokens.ts",
     "deps:check": "depcruise --config .dependency-cruiser.cjs src tests",
     "dev": "bun run --watch ./src/main.ts",
@@ -57,8 +58,8 @@
     "figjam": "bun packages/figjam-bridge/src/cli.ts",
     "figjam:bridge": "bun packages/figjam-bridge/src/bridge.ts",
     "figjam:build": "bun packages/figjam-plugin/scripts/build.ts",
-    "figjam:layout:install": "mise -C packages/figjam-layout exec -- pnpm install --frozen-lockfile",
     "figjam:test": "bun run --filter './packages/figjam-*' test",
+    "figjam:typecheck": "bun run --filter './packages/figjam-*' typecheck",
     "git:tidy": "bun scripts/tidy-branches.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",

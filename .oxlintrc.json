@@ -3,7 +3,6 @@
   "ignorePatterns": [
     "parked/**",
     "packages/figjam-plugin/src/legacy/**",
-    "packages/figjam-plugin/test/sandbox/**",
-    "packages/figjam-layout/**"
+    "packages/figjam-plugin/test/sandbox/**"
   ]
 }

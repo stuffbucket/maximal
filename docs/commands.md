@@ -21,12 +21,14 @@ bun test             # Run all tests (root suite under tests/)
 bun test tests/foo.test.ts  # Run a single test file
 bun run plugins:typecheck   # tsc in every packages/plugin-* workspace
 bun run plugins:test        # bun test in every packages/plugin-* workspace
+bun run figjam:typecheck    # tsc in every packages/figjam-* workspace that has one
+bun run figjam:test         # bun test in every packages/figjam-* workspace
 bun run bench:connectors    # real server + Work IQ against a fake upstream (see "Connectors bench")
 bun run test:e2e:plugins    # Work IQ through its whole lifecycle in-process, vs. a golden transcript
 
 # Aggregates
-bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + plugins:typecheck + lint:all + casts:check + check:tokens (the per-edit inner loop)
-bun run check:deep   # check:fast + bun test + plugins:test + knip (end-of-task gate)
+bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + plugins:typecheck + figjam:typecheck + lint:all + casts:check + check:tokens (the per-edit inner loop)
+bun run check:deep   # check:fast + bun test + plugins:test + figjam:test + knip (end-of-task gate)
 bun run deps:check   # dependency-cruiser layer rules
 bun run knip         # find unused exports/files
 bun run git:tidy     # plan branch cleanup (archive-then-delete); --apply to act

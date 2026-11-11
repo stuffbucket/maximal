@@ -5,12 +5,18 @@ This runs on the bridge side, in Bun. It reads a page's AST (`board_tree`), plan
 previews, and only then builds the chosen result on a page it owns.
 
 ```sh
-mise -C packages/figjam-layout exec -- pnpm install --frozen-lockfile   # elkjs, libavoid-js
 bun src/cli.ts fetch 8:248 out/map.json                      # read-only: board_tree (+style) → Layout JSON
 bun src/cli.ts convert out/bt.json out/map.json [ref.json]   # offline: cached board_tree → Layout (edge kinds from ref)
 bun src/cli.ts plan out/map.json out/run1                    # all candidates → checks, previews, plan.json, classification.json
+bun src/cli.ts map out/map.json out/map [--policy A|B]       # only planMap (no baselines) → <name>.svg/.png, plan.json, checks
 bun src/cli.ts build out/run1/plan.json lanes [pageId]       # recreate on "Map — layout experiment"; refuses if a hard check fails
 ```
+
+**`map`:** runs only the recommended pipeline, without the baseline strategies, and prints its
+scores and self-checks. `--policy A` (the default) keeps every route monotone. `--policy B` keeps
+routes monotone inside families only: a cross-family route may be non-monotone when its detour is
+≤ 1.25× with ≤ 4 bends. Its `plan.json` has the same shape as `plan`'s, so
+`build out/map/plan.json lanes` builds it.
 
 **Board:** commands that talk to the bridge (`fetch`, `build`) need `FIGJAM_BOARD` set to the
 board's name or id. There is no default, because the bridge can serve several FigJam files.
@@ -27,8 +33,16 @@ whole bridge, so using it is opt-in:
 ## Files
 - `pipeline.ts`: the full pipeline (`planMap`, recommended). It also places the name-tag pills.
 - `global.ts`: global routing (`globalPlan`) and the monotone crossing lower bound.
-- `lanes.ts`: the detailed router (`lanes`), plus the self-checks (`checks`) and `spread`, which
-  widens the gutters.
+- `lanes.ts`: the detailed router (`lanes`): orchestration, rip-up and reroute, unswapping, and
+  `HARD_CHECKS`. It re-exports the stages, which live in their own files:
+  - `lanes-grid.ts`: shared types and the routing context, the lattice and masks, `titleRect`.
+  - `lanes-doors.ts`: family pairs, door sides, window placement and door slots.
+  - `lanes-ports.ts`: ports, channel and ring bands, link modes, corridors.
+  - `lanes-search.ts`: lane usage bookkeeping and the monotone A* search.
+  - `lanes-layered.ts`: layered (Sugiyama-style) routing inside families.
+  - `lanes-draw.ts`: routes, bundle chains, doors, explanations, `piecesFromRoutes`.
+  - `lanes-labels.ts`: `labelSize` and `placeLabels`.
+  - `lanes-checks.ts` and `lanes-shape.ts`: the self-checks (`checks`).
 - `classify.ts`: the ORDERED/UNORDERED classification and the suggested (unapplied) moves.
 - `build.ts`: writes the page and runs `gate()` first, which refuses to write when any hard check
   fails. It draws:
@@ -43,7 +57,13 @@ whole bridge, so using it is opt-in:
   - `route`: libavoid with per-card doors.
   - `reflow`: ELK.
   - `magnets`: re-picks connector sides only.
-- `model.ts` holds the shared geometry and metrics, and `svg.ts` the offline preview.
+- `model.ts` holds the shared types, geometry and metrics, and `svg.ts` the offline preview.
+- `cli.ts` parses and checks `board_tree` responses (`parseBoardTree`) before converting them.
+
+## Tests
+`bun run figjam:test` (or `bun test test` here). `test/pipeline.test.ts` runs `planMap` on the
+live fixture (about 10s): every hard check must pass, and its crossings, wire length and name-tag
+counts are pinned, so a routing change shows up there as a deliberate update.
 
 ## Pipeline (`planMap`)
 1. **Global routing (`global.ts`).**
