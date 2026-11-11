@@ -609,6 +609,16 @@ function toolResultContent(out) {
 
 // actor tags the board changes a call makes: "panel:<session>" for the
 // panel's own agent, "agent:<name>" for calls relayed by the bridge.
+// Relayed calls always run as "agent:<name>". The bridge stamps them that way,
+// but the panel doesn't take its word for it: "panel:" calls get the panel's
+// own exemptions (run_code without a per-call confirm, deleting what this
+// panel made), which a relayed call must not.
+function relayedActor(actor) {
+  const name = typeof actor === "string" ? actor.replace(/^agent:/, "") : "";
+  const clean = name.replace(/[^\w.-]/g, "").slice(0, 64);
+  return `agent:${clean || "anonymous"}`;
+}
+
 function runTool(name, input, actor) {
   const id = `t${++toolSeq}`;
   return new Promise((resolve) => {
@@ -2626,7 +2636,7 @@ function openBridge() {
     bridgeToolsBusy++;
     let out;
     try {
-      out = await runTool(msg.name, msg.input || {}, typeof msg.actor === "string" ? msg.actor : "agent:anonymous");
+      out = await runTool(msg.name, msg.input || {}, relayedActor(msg.actor));
     } finally {
       bridgeToolsBusy--;
     }

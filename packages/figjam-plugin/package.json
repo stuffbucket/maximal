@@ -1,6 +1,6 @@
 {
   "name": "@stuffbucket/maximal-figjam-plugin",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "private": true,
   "description": "The FigJam agent plugin: the Figma sandbox code, the panel, and the build that produces code.js, ui.html and manifest.json",
   "license": "MIT",

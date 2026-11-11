@@ -4745,6 +4745,26 @@ function jsonSafe(value, depth, seen) {
 
 var RUN_PARAMS = ["figma", "tools", "helpers", "console"]
 
+// run_code gets its own copy of the tools, and every call goes through
+// runToolCall like any other: expect/confirm checks, page targeting, clientId
+// and change attribution under run_code's actor. Passing the raw `tools` map
+// would let code skip all of that while looking like it used the guarded tools.
+// Each call is checked on its own (run_code's own confirm doesn't carry over),
+// and run_code and batch can't be called from inside it.
+var NOT_FROM_RUN_CODE = { run_code: true, batch: true }
+
+function guardedTools(ctx) {
+  var actor = ctx && ctx.actor
+  var out = {}
+  Object.keys(tools).forEach(function (name) {
+    out[name] = function (input) {
+      if (NOT_FROM_RUN_CODE[name]) return Promise.reject(new Error(name + " can't be called from run_code."))
+      return runToolCall(name, input || {}, { actor: actor })
+    }
+  })
+  return Object.freeze(out)
+}
+
 // Compile `code` as the body of an async function, trying each mechanism the
 // sandbox might allow.
 function compileAsync(code) {
@@ -4780,7 +4800,7 @@ tool("run_code",
     code: str("Function body, e.g. const n = await figma.getNodeByIdAsync(\"1:2\"); return n.name"),
     timeoutMs: int("Default 30000, max 110000."),
   }, ["code"],
-  async function (input) {
+  async function (input, ctx) {
     var settings = await loadSettings()
     if (!settings.allowRunCode) throw new Error("run_code is off. The user can turn it on with \"Allow run_code\" in the panel's settings.")
     var compiled = compileAsync(String(input.code || ""))
@@ -4802,7 +4822,7 @@ tool("run_code",
     var timeout = Math.min(Math.max(Number(input.timeoutMs) || 30000, 100), 110000)
     var timer
     var result = await Promise.race([
-      compiled.fn(figma, tools, helpers, sandboxConsole),
+      compiled.fn(figma, guardedTools(ctx), helpers, sandboxConsole),
       new Promise(function (resolve, reject) {
         timer = setTimeout(function () { reject(new Error("run_code timed out after " + timeout + " ms (it may still be running).")) }, timeout)
       }),

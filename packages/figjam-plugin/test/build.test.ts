@@ -81,6 +81,7 @@ describe("sandbox", () => {
     "ramp.mjs",
     "toolbar.mjs",
     "comments.mjs",
+    "security.mjs",
   ]) {
     test(file, () => {
       const run = Bun.spawnSync(
