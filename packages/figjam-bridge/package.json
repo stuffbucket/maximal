@@ -6,7 +6,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./chats-store": "./src/chats-store.ts"
+    "./chats-store": "./src/chats-store.ts",
+    "./data-dir": "./src/data-dir.ts"
   },
   "bin": {
     "figjam": "./src/cli.ts"

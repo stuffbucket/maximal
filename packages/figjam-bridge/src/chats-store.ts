@@ -2,9 +2,7 @@
  * Chat persistence for the FigJam bridge: SQLite (bun:sqlite, WAL) with an
  * FTS5 index over each chat's title and the plain text of its messages.
  *
- * DB: <data>/figjam/chats.sqlite, where <data> is $COPILOT_API_HOME, else
- * %APPDATA%\maximal on Windows, else $XDG_DATA_HOME/maximal, else
- * ~/.local/share/maximal.
+ * DB: <data>/figjam/chats.sqlite (see data-dir.ts for <data>).
  */
 import { Database } from "bun:sqlite"
 import { randomBytes } from "node:crypto"
@@ -15,8 +13,9 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs"
-import os from "node:os"
 import path from "node:path"
+
+import { dataDir, pairingTokenPath } from "./data-dir"
 
 type Json = Record<string, unknown>
 
@@ -39,24 +38,8 @@ export interface SearchResult extends IndexEntry {
 const MAX_CHARS = 800_000
 const TRUNCATE_TO = 2_000
 
-export function dataDir(): string {
-  const env = process.env
-  if (env.COPILOT_API_HOME) return env.COPILOT_API_HOME
-  if (process.platform === "win32" && env.APPDATA)
-    return path.join(env.APPDATA, "maximal")
-  if (env.XDG_DATA_HOME) return path.join(env.XDG_DATA_HOME, "maximal")
-  return path.join(os.homedir(), ".local", "share", "maximal")
-}
-
 export function defaultDbPath(): string {
   return path.join(dataDir(), "figjam", "chats.sqlite")
-}
-
-// Bridge admin token for HTTP and the figjam CLI (panels never see it; they get
-// their own token when the user approves their pairing request): 32 random
-// bytes, base64url, at <data>/figjam/pairing-token, mode 0600.
-export function pairingTokenPath(): string {
-  return path.join(dataDir(), "figjam", "pairing-token")
 }
 
 export function loadPairingToken({
@@ -402,3 +385,5 @@ export class StoreError extends Error {
     this.status = status
   }
 }
+
+export { dataDir, pairingTokenPath } from "./data-dir"

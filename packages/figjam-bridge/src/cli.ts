@@ -24,7 +24,7 @@
  *   bun run figjam -- admin-token [--rotate] # print (or replace) the bridge admin token
  *
  * Every request carries the bridge admin token as a bearer token, read from
- * <data>/figjam/pairing-token (see chats-store.ts for <data>). Panels never
+ * <data>/figjam/pairing-token (see data-dir.ts for <data>). Panels never
  * need it: they pair by approval (the name is the panel's instance name,
  * shown in Figma's window title, e.g. "Agent · grumpy-urchin").
  *

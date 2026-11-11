@@ -1,5 +1,5 @@
-// The bridge client against a stand-in bridge on a spare port: which board it targets, that the
-// bridge-wide pairing token is only sent when the operator opts in, and that nothing can point
+// The bridge client against a stand-in bridge on a spare port: which board it targets, that a
+// token is sent only when the caller passes one, and that nothing can point
 // the call (and its token) somewhere other than this machine's bridge.
 import {
   afterAll,
@@ -9,9 +9,6 @@ import {
   expect,
   test,
 } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 
 import { tool } from "../src/client"
 
@@ -21,13 +18,7 @@ type Seen = {
   body: unknown
 }
 
-const ENV_KEYS = [
-  "FIGJAM_BRIDGE_PORT",
-  "FIGJAM_BOARD",
-  "FIGJAM_TOKEN",
-  "FIGJAM_USE_PAIRING_TOKEN",
-  "COPILOT_API_HOME",
-] as const
+const ENV_KEYS = ["FIGJAM_BRIDGE_PORT", "FIGJAM_BOARD"] as const
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]))
 const unset = (k: string) => Reflect.deleteProperty(process.env, k)
 
@@ -46,8 +37,6 @@ const server = Bun.serve({
   },
 })
 
-const home = mkdtempSync(join(tmpdir(), "figjam-layout-client-"))
-
 // The message a call fails with, or undefined if it succeeds.
 async function failure(call: Promise<unknown>): Promise<string | undefined> {
   try {
@@ -62,7 +51,6 @@ beforeAll(() => {
   for (const k of ENV_KEYS) unset(k)
   // client.ts reads the port on every call, so the stand-in bridge is always the target.
   process.env.FIGJAM_BRIDGE_PORT = String(server.port)
-  process.env.COPILOT_API_HOME = home
 })
 
 afterEach(() => {
@@ -70,13 +58,10 @@ afterEach(() => {
   reply = { ok: true, result: { id: "1:2" } }
   process.env.FIGJAM_BRIDGE_PORT = String(server.port)
   unset("FIGJAM_BOARD")
-  unset("FIGJAM_TOKEN")
-  unset("FIGJAM_USE_PAIRING_TOKEN")
 })
 
 afterAll(async () => {
   await server.stop(true)
-  rmSync(home, { recursive: true, force: true })
   for (const k of ENV_KEYS) {
     const v = savedEnv[k]
     if (v === undefined) unset(k)
@@ -108,21 +93,21 @@ describe("tool", () => {
     ])
   })
 
-  test("sends FIGJAM_TOKEN when it is set", async () => {
+  test("sends the token it is given", async () => {
     process.env.FIGJAM_BOARD = "b"
-    process.env.FIGJAM_TOKEN = "t0k"
-    await tool("status", {})
+    await tool("status", {}, { token: "t0k" })
     expect(seen[0]?.authorization).toBe("Bearer t0k")
   })
 
-  test("reads the pairing token from the data directory only when asked to", async () => {
+  test("ignores the environment: no token passed, none sent", async () => {
     process.env.FIGJAM_BOARD = "b"
-    mkdirSync(join(home, "figjam"), { recursive: true })
-    writeFileSync(join(home, "figjam", "pairing-token"), "from-file\n")
-    await tool("status", {})
-    process.env.FIGJAM_USE_PAIRING_TOKEN = "1"
-    await tool("status", {})
-    expect(seen.map((s) => s.authorization)).toEqual([null, "Bearer from-file"])
+    process.env.FIGJAM_TOKEN = "from-env"
+    try {
+      await tool("status", {})
+    } finally {
+      unset("FIGJAM_TOKEN")
+    }
+    expect(seen[0]?.authorization).toBeNull()
   })
 
   test("turns a failed call into an error naming the tool", async () => {
@@ -133,17 +118,17 @@ describe("tool", () => {
 
   test("refuses a port that isn't a plain number, so the token can't leave this machine", async () => {
     process.env.FIGJAM_BOARD = "b"
-    process.env.FIGJAM_TOKEN = "t0k"
     for (const port of ["1@evil.example", "4150/x", "70000", "0"]) {
       process.env.FIGJAM_BRIDGE_PORT = port
-      expect(await failure(tool("status", {}))).toContain("FIGJAM_BRIDGE_PORT")
+      expect(await failure(tool("status", {}, { token: "t0k" }))).toContain(
+        "FIGJAM_BRIDGE_PORT",
+      )
     }
     expect(seen).toEqual([])
   })
 
   test("doesn't follow a redirect away from the bridge", async () => {
     process.env.FIGJAM_BOARD = "b"
-    process.env.FIGJAM_TOKEN = "t0k"
     const redirector = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
@@ -152,7 +137,7 @@ describe("tool", () => {
     })
     try {
       process.env.FIGJAM_BRIDGE_PORT = String(redirector.port)
-      expect(await failure(tool("status", {}))).toBeDefined()
+      expect(await failure(tool("status", {}, { token: "t0k" }))).toBeDefined()
       expect(seen).toEqual([])
     } finally {
       await redirector.stop(true)
