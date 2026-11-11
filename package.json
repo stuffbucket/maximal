@@ -117,6 +117,7 @@
     "@stryker-mutator/core": "^9.6.1",
     "@types/bun": "^1.2.23",
     "@types/d3-force": "^3.0.10",
+    "@types/estree": "^1.0.9",
     "@types/proxy-from-env": "^1.0.4",
     "@types/turndown": "^5.0.6",
     "@types/winreg": "^1.2.36",
@@ -127,7 +128,7 @@
     "lint-staged": "^16.2.3",
     "oxlint": "^1.63.0",
     "prettier-plugin-packagejson": "^2.5.19",
-    "simple-git-hooks": "^2.13.1",
+    "simple-git-hooks": "^2.14.0",
     "typescript": "^5.9.3"
   },
   "engines": {
