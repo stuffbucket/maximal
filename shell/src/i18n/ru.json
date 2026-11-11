@@ -409,7 +409,8 @@
   "dashboard-empty-summary": "За выбранный период использование токенов не зафиксировано.",
   "dashboard-empty-events": "Нет строк деталей использования токенов за выбранный период.",
 
-  "dashboard-error-usage": "Запрос использования не удался",
+  "dashboard-usage-waiting": "Ожидание данных об использовании от GitHub…",
+  "dashboard-usage-reconnecting": "Обновлено {ago} · переподключение к GitHub",
   "dashboard-error-summary": "Не удалось получить сводку использования токенов",
   "dashboard-error-details": "Не удалось получить детали использования токенов",
   "dashboard-error-generic": "Произошла ошибка",

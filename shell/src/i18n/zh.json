@@ -409,7 +409,8 @@
   "dashboard-empty-summary": "所选周期内未记录令牌用量。",
   "dashboard-empty-events": "所选周期内没有令牌用量详情行。",
 
-  "dashboard-error-usage": "使用情况请求失败",
+  "dashboard-usage-waiting": "正在等待 GitHub 的使用情况…",
+  "dashboard-usage-reconnecting": "{ago}更新 · 正在重新连接 GitHub",
   "dashboard-error-summary": "令牌用量摘要失败",
   "dashboard-error-details": "令牌用量详情失败",
   "dashboard-error-generic": "发生错误",

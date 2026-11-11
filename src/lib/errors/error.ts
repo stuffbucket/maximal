@@ -8,6 +8,10 @@
 
 import type { Context } from "hono"
 
+import {
+  PROXY_ERROR_REWRITES,
+  upstreamTimeout,
+} from "~/lib/errors/proxy-error-rewrites"
 import { proxyErrorResponse } from "~/lib/errors/proxy-errors"
 
 export {
@@ -16,10 +20,16 @@ export {
   NoUpstreamError,
 } from "~/lib/errors/http-errors"
 
+/** The OpenAI wire's rewrites, plus a timed-out GitHub read as 504. */
+const FORWARD_ERROR_REWRITES = [upstreamTimeout, ...PROXY_ERROR_REWRITES.openai]
+
 /** An error as OpenAI's `{ error: { message, type } }`, with the upstream
- *  status. */
+ *  status (504 when a GitHub read timed out). */
 export function forwardError(c: Context, error: unknown): Promise<Response> {
-  return proxyErrorResponse(c, error, { wire: "openai" })
+  return proxyErrorResponse(c, error, {
+    wire: "openai",
+    rewrites: FORWARD_ERROR_REWRITES,
+  })
 }
 
 /**

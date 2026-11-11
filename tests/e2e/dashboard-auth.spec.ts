@@ -35,7 +35,7 @@ test("signed-out remote quotas render an account state while local usage remains
   await expect(frame.locator(".usage-signed-out")).toContainText(
     "Not signed in",
   )
-  await expect(frame.locator(".usage-error")).toHaveCount(0)
+  await expect(frame.locator(".usage-status")).toHaveCount(0)
   await expect(frame.locator("body")).not.toContainText(
     "GitHub token not found",
   )

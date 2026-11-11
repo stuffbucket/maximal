@@ -409,7 +409,8 @@
   "dashboard-empty-summary": "Für den ausgewählten Zeitraum wurde keine Tokennutzung aufgezeichnet.",
   "dashboard-empty-events": "Keine Detailzeilen zur Tokennutzung für den ausgewählten Zeitraum.",
 
-  "dashboard-error-usage": "Nutzungsanfrage fehlgeschlagen",
+  "dashboard-usage-waiting": "Warten auf Nutzungsdaten von GitHub…",
+  "dashboard-usage-reconnecting": "Aktualisiert {ago} · Verbindung zu GitHub wird wiederhergestellt",
   "dashboard-error-summary": "Zusammenfassung der Tokennutzung fehlgeschlagen",
   "dashboard-error-details": "Details zur Tokennutzung fehlgeschlagen",
   "dashboard-error-generic": "Ein Fehler ist aufgetreten",
