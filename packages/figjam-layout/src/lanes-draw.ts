@@ -266,6 +266,7 @@ function wallAheadY(R: Rect, y: number, dy: number): boolean {
   const to = y + dy * 200
   return (
     (y < R.y && to >= R.y)
+    || (y > R.y + R.h && to <= R.y + R.h)
     || (y > R.y && y < R.y + R.h && (to <= R.y || to >= R.y + R.h))
   )
 }

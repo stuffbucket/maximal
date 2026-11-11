@@ -65,7 +65,7 @@ function objectiveKey(c: Layout): Array<number> {
   const ch = checksOf(c)
   return [
     hardBad(c),
-    ch.crossings,
+    checkValue(ch, "crossings"),
     checkValue(ch, "nonMonotone"),
     Math.round(checkValue(ch, "bendsPerEdge") * c.routes.length),
     checkValue(ch, "meanPortDeviation") * c.routes.length,

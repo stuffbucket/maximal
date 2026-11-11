@@ -179,7 +179,10 @@ function reroutePass(c: Ctx, ord: Array<Edge>, failed: Array<Edge>): void {
     if (c.direct.has(e.id) || !routable(c, e)) continue
     const p = c.placed.get(e.id)
     if (!p) {
-      if (place(c, e)) failed.splice(failed.indexOf(e), 1)
+      if (place(c, e)) {
+        const k = failed.indexOf(e)
+        if (k !== -1) failed.splice(k, 1)
+      }
       continue
     }
     occupy(c, p, false)

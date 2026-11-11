@@ -65,7 +65,7 @@ function section(s: Section): Array<string> {
 }
 
 function card(n: Node): Array<string> {
-  const f = FILL[String(n.style?.color)] ?? n.style?.fillHex ?? "#EEE"
+  const f = FILL[String(n.style?.color)] ?? n.style?.fill ?? "#EEE"
   const rx = n.style?.shape === "HEXAGON" ? 4 : 20
   const ink = n.style?.color === "dark gray" ? "#fff" : "#1E1E1E"
   const t = (n.text ?? "").split("\n")[0]

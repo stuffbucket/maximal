@@ -79,7 +79,7 @@ const isRect = (v: unknown): v is Rect =>
 
 const isShapeStyle = (v: unknown): v is ShapeStyle =>
   isRecord(v)
-  && ["color", "fill", "fillHex", "shape"].every((k) => optString(v, k))
+  && ["color", "fill", "shape"].every((k) => optString(v, k))
   && optNumber(v, "fontSize")
 const isEdgeStyle = (v: unknown): v is EdgeStyle =>
   isRecord(v)
@@ -126,13 +126,12 @@ export function parseBoardTree(raw: unknown): BoardTree {
 
 // ---- board_tree → Layout ----
 
-function kindOf(style: EdgeStyle | undefined, lineType?: string): EdgeKind {
+function kindOf(style: EdgeStyle | undefined): EdgeKind {
   const dash: Array<number> = style?.dashPattern ?? style?.dashes ?? []
   const w = style?.strokeWeight ?? 2
   if (w >= 5) return "loop"
   if (dash.length > 0 && dash[0] <= 3) return "verify"
   if (dash.length > 0) return "flow"
-  if (lineType === "STRAIGHT" && w >= 5) return "loop"
   return "dep"
 }
 
@@ -225,7 +224,7 @@ export function fromTree(tree: unknown, ref?: Layout): Layout {
         id: e.id,
         from: e.from,
         to: e.to,
-        kind: r?.kind ?? kindOf(e.style, e.lineType ?? e.style?.lineType),
+        kind: r?.kind ?? kindOf(e.style),
         label: e.label ?? r?.label,
         fromMagnet: e.fromMagnet,
         toMagnet: e.toMagnet,

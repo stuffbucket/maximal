@@ -9,7 +9,6 @@ export type EdgeKind = "dep" | "flow" | "verify" | "loop" | "other"
 export type ShapeStyle = {
   color?: string
   fill?: string
-  fillHex?: string
   shape?: string
   fontSize?: number
 }
@@ -489,6 +488,14 @@ export function score(L: Layout): Metrics {
   }
 }
 
+// LAYOUT_CROSS_COST overrides the cost of one crossing when picking magnets. Anything that isn't a
+// finite number is ignored: NaN would make every pair with a crossing lose.
+function envCrossCost(): number {
+  const raw = process.env.LAYOUT_CROSS_COST
+  const n = raw === undefined ? Number.NaN : Number(raw)
+  return Number.isFinite(n) ? n : 800
+}
+
 // Best magnet pair for a native connector given the current layout, by local cost.
 // eslint-disable-next-line max-params -- exported signature (engine.ts and bus.ts pass obstacles, other routes and the cross cost)
 export function bestMagnets(
@@ -496,7 +503,7 @@ export function bestMagnets(
   b: Rect,
   obstacles: Array<Rect>,
   others: Array<Array<Pt>>,
-  crossCost = Number(process.env.LAYOUT_CROSS_COST ?? 800),
+  crossCost = envCrossCost(),
 ): { sa: Side; sb: Side; pts: Array<Pt> } {
   // `cost` plus crossCost for every crossing with another route, added one crossing at a time
   const addCrossings = (cost: number, pts: Array<Pt>): number => {

@@ -501,6 +501,7 @@ export async function build(
   pageId?: string,
   tag = `${L.name}.${Date.now().toString(36)}`,
 ) {
+  truncatedBefore = 0
   gate(L)
   const page =
     pageId

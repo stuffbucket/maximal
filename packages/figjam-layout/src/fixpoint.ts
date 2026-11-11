@@ -78,11 +78,11 @@ class Judge {
   key(c: Checks): Array<number> {
     return [
       hard(c),
-      c.crossings,
+      checkValue(c, "crossings"),
       checkValue(c, "nonMonotoneGlobal"),
       bendsTotal(this.R),
       portDeviation(this.R),
-      c.wireLength,
+      checkValue(c, "wireLength"),
     ]
   }
 
