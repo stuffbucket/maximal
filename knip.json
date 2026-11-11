@@ -16,7 +16,8 @@
       "ignoreDependencies": [
         "prettier-plugin-packagejson",
         "undici",
-        "@stryker-mutator/command-runner"
+        "@stryker-mutator/command-runner",
+        "@types/estree"
       ],
       "playwright": {
         "entry": [
