@@ -19,6 +19,7 @@ Always read the linked doc before acting in its area.
 | Touch any HTML, CSS, or component code (Tauri windows, proxy-served pages) | [`.design-context.md`](.design-context.md) — front door; topic deep-dives in [`docs/design/`](docs/design/). **Read `docs/design/failure-modes.md` before any non-trivial UI change.** |
 | Touch the Claude Code integration (`settings.json`, `apiKeyHelper`) | [`docs/plugins.md`](docs/plugins.md) |
 | Touch the Codex integration | [`docs/dev/codex-integration.md`](docs/dev/codex-integration.md) |
+| Touch the FigJam agent (`packages/figjam-*`: plugin, bridge, layout) | [`docs/dev/figjam.md`](docs/dev/figjam.md) |
 | Touch a `/v1/messages` or client-auth wire contract | [`docs/spec/wire/`](docs/spec/wire/) |
 | Touch i18n catalogs / translation wording (`shell/src/i18n/`) | [`docs/dev/i18n.md`](docs/dev/i18n.md); loop in the i18n expert per [`CONTRIBUTORS.md`](CONTRIBUTORS.md) |
 

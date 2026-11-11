@@ -1,0 +1,17 @@
+{
+  "name": "@stuffbucket/maximal-figjam-plugin",
+  "version": "0.10.0",
+  "private": true,
+  "description": "The FigJam agent plugin: the Figma sandbox code, the panel, and the build that produces code.js, ui.html and manifest.json",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./build": "./scripts/build.ts"
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "build:release": "bun scripts/build.ts --release",
+    "dev": "bun scripts/build.ts --watch",
+    "test": "bun test test"
+  }
+}

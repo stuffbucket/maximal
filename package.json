@@ -28,7 +28,9 @@
     "packages/connector-kit",
     "packages/plugin-sdk",
     "packages/plugin-host",
-    "packages/plugin-workiq"
+    "packages/plugin-workiq",
+    "packages/figjam-plugin",
+    "packages/figjam-bridge"
   ],
   "scripts": {
     "app:build": "MAXIMAL_FORCE_SIDECAR=1 bun run app:sidecar && bun run scripts/predmg-cleanup.ts && cd shell && bun run tauri build --bundles app,dmg",
@@ -52,6 +54,11 @@
     "deps:check": "depcruise --config .dependency-cruiser.cjs src tests",
     "dev": "bun run --watch ./src/main.ts",
     "ensure:ui-embed": "bun scripts/ensure-ui-embed-stub.ts",
+    "figjam": "bun packages/figjam-bridge/src/cli.ts",
+    "figjam:bridge": "bun packages/figjam-bridge/src/bridge.ts",
+    "figjam:build": "bun packages/figjam-plugin/scripts/build.ts",
+    "figjam:layout:install": "mise -C packages/figjam-layout exec -- pnpm install --frozen-lockfile",
+    "figjam:test": "bun run --filter './packages/figjam-*' test",
     "git:tidy": "bun scripts/tidy-branches.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",

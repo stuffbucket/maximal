@@ -150,6 +150,13 @@ export default [
       // (packages/plugin-*, packages/connector-kit) are root Bun workspaces
       // and are linted here.
       "packages/storybook/**",
+      // The FigJam plugin's sandbox and panel are still the single-file
+      // originals (plain browser/Figma JavaScript); its build copies them
+      // through. The Node stub tests load that output in a vm.
+      "packages/figjam-plugin/src/legacy/**",
+      "packages/figjam-plugin/test/sandbox/**",
+      // Isolated pnpm package with its own lockfile (elkjs, libavoid-js).
+      "packages/figjam-layout/**",
       // Parked code (kept in git, not part of the build): see parked/mcp/README.md.
       "parked/**",
       "site/**",
