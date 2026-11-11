@@ -12,6 +12,8 @@ import { scenarioIds, scenarioLabel } from "../mock/fetch-mock";
  */
 interface Args {
   scenario: ScenarioId;
+  /** Backend paths to answer with a 500 (see WindowFrame). */
+  fail?: Array<string>;
 }
 
 const meta = {
@@ -31,6 +33,7 @@ const meta = {
       scenario={args.scenario}
       theme={globals.theme as string}
       locale={globals.locale as string}
+      fail={args.fail}
     />
   ),
 } satisfies Meta<Args>;
@@ -45,3 +48,9 @@ export const Empty: Story = { args: { scenario: "fresh-install" } };
 export const QuotaNearlyOut: Story = { args: { scenario: "quota-nearly-out" } };
 /** The window sat open past the reset: no stale percentage, "Period ended", and a refetch. */
 export const QuotaPeriodEnded: Story = { args: { scenario: "quota-period-ended" } };
+/**
+ * GitHub's usage read keeps failing before any good one: the quota layout in
+ * muted ink with placeholders under "Waiting for GitHub usage…", no red error.
+ * The Dashboard retries on its own (30 s, 1, 2, then every 5 minutes).
+ */
+export const UsageUnavailable: Story = { args: { fail: ["/usage"] } };

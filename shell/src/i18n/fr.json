@@ -409,7 +409,8 @@
   "dashboard-empty-summary": "Aucune utilisation de jetons enregistrée pour la période sélectionnée.",
   "dashboard-empty-events": "Aucune ligne de détail d’utilisation des jetons pour la période sélectionnée.",
 
-  "dashboard-error-usage": "Échec de la requête d’utilisation",
+  "dashboard-usage-waiting": "En attente des données d’utilisation de GitHub…",
+  "dashboard-usage-reconnecting": "Mis à jour {ago} · reconnexion à GitHub",
   "dashboard-error-summary": "Échec du résumé d’utilisation des jetons",
   "dashboard-error-details": "Échec des détails d’utilisation des jetons",
   "dashboard-error-generic": "Une erreur s’est produite",

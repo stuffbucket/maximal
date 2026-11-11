@@ -409,7 +409,8 @@
   "dashboard-empty-summary": "Nessun utilizzo di token registrato per il periodo selezionato.",
   "dashboard-empty-events": "Nessuna riga di dettaglio sull’utilizzo dei token per il periodo selezionato.",
 
-  "dashboard-error-usage": "Richiesta di utilizzo non riuscita",
+  "dashboard-usage-waiting": "In attesa dei dati di utilizzo di GitHub…",
+  "dashboard-usage-reconnecting": "Aggiornato {ago} · riconnessione a GitHub",
   "dashboard-error-summary": "Riepilogo dell’utilizzo dei token non riuscito",
   "dashboard-error-details": "Dettagli sull’utilizzo dei token non riusciti",
   "dashboard-error-generic": "Si è verificato un errore",

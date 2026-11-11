@@ -409,7 +409,8 @@
   "dashboard-empty-summary": "No se registró uso de tokens para el período seleccionado.",
   "dashboard-empty-events": "No hay filas de detalle de uso de tokens para el período seleccionado.",
 
-  "dashboard-error-usage": "La solicitud de uso falló",
+  "dashboard-usage-waiting": "Esperando los datos de uso de GitHub…",
+  "dashboard-usage-reconnecting": "Actualizado {ago} · reconectando con GitHub",
   "dashboard-error-summary": "El resumen de uso de tokens falló",
   "dashboard-error-details": "Los detalles de uso de tokens fallaron",
   "dashboard-error-generic": "Se produjo un error",

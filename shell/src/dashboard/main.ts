@@ -11,6 +11,17 @@ import { resolveLocale, t } from "../i18n";
 import { applyI18n, wireLocalePicker } from "../i18n/apply";
 import { fetchJson, isFetchJsonError } from "./fetch-json";
 import { startLiveSessions } from "./live/controller";
+import {
+  escapeHtml,
+  parseResetDate,
+  renderRemoteUsage,
+  type UsageData,
+} from "./usage-quotas";
+import {
+  createTrafficWatch,
+  createUsageRefresher,
+  shownSnapshot,
+} from "./usage-refresh";
 
 // Tailwind + Lucide are loaded as classic global <script>s in index.html, so
 // they exist on `window` at runtime; the bundle references them as ambient
@@ -71,18 +82,6 @@ interface TokenUsageEventsPage {
   total_pages: number;
   range?: TokenUsageRange;
 }
-interface QuotaDetails {
-  entitlement: number;
-  remaining: number;
-  percent_remaining: number;
-  unlimited: boolean;
-}
-interface UsageData {
-  quota_snapshots?: Record<string, QuotaDetails> | null;
-  /** When the quotas next reset (GitHub sends a date, "2025-07-01", UTC).
-   *  The end of the current period; GitHub doesn't send its start. */
-  quota_reset_date?: string;
-}
 interface TokenUsageChannelMessage {
   event?: "update" | "error";
   data?: { payload?: TokenUsageSummary; message?: string };
@@ -128,15 +127,7 @@ const EMPTY_TOKEN_USAGE_TOTALS: TokenUsageTotals = {
 };
 
 // --- State Management ---
-type RemoteUsageState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "ready"; data: UsageData; fetchedAt: number }
-  | { status: "signed-out" }
-  | { status: "error"; message: string };
-
 interface DashboardState {
-  remoteUsage: RemoteUsageState;
   isTokenUsageLoading: boolean;
   isEventsLoading: boolean;
   tokenUsageSummary: TokenUsageSummary | null;
@@ -144,8 +135,6 @@ interface DashboardState {
   tokenUsageSummaryError: string | null;
   tokenUsageEventsError: string | null;
   tokenUsagePeriod: Period;
-  /** Last background /usage refetch attempt (rate-limits them). */
-  usageRefetchAt: number;
   /** Whether the "Chat and completions" quotas are unfolded. Render rebuilds
    *  the page from strings, so the open state lives here, not in the DOM. */
   quotaMoreOpen: boolean;
@@ -171,7 +160,6 @@ function writeQuotaMoreOpen(open: boolean): void {
 }
 
 const state: DashboardState = {
-  remoteUsage: { status: "idle" },
   isTokenUsageLoading: false,
   isEventsLoading: false,
   tokenUsageSummary: null,
@@ -179,16 +167,8 @@ const state: DashboardState = {
   tokenUsageSummaryError: null,
   tokenUsageEventsError: null,
   tokenUsagePeriod: DEFAULT_TOKEN_USAGE_PERIOD,
-  usageRefetchAt: 0,
   quotaMoreOpen: readQuotaMoreOpen(),
 };
-
-function readyRemoteUsage(): Extract<
-  RemoteUsageState,
-  { status: "ready" }
-> | null {
-  return state.remoteUsage.status === "ready" ? state.remoteUsage : null;
-}
 
 function isNotAuthenticated(error: unknown): boolean {
   return (
@@ -228,6 +208,24 @@ let observabilitySurface: ObservabilitySurface =
 const dashboardIsActive = (): boolean =>
   observabilitySurface === "dashboard" &&
   document.visibilityState === "visible";
+
+// GitHub's quotas (/usage). Every reason to re-read them (the Dashboard shown,
+// the window back in view, new traffic, the retry timer, a quota period
+// ending) goes through `usageRefresher.request`; see usage-refresh.ts for when
+// each one fetches.
+const usageRefresher = createUsageRefresher<UsageData>({
+  fetchUsage: () => fetchJson<UsageData>(USAGE_PATH),
+  isSignedOut: isNotAuthenticated,
+  describeError: getErrorMessage,
+  isActive: dashboardIsActive,
+  periodEnded: (data) => {
+    const resetMs = parseResetDate(data.quota_reset_date);
+    return resetMs !== null && Date.now() >= resetMs;
+  },
+  onChange: render,
+});
+// New requests in the live token feed show the network is up again.
+const sawNewTraffic = createTrafficWatch();
 
 function showObservabilitySurface(surface: ObservabilitySurface): void {
   observabilitySurface = surface;
@@ -269,6 +267,15 @@ function applyTokenUsagePayload(payload: TokenUsageSummary | undefined): void {
   state.tokenUsageSummaryError = null;
   state.isTokenUsageLoading = false;
   render();
+  noteTokenUsage(state.tokenUsageSummary);
+}
+
+/** A token-usage snapshot arrived: if it shows new requests, the upstream is
+ *  reachable, so quotas that aren't ready (or are old) are worth re-reading. */
+function noteTokenUsage(summary: TokenUsageSummary | null): void {
+  if (sawNewTraffic(state.tokenUsagePeriod, summary?.totals?.request_count)) {
+    void usageRefresher.request("traffic");
+  }
 }
 
 function applyTokenUsageError(message: string): void {
@@ -323,18 +330,6 @@ function createIcons(): void {
   if (typeof lucide !== "undefined" && lucide) {
     lucide.createIcons();
   }
-}
-
-function escapeHtml(value: unknown): string {
-  // Use regex .replace (ES2020-safe) rather than .replaceAll — the shell
-  // tsconfig targets ES2020, and this file is now typechecked (it lives under
-  // src/, unlike the old shell/ui vanilla main.js where replaceAll was fine).
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function getErrorMessage(error: unknown): string {
@@ -407,8 +402,7 @@ function syncUrlState(): void {
 }
 
 function updateControls(): void {
-  const periodDisabled =
-    state.remoteUsage.status === "loading" || state.isTokenUsageLoading;
+  const periodDisabled = state.isTokenUsageLoading;
   for (const button of tokenUsagePeriodButtons) {
     button.disabled = periodDisabled;
   }
@@ -575,25 +569,15 @@ function renderTokenUsageRangeText(
 function render(): void {
   updateControls();
 
-  const remoteUsage = state.remoteUsage;
-  const quotasHtml =
-    remoteUsage.status === "ready"
-      ? renderUsageQuotas(remoteUsage.data.quota_snapshots)
-      : remoteUsage.status === "signed-out"
-        ? renderQuotaColumn(renderUsageSignedOut())
-        : remoteUsage.status === "error"
-          ? renderQuotaColumn(
-              renderUsageError(remoteUsage.message, t("dashboard-error-usage")),
-            )
-          : remoteUsage.status === "loading"
-            ? renderQuotaColumn(
-                `<p class="usage-loading">${escapeHtml(t("common-working"))}</p>`,
-              )
-            : "";
+  const usage = usageRefresher.usage;
+  const quotasHtml = renderRemoteUsage(usage, {
+    quotaMoreOpen: state.quotaMoreOpen,
+    now: Date.now(),
+  });
 
   const tokenUsageHtml = renderTokenUsageSection();
-  const detailedHtml =
-    remoteUsage.status === "ready" ? renderDetailedData(remoteUsage.data) : "";
+  const snapshot = shownSnapshot(usage);
+  const detailedHtml = snapshot ? renderDetailedData(snapshot.data) : "";
 
   // The quota column and the rest are rebuilt; the live card beside the
   // quotas is not (it updates in place).
@@ -611,189 +595,7 @@ function render(): void {
   createIcons();
 
   // Numbers from a finished quota period render as "—"; fetch the new ones.
-  if (quotaPeriodEnded()) void refreshUsage();
-}
-
-/** The dynamic quota content inside the bento's static heading and card. */
-function renderQuotaColumn(body: string): string {
-  return `<div class="dashboard-bento__body">${body}</div>`;
-}
-
-function renderUsageSignedOut(): string {
-  return `
-    <div class="usage-signed-out">
-      <i data-lucide="log-in" aria-hidden="true"></i>
-      <div class="usage-signed-out__content">
-        <strong>${escapeHtml(t("account-unauth-title"))}</strong>
-        <p>${escapeHtml(t("account-unauth-body"))}</p>
-        <button type="button" class="usage-signed-out__action" data-usage-action="open-settings">
-          ${escapeHtml(t("account-sign-in"))}
-        </button>
-      </div>
-    </div>`;
-}
-
-function renderUsageError(message: string, title: string): string {
-  return `
-    <div class="usage-error" role="alert">
-      <strong>${escapeHtml(title)}</strong>
-      <span>${escapeHtml(message)}</span>
-    </div>`;
-}
-
-/**
- * Renders the "Usage Quotas" column: the metered cards stacked, then the
- * unlimited ones folded away.
- */
-function renderUsageQuotas(
-  snapshots: Record<string, QuotaDetails> | null | undefined,
-): string {
-  if (!snapshots) return "";
-
-  const entries = Object.entries(snapshots);
-  const metered = entries.filter(([, value]) => !value.unlimited);
-  const unlimited = entries.filter(([, value]) => value.unlimited);
-  const resetMs = parseResetDate(readyRemoteUsage()?.data.quota_reset_date);
-  const meteredCards = metered
-    .map(([key, value]) => renderQuotaCard(key, value, resetMs))
-    .join("");
-  // Unlimited quotas have nothing to measure, so they share one list, folded
-  // away under the metered cards. With no metered card it is all there is.
-  const unlimitedHtml =
-    unlimited.length > 0
-      ? renderUnlimitedQuotas(unlimited.map(([key]) => key))
-      : "";
-
-  if (!meteredCards && !unlimitedHtml) return "";
-  return renderQuotaColumn(`
-                ${meteredCards ? `<div class="flex flex-col gap-4">${meteredCards}</div>` : ""}
-                ${unlimitedHtml}`);
-}
-
-/** GitHub's quota_reset_date as a timestamp. A bare date is midnight UTC. */
-function parseResetDate(value: string | undefined): number | null {
-  if (!value) return null;
-  const ms = Date.parse(
-    /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value,
-  );
-  return Number.isFinite(ms) ? ms : null;
-}
-
-/** "Jul 1" in the UI locale. Shown in UTC: GitHub's date is a UTC date, and
- *  local time would turn "Jul 1" into "Jun 30" west of Greenwich. */
-function formatResetDate(ms: number): string {
-  return new Intl.DateTimeFormat(resolveLocale(), {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  }).format(ms);
-}
-
-/**
- * Renders a single quota card: percent used as the headline, the meter, the
- * counts, and when the period resets. The meter's color says how close the
- * quota is to its limit (see .meter in style.css), with an icon from
- * "running low" on so the state never rests on color alone. Unlimited
- * quotas don't come here (renderUnlimitedQuotas): a full bar would read as
- * "used up".
- *
- * If the period these numbers belong to has already ended (the window sat
- * open across the reset), or GitHub's numbers don't add up, the figures show
- * "—" rather than a stale or made-up percentage.
- */
-function renderQuotaCard(
-  title: string,
-  details: QuotaDetails,
-  resetMs: number | null,
-): string {
-  const { entitlement, remaining, percent_remaining } = details;
-  const ended = resetMs !== null && Date.now() >= resetMs;
-  const known =
-    !ended &&
-    Number.isFinite(percent_remaining) &&
-    Number.isFinite(entitlement) &&
-    Number.isFinite(remaining) &&
-    entitlement > 0;
-  const percentUsed = known ? 100 - percent_remaining : 0;
-  const level = !known
-    ? "ok"
-    : percentUsed >= 90
-      ? "out"
-      : percentUsed >= 75
-        ? "low"
-        : "ok";
-  const icon =
-    level === "ok"
-      ? ""
-      : `<i data-lucide="triangle-alert" aria-hidden="true"></i>`;
-
-  const period =
-    resetMs === null
-      ? ""
-      : ended
-        ? t("dashboard-quota-period-ended", { date: formatResetDate(resetMs) })
-        : t("dashboard-quota-resets", { date: formatResetDate(resetMs) });
-  const fetchedAt = readyRemoteUsage()?.fetchedAt;
-  const asOf =
-    fetchedAt === undefined
-      ? ""
-      : t("dashboard-quota-as-of", {
-          time: new Intl.DateTimeFormat(resolveLocale(), {
-            timeStyle: "short",
-          }).format(fetchedAt),
-        });
-
-  return `
-            <header class="usage-panel__header" title="${escapeHtml(asOf)}">
-                <div class="usage-panel__heading">
-                    <h3 class="usage-panel__title">${escapeHtml(title.replace(/_/g, " "))}</h3>
-                    ${period ? `<p class="usage-panel__subtitle">${escapeHtml(period)}</p>` : ""}
-                </div>
-                <output class="usage-panel__headline meter-state meter-state--${level} meter-state--headline">${icon}${
-                  known
-                    ? escapeHtml(
-                        t("dashboard-quota-percent-used", {
-                          percent: percentUsed.toFixed(1),
-                        }),
-                      )
-                    : "—"
-                }</output>
-            </header>
-            <div class="usage-panel__body">
-                ${
-                  known
-                    ? `<progress class="quota-progress quota-progress--${level}" max="100" value="${Math.min(100, Math.max(0, percentUsed))}" aria-label="${escapeHtml(title.replace(/_/g, " "))}"></progress>`
-                    : `<div class="quota-progress quota-progress--unknown" aria-hidden="true"></div>`
-                }
-                <div class="usage-panel__meta">
-                    <span>${known ? `${(entitlement - remaining).toLocaleString()} / ${entitlement.toLocaleString()}` : "—"}</span>
-                    <span>${known ? escapeHtml(t("dashboard-quota-remaining", { n: remaining.toLocaleString() })) : ""}</span>
-                </div>
-            </div>
-        `;
-}
-
-/**
- * The unlimited quotas, folded behind a chevron: name, then "Unlimited".
- * The open state is `state.quotaMoreOpen`; see handleQuotaMoreToggle.
- */
-function renderUnlimitedQuotas(titles: Array<string>): string {
-  const rows = titles
-    .map(
-      (title) => `
-                <div class="quota-more__row">
-                    <h3 class="quota-more__title">${escapeHtml(title.replace(/_/g, " "))}</h3>
-                    <span class="quota-more__value">${escapeHtml(t("dashboard-quota-unlimited"))}</span>
-                </div>`,
-    )
-    .join("");
-  return `
-            <details class="quota-more" data-quota-more${state.quotaMoreOpen ? " open" : ""}>
-                <summary class="quota-more__summary"><i data-lucide="chevron-right" class="quota-more__chevron" aria-hidden="true"></i>${escapeHtml(t("dashboard-quotas-more"))}</summary>
-                <div class="quota-more__body">${rows}
-                </div>
-            </details>
-        `;
+  void usageRefresher.request("period-ended");
 }
 
 /**
@@ -1163,49 +965,10 @@ function renderWelcomeMessage(): string {
  * independently so the Dashboard renders immediately without waiting on GitHub.
  */
 async function fetchData(page = 1): Promise<void> {
-  state.remoteUsage = { status: "loading" };
-  render();
-
-  const usagePromise = fetchJson<UsageData>(USAGE_PATH)
-    .then((data) => {
-      state.remoteUsage = { status: "ready", data, fetchedAt: Date.now() };
-    })
-    .catch((error: unknown) => {
-      state.remoteUsage = isNotAuthenticated(error)
-        ? { status: "signed-out" }
-        : { status: "error", message: getErrorMessage(error) };
-    })
-    .finally(render);
-
-  const tokenUsagePromise = fetchTokenUsageSummaryAndEvents(page);
-  await Promise.allSettled([usagePromise, tokenUsagePromise]);
-}
-
-/**
- * Re-read just /usage (live from GitHub), quietly, at most once a minute.
- * Used when the quota period has ended under an open window, and when the
- * window comes back into view with a stale snapshot.
- */
-async function refreshUsage(): Promise<void> {
-  if (Date.now() - state.usageRefetchAt < 60_000) return;
-  state.usageRefetchAt = Date.now();
-  try {
-    const data = await fetchJson<UsageData>(USAGE_PATH);
-    state.remoteUsage = { status: "ready", data, fetchedAt: Date.now() };
-    render();
-  } catch (error) {
-    if (isNotAuthenticated(error)) {
-      state.remoteUsage = { status: "signed-out" };
-      render();
-    }
-    // Keep a previous snapshot through transient failures; the next trigger tries again.
-  }
-}
-
-/** True when the quota numbers on screen belong to a period that's over. */
-function quotaPeriodEnded(): boolean {
-  const resetMs = parseResetDate(readyRemoteUsage()?.data.quota_reset_date);
-  return resetMs !== null && Date.now() >= resetMs;
+  await Promise.allSettled([
+    usageRefresher.request("load"),
+    fetchTokenUsageSummaryAndEvents(page),
+  ]);
 }
 
 /**
@@ -1236,6 +999,7 @@ async function fetchTokenUsageSummaryAndEvents(
     if (summaryResult.status === "fulfilled") {
       state.tokenUsageSummary = summaryResult.value;
       state.tokenUsageSummaryError = null;
+      noteTokenUsage(summaryResult.value);
     } else if (isMissingTokenUsageEndpointError(summaryResult.reason)) {
       state.tokenUsageSummary = null;
       state.tokenUsageSummaryError = null;
@@ -1373,6 +1137,7 @@ function handleContentAreaClick(event: Event): void {
 }
 
 function updateDashboardActivity(): void {
+  usageRefresher.activityChanged();
   if (!dashboardIsActive()) {
     unsubscribeTokenUsage();
     if (browserPollTimer !== null) window.clearTimeout(browserPollTimer);
@@ -1463,18 +1228,14 @@ function init(): void {
     ) {
       showObservabilitySurface(msg.surface);
       updateDashboardActivity();
-      if (
-        msg.surface === "dashboard" &&
-        state.remoteUsage.status === "signed-out"
-      ) {
-        void refreshUsage();
-      }
+      if (dashboardIsActive()) void usageRefresher.request("shown");
     } else if (
       msg.type === "maximal:dashboard-visibility" &&
       typeof msg.visible === "boolean"
     ) {
       showObservabilitySurface(msg.visible ? "dashboard" : "settings");
       updateDashboardActivity();
+      if (dashboardIsActive()) void usageRefresher.request("shown");
     }
   });
 
@@ -1525,8 +1286,8 @@ function init(): void {
   }
 }
 
-// /usage is only fetched on load and period changes, so a window left open
-// drifts; re-read it when the window comes back into view and it's >10 min old.
+// A window left open drifts; re-read the quotas when it comes back into view
+// and they aren't ready, are old, or belong to a period that has ended.
 document.addEventListener("visibilitychange", () => {
   updateDashboardActivity();
   if (!dashboardIsActive()) return;
@@ -1534,9 +1295,7 @@ document.addEventListener("visibilitychange", () => {
   // clock has rolled over while it was hidden.
   syncRangeBaseline(true);
   updateControls();
-  const fetchedAt = readyRemoteUsage()?.fetchedAt;
-  const age = fetchedAt === undefined ? Infinity : Date.now() - fetchedAt;
-  if (age > 10 * 60_000 || quotaPeriodEnded()) void refreshUsage();
+  void usageRefresher.request("visible");
 });
 
 // The bundle is loaded as a deferred module, so the DOM is parsed by the time

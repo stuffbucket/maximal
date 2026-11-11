@@ -409,7 +409,8 @@
   "dashboard-empty-summary": "選択した期間に記録されたトークン使用量はありません。",
   "dashboard-empty-events": "選択した期間のトークン使用量の詳細行はありません。",
 
-  "dashboard-error-usage": "使用量リクエストに失敗しました",
+  "dashboard-usage-waiting": "GitHub の使用量を待っています…",
+  "dashboard-usage-reconnecting": "{ago}に更新 · GitHub に再接続しています",
   "dashboard-error-summary": "トークン使用量サマリーに失敗しました",
   "dashboard-error-details": "トークン使用量の詳細に失敗しました",
   "dashboard-error-generic": "エラーが発生しました",
