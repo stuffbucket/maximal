@@ -1,7 +1,4 @@
-// Minimal HTTP client for the FigJam bridge (reads the pairing token if present).
-import { existsSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+// Minimal HTTP client for the FigJam bridge (sends a pairing token only when the caller passes one).
 
 // Read per call, not at load, so a caller (or test) can point an already-imported client elsewhere.
 // The port goes into the 127.0.0.1 URL that carries the pairing token, so it must be a bare port
@@ -30,25 +27,11 @@ function board(): string {
   return b
 }
 
-// The pairing token is a bridge-wide credential: only used when the operator opts in, via
-// FIGJAM_TOKEN (the value) or FIGJAM_USE_PAIRING_TOKEN=1 (read <data>/figjam/pairing-token).
-function token(): string | undefined {
-  if (process.env.FIGJAM_TOKEN) return process.env.FIGJAM_TOKEN
-  if (process.env.FIGJAM_USE_PAIRING_TOKEN !== "1") return undefined
-  const dirs = [
-    process.env.COPILOT_API_HOME,
-    join(homedir(), ".local/share/maximal"),
-  ].filter(Boolean) as Array<string>
-  for (const d of dirs) {
-    const p = join(d, "figjam", "pairing-token")
-    if (existsSync(p)) return readFileSync(p, "utf8").trim()
-  }
-  return undefined
-}
-
+// The caller decides whether to pass a token (see token.ts); this only sends it.
 export async function tool(
   name: string,
   input: Record<string, unknown>,
+  opts: { token?: string } = {},
 ): Promise<unknown> {
   const url = `http://127.0.0.1:${port()}/tool`
   const who = agent()
@@ -56,8 +39,7 @@ export async function tool(
     "content-type": "application/json",
     "x-agent": who,
   }
-  const t = token()
-  if (t) headers.authorization = `Bearer ${t}`
+  if (opts.token) headers.authorization = `Bearer ${opts.token}`
   const res = await fetch(url, {
     method: "POST",
     redirect: "error",

@@ -6,7 +6,7 @@
 //                           "Routed edges". Revert: delete the group, show the connectors again.
 import type { BoardTree } from "./cli"
 
-import { tool } from "./client"
+import { tool as callTool } from "./client"
 import { HARD_CHECKS } from "./lanes"
 import {
   last,
@@ -19,6 +19,11 @@ import {
   type Rect,
   type Route,
 } from "./model"
+import { bridgeToken } from "./token"
+
+// The bridge call every tool request goes through, with the operator's opt-in token (token.ts).
+const tool = (name: string, input: Record<string, unknown>) =>
+  callTool(name, input, { token: bridgeToken() })
 
 type StrokeStyle = {
   color: string

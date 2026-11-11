@@ -21,10 +21,14 @@ routes monotone inside families only: a cross-family route may be non-monotone w
 **Board:** commands that talk to the bridge (`fetch`, `build`) need `FIGJAM_BOARD` set to the
 board's name or id. There is no default, because the bridge can serve several FigJam files.
 
-**Bridge auth:** `client.ts` sends no token by default. The pairing token is a credential for the
-whole bridge, so using it is opt-in:
+**Bridge auth:** the CLI and `build` send no token by default. The pairing token is a credential
+for the whole bridge, so using it is opt-in. `token.ts` resolves it and `client.ts`
+only sends what it is given:
 - `FIGJAM_TOKEN=<value>` passes the token directly.
-- `FIGJAM_USE_PAIRING_TOKEN=1` reads `<data>/figjam/pairing-token`.
+- `FIGJAM_USE_PAIRING_TOKEN=1` reads `<data>/figjam/pairing-token`. `<data>` is the bridge's data
+  directory (`dataDir()` in `figjam-bridge/src/data-dir.ts`): the same rules as in
+  `docs/dev/figjam.md`, so `COPILOT_API_HOME`, else `%APPDATA%\maximal` on Windows,
+  `$XDG_DATA_HOME/maximal`, or `~/.local/share/maximal`.
 
 **Input:** `fixtures/map-8-248.live.json`, from a `board_tree` read of 8:248. It has 85 cards,
 101 edges and 6 family sections, and the legend is kept as a no-go block. Edge kinds come from

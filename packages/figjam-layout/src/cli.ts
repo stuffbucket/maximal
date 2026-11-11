@@ -11,7 +11,7 @@ import { join } from "node:path"
 
 import { bus } from "./bus"
 import { classify, suggestMoves } from "./classify"
-import { tool } from "./client"
+import { tool as callTool } from "./client"
 import { baseline, magnets, reflow, route } from "./engine"
 import { checks, HARD_CHECKS, lanes, titleRect } from "./lanes"
 import {
@@ -28,6 +28,11 @@ import {
 } from "./model"
 import { planMap } from "./pipeline"
 import { toSvg } from "./svg"
+import { bridgeToken } from "./token"
+
+// The bridge call every tool request goes through, with the operator's opt-in token (token.ts).
+const tool = (name: string, input: Record<string, unknown>) =>
+  callTool(name, input, { token: bridgeToken() })
 
 // ---- board_tree, as the bridge returns it (figjam-plugin `board_tree`: treeNode / edgeOut) ----
 
