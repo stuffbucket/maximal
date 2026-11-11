@@ -66,7 +66,7 @@ function objectiveKey(c: Layout): Array<number> {
   return [
     hardBad(c),
     checkValue(ch, "crossings"),
-    checkValue(ch, "nonMonotone"),
+    checkValue(ch, "nonMonotoneGlobal"),
     Math.round(checkValue(ch, "bendsPerEdge") * c.routes.length),
     checkValue(ch, "meanPortDeviation") * c.routes.length,
     checkValue(ch, "wireLength"),
