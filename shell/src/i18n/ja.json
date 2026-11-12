@@ -290,6 +290,7 @@
   "models-auto-effective-external-default": "Claude Code 独自のデフォルトを使用中",
   "models-auto-effective-override": "選択済み: {modelName}",
   "models-auto-saving": "モデル設定を保存中…",
+  "models-auto-signed-out": "サインインして利用可能なモデルの一覧を取得します。",
   "models-auto-fast-unavailable-title": "Haiku エイリアスのモデルは利用できなくなりました",
   "models-auto-capable-unavailable-title": "Sonnet エイリアスのモデルは利用できなくなりました",
   "models-auto-classifier-unavailable-title": "自動許可チェック用のモデルは利用できなくなりました",

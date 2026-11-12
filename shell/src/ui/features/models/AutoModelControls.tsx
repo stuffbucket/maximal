@@ -229,9 +229,9 @@ export function AutoModelControls({
         <div id={ACCOUNT_PREREQUISITE_ID}>
           <Callout
             tone="notice"
-            title={t("account-setup-required-body")}
+            title={t("models-auto-signed-out")}
             action={
-              <a className="btn btn--secondary btn--sm" href="#account">
+              <a className="btn btn--primary btn--sm" href="#account">
                 {t("account-setup-required-action")}
               </a>
             }

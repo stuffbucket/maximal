@@ -290,6 +290,7 @@
   "models-auto-effective-external-default": "Используется собственное значение Claude Code по умолчанию",
   "models-auto-effective-override": "Выбрано: {modelName}",
   "models-auto-saving": "Настройки моделей сохраняются…",
+  "models-auto-signed-out": "Войдите, чтобы получить список доступных моделей.",
   "models-auto-fast-unavailable-title": "Модель для псевдонима Haiku больше недоступна",
   "models-auto-capable-unavailable-title": "Модель для псевдонима Sonnet больше недоступна",
   "models-auto-classifier-unavailable-title": "Модель для автоматических проверок разрешений больше недоступна",

@@ -290,6 +290,7 @@
   "models-auto-effective-external-default": "Der eigene Standard von Claude Code wird verwendet",
   "models-auto-effective-override": "Ausgewählt: {modelName}",
   "models-auto-saving": "Modelleinstellungen werden gespeichert…",
+  "models-auto-signed-out": "Melden Sie sich an, um die Liste der verfügbaren Modelle abzurufen.",
   "models-auto-fast-unavailable-title": "Das Modell für Ihren Haiku-Alias ist nicht mehr verfügbar",
   "models-auto-capable-unavailable-title": "Das Modell für Ihren Sonnet-Alias ist nicht mehr verfügbar",
   "models-auto-classifier-unavailable-title": "Ihr Modell für automatische Berechtigungsprüfungen ist nicht mehr verfügbar",

@@ -292,11 +292,13 @@ test("signed out shows one shared Account prerequisite", async ({
   const prerequisite = page.locator("#models-auto-account-prerequisite")
   await expect(prerequisite).toHaveCount(1)
   await expect(prerequisite).toContainText(
-    "Sign-in and account setup are handled in Settings.",
+    "Sign-in to retrieve the list of available models.",
   )
-  await expect(
-    prerequisite.getByRole("link", { name: "Open Account settings" }),
-  ).toBeVisible()
+  const accountAction = prerequisite.getByRole("link", {
+    name: "Open Account settings",
+  })
+  await expect(accountAction).toBeVisible()
+  await expect(accountAction).toHaveClass(/\bbtn--primary\b/u)
   await expect(
     page.getByText("No compatible model found—choose one"),
   ).toHaveCount(0)
@@ -315,9 +317,7 @@ test("signed out shows one shared Account prerequisite", async ({
   }
   await expect(page.locator('[id$="-problem"]')).toHaveCount(0)
 
-  await prerequisite
-    .getByRole("link", { name: "Open Account settings" })
-    .click()
+  await accountAction.click()
   await expect(page).toHaveURL(/#account$/u)
   await expect(page.locator('[data-section="account"]')).toBeVisible()
 })

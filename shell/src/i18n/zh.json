@@ -290,6 +290,7 @@
   "models-auto-effective-external-default": "使用 Claude Code 自身的默认设置",
   "models-auto-effective-override": "已选择：{modelName}",
   "models-auto-saving": "正在保存模型设置…",
+  "models-auto-signed-out": "登录以获取可用模型列表。",
   "models-auto-fast-unavailable-title": "Haiku 别名的模型已不可用",
   "models-auto-capable-unavailable-title": "Sonnet 别名的模型已不可用",
   "models-auto-classifier-unavailable-title": "自动权限检查模型已不可用",
