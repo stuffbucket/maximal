@@ -96,24 +96,25 @@ export interface PluginClientConfigurator {
   ): PluginClientApplyResult
 }
 
-const APPS_KEY = {
+type LegacyMcpAppKey = "claudeCode" | "claudeDesktop"
+
+const APPS_KEY: Partial<Record<PluginClientId, LegacyMcpAppKey>> = {
   "claude-code": "claudeCode",
-} as const satisfies Record<
-  PluginClientId,
-  keyof NonNullable<AppConfig["apps"]>
->
+}
 
 /** Entry names older versions recorded as written (`apps.<client>.mcpServers`). */
 function legacyNames(
   clientId: PluginClientId,
   config: AppConfig,
 ): Array<string> {
-  return config.apps?.[APPS_KEY[clientId]]?.mcpServers ?? []
+  const key = APPS_KEY[clientId]
+  return key ? (config.apps?.[key]?.mcpServers ?? []) : []
 }
 
 function clearLegacyNames(clientId: PluginClientId): void {
-  const latest = getConfig()
   const key = APPS_KEY[clientId]
+  if (!key) return
+  const latest = getConfig()
   const { mcpServers: _dropped, ...rest } = latest.apps?.[key] ?? {}
   writeConfig({ ...latest, apps: { ...latest.apps, [key]: rest } })
 }

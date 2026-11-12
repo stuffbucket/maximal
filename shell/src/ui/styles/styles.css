@@ -2838,6 +2838,9 @@ html[data-os="macos"] .topbar {
   color: var(--text-strong);
   overflow-wrap: anywhere;
   border-radius: var(--radius-chip);
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Focus lands here when the page opens (it isn't in the tab order); the
@@ -2944,22 +2947,40 @@ html[data-os="macos"] .topbar {
   overflow-wrap: anywhere;
 }
 
-.connector-clients {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+.client-menu {
+  align-self: flex-start;
+  max-width: 100%;
 }
 
-.connector-clients__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: var(--space-3);
-  row-gap: var(--space-1);
-  padding-block: var(--space-1);
+.client-menu__trigger {
+  max-width: 100%;
+  gap: var(--space-2);
+}
+
+.client-menu__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-menu__list {
+  inset-inline: 0 auto;
+}
+
+.client-menu__check {
+  margin-inline-start: 0;
+}
+
+.client-menu__warning {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--status-warning);
+}
+
+.client-menu__warning svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
 }
 
 .connector-endpoint {

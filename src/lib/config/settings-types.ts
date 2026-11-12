@@ -503,7 +503,12 @@ export type ClaudeDesktopToggleRequest = z.infer<
 // public manifest subset below is what keeps auth details (client ids,
 // authorities, scopes) and the config schema off the list endpoint.
 
-export const PluginClientId = z.enum(["claude-code"])
+export const PluginClientId = z.enum([
+  "claude-code",
+  "claude-desktop",
+  "codex",
+  "copilot-cli",
+])
 export type PluginClientId = z.infer<typeof PluginClientId>
 
 /** A connector exposes tools to MCP clients and gets host-managed tool

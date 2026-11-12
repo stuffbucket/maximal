@@ -11,6 +11,7 @@
  */
 
 import type {
+  PluginClientId,
   PluginGateway,
   PluginSnapshot,
   PluginToolView as GatewayToolView,
@@ -33,35 +34,60 @@ import { claudeCodePluginClient } from "./clients/claude-code"
 import { type PluginClientConfigurator, pluginMcpUrl } from "./clients/sync"
 import { pluginClients } from "./settings"
 
-/** The clients a connector's endpoint can be registered with, in UI order. */
+/** Clients Maximal can currently write connector entries to. */
 export const PLUGIN_CLIENTS: ReadonlyArray<PluginClientConfigurator> = [
   claudeCodePluginClient,
 ]
 
+interface ClientOption {
+  clientId: PluginClientId
+  configurator?: PluginClientConfigurator
+  unavailableReason?: string
+}
+
+/** Every Maximal app, in the same order as the Apps page. Apps without a
+ * connector writer stay visible but unavailable rather than disappearing. */
+const CLIENT_OPTIONS: ReadonlyArray<ClientOption> = [
+  { clientId: "claude-code", configurator: claudeCodePluginClient },
+  {
+    clientId: "claude-desktop",
+    unavailableReason:
+      "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+  },
+  {
+    clientId: "codex",
+    unavailableReason: "Maximal doesn't add connectors to Codex yet.",
+  },
+  {
+    clientId: "copilot-cli",
+    unavailableReason: "Copilot CLI integration is coming soon.",
+  },
+]
+
 interface ClientAvailability {
-  configurator: PluginClientConfigurator
+  option: ClientOption
   available: boolean
 }
 
 function clientAvailability(): Array<ClientAvailability> {
-  return PLUGIN_CLIENTS.map((configurator) => {
+  return CLIENT_OPTIONS.map((option) => {
     let available = false
     try {
-      available = configurator.available()
+      available = option.configurator?.available() ?? false
     } catch {
       // Unreadable config: shown as unavailable.
     }
-    return { configurator, available }
+    return { option, available }
   })
 }
 
 /** The client's own setup of the connector, which Maximal defers to. */
 function standaloneIn(
-  configurator: PluginClientConfigurator,
+  configurator: PluginClientConfigurator | undefined,
   id: string,
 ): PluginClientView["standalone"] {
   try {
-    return configurator.standalone(id)
+    return configurator?.standalone(id)
   } catch {
     return undefined
   }
@@ -177,13 +203,21 @@ function toView(
     toolsSource: snapshot.toolsSource,
     clients:
       isConnector ?
-        clients.map(({ configurator, available }): PluginClientView => {
+        clients.map(({ option, available }): PluginClientView => {
+          const { clientId, configurator, unavailableReason } = option
           const standalone = standaloneIn(configurator, snapshot.id)
           return {
-            id: configurator.clientId,
-            selected: selected.includes(configurator.clientId),
+            id: clientId,
+            selected: selected.includes(clientId),
             available,
-            ...(available ? {} : { reason: configurator.unavailableReason() }),
+            ...(available ?
+              {}
+            : {
+                reason:
+                  unavailableReason
+                  ?? configurator?.unavailableReason()
+                  ?? "This app can't receive connectors from Maximal yet.",
+              }),
             ...(standalone ? { standalone } : {}),
           }
         })
