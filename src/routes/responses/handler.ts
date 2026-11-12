@@ -84,7 +84,10 @@ export const handleResponses = async (c: Context) => {
 
   const payload = await c.req.json<ResponsesPayload>()
   payload.model = reverseId(payload.model)
-  await admitChat("responses", payload.model)
+  await admitChat("responses", {
+    model: payload.model,
+    maxTokens: payload.max_output_tokens,
+  })
   const mapping = resolveModelMapping({
     requestedModel: payload.model,
     rules: getConfig().modelMappings ?? [],

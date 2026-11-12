@@ -63,6 +63,8 @@ function startService(): BudgetService {
         listener({
           createdAtMs: row.created_at_ms,
           nanoAiu: row.total_nano_aiu,
+          inputTokens: row.input_tokens + row.cache_read_input_tokens,
+          outputTokens: row.output_tokens,
           key: "unidentified",
           provider: "copilot",
         })

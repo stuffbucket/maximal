@@ -48,6 +48,21 @@ const FIXED_RESETS: ReadonlyArray<BudgetResetPreset> = [
     window: null,
   },
   {
+    id: "every-10m",
+    label: "Every 10 minutes (rolling)",
+    description:
+      "Counts the last 10 minutes, for catching a burst: a runaway loop or a large fan-out of agents. Room comes back as it ages out.",
+    limit_reset: { every: { minutes: 10 } },
+    window: null,
+  },
+  {
+    id: "every-1h",
+    label: "Every hour (rolling)",
+    description: "Counts the last hour. Room comes back as old usage ages out.",
+    limit_reset: { every: { hours: 1 } },
+    window: null,
+  },
+  {
     id: "every-5h",
     label: "Every 5 hours (rolling)",
     description:
@@ -109,18 +124,27 @@ export function slugOf(text: string): string {
   return slug === "" ? "key" : slug
 }
 
-type TemplateFields = Pick<
-  BudgetPresetLimit,
-  "id" | "label" | "scope" | "limit_reset" | "warn_at" | "action"
-> & {
-  /** US dollars, whatever unit the person reads. */
-  usd: number
-}
+type TemplateFields = Omit<BudgetPresetLimit, "amount" | "limit">
+  & (
+    | {
+        /** US dollars, whatever unit the person reads. */
+        usd: number
+        tokens?: undefined
+      }
+    | {
+        /** A count of tokens (the rule's `unit` is `tokens`). */
+        tokens: number
+        usd?: undefined
+      }
+  )
 
 function template(
   { display }: PresetInputs,
-  { usd, ...fields }: TemplateFields,
+  { usd, tokens, ...fields }: TemplateFields,
 ): BudgetPresetLimit {
+  if (tokens !== undefined) {
+    return { ...fields, unit: "tokens", limit: tokens, amount: tokens }
+  }
   const limit = displayToNanoAiu(usd, {
     unit: "usd",
     creditUsd: display.creditUsd,
@@ -161,6 +185,69 @@ function teamLimits(
       usd: 20,
     }),
   )
+}
+
+/** Personas for catching a runaway: by tokens, while away, or in a burst. */
+function guardPersonas(
+  inputs: PresetInputs,
+  money: (usd: number) => string,
+): Array<BudgetPersonaPreset> {
+  const global = { kind: "global" } as const
+  return [
+    {
+      id: "runaway-guard",
+      label: "Runaway guard: 2M tokens per rolling hour",
+      description:
+        "Counts tokens, not money, over the last hour: a loop that burns through a model's context again and again stops long before a dollar cap would notice.",
+      limits: [
+        template(inputs, {
+          id: "runaway-tokens",
+          label: "Runaway guard",
+          scope: global,
+          limit_reset: { every: { hours: 1 } },
+          warn_at: 0.8,
+          action: "block",
+          tokens: 2_000_000,
+        }),
+      ],
+    },
+    {
+      id: "while-away",
+      label: `While you're away: ${money(10)} per rolling hour`,
+      description:
+        "Enforced only while the screen is locked or after 30 minutes with no keyboard or mouse input, to catch a process that keeps spending after you leave. It does nothing while you're at the machine, or when Maximal can't tell.",
+      limits: [
+        template(inputs, {
+          id: "away-hourly",
+          label: "While away",
+          scope: global,
+          limit_reset: { every: { hours: 1 } },
+          warn_at: 0.8,
+          action: "block",
+          when: { locked: true, idleMinutes: 30 },
+          usd: 10,
+        }),
+      ],
+    },
+    {
+      id: "fan-out-guard",
+      label: "Fan-out guard: 500k tokens and 120 requests per 10 minutes",
+      description:
+        "A short rolling window with a request cap beside the token cap, for a lead agent that spawns many subagents at once.",
+      limits: [
+        template(inputs, {
+          id: "fan-out",
+          label: "Fan-out guard",
+          scope: global,
+          limit_reset: { every: { minutes: 10 } },
+          warn_at: 0.8,
+          action: "block",
+          max_requests: 120,
+          tokens: 500_000,
+        }),
+      ],
+    },
+  ]
 }
 
 export function personaPresets(
@@ -243,6 +330,7 @@ export function personaPresets(
         : "One daily cap for each of your client keys.",
       limits: teamLimits(inputs, labels),
     },
+    ...guardPersonas(inputs, money),
   ]
 }
 

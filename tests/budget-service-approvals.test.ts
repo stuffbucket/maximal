@@ -81,6 +81,7 @@ describe("an ask limit", () => {
     expect({ ...first, periodKey: "" }).toEqual({
       limitId: "cap",
       periodKey: "",
+      unit: "nano_aiu",
       used: AIU,
       limit: AIU,
       resetsAtMs: Date.UTC(2026, 10, 12),

@@ -68,6 +68,7 @@ export const ProviderWindowRef = z
   .regex(/^[\w.-]+:[\w.-]+$/u)
 
 /** Longest rolling window: the spend it counts is read into memory. */
+export const MAX_EVERY_MINUTES = 1440
 export const MAX_EVERY_HOURS = 720
 export const MAX_EVERY_DAYS = 90
 
@@ -79,6 +80,9 @@ export const BudgetLimitReset = z.union([
   z.object({ follow: ProviderWindowRef }),
   z.object({
     every: z.union([
+      z
+        .object({ minutes: z.number().int().min(1).max(MAX_EVERY_MINUTES) })
+        .strict(),
       z
         .object({ hours: z.number().int().min(1).max(MAX_EVERY_HOURS) })
         .strict(),
@@ -96,6 +100,30 @@ export type BudgetLimitReset = z.infer<typeof BudgetLimitReset>
  *  entry), recording what they allow as a temporary override. */
 export const BudgetLimitAction = z.enum(["block", "warn", "ask"])
 export type BudgetLimitAction = z.infer<typeof BudgetLimitAction>
+
+/** What a limit's amount is in: cost (nano-AIU, today's) or tokens. */
+export const BudgetLimitUnit = z.enum(["cost", "tokens"])
+export type BudgetLimitUnit = z.infer<typeof BudgetLimitUnit>
+
+/** Which tokens a token limit counts: the prompt (cache reads included), the
+ *  reply, or both. */
+export const BudgetTokenMeasure = z.enum(["input", "output", "total"])
+export type BudgetTokenMeasure = z.infer<typeof BudgetTokenMeasure>
+
+/** A condition on enforcing a limit: only while the screen is locked, or
+ *  after `idleMinutes` with no input (either one is enough). Presence that
+ *  isn't known doesn't meet it. */
+export const BudgetWhen = z
+  .object({
+    locked: z.literal(true).optional(),
+    idleMinutes: z.number().int().min(1).max(1440).optional(),
+  })
+  .strict()
+  .refine(
+    (when) => when.locked !== undefined || when.idleMinutes !== undefined,
+    { message: "give locked or idleMinutes" },
+  )
+export type BudgetWhen = z.infer<typeof BudgetWhen>
 
 /** Where a rule's warning, or its limit being reached, is told: nowhere, a
  *  native notification, the menu-bar attention list, or both. */
@@ -142,8 +170,25 @@ const BudgetLimitConfigSchema = z
     warnAt: BudgetWarnAt.optional(),
     action: BudgetLimitAction,
     notify: BudgetNotifySchema.optional(),
+    /** What `limit` is in; absent means cost. */
+    unit: BudgetLimitUnit.optional(),
+    /** For a token limit: which tokens; absent means total. */
+    measure: BudgetTokenMeasure.optional(),
+    /** At most this many requests in the period, beside the amount. */
+    maxRequests: z
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
+    /** Enforce only while this holds (the person is away). */
+    when: BudgetWhen.optional(),
   })
   .loose()
+  .refine((limit) => limit.measure === undefined || limit.unit === "tokens", {
+    message: "measure goes with unit tokens",
+    path: ["measure"],
+  })
 
 export const BudgetConfigSchema = z
   .object({

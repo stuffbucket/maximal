@@ -17,6 +17,7 @@
 
 import type { PluginAttentionItem } from "~/lib/config/settings-types"
 
+import type { RefusalUnit, SpendMetric } from "./metric"
 import type { OverrideRegistry } from "./overrides"
 import type { BudgetPeriod } from "./periods"
 import type {
@@ -25,9 +26,10 @@ import type {
   BudgetNotifyChannel,
 } from "./schema"
 
+import { metricOf } from "./metric"
 import { resolveNotify } from "./notify"
 import { resolveBudgetDisplay } from "./units"
-import { formatAmount } from "./wording"
+import { formatUnitAmount } from "./wording"
 
 /** What the shell calls these items; plugin ids can't be this. */
 export const ATTENTION_SOURCE_ID = "budget"
@@ -52,7 +54,9 @@ export interface LimitEvent {
   limitId: string
   /** The period the event belongs to, so it is only told once. */
   periodKey: string
-  /** Nano-AIU used, and the limit in force (extra room included). */
+  /** What `used` and `limit` are in. */
+  unit: RefusalUnit
+  /** Used, and the limit in force (extra room included), in `unit`. */
   used: number
   limit: number
   /** When it resets, or for a rolling window when room starts to return. */
@@ -119,8 +123,10 @@ interface Entry {
   limitId: string
   /** The rule's label, else its id, as it read when this was noted. */
   label: string
-  /** What "Allow more" offers: a quarter of the limit when it was noted. */
+  /** What "Allow more" offers: a quarter of the limit when it was noted, in
+   *  the limit's unit (cost or tokens). */
   offeredNanoAiu: number
+  offeredUnit: SpendMetric
   periodKey: string
   event: LimitEvent
   /** Listed in the attention items. */
@@ -163,8 +169,8 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
   const findLimit = (limitId: string): BudgetLimitConfig | undefined =>
     deps.config()?.limits?.find((limit) => limit.id === limitId)
 
-  const money = (nano: number): string =>
-    formatAmount(nano, resolveBudgetDisplay(deps.config()))
+  const money = (amount: number, unit: RefusalUnit): string =>
+    formatUnitAmount(amount, unit, resolveBudgetDisplay(deps.config()))
 
   /** A live entry: its limit still exists and its period hasn't ended. */
   function live(entry: Entry): boolean {
@@ -183,7 +189,7 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
 
   function messageFor(entry: Entry): string {
     const { kind, label, event } = entry
-    const figures = `${money(event.used)} of ${money(event.limit)} used`
+    const figures = `${money(event.used, event.unit)} of ${money(event.limit, event.unit)} used`
     if (kind === "ask") {
       return `Rule "${label}" reached its limit: ${figures}. Requests are refused until you allow more. Choose in the Maximal menu or Rules.`
     }
@@ -212,6 +218,7 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
       limitId: event.limitId,
       label: limit.label ?? limit.id,
       offeredNanoAiu: defaultExtraNanoAiu(limit.limit),
+      offeredUnit: metricOf(limit),
       periodKey: event.periodKey,
       event,
       tray: shows(channel, "tray"),
@@ -287,15 +294,22 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
         actions: [{ id: `dismiss.${id}`, label: `Dismiss: ${label}` }],
       }
     }
+    // More room is in the limit's unit, so it can't lift a request cap.
+    const more: PluginAttentionItem["actions"] =
+      entry.event.unit === "requests" ?
+        []
+      : [
+          {
+            id: `allow-more.${id}`,
+            label: `Allow ${money(entry.offeredNanoAiu, entry.offeredUnit)} more: ${label}`,
+            kind: "primary",
+          },
+        ]
     return {
       ...base,
       summary: messageFor(entry),
       actions: [
-        {
-          id: `allow-more.${id}`,
-          label: `Allow ${money(entry.offeredNanoAiu)} more: ${label}`,
-          kind: "primary",
-        },
+        ...more,
         { id: `allow-hour.${id}`, label: `Allow for 1 hour: ${label}` },
         {
           id: `keep-blocked.${id}`,
@@ -354,6 +368,7 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
       if (kind !== "ask" || !liveEntry("ask", limitId)) return false
       switch (verb) {
         case "allow-more": {
+          if (liveEntry("ask", limitId)?.event.unit === "requests") return false
           return approve(limitId, "more").ok
         }
         case "allow-hour": {

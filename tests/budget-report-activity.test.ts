@@ -659,6 +659,8 @@ function startService(config: BudgetConfig, nowMs: number): BudgetService {
         listener({
           createdAtMs: row.created_at_ms,
           nanoAiu: row.total_nano_aiu,
+          inputTokens: 0,
+          outputTokens: 0,
           key: "claude-code",
           provider: "copilot",
         })

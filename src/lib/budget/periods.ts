@@ -25,6 +25,7 @@
 import type { BudgetLimitReset } from "./schema"
 
 export const DAY_MS = 86_400_000
+export const MINUTE_MS = 60_000
 export const HOUR_MS = 3_600_000
 const WEEK_MS = 7 * DAY_MS
 
@@ -101,8 +102,9 @@ export function rollingPeriodEnd(
 
 /** The length of an `every` reset, in ms. */
 export function everyDurationMs(
-  every: { hours: number } | { days: number },
+  every: { minutes: number } | { hours: number } | { days: number },
 ): number {
+  if ("minutes" in every) return every.minutes * MINUTE_MS
   return "hours" in every ? every.hours * HOUR_MS : every.days * DAY_MS
 }
 

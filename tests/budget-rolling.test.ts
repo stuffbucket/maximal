@@ -211,6 +211,7 @@ describe("the reset schema", () => {
 describe("the refusal wording for a rolling window", () => {
   const words = {
     name: "Agents",
+    unit: "nano_aiu" as const,
     limit: AIU,
     used: AIU,
     held: 0,
@@ -493,6 +494,8 @@ const heldFor = (id: string, createdAtMs: number) => ({
   key: "laptop",
   provider: "copilot",
   estimateNanoAiu: 4,
+  estimateInputTokens: 0,
+  estimateOutputTokens: 0,
 })
 
 describe("rolling spend in the usage database", () => {
@@ -537,6 +540,7 @@ describe("rolling spend in the usage database", () => {
     const rows = await getNanoAiuSpendRows(
       { kind: "key", id: "laptop" },
       { startMs: 0, endMs: null },
+      "nano_aiu",
     )
     expect(rows).toEqual([{ createdAtMs: NOON - 2_000, nanoAiu: 2 }])
     expect(
@@ -558,12 +562,14 @@ describe("rolling spend in the usage database", () => {
     const rows = await store.spendRows(
       { kind: "key", id: "laptop" },
       { startMs: 0, endMs: null },
+      "nano_aiu",
     )
     expect(rows).toEqual([{ createdAtMs: NOON - 2_000, nanoAiu: 4 }])
     expect(
       await store.spendRows(
         { kind: "key", id: "other" },
         { startMs: 0, endMs: null },
+        "nano_aiu",
       ),
     ).toEqual([])
   })

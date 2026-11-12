@@ -107,19 +107,32 @@ const credits = (nano: number): number => nano / NANO_AIU_PER_CREDIT
  *  plus AI credits, which GitHub bills, and the raw nano-AIU. */
 function budgetMetadata(refusal: BudgetRefusal): Record<string, unknown> {
   const usd = (nano: number) => credits(nano) * refusal.creditUsd
+  // Cost has OpenRouter's names plus credits and nano-AIU; a token or request
+  // limit has its figures in `limit`, `spend` and `requested`, in `unit`.
+  const figures =
+    refusal.unit === "nano_aiu" ?
+      {
+        limit_usd: usd(refusal.limit),
+        spend_usd: usd(refusal.used),
+        limit_credits: credits(refusal.limit),
+        spend_credits: credits(refusal.used),
+        limit_nano_aiu: refusal.limit,
+        spend_nano_aiu: refusal.used,
+        requested_nano_aiu: refusal.requested,
+      }
+    : {
+        limit: refusal.limit,
+        spend: refusal.used,
+        requested: refusal.requested,
+      }
   return {
     limit_source:
       refusal.inFlight ? "maximal_in_flight_budget" : "maximal_limit",
     scope: refusal.scope.kind,
     ...(refusal.scope.kind === "global" ? {} : { scope_id: refusal.scope.id }),
     limit_id: refusal.limitId,
-    limit_usd: usd(refusal.limit),
-    spend_usd: usd(refusal.used),
-    limit_credits: credits(refusal.limit),
-    spend_credits: credits(refusal.used),
-    limit_nano_aiu: refusal.limit,
-    spend_nano_aiu: refusal.used,
-    requested_nano_aiu: refusal.requested,
+    unit: refusal.unit,
+    ...figures,
     resets_at:
       refusal.resetsAtMs === null ?
         null
@@ -138,6 +151,7 @@ function budgetHeaders(refusal: BudgetRefusal): Record<string, string> {
   return {
     "x-maximal-budget-limit-id": refusal.limitId,
     "x-maximal-budget-scope": refusal.scope.kind,
+    "x-maximal-budget-unit": refusal.unit,
     "x-maximal-budget-limit": String(refusal.limit),
     "x-maximal-budget-used": String(refusal.used),
     ...(refusal.approval === undefined ?

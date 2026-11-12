@@ -235,7 +235,13 @@ describe("warning arithmetic", () => {
     )
 
     expect(decision.ok && decision.warnings).toEqual([
-      { limitId: "all", used: 0.3 * AIU, limit: AIU, resetsAtMs: MIDNIGHT },
+      {
+        limitId: "all",
+        used: 0.3 * AIU,
+        limit: AIU,
+        unit: "nano_aiu",
+        resetsAtMs: MIDNIGHT,
+      },
     ])
   })
 
@@ -438,6 +444,8 @@ describe("the fields a stored hold carries", () => {
       operation: "messages",
       key: "claude-code",
       estimateNanoAiu: AIU / 10,
+      estimateInputTokens: 0,
+      estimateOutputTokens: 0,
     })
     if (!decision.ok) throw new Error("expected admission")
 
@@ -448,6 +456,8 @@ describe("the fields a stored hold carries", () => {
         operation: "messages",
         key: "claude-code",
         estimateNanoAiu: AIU / 10,
+        estimateInputTokens: 0,
+        estimateOutputTokens: 0,
       },
     ])
   })
@@ -460,12 +470,16 @@ describe("the fields a stored hold carries", () => {
       key: "claude-code",
       provider: "copilot",
       estimateNanoAiu: AIU / 10,
+      estimateInputTokens: 0,
+      estimateOutputTokens: 0,
     })
     await h.service.reserve({
       operation: "images.edits",
       key: "claude-code",
       plugin: "images",
       estimateNanoAiu: AIU / 10,
+      estimateInputTokens: 0,
+      estimateOutputTokens: 0,
     })
 
     expect(h.calls.opened.map(({ id: _id, ...rest }) => rest)).toStrictEqual([
@@ -475,6 +489,8 @@ describe("the fields a stored hold carries", () => {
         key: "claude-code",
         provider: "copilot",
         estimateNanoAiu: AIU / 10,
+        estimateInputTokens: 0,
+        estimateOutputTokens: 0,
       },
       {
         createdAtMs: NOON,
@@ -482,6 +498,8 @@ describe("the fields a stored hold carries", () => {
         key: "claude-code",
         plugin: "images",
         estimateNanoAiu: AIU / 10,
+        estimateInputTokens: 0,
+        estimateOutputTokens: 0,
       },
     ])
   })

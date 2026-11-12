@@ -276,11 +276,15 @@ function respondIfWarmup(
   return undefined
 }
 
+// eslint-disable-next-line max-lines-per-function
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-  await admitChat("messages", anthropicPayload.model)
+  await admitChat("messages", {
+    model: anthropicPayload.model,
+    maxTokens: anthropicPayload.max_tokens,
+  })
   stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 

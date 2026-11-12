@@ -15,9 +15,12 @@ import {
   BudgetLimitAction,
   BudgetLimitId,
   BudgetLimitReset,
+  BudgetLimitUnit,
   BudgetNotifyChannel,
   BudgetScope,
+  BudgetTokenMeasure,
   BudgetWarnAt,
+  BudgetWhen,
   CreditUsdRate,
   NanoAiuAmount,
 } from "./schema"
@@ -57,6 +60,20 @@ export const BudgetLimitStatus = z.object({
   scope: BudgetScope,
   action: BudgetLimitAction,
   warn_at: BudgetWarnAt,
+  /** What `limit`, `usage`, `held` and the other amounts are in: nano-AIU of
+   *  cost, or tokens (then `display` holds the same token counts). */
+  unit: BudgetLimitUnit,
+  /** For a token limit, which tokens it counts; null for cost. */
+  measure: BudgetTokenMeasure.nullable(),
+  /** At most this many requests in the period, or null. */
+  max_requests: z.number().int().min(1).nullable(),
+  /** Requests made in the period; null without `max_requests`. */
+  requests: z.number().int().min(0).nullable(),
+  /** Enforced only while this holds (the person is away), or null. */
+  when: BudgetWhen.nullable(),
+  /** False while a `when` isn't met (or presence is unknown): the rule is
+   *  counted but neither refuses nor warns. */
+  enforced: z.boolean(),
   limit: NanoAiuAmount,
   /** The limit plus the room `extra` overrides granted; `limit_remaining`,
    *  `state` and a refusal use this one. */
@@ -334,6 +351,14 @@ export const BudgetLimitPutRequest = z
     limit_reset: BudgetLimitReset,
     warn_at: BudgetWarnAt.optional(),
     action: BudgetLimitAction,
+    /** What `limit`/`amount` are in; absent is cost. For tokens both mean a
+     *  count of tokens. */
+    unit: BudgetLimitUnit.optional(),
+    /** For `unit: "tokens"`: input (cache reads included), output or total
+     *  (the default). */
+    measure: BudgetTokenMeasure.optional(),
+    max_requests: z.number().int().min(1).optional(),
+    when: BudgetWhen.optional(),
     /** Where this rule's notices go; what is left out takes the default
      *  (warn: `notification`, limit: `both`). */
     notify: z
@@ -352,6 +377,10 @@ export const BudgetLimitPutRequest = z
       path: ["limit"],
     },
   )
+  .refine((body) => body.measure === undefined || body.unit === "tokens", {
+    message: "measure goes with unit tokens",
+    path: ["measure"],
+  })
 export type BudgetLimitPutRequest = z.infer<typeof BudgetLimitPutRequest>
 
 /** One way a rule's period can reset, for the UI to offer. */
@@ -383,6 +412,11 @@ export const BudgetPresetLimit = z.object({
   limit_reset: BudgetLimitReset,
   warn_at: BudgetWarnAt,
   action: BudgetLimitAction,
+  /** Present for a token rule (`limit` and `amount` are then tokens). */
+  unit: BudgetLimitUnit.optional(),
+  measure: BudgetTokenMeasure.optional(),
+  max_requests: z.number().int().min(1).optional(),
+  when: BudgetWhen.optional(),
 })
 export type BudgetPresetLimit = z.infer<typeof BudgetPresetLimit>
 
@@ -434,8 +468,17 @@ export const BudgetRuleLimit = z
     action: BudgetLimitAction,
     /** Always written on export; an import without it takes the defaults. */
     notify: BudgetNotifyStatus.strict().optional(),
+    /** Written only for a token limit; absent is cost. */
+    unit: BudgetLimitUnit.optional(),
+    measure: BudgetTokenMeasure.optional(),
+    max_requests: z.number().int().min(1).optional(),
+    when: BudgetWhen.optional(),
   })
   .strict()
+  .refine((rule) => rule.measure === undefined || rule.unit === "tokens", {
+    message: "measure goes with unit tokens",
+    path: ["measure"],
+  })
 export type BudgetRuleLimit = z.infer<typeof BudgetRuleLimit>
 
 export const BudgetRuleFilter = z

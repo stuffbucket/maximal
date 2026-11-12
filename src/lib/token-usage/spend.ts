@@ -5,6 +5,11 @@
  */
 
 import { globToSqlite } from "~/lib/budget/glob"
+import {
+  EVENT_METRIC_SQL,
+  HOLD_METRIC_SQL,
+  type SpendMetric,
+} from "~/lib/budget/metric"
 import { KEY_SQL, PROVIDER_SQL } from "~/lib/token-usage/aggregate"
 import {
   isTokenUsageStorageEnabled,
@@ -87,18 +92,19 @@ export function scopeWhere(
   return { clauses: [sql[scope.kind]], values: [scope.id] }
 }
 
-/** Nano-AIU the scope's rows spent in each range, in one query; zeros when
- *  storage is off. */
+/** What the scope's rows spent in each range, in one query (nano-AIU, or the
+ *  tokens of `metric`); zeros when storage is off. */
 export async function getNanoAiuSpend(
   scope: SpendScope,
   ranges: ReadonlyArray<SpendRange>,
+  metric: SpendMetric = "nano_aiu",
 ): Promise<Array<number>> {
   if (ranges.length === 0) return []
   if (!isTokenUsageStorageEnabled()) return ranges.map(() => 0)
 
   const sums = ranges.map(
     (_, index) =>
-      `COALESCE(SUM(CASE WHEN created_at_ms >= ? AND created_at_ms < ? THEN total_nano_aiu ELSE 0 END), 0) AS spend_${index}`,
+      `COALESCE(SUM(CASE WHEN created_at_ms >= ? AND created_at_ms < ? THEN ${EVENT_METRIC_SQL[metric]} ELSE 0 END), 0) AS spend_${index}`,
   )
   const rangeValues = ranges.flatMap((range) => [
     range.startMs,
@@ -110,7 +116,7 @@ export async function getNanoAiuSpend(
   const whereValues = [earliest, ...events.values]
   const holdSums = ranges.map(
     (_, index) =>
-      `COALESCE(SUM(CASE WHEN created_at_ms >= ? AND created_at_ms < ? THEN estimate_nano_aiu ELSE 0 END), 0) AS spend_${index}`,
+      `COALESCE(SUM(CASE WHEN created_at_ms >= ? AND created_at_ms < ? THEN ${HOLD_METRIC_SQL[metric]} ELSE 0 END), 0) AS spend_${index}`,
   )
   const holds = scopeWhere(scope, "holds")
   const holdWhere = [
@@ -136,7 +142,8 @@ export async function getNanoAiuSpend(
   )
 }
 
-/** One cost the scope incurred at an instant. */
+/** One cost the scope incurred at an instant, in the unit asked for
+ *  (nano-AIU, or the tokens of a metric). */
 export interface SpendRow {
   createdAtMs: number
   nanoAiu: number
@@ -148,6 +155,7 @@ export interface SpendRow {
 export async function getNanoAiuSpendRows(
   scope: SpendScope,
   range: SpendRange,
+  metric: SpendMetric = "nano_aiu",
 ): Promise<Array<SpendRow>> {
   if (!isTokenUsageStorageEnabled()) return []
   const end = range.endMs ?? Number.MAX_SAFE_INTEGER
@@ -156,25 +164,25 @@ export async function getNanoAiuSpendRows(
   const eventWhere = [
     "created_at_ms >= ?",
     "created_at_ms < ?",
-    "total_nano_aiu > 0",
+    `${EVENT_METRIC_SQL[metric]} > 0`,
     ...events.clauses,
   ]
   const holdWhere = [
     "state = 'orphaned'",
     "created_at_ms >= ?",
     "created_at_ms < ?",
-    "estimate_nano_aiu > 0",
+    `${HOLD_METRIC_SQL[metric]} > 0`,
     ...holds.clauses,
   ]
   const [eventRows, holdRows] = await readUsageDb((db) => [
     db
       .prepare(
-        `SELECT created_at_ms AS at_ms, total_nano_aiu AS nano_aiu FROM token_usage_events WHERE ${eventWhere.join(" AND ")}`,
+        `SELECT created_at_ms AS at_ms, ${EVENT_METRIC_SQL[metric]} AS nano_aiu FROM token_usage_events WHERE ${eventWhere.join(" AND ")}`,
       )
       .all(range.startMs, end, ...events.values),
     db
       .prepare(
-        `SELECT created_at_ms AS at_ms, estimate_nano_aiu AS nano_aiu FROM budget_holds WHERE ${holdWhere.join(" AND ")}`,
+        `SELECT created_at_ms AS at_ms, ${HOLD_METRIC_SQL[metric]} AS nano_aiu FROM budget_holds WHERE ${holdWhere.join(" AND ")}`,
       )
       .all(range.startMs, end, ...holds.values),
   ])
@@ -196,7 +204,33 @@ function spendRowOf(row: unknown): SpendRow {
 export async function getOldestSpendMs(
   scope: SpendScope,
   range: SpendRange,
+  metric: SpendMetric = "nano_aiu",
 ): Promise<number | undefined> {
-  const rows = await getNanoAiuSpendRows(scope, range)
+  const rows = await getNanoAiuSpendRows(scope, range, metric)
   return rows.length === 0 ? undefined : rows[0].createdAtMs
+}
+
+/** When each request the scope's usage rows recorded in the range was made,
+ *  oldest first, whatever it cost. Empty when storage is off. */
+export async function getRequestTimes(
+  scope: SpendScope,
+  range: SpendRange,
+): Promise<Array<number>> {
+  if (!isTokenUsageStorageEnabled()) return []
+  const events = scopeWhere(scope, "events")
+  const where = ["created_at_ms >= ?", "created_at_ms < ?", ...events.clauses]
+  const rows = await readUsageDb((db) =>
+    db
+      .prepare(
+        `SELECT created_at_ms AS at_ms FROM token_usage_events WHERE ${where.join(" AND ")} ORDER BY created_at_ms ASC`,
+      )
+      .all(
+        range.startMs,
+        range.endMs ?? Number.MAX_SAFE_INTEGER,
+        ...events.values,
+      ),
+  )
+  return (rows as Array<Record<string, unknown>>).map((row) =>
+    Number(row.at_ms),
+  )
 }

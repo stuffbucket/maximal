@@ -47,7 +47,10 @@ export async function handleCompletion(c: Context) {
 
   let payload = await c.req.json<ChatCompletionsPayload>()
   payload.model = reverseId(payload.model)
-  await admitChat("chat_completions", payload.model)
+  await admitChat("chat_completions", {
+    model: payload.model,
+    maxTokens: payload.max_tokens,
+  })
   const mapping = resolveModelMapping({
     requestedModel: payload.model,
     rules: getConfig().modelMappings ?? [],

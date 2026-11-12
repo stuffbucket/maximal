@@ -47,6 +47,8 @@ describe("reset presets", () => {
       "daily",
       "weekly",
       "monthly-1",
+      "every-10m",
+      "every-1h",
       "every-5h",
       "every-24h",
       "every-7d",
@@ -94,7 +96,7 @@ describe("reset presets", () => {
       },
       { provider: "acme", id: "five_hour", label: "Acme 5-hour window" },
     ])
-    expect(presets.slice(7)).toEqual([
+    expect(presets.slice(9)).toEqual([
       {
         id: "follow:copilot:premium_interactions",
         label: "Follow Copilot premium allowance",
@@ -125,6 +127,9 @@ describe("persona presets", () => {
       "Daily driver: $20.00/day plus $100.00/week",
       "Heavy agent use: $50.00 per rolling 5 hours, warn at 80%",
       "Team: per-key caps of $20.00/day",
+      "Runaway guard: 2M tokens per rolling hour",
+      "While you're away: $10.00 per rolling hour",
+      "Fan-out guard: 500k tokens and 120 requests per 10 minutes",
     ])
   })
 
@@ -267,8 +272,8 @@ describe("buildBudgetPresets", () => {
       keyLabels: [],
     })
     expect(built.display).toEqual({ unit: "credits", credit_usd: 0.02 })
-    expect(built.resets).toHaveLength(7)
-    expect(built.personas).toHaveLength(4)
+    expect(built.resets).toHaveLength(9)
+    expect(built.personas).toHaveLength(7)
   })
 })
 
@@ -298,7 +303,7 @@ describe("GET /settings/api/budget/presets", () => {
     const body = BudgetPresetsResponse.parse(await response.json())
     expect(body.display).toEqual({ unit: "usd", credit_usd: 0.01 })
     expect(body.resets.map((preset) => preset.id)).toContain("every-5h")
-    expect(body.personas).toHaveLength(4)
+    expect(body.personas).toHaveLength(7)
     expect(getConfig().budget?.limits ?? []).toEqual([])
   })
 

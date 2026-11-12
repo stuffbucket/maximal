@@ -123,6 +123,30 @@ function withLimits(
   return { ...config, budget: { ...config.budget, limits } }
 }
 
+/** The limit a PUT body describes. */
+function limitFromRequest(
+  id: string,
+  request: BudgetLimitPutRequest,
+  amount: number,
+): BudgetLimitConfig {
+  return {
+    id,
+    ...(request.label === undefined ? {} : { label: request.label }),
+    scope: request.scope,
+    limit: amount,
+    limitReset: request.limit_reset,
+    warnAt: request.warn_at ?? DEFAULT_WARN_AT,
+    action: request.action,
+    ...(request.notify === undefined ? {} : { notify: request.notify }),
+    ...(request.unit === "tokens" ? { unit: "tokens" as const } : {}),
+    ...(request.measure === undefined ? {} : { measure: request.measure }),
+    ...(request.max_requests === undefined ?
+      {}
+    : { maxRequests: request.max_requests }),
+    ...(request.when === undefined ? {} : { when: request.when }),
+  }
+}
+
 /** The id of the filter a scope names when there is no such filter. */
 function missingFilter(
   config: AppConfig,
@@ -165,12 +189,15 @@ budgetRoutes.put("/limits/:id", async (c) => {
 
     const config = getConfig()
     const request = body.data
+    // A token limit's amount is a count of tokens, whichever field gave it.
     const nanoAiu = NanoAiuAmount.safeParse(
-      request.limit
-        ?? displayToNanoAiu(
-          request.amount ?? 0,
-          resolveBudgetDisplay(config.budget),
-        ),
+      request.unit === "tokens" ?
+        (request.limit ?? Math.round(request.amount ?? 0))
+      : (request.limit
+          ?? displayToNanoAiu(
+            request.amount ?? 0,
+            resolveBudgetDisplay(config.budget),
+          )),
     )
     if (!nanoAiu.success) {
       return validationError(c, "Limit amount is out of range")
@@ -181,16 +208,7 @@ budgetRoutes.put("/limits/:id", async (c) => {
       return validationError(c, `Unknown filter '${missing}'; create it first`)
     }
 
-    const entry: BudgetLimitConfig = {
-      id: id.data,
-      ...(request.label === undefined ? {} : { label: request.label }),
-      scope: request.scope,
-      limit: nanoAiu.data,
-      limitReset: request.limit_reset,
-      warnAt: request.warn_at ?? DEFAULT_WARN_AT,
-      action: request.action,
-      ...(request.notify === undefined ? {} : { notify: request.notify }),
-    }
+    const entry = limitFromRequest(id.data, request, nanoAiu.data)
     const limits = [...(config.budget?.limits ?? [])]
     const index = limits.findIndex((limit) => limit.id === id.data)
     if (index === -1) limits.push(entry)
