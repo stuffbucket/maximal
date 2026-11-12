@@ -18,4 +18,5 @@ export {
   operationsService,
   type PluginServiceFactory,
   providersService,
+  serverToolsService,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"

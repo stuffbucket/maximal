@@ -153,6 +153,17 @@ never destructured.
   reserved for the host.
 - **`ctx.host`** — `openExternal(url)` (http/https only), `logger`
   (prefixed with the plugin id), `appVersion`.
+- **`ctx.serverTools`** (inject `serverTools`; provided by Maximal's composition
+  root, not by every host) — `register({ name, description, input_schema,
+  render, offer, clients?, execute(input, call) })` → disposer. A server tool is
+  one the model calls and Maximal runs inside the `/v1/messages` loop. `name`
+  matches `/^[a-z][a-z0-9_]{0,63}$/` and must be unique across plugins;
+  `description` is part of the prompt-cache prefix, so keep it fixed. `render:
+  "hidden"` keeps the call and its result from the client; `offer: "always"`
+  offers it on every agent turn of the `clients` (default `["claude-code"]`).
+  `call` has `signal`, `sessionId?`, `model`, `client` and `budget?` (the
+  `{ plugin, tool }` scope spend will be booked under; nothing enforces it yet).
+  Server tools are not MCP tools and have no tool permissions.
 
 ## Testing a plugin
 

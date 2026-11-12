@@ -8,6 +8,8 @@ export type PluginContractErrorCode =
   | "not-a-plugin"
   | "invalid-tool"
   | "duplicate-tool"
+  | "invalid-server-tool"
+  | "duplicate-server-tool"
   | "invalid-action"
   | "duplicate-action"
   | "invalid-status"

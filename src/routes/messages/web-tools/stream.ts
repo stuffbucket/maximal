@@ -2,9 +2,12 @@
  * Streaming agent loop for web-tools.
  *
  * Each Copilot inner call streams; events transform on the fly:
- *   tool_use{name in web_*}  →  server_tool_use (type rewrite)
- *   after that block ends    →  synthesized web_*_tool_result
- *   message_delta/stop       →  buffered until the loop terminates
+ *   tool_use{planned tool, anthropic-* render} →  server_tool_use (type rewrite)
+ *   after that block ends                      →  synthesized web_*_tool_result
+ *   tool_use{planned tool, hidden render}      →  swallowed: start, deltas,
+ *                                                 stop, and no result block
+ *   message_delta/stop                         →  buffered until the loop
+ *                                                 terminates
  *
  * Block indices remap from per-turn (0..n) to a monotonic client-facing
  * cursor that crosses turn boundaries.
@@ -12,6 +15,8 @@
  * Index-bookkeeping discipline (cribbed from ollama/ollama
  * middleware/anthropic.go's WebSearchAnthropicWriter):
  *   - Track open block via (clientIndex, isWebTool) per upstream index
+ *   - A hidden call takes no client index, so the client's indices stay
+ *     contiguous
  *   - Synthesized result blocks emit at the next free client cursor,
  *     start-then-stop with the full block as the start payload
  *     (no input_json_delta — Anthropic SSE emits these whole)
@@ -41,6 +46,7 @@ import type { CompactType } from "~/lib/models/compact"
 import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 
 import { debugLazy } from "~/lib/platform/logger"
+import { normalizeAnthropicUsage, type UsageTokens } from "~/lib/token-usage"
 import {
   createResponsesStreamState,
   translateResponsesStreamEvent,
@@ -49,24 +55,24 @@ import { translateAnthropicMessagesToResponsesPayload } from "~/routes/messages/
 import { getResponsesRequestOptions } from "~/routes/responses/utils"
 import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
 
+import type {
+  PlannedServerTool,
+  ServerToolPlan,
+  ServerToolRun,
+} from "../server-tools/types"
+
 import { translateToOpenAI } from "../non-stream-translation"
 import { translateChunkToAnthropicEvents } from "../stream-translation"
-import {
-  buildResultBlockForOutcome,
-  buildToolResultMessage,
-  executeToolUse,
-  type ExecOutcome,
-} from "./exec"
 import { type Executor } from "./executor"
-import { isWebToolName, type WebToolPolicy } from "./rewriter"
-import { newRequestState, type RequestState } from "./state"
+import { planWebTools } from "./listings"
+import { type WebToolPolicy } from "./rewriter"
 import {
   buildTurnUpstream,
   type TurnTransport,
   type TurnUpstream,
   type WebToolsUpstreamDeps,
 } from "./transport"
-import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./vocab"
+import { BLOCK_KIND, MAX_AGENT_TURNS } from "./vocab"
 
 /** The upstream chat-completions function. Exported so tests can
  *  type their stub without `as unknown as ...` casts. */
@@ -94,20 +100,32 @@ interface StreamingAgentArgs {
   /** Keepalive-ping interval for silent gaps (tool execution, next upstream
    *  turn). Test seam; defaults to {@link HEARTBEAT_INTERVAL_MS}. */
   heartbeatIntervalMs?: number
+  /** The server tools this request offers. Absent: the web tools `policy`
+   *  declares, run by `executor`. */
+  serverTools?: ServerToolPlan
+  /** Told the whole request's usage once, when the stream finished. Absent
+   *  for web-tools requests, which have never recorded it here. */
+  recordUsage?: (usage: UsageTokens) => void
 }
 
 export async function runStreamingAgent(
   args: StreamingAgentArgs,
 ): Promise<void> {
-  const { executor } = args
   const { logger } = args.options
-  const state = newRequestState(args.policy.declarations)
+  const plan =
+    args.serverTools
+    ?? planWebTools({
+      payload: args.initialPayload,
+      policy: args.policy,
+      executor: args.executor,
+    })
   const messages: Array<AnthropicMessage> = [...args.initialPayload.messages]
 
   // Cursor for client-facing block indices, monotonic across turns.
   const cursor = { next: 0 }
   let messageStartEmitted = false
   let bufferedFinalEvents: Array<AnthropicStreamEventData> = []
+  let lastTurn: TurnResult | undefined
   // Every intermediate turn is a real, separately-billed Copilot call. Only
   // the last turn's terminal events reach the client, so its lone usage count
   // would under-report the whole request. Sum every turn's usage and stamp the
@@ -124,7 +142,7 @@ export async function runStreamingAgent(
   debugLazy(logger, () => [
     "web-tools stream start",
     JSON.stringify({
-      decls: args.policy.declarations.map((d) => d.name),
+      decls: [...plan.tools.keys()],
       max_turns: MAX_AGENT_TURNS,
     }),
   ])
@@ -146,22 +164,24 @@ export async function runStreamingAgent(
       stream: args.stream,
       cursor,
       messageStartEmitted,
-      executor,
-      state,
+      plan,
       upstream,
       heartbeatIntervalMs,
     })
+    lastTurn = turnResult
     messageStartEmitted = turnResult.messageStartEmitted
     bufferedFinalEvents = turnResult.bufferedFinal
     accumulateTurnUsage(usageTotal, turnResult.bufferedFinal)
 
+    // A turn that also called a client tool goes back to the client as it
+    // stands: only the client has that tool's result. Our own calls ran
+    // already and the client saw what their render shows.
     if (
       turnResult.stopReason === "tool_use"
       && turnResult.outcomes.length > 0
+      && !turnResult.callsClientTool
     ) {
-      const toolResults = turnResult.outcomes.map(({ toolUse, outcome }) =>
-        buildToolResultMessage(toolUse.id, outcome),
-      )
+      const toolResults = turnResult.outcomes.map(({ run }) => run.toolResult)
       messages.push(
         { role: "assistant", content: turnResult.assistantContent },
         { role: "user", content: toolResults },
@@ -175,13 +195,26 @@ export async function runStreamingAgent(
     break
   }
 
+  // The loop ran out of turns while the model was still calling only hidden
+  // tools: no tool call is left for the client to answer.
+  const endedOnHiddenCalls =
+    lastTurn !== undefined
+    && lastTurn.stopReason === "tool_use"
+    && lastTurn.outcomes.length > 0
+    && !lastTurn.callsClientTool
+    && lastTurn.outcomes.every(({ run }) => run.clientBlock === undefined)
+
   // Emit the buffered terminal events from the last turn, stamping the summed
   // cross-turn usage onto the final message_delta so the client bills for every
   // turn, not just the last one.
   for (const ev of bufferedFinalEvents) {
-    if (ev.type === "message_delta") ev.usage = usageTotal
+    if (ev.type === "message_delta") {
+      ev.usage = usageTotal
+      if (endedOnHiddenCalls) ev.delta.stop_reason = "end_turn"
+    }
     await writeEvent(args.stream, ev)
   }
+  args.recordUsage?.(normalizeAnthropicUsage(usageTotal))
 }
 
 /**
@@ -218,7 +251,9 @@ function accumulateTurnUsage(
 interface TurnResult {
   stopReason: string | null
   assistantContent: Array<AnthropicAssistantContentBlock>
-  outcomes: Array<{ toolUse: AnthropicToolUseBlock; outcome: ExecOutcome }>
+  outcomes: Array<TurnOutcome>
+  /** The model also called a tool that is the client's. */
+  callsClientTool: boolean
   /** message_delta + message_stop captured but NOT yet forwarded; the
    *  caller forwards them only on the final turn. */
   bufferedFinal: Array<AnthropicStreamEventData>
@@ -227,27 +262,32 @@ interface TurnResult {
   messageStartEmitted: boolean
 }
 
+interface TurnOutcome {
+  toolUse: AnthropicToolUseBlock
+  run: ServerToolRun
+}
+
 interface TurnArgs {
   payload: AnthropicMessagesPayload
   options: StreamingAgentArgs["options"]
   stream: SSEStreamingApi
   cursor: { next: number }
   messageStartEmitted: boolean
-  executor: Executor
-  state: RequestState
+  plan: ServerToolPlan
   upstream: TurnUpstream
   heartbeatIntervalMs: number
 }
 
 interface OpenBlock {
-  /** Index assigned to the client. */
+  /** Index assigned to the client; -1 for a hidden call, which has none. */
   clientIndex: number
-  /** Whether this is one of our web tools (we'll execute on stop). */
-  isWebTool: boolean
-  /** For web-tool blocks: accumulated input_json_delta payload. */
+  /** The planned server tool this block calls, when it is one of ours
+   *  (we'll execute on stop). */
+  serverTool?: PlannedServerTool
+  /** For server-tool blocks: accumulated input_json_delta payload. */
   partialJson: string
   /** Block metadata captured at start, used for execution + accumulator. */
-  toolUse?: { id: string; name: ToolName }
+  toolUse?: { id: string; name: string }
   /** Accumulated text/thinking content for non-tool blocks. */
   text: string
   thinking: string
@@ -261,13 +301,11 @@ interface OpenBlock {
 
 async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
   const upstreamToClient = new Map<number, OpenBlock>()
-  const outcomes: Array<{
-    toolUse: AnthropicToolUseBlock
-    outcome: ExecOutcome
-  }> = []
+  const outcomes: Array<TurnOutcome> = []
   const assistantContent: Array<AnthropicAssistantContentBlock> = []
   const bufferedFinal: Array<AnthropicStreamEventData> = []
   let stopReason: string | null = null
+  const calls = { client: false }
   let messageStartEmitted = args.messageStartEmitted
 
   for await (const event of createTurnEventStream(args)) {
@@ -277,8 +315,8 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
       cursor: args.cursor,
       messageStartEmitted,
       stream: args.stream,
-      executor: args.executor,
-      state: args.state,
+      plan: args.plan,
+      calls,
       outcomes,
       assistantContent,
       bufferedFinal,
@@ -296,6 +334,7 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
     stopReason,
     assistantContent,
     outcomes,
+    callsClientTool: calls.client,
     bufferedFinal,
     messageStartEmitted,
   }
@@ -499,9 +538,10 @@ interface DispatchArgs {
   cursor: { next: number }
   messageStartEmitted: boolean
   stream: SSEStreamingApi
-  executor: Executor
-  state: RequestState
-  outcomes: Array<{ toolUse: AnthropicToolUseBlock; outcome: ExecOutcome }>
+  plan: ServerToolPlan
+  /** Set while dispatching: the model called a tool that is the client's. */
+  calls: { client: boolean }
+  outcomes: Array<TurnOutcome>
   assistantContent: Array<AnthropicAssistantContentBlock>
   bufferedFinal: Array<AnthropicStreamEventData>
   logger: ConsolaInstance
@@ -581,33 +621,37 @@ async function handleBlockStart(
   d: DispatchArgs,
   ev: Extract<AnthropicStreamEventData, { type: "content_block_start" }>,
 ): Promise<void> {
-  const clientIndex = d.cursor.next++
   const block = ev.content_block
 
-  // Narrow once: `isToolUse` puts `name` and `id` in scope below.
-  const isToolUse = block.type === "tool_use"
-  const isWebTool = isToolUse && isWebToolName(block.name)
+  const serverTool =
+    block.type === "tool_use" ? d.plan.tools.get(block.name) : undefined
+  if (block.type === "tool_use" && !serverTool) d.calls.client = true
+  // A hidden call is never shown, so it takes no index: the client's stay
+  // contiguous.
+  const clientIndex = serverTool?.hidden ? -1 : d.cursor.next++
 
   const open: OpenBlock = {
     clientIndex,
-    isWebTool,
+    serverTool,
     partialJson: "",
     text: "",
     thinking: "",
     signature: "",
     startBlock: block,
     blockKind: classifyBlock(block),
-    ...(isWebTool ?
-      { toolUse: { id: block.id, name: block.name as ToolName } }
+    ...(serverTool && block.type === "tool_use" ?
+      { toolUse: { id: block.id, name: block.name } }
     : {}),
   }
   d.upstreamToClient.set(ev.index, open)
 
-  // Rewrite type for our web tools: tool_use → server_tool_use. Wire
-  // shape: id, name, input — identical to tool_use. The existing typed
+  if (serverTool?.hidden) return
+
+  // Rewrite type for our `anthropic-*` tools: tool_use → server_tool_use.
+  // Wire shape: id, name, input — identical to tool_use. The existing typed
   // event union doesn't model server_tool_use, so we write the rewritten
   // JSON directly to the SSE stream.
-  if (isWebTool) {
+  if (serverTool && block.type === "tool_use") {
     const rewritten = {
       type: "content_block_start",
       index: clientIndex,
@@ -634,8 +678,9 @@ async function handleBlockDelta(
   const open = d.upstreamToClient.get(ev.index)
   if (!open) return
   const remapped = { ...ev, index: open.clientIndex }
-  if (ev.delta.type === "input_json_delta" && open.isWebTool) {
+  if (ev.delta.type === "input_json_delta" && open.serverTool) {
     open.partialJson += ev.delta.partial_json
+    if (open.serverTool.hidden) return
   } else if (ev.delta.type === "text_delta" && open.blockKind === "text") {
     open.text += ev.delta.text
   } else if (
@@ -658,10 +703,12 @@ async function handleBlockStop(
 ): Promise<void> {
   const open = d.upstreamToClient.get(ev.index)
   if (!open) return
-  await writeEvent(d.stream, {
-    type: "content_block_stop",
-    index: open.clientIndex,
-  })
+  if (!open.serverTool?.hidden) {
+    await writeEvent(d.stream, {
+      type: "content_block_stop",
+      index: open.clientIndex,
+    })
+  }
   d.upstreamToClient.delete(ev.index)
 
   // Build assistant-content entry for the loop's next-turn message.
@@ -696,20 +743,19 @@ async function handleBlockStop(
     }
     d.assistantContent.push(toolUseBlock)
 
-    if (open.isWebTool && isWebToolName(toolUseBlock.name)) {
-      // Execute, emit synthesized result block at the next cursor. The
-      // isWebToolName guard narrows `name` to ToolName for the call.
-      const narrowed = toolUseBlock as AnthropicToolUseBlock & {
-        name: ToolName
-      }
+    if (open.serverTool) {
+      // Execute (pings keep the stream alive meanwhile). An `anthropic-*`
+      // tool then emits its result block at the next cursor; a hidden one
+      // emits nothing.
+      const { serverTool } = open
       const t0 = Date.now()
-      const outcome = await withHeartbeat(
+      const run = await withHeartbeat(
         {
           stream: d.stream,
           messageStartEmitted: d.messageStartEmitted,
           intervalMs: d.heartbeatIntervalMs,
         },
-        () => executeToolUse(narrowed, d.executor, d.state),
+        () => serverTool.run(toolUseBlock),
       )
       const ms = Date.now() - t0
       debugLazy(d.logger, () => [
@@ -717,28 +763,28 @@ async function handleBlockStop(
         JSON.stringify({
           tool: toolUseBlock.name,
           id: toolUseBlock.id,
-          ok: outcome.ok,
-          ...(outcome.ok ? {} : { code: outcome.code }),
+          ok: run.ok,
+          ...(run.ok ? {} : { code: run.code }),
           ms,
         }),
       ])
-      d.outcomes.push({ toolUse: toolUseBlock, outcome })
+      d.outcomes.push({ toolUse: toolUseBlock, run })
 
-      const resultIndex = d.cursor.next++
-      const resultBlock = buildResultBlockForOutcome(toolUseBlock.id, outcome)
-
-      await writeEvent(d.stream, {
-        type: "content_block_start",
-        index: resultIndex,
-        content_block: resultBlock as unknown as Extract<
-          AnthropicStreamEventData,
-          { type: "content_block_start" }
-        >["content_block"],
-      })
-      await writeEvent(d.stream, {
-        type: "content_block_stop",
-        index: resultIndex,
-      })
+      if (run.clientBlock) {
+        const resultIndex = d.cursor.next++
+        await writeEvent(d.stream, {
+          type: "content_block_start",
+          index: resultIndex,
+          content_block: run.clientBlock as unknown as Extract<
+            AnthropicStreamEventData,
+            { type: "content_block_start" }
+          >["content_block"],
+        })
+        await writeEvent(d.stream, {
+          type: "content_block_stop",
+          index: resultIndex,
+        })
+      }
     }
   }
 }
