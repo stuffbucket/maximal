@@ -13,12 +13,21 @@ export type CopilotPostBody = Record<string, unknown> | FormData
  * JSON, through the same error tail as the inference calls. A `FormData` body goes out without the base headers'
  * `content-type`, so `fetch` writes the multipart type with a fresh boundary.
  * No timeout: image generation can take minutes; `signal` ends the call when
- * the client goes away.
+ * the client goes away. `sendRequest` swaps the transport (tests, and the
+ * Copilot provider's injected seam).
  */
 export const postCopilotJson = async <T>(
   path: string,
   body: CopilotPostBody,
-  { signal, errorMessage }: { signal?: AbortSignal; errorMessage: string },
+  {
+    signal,
+    errorMessage,
+    sendRequest: send = sendRequest,
+  }: {
+    signal?: AbortSignal
+    errorMessage: string
+    sendRequest?: typeof sendRequest
+  },
 ): Promise<T> => {
   requireCopilotToken()
 
@@ -33,7 +42,7 @@ export const postCopilotJson = async <T>(
       )
     : baseHeaders
 
-  const response = await sendRequest(`${copilotBaseUrl(state)}${path}`, {
+  const response = await send(`${copilotBaseUrl(state)}${path}`, {
     method: "POST",
     headers,
     body: isForm ? body : JSON.stringify(body),

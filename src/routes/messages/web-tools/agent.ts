@@ -15,28 +15,31 @@ import type {
   AnthropicMessage,
   AnthropicMessagesPayload,
   AnthropicResponse,
-  AnthropicToolResultBlock,
   AnthropicToolUseBlock,
 } from "~/lib/models/anthropic-types"
 
 import { debugLazy } from "~/lib/platform/logger"
+import {
+  normalizeAnthropicUsage,
+  withCopilotCost,
+  type UsageTokens,
+} from "~/lib/token-usage"
 
+import type {
+  PlannedServerTool,
+  ServerToolClientBlock,
+  ServerToolPlan,
+  ServerToolRun,
+} from "../server-tools/types"
 import type { Executor } from "./executor"
 
-import {
-  buildResultBlockForOutcome,
-  buildToolResultMessage,
-  executeToolUse,
-  type ExecOutcome,
-  type ResultOutBlock,
-} from "./exec"
-import { isWebToolName, type WebToolPolicy } from "./rewriter"
-import { newRequestState } from "./state"
-import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./vocab"
+import { planWebTools } from "./listings"
+import { type WebToolPolicy } from "./rewriter"
+import { BLOCK_KIND, MAX_AGENT_TURNS } from "./vocab"
 
 interface RoundTrip {
   toolUseId: string
-  outcome: ExecOutcome
+  run: ServerToolRun
 }
 
 interface Turn {
@@ -53,13 +56,21 @@ export interface AgentLoopArgs {
    *  the cadence of api-flows.ts. Tests pass `undefined` to keep output
    *  quiet. */
   logger?: ConsolaInstance
+  /** The server tools this request offers. Absent: the web tools `policy`
+   *  declares, run by `executor`. */
+  serverTools?: ServerToolPlan
+  /** Told the whole request's usage once, when the loop finishes. Absent for
+   *  web-tools requests, which have never recorded it here. */
+  recordUsage?: (usage: UsageTokens) => void
 }
 
 export async function runAgentLoop(
   args: AgentLoopArgs,
 ): Promise<AnthropicResponse> {
   const { initialPayload, policy, executor, callOnce, logger } = args
-  const state = newRequestState(policy.declarations)
+  const plan =
+    args.serverTools
+    ?? planWebTools({ payload: initialPayload, policy, executor })
   const messages: Array<AnthropicMessage> = [...initialPayload.messages]
   const turns: Array<Turn> = []
 
@@ -74,7 +85,7 @@ export async function runAgentLoop(
     debugLazy(logger, () => [
       "web-tools agent start",
       JSON.stringify({
-        decls: policy.declarations.map((d) => d.name),
+        decls: [...plan.tools.keys()],
         max_turns: MAX_AGENT_TURNS,
       }),
     ])
@@ -95,7 +106,7 @@ export async function runAgentLoop(
     accumulateTurnUsage(usageTotal, last)
 
     const content = Array.isArray(last.content) ? last.content : []
-    const ours = content.filter((block) => isOurToolUse(block))
+    const ours = content.filter((block) => isOurToolUse(block, plan))
 
     if (ours.length === 0 || last.stop_reason !== "tool_use") {
       if (logger) {
@@ -108,34 +119,17 @@ export async function runAgentLoop(
       break
     }
 
-    const trips: Array<RoundTrip> = []
-    const toolResults: Array<AnthropicToolResultBlock> = []
-    for (const block of content) {
-      if (!isOurToolUse(block)) continue
-      const t0 = Date.now()
-      const outcome = await executeToolUse(block, executor, state)
-      const ms = Date.now() - t0
-      if (logger) {
-        debugLazy(logger, () => [
-          "web-tools outcome",
-          JSON.stringify({
-            tool: block.name,
-            id: block.id,
-            ok: outcome.ok,
-            ...(outcome.ok ? {} : { code: outcome.code }),
-            ms,
-          }),
-        ])
-      }
-      trips.push({ toolUseId: block.id, outcome })
-      toolResults.push(buildToolResultMessage(block.id, outcome))
-    }
-
+    const trips = await runOurCalls(content, plan, logger)
     turns.push({ assistant: content, trips })
+
+    // The model also called a tool of the client's, and only the client has
+    // its result: the turn goes back to the client as it stands. Our own
+    // calls already ran and are woven in below.
+    if (callsClientTool(content, plan)) break
 
     messages.push(
       { role: "assistant", content },
-      { role: "user", content: toolResults },
+      { role: "user", content: trips.map((trip) => trip.run.toolResult) },
     )
   }
 
@@ -149,13 +143,65 @@ export async function runAgentLoop(
     }
   }
 
-  return synthesizeFinalResponse(last as AnthropicResponse, turns, usageTotal)
+  const response = synthesizeFinalResponse(
+    last as AnthropicResponse,
+    { turns, plan },
+    usageTotal,
+  )
+  args.recordUsage?.(
+    withCopilotCost(
+      normalizeAnthropicUsage(response.usage),
+      response.copilot_usage,
+    ),
+  )
+  return response
+}
+
+/** Run every call of ours in one assistant turn, in order. */
+async function runOurCalls(
+  content: Array<AnthropicAssistantContentBlock>,
+  plan: ServerToolPlan,
+  logger: ConsolaInstance | undefined,
+): Promise<Array<RoundTrip>> {
+  const trips: Array<RoundTrip> = []
+  for (const block of content) {
+    if (!isOurToolUse(block, plan)) continue
+    const t0 = Date.now()
+    const run = await (plan.tools.get(block.name) as PlannedServerTool).run(
+      block,
+    )
+    const ms = Date.now() - t0
+    if (logger) {
+      debugLazy(logger, () => [
+        "web-tools outcome",
+        JSON.stringify({
+          tool: block.name,
+          id: block.id,
+          ok: run.ok,
+          ...(run.ok ? {} : { code: run.code }),
+          ms,
+        }),
+      ])
+    }
+    trips.push({ toolUseId: block.id, run })
+  }
+  return trips
 }
 
 function isOurToolUse(
   block: AnthropicAssistantContentBlock,
-): block is AnthropicToolUseBlock & { name: ToolName } {
-  return block.type === "tool_use" && isWebToolName(block.name)
+  plan: ServerToolPlan,
+): block is AnthropicToolUseBlock {
+  return block.type === "tool_use" && plan.tools.has(block.name)
+}
+
+function callsClientTool(
+  content: Array<AnthropicAssistantContentBlock>,
+  plan: ServerToolPlan,
+): boolean {
+  return content.some(
+    (block) => block.type === "tool_use" && !plan.tools.has(block.name),
+  )
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -216,52 +262,69 @@ function accumulateTurnUsage(total: UsageTotal, resp: AnthropicResponse): void {
 interface ServerToolUseBlock {
   type: typeof BLOCK_KIND.serverToolUse
   id: string
-  name: ToolName
+  name: string
   input: Record<string, unknown>
 }
 
 type SynthesizedBlock =
   | AnthropicAssistantContentBlock
   | ServerToolUseBlock
-  | ResultOutBlock
+  | ServerToolClientBlock
 
 function buildServerToolUse(tu: AnthropicToolUseBlock): ServerToolUseBlock {
   return {
     type: BLOCK_KIND.serverToolUse,
     id: tu.id,
-    name: tu.name as ToolName,
+    name: tu.name,
     input: tu.input,
   }
 }
 
-function weaveTurn(turn: Turn): Array<SynthesizedBlock> {
-  if (turn.trips.length === 0) return turn.assistant
+/** A turn as the client sees it. A call to an `anthropic-*` tool becomes
+ *  `server_tool_use` + its result block; a call to a `hidden` tool becomes
+ *  nothing (the text around it stays). */
+function weaveTurn(turn: Turn, plan: ServerToolPlan): Array<SynthesizedBlock> {
   const tripById = new Map<string, RoundTrip>(
     turn.trips.map((t) => [t.toolUseId, t]),
   )
   const out: Array<SynthesizedBlock> = []
   for (const block of turn.assistant) {
-    if (block.type === "tool_use" && tripById.has(block.id)) {
-      const trip = tripById.get(block.id) as RoundTrip
-      out.push(
-        buildServerToolUse(block),
-        buildResultBlockForOutcome(trip.toolUseId, trip.outcome),
-      )
-    } else {
+    if (block.type !== "tool_use") {
+      out.push(block)
+    } else if (tripById.has(block.id)) {
+      const { clientBlock } = (tripById.get(block.id) as RoundTrip).run
+      if (clientBlock) out.push(buildServerToolUse(block), clientBlock)
+    } else if (!plan.tools.get(block.name)?.hidden) {
+      // A hidden call that never ran (the reply was cut off mid-call) is
+      // not for the client either.
       out.push(block)
     }
   }
   return out
 }
 
+/** The loop ran out of turns while the model was still calling only hidden
+ *  tools, so no tool call is left for the client to answer. */
+function endsOnHiddenCalls(
+  turn: Turn | undefined,
+  plan: ServerToolPlan,
+): boolean {
+  if (!turn || turn.trips.length === 0) return false
+  return (
+    turn.trips.every((trip) => trip.run.clientBlock === undefined)
+    && !callsClientTool(turn.assistant, plan)
+  )
+}
+
 function synthesizeFinalResponse(
   last: AnthropicResponse,
-  turns: Array<Turn>,
+  run: { turns: Array<Turn>; plan: ServerToolPlan },
   usageTotal: UsageTotal,
 ): AnthropicResponse {
+  const { turns, plan } = run
   const synthesized: Array<SynthesizedBlock> = []
   for (const turn of turns) {
-    for (const block of weaveTurn(turn)) synthesized.push(block)
+    for (const block of weaveTurn(turn, plan)) synthesized.push(block)
   }
   // Replace the last-turn-only usage with the cross-turn total so the client
   // bills for every turn's upstream call, not just the final one.
@@ -278,9 +341,14 @@ function synthesizeFinalResponse(
       { service_tier: usageTotal.service_tier }
     : {}),
   }
+  const stopReason =
+    last.stop_reason === "tool_use" && endsOnHiddenCalls(turns.at(-1), plan) ?
+      "end_turn"
+    : last.stop_reason
   return {
     ...last,
     content: synthesized as Array<AnthropicAssistantContentBlock>,
+    stop_reason: stopReason,
     usage,
     ...(usageTotal.copilot_total_nano_aiu !== undefined ?
       { copilot_usage: { total_nano_aiu: usageTotal.copilot_total_nano_aiu } }

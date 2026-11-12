@@ -6,6 +6,8 @@
  * into the core. The only runtime values are `PluginGatewayError` and its
  * guard, and the tool-permission wording the host and the MCP layer share.
  */
+import type { OperationDispatch } from "./operations"
+import type { ServerToolCall, ServerToolView } from "./server-tools"
 import type {
   JsonSchemaObject,
   PluginKind,
@@ -138,6 +140,31 @@ export interface PluginGateway {
     input: Record<string, unknown>,
     call: ToolCallContext,
   ): Promise<ToolResult>
+  /**
+   * The operation registry's cordis-free view: what enabled plugins serve for
+   * `systemone`, `decisions` and `images.*`. Always the same live object.
+   */
+  operations(): OperationDispatch
+  /**
+   * Every server tool the active plugins have registered, ordered by name.
+   * `[]` when no plugin provides any. The app core offers these to the model
+   * in the `/v1/messages` loop. (Server tools take no part in MCP tool
+   * permissions: a plugin that wants one switchable puts that in its config
+   * and registers or withdraws the tool.)
+   */
+  serverTools(): Array<ServerToolView>
+  /**
+   * Run one server tool. Throws `unknown-plugin` / `plugin-inactive` /
+   * `unknown-tool`. A tool that throws resolves to
+   * `{ isError: true, content: [{ type: "text", text }] }`, like `callTool`.
+   * The host sets `call.budget` to the tool's own `{ plugin, tool }`.
+   */
+  callServerTool(
+    pluginId: string,
+    name: string,
+    input: Record<string, unknown>,
+    call: ServerToolCall,
+  ): Promise<ToolResult>
   /** Throws `unknown-plugin` / `plugin-inactive` / `unknown-action`; rejects if the handler throws. */
   runAction(
     pluginId: string,
@@ -230,6 +257,54 @@ export function isPluginGatewayError(
   return (GATEWAY_ERROR_CODES as ReadonlyArray<unknown>).includes(code)
 }
 
+/**
+ * Thrown by `OperationDispatch.dispatch` when no enabled plugin serves the
+ * model for the operation (the plugin is off, or the id is unknown or
+ * ambiguous).
+ */
+export class OperationUnavailableError extends Error {
+  readonly operation: string
+  readonly model: string
+
+  constructor(operation: string, model: string) {
+    super(`No enabled plugin serves "${model}" for ${operation}.`)
+    this.name = "OperationUnavailableError"
+    this.operation = operation
+    this.model = model
+  }
+}
+
+/** Structural guard (works across duplicated module copies). */
+export function isOperationUnavailableError(
+  error: unknown,
+): error is OperationUnavailableError {
+  return (
+    error instanceof OperationUnavailableError
+    || (error instanceof Error && error.name === "OperationUnavailableError")
+  )
+}
+export type {
+  ModelBinding,
+  ModelOperation,
+  OperationDispatch,
+  OperationRequest,
+  OperationResult,
+  ServedModel,
+} from "./operations"
+export type {
+  ProviderCall,
+  ProviderModelInfo,
+  ProviderQuotaWindow,
+  ProviderRegistry,
+  UpstreamProvider,
+} from "./providers"
+export type {
+  ServerToolBudget,
+  ServerToolCall,
+  ServerToolOffer,
+  ServerToolRender,
+  ServerToolView,
+} from "./server-tools"
 export type {
   ConnectorAuth,
   ConnectorLaneLimits,

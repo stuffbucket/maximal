@@ -12,8 +12,23 @@ import { watch } from "node:fs"
  *   bun scripts/build.ts --out <dir>     # write somewhere else
  *   bun scripts/build.ts --watch         # rebuild when src/ changes
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { mkdir, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
+
+// Embedded when bundled, so a compiled Maximal can write the plugin without
+// the repo's source tree beside it.
+import packageJson from "../package.json" with { type: "json" }
+import codeSource from "../src/legacy/code.js" with { type: "text" }
+import uiSource from "../src/legacy/ui.html" with { type: "text" }
+
+// The text imports are typed as a module (code.js) or a bundle (ui.html); at
+// runtime Bun gives the file's text.
+function embeddedText(source: unknown, name: string): string {
+  if (typeof source !== "string") {
+    throw new TypeError(`The embedded ${name} is not text.`)
+  }
+  return source
+}
 
 const PACKAGE_DIR = path.resolve(import.meta.dir, "..")
 const SOURCE_DIR = path.join(PACKAGE_DIR, "src")
@@ -39,15 +54,8 @@ export interface BuildResult {
   files: Array<string>
 }
 
-interface PackageJson {
-  version: string
-}
-
-export async function readPackageVersion(): Promise<string> {
-  const pkg = JSON.parse(
-    await readFile(path.join(PACKAGE_DIR, "package.json"), "utf8"),
-  ) as PackageJson
-  return pkg.version
+export function readPackageVersion(): Promise<string> {
+  return Promise.resolve(packageJson.version)
 }
 
 /** The sandbox source with its version line set to `version`. */
@@ -102,14 +110,10 @@ export async function buildPlugin(options: BuildOptions): Promise<BuildResult> {
     maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
     bridgePort: options.bridgePort ?? DEFAULT_BRIDGE_PORT,
   }
-  const [code, ui] = await Promise.all([
-    readFile(path.join(SOURCE_DIR, "legacy", "code.js"), "utf8"),
-    readFile(path.join(SOURCE_DIR, "legacy", "ui.html"), "utf8"),
-  ])
   await mkdir(options.outDir, { recursive: true })
   const files = {
-    "code.js": stampVersion(code, version),
-    "ui.html": ui,
+    "code.js": stampVersion(embeddedText(codeSource, "code.js"), version),
+    "ui.html": embeddedText(uiSource, "ui.html"),
     "manifest.json": `${JSON.stringify(pluginManifest(resolved), null, 2)}\n`,
   }
   await Promise.all(

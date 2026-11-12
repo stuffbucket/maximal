@@ -8,12 +8,18 @@ export type PluginContractErrorCode =
   | "not-a-plugin"
   | "invalid-tool"
   | "duplicate-tool"
+  | "invalid-server-tool"
+  | "duplicate-server-tool"
   | "invalid-action"
   | "duplicate-action"
   | "invalid-status"
   | "invalid-notice"
   | "invalid-storage-name"
   | "invalid-url"
+  | "invalid-operation"
+  | "duplicate-operation"
+  | "invalid-provider"
+  | "duplicate-provider"
 
 /**
  * Thrown when a plugin (or a plugin list) violates the plugin contract:

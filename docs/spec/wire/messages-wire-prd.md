@@ -146,6 +146,17 @@ else                            ──▶ handleWithChatCompletions (Copilot /ch
   `web_*_tool_result` blocks a client echoes back, sends signed and
   redacted thinking back with each tool call, and counts each turn's
   `message_start` input and cache tokens in the summed usage.
+- Plugin server tools join the loop: after classification, `planServerToolsForRequest`
+  adds the tools `always` offers (not on a compaction, only for a client the
+  tool allows, only when the client declared tools of its own and a client
+  tool of the same name does not exist) after the client's tools, sorted by
+  name, so the `tools` array is the same bytes on every turn. A request that
+  offers one runs through the loop on the native `/v1/messages` transport
+  where the model uses it. A `hidden` tool's `tool_use` and result never
+  reach the client: streamed, the blocks are dropped and the next block takes
+  the next index; buffered, the response is synthesized without them. A turn
+  that also calls a client tool is returned to the client with only the
+  client's call.
 - `shouldUseMessagesApi` requires the `useMessagesApi` config flag
   (default `true`) **and** `supported_endpoints` ∋ `/v1/messages`.
 - `shouldUseResponsesApi` requires `supported_endpoints` ∋ `/responses`.

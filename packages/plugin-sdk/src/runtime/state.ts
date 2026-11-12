@@ -1,5 +1,6 @@
 import type { Context, Fiber } from "@deepseek-ai/cordis"
 
+import type { ServerToolDefinition } from "../server-tools"
 import type {
   PluginActionHandler,
   PluginDisposer,
@@ -31,6 +32,11 @@ interface ToolEntry {
   owner: Registration
 }
 
+interface ServerToolEntry {
+  definition: Readonly<ServerToolDefinition>
+  owner: Registration
+}
+
 interface ActionEntry {
   handler: PluginActionHandler
   owner: Registration
@@ -42,6 +48,7 @@ export class PluginSlot {
   readonly fiber: Fiber
   readonly tools = new Map<string, ToolEntry>()
   readonly actions = new Map<string, ActionEntry>()
+  readonly serverTools = new Map<string, ServerToolEntry>()
   readonly registrations = new Set<Registration>()
   status: Readonly<PluginStatus> | undefined
   attached = true
@@ -98,6 +105,7 @@ export class PluginRuntime {
     for (const registration of slot.registrations) retire(registration)
     slot.registrations.clear()
     slot.actions.clear()
+    slot.serverTools.clear()
     const hadTools = slot.tools.size > 0
     const hadStatus = slot.status !== undefined
     slot.tools.clear()
@@ -134,6 +142,29 @@ export class PluginRuntime {
 
   tool(pluginId: string, name: string): Readonly<ToolDefinition> | undefined {
     return this.#slots.get(pluginId)?.tools.get(name)?.definition
+  }
+
+  /** The server tools the plugin's current activation registered. */
+  serverTools(pluginId: string): Array<Readonly<ServerToolDefinition>> {
+    const slot = this.#slots.get(pluginId)
+    return slot ?
+        [...slot.serverTools.values()].map((entry) => entry.definition)
+      : []
+  }
+
+  serverTool(
+    pluginId: string,
+    name: string,
+  ): Readonly<ServerToolDefinition> | undefined {
+    return this.#slots.get(pluginId)?.serverTools.get(name)?.definition
+  }
+
+  /** Which plugin has a server tool called `name` registered right now. */
+  serverToolOwner(name: string): string | undefined {
+    for (const slot of this.#slots.values()) {
+      if (slot.serverTools.has(name)) return slot.id
+    }
+    return undefined
   }
 
   status(pluginId: string): Readonly<PluginStatus> | undefined {
@@ -213,6 +244,25 @@ export class PluginRuntime {
     this.#emit(slot, "tools")
   }
 
+  /** Throws `duplicate-server-tool` when any plugin already has `name`. */
+  addServerTool(
+    slot: PluginSlot,
+    definition: Readonly<ServerToolDefinition>,
+    registration: Registration,
+  ): void {
+    const owner = this.serverToolOwner(definition.name)
+    if (owner !== undefined) {
+      throw new PluginContractError(
+        "duplicate-server-tool",
+        owner === slot.id ?
+          `Plugin "${slot.id}" already registered server tool "${definition.name}".`
+        : `Plugin "${slot.id}" cannot register server tool "${definition.name}": plugin "${owner}" already has it.`,
+        { pluginId: slot.id },
+      )
+    }
+    slot.serverTools.set(definition.name, { definition, owner: registration })
+  }
+
   // eslint-disable-next-line max-params -- internal runtime API; slot/id/handler/registration are all required and positional
   addAction(
     slot: PluginSlot,
@@ -279,6 +329,9 @@ export class PluginRuntime {
     }
     for (const [id, entry] of slot.actions) {
       if (entry.owner === registration) slot.actions.delete(id)
+    }
+    for (const [name, entry] of slot.serverTools) {
+      if (entry.owner === registration) slot.serverTools.delete(name)
     }
     if (toolsChanged) this.#emit(slot, "tools")
   }

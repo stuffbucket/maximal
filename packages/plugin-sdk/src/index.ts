@@ -21,6 +21,13 @@ import type {
 } from "./types"
 
 export { PluginContractError, type PluginContractErrorCode } from "./errors"
+export {
+  isOperationUnavailableError,
+  OperationUnavailableError,
+} from "./gateway"
+export * from "./operations"
+export * from "./providers"
+export * from "./server-tools"
 export * from "./types"
 export { Context, Service } from "@deepseek-ai/cordis"
 

@@ -10,6 +10,7 @@ import type {
   AnthropicTool,
 } from "~/lib/models/anthropic-types"
 
+import type { ServerToolDeclaration } from "../server-tools/types"
 import type { WebToolDecl } from "./types"
 
 import {
@@ -78,7 +79,7 @@ export function splitWebTools(
 // closely enough that the model uses them in the same situations.
 // ────────────────────────────────────────────────────────────────────
 
-const WEB_FETCH_SHIM: AnthropicTool = {
+export const WEB_FETCH_SHIM: ServerToolDeclaration = {
   name: TOOL_NAME.webFetch,
   description:
     "Fetch the content of a web page or document at a URL and return it as markdown text. The URL must be one that already appears in the conversation; do not invent URLs.",
@@ -94,7 +95,7 @@ const WEB_FETCH_SHIM: AnthropicTool = {
   },
 }
 
-const WEB_SEARCH_SHIM: AnthropicTool = {
+export const WEB_SEARCH_SHIM: ServerToolDeclaration = {
   name: TOOL_NAME.webSearch,
   description:
     "Search the web for information matching a query. Returns a list of result URLs and titles. Follow up with web_fetch to get the actual content of a result.",
@@ -108,29 +109,6 @@ const WEB_SEARCH_SHIM: AnthropicTool = {
     },
     required: ["query"],
   },
-}
-
-/** Append client-side shim tool declarations matching the stripped
- *  server-side ones, so the model sees web_search/web_fetch as regular
- *  tools it can call. Idempotent: skips if a tool of the same name is
- *  already present (e.g. the client added one explicitly). */
-export function attachClientShims(
-  payload: AnthropicMessagesPayload,
-  policy: WebToolPolicy,
-): void {
-  if (policy.declarations.length === 0) return
-
-  const tools: Array<AnthropicTool> = payload.tools ?? []
-  const existing = new Set<string>(tools.map((t) => t.name))
-
-  if (policy.hasFetch && !existing.has(TOOL_NAME.webFetch)) {
-    tools.push(WEB_FETCH_SHIM)
-  }
-  if (policy.hasSearch && !existing.has(TOOL_NAME.webSearch)) {
-    tools.push(WEB_SEARCH_SHIM)
-  }
-
-  payload.tools = tools
 }
 
 export function isWebToolName(name: string): name is ToolName {

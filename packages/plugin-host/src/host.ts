@@ -1,5 +1,6 @@
 import type { Fiber, Plugin } from "@deepseek-ai/cordis"
 import type {
+  OperationDispatch,
   PluginGateway,
   PluginGatewayEvent,
   PluginLifecycle,
@@ -9,6 +10,8 @@ import type {
   PluginToolsSource,
   PluginToolListing,
   PluginToolView,
+  ServerToolCall,
+  ServerToolView,
   ToolCallContext,
   ToolDefinitionPublic,
   ToolPermission,
@@ -39,6 +42,7 @@ import {
   migrateSettingsDocument,
   newSettingsDocument,
   nonJsonPath,
+  operationDispatchOf,
   normalizeManifest,
   parsePluginConfig,
   parseSettingsDocument,
@@ -60,6 +64,8 @@ import {
   type PluginStorageBackend,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
 import path from "node:path"
+
+import { listServerToolViews, runServerTool } from "./server-tools"
 
 /** The size the SDK refuses to read a settings file above (1 MiB). */
 const MAX_SETTINGS_FILE_BYTES = 1024 * 1024
@@ -222,6 +228,7 @@ class PluginHost implements PluginGateway {
   readonly #records = new Map<string, PluginRecord>()
   readonly #listeners = new Set<(event: PluginGatewayEvent) => void>()
   readonly #host: HostServices
+  readonly #operations: OperationDispatch
   readonly #storage: PluginStorageBackend
   #queue: Promise<void> = Promise.resolve()
   #disposed = false
@@ -229,6 +236,7 @@ class PluginHost implements PluginGateway {
 
   constructor(options: PluginHostOptions) {
     this.#host = options.services.host
+    this.#operations = operationDispatchOf(this.#root)
     this.#runtime = new PluginRuntime({
       onChange: (event) => {
         if (event.type === "tools") this.#scheduleCatalog(event.pluginId)
@@ -290,6 +298,10 @@ class PluginHost implements PluginGateway {
     return this.#enqueue(() => this.#reconcileNow(settings))
   }
 
+  operations(): OperationDispatch {
+    return this.#operations
+  }
+
   list(): Array<PluginSnapshot> {
     return [...this.#records.values()].map((record) => this.#snapshot(record))
   }
@@ -346,6 +358,37 @@ class PluginHost implements PluginGateway {
     const signal =
       lifetime ? AbortSignal.any([call.signal, lifetime]) : call.signal
     return await invokeTool(tool, input, { ...call, signal })
+  }
+
+  serverTools(): Array<ServerToolView> {
+    const active = [...this.#records.values()]
+      .filter((record) => record.lifecycle === "active")
+      .map((record) => record.id)
+    return listServerToolViews(this.#runtime, active)
+  }
+
+  // eslint-disable-next-line max-params -- implements the PluginGateway.callServerTool contract
+  async callServerTool(
+    pluginId: string,
+    name: string,
+    input: Record<string, unknown>,
+    call: ServerToolCall,
+  ): Promise<ToolResult> {
+    const record = this.#activeRecord(pluginId)
+    const tool = this.#runtime.serverTool(pluginId, name)
+    if (!tool)
+      throw new PluginGatewayError(
+        "unknown-tool",
+        pluginId,
+        `Plugin "${pluginId}" has no server tool "${name}".`,
+      )
+    return await runServerTool({
+      tool,
+      pluginId,
+      input,
+      call,
+      lifetime: record.lifetime?.signal,
+    })
   }
 
   async runAction(
@@ -693,16 +736,32 @@ class PluginHost implements PluginGateway {
 
   async #reconcileNow(settings: PluginSettings | undefined): Promise<void> {
     if (this.#disposed) return
-    await Promise.all(
-      [...this.#records.values()].map(async (record) => {
-        const entry = settingsEntry(settings, record.id)
-        const enabled = entry?.enabled === true
-        const enabledChanged = record.enabled !== enabled
-        record.enabled = enabled
-        await this.#load(record)
-        await this.#converge(record, enabledChanged)
-      }),
+    const records = [...this.#records.values()]
+    const changes = records.map((record) => {
+      const enabled = settingsEntry(settings, record.id)?.enabled === true
+      const enabledChanged = record.enabled !== enabled
+      record.enabled = enabled
+      return enabledChanged
+    })
+    // Read in parallel, but converge in record order: what plugins register
+    // (operations, providers, server tools) must not depend on I/O timing.
+    const loads = await Promise.allSettled(
+      records.map((record) => this.#load(record)),
     )
+    let failure: { error: unknown } | undefined
+    for (const [index, record] of records.entries()) {
+      const load = loads[index]
+      if (load.status === "rejected") {
+        failure ??= { error: load.reason }
+        continue
+      }
+      try {
+        await this.#converge(record, changes[index])
+      } catch (error) {
+        failure ??= { error }
+      }
+    }
+    if (failure) throw failure.error
   }
 
   /** Start/stop/reload the plugin to match `enabled` and its settings. */

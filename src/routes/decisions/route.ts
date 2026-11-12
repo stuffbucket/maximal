@@ -1,33 +1,32 @@
 /**
- * `/v1/decisions` (the OpenAI Decisions API): relayed to Copilot's
- * `/v1/decisions` and answered with its JSON unchanged.
+ * `/v1/decisions` (the OpenAI Decisions API): dispatched to the `decisions`
+ * operation (today Copilot's `/v1/decisions`, through the built-in handler)
+ * and answered with the JSON unchanged.
  *
- * `createDecisionsRoutes(deps)` lets tests inject the upstream call without a
- * process-wide `mock.module` (docs/architecture.md § Testing gotchas).
+ * `createDecisionsRoutes(deps)` lets tests inject the operation dispatch (or
+ * the built-in upstream call) without a process-wide `mock.module`
+ * (docs/architecture.md § Testing gotchas).
  */
+
+import type { OperationDispatch } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { Hono } from "hono"
 
 import { requireGithubAuth } from "~/lib/auth/request-auth"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
 import {
-  createCopilotTokenUsageRecorder,
-  normalizeResponsesUsage,
-} from "~/lib/token-usage"
-import { admitUpstreamRequest, requestedModel } from "~/routes/passthrough"
-import {
-  createDecisions as defaultCreateDecisions,
-  type DecisionsPayload,
-} from "~/services/copilot/create-decisions"
+  type BuiltinOperationDeps,
+  createBuiltinOperationDispatch,
+} from "~/lib/operations/builtin"
+import { runOperation } from "~/routes/passthrough"
 
-export interface DecisionsRoutesDeps {
-  createDecisions: typeof defaultCreateDecisions
+export type DecisionsRoutesDeps = Partial<BuiltinOperationDeps> & {
+  /** Serves the operation; the built-in Copilot handler by default. */
+  operations?: OperationDispatch
 }
 
-export function createDecisionsRoutes(
-  deps: Partial<DecisionsRoutesDeps> = {},
-): Hono {
-  const createDecisions = deps.createDecisions ?? defaultCreateDecisions
+export function createDecisionsRoutes(deps: DecisionsRoutesDeps = {}): Hono {
+  const operations = deps.operations ?? createBuiltinOperationDispatch(deps)
 
   // Errors propagate to the error handler, which answers in OpenAI's format;
   // the token gate's "not signed in" goes the same way.
@@ -36,14 +35,15 @@ export function createDecisionsRoutes(
   routes.use(requireGithubAuth)
 
   routes.post("/", async (c) => {
-    const payload = await c.req.json<DecisionsPayload>()
-    await admitUpstreamRequest()
-    const result = await createDecisions(payload, { signal: c.req.raw.signal })
-    createCopilotTokenUsageRecorder({
-      endpoint: "decisions",
-      model: requestedModel(payload.model),
-    })(normalizeResponsesUsage(result.usage))
-    return c.json(result)
+    const payload = await c.req.json<Record<string, unknown>>()
+    return c.json(
+      await runOperation(operations, {
+        operation: "decisions",
+        model: payload.model,
+        body: payload,
+        signal: c.req.raw.signal,
+      }),
+    )
   })
 
   return routes
