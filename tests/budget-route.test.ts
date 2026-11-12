@@ -271,7 +271,7 @@ describe("what calls in progress hold", () => {
     if (!decision.ok) throw new Error("expected admission")
 
     const during = await status(await app.request("/budget"))
-    decision.hold.commit()
+    await decision.hold.commit()
     const after = await status(await app.request("/budget"))
 
     expect(during.budgets[0].held).toBe(0.6 * AIU)

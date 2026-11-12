@@ -20,7 +20,7 @@ import { Sparkline } from "./Sparkline";
 import { ChevronGlyph, CrossGlyph, ListChecksGlyph, PencilGlyph, PlusGlyph, TrashGlyph, WarningGlyph } from "./glyphs";
 import { describeReset, formatWhen, limitFigures, newLimitId, usedFraction } from "./format";
 import type { BudgetFormat } from "./hooks";
-import { amountIn, resetText, scopeName } from "./labels";
+import { amountIn, displayAmountIn, resetText, scopeName } from "./labels";
 import { rulesForModel } from "./modelRules";
 import type { RangeChoice } from "./range";
 import { type SuggestedRule, draftToPut } from "./sessions";
@@ -68,7 +68,9 @@ function LimitRow({ limit, status, format, version, open, onToggle, onEdit, onDe
   const detailId = `limit-detail-${limit.id}`;
   const perfLabel = t(open ? "budget-perf-hide" : "budget-perf-show", { name });
   const sparkLabel = timeline ? t("budget-spark-label", { total: amountIn(limit.unit, format)(timeline.totals.nano_aiu) }) : "";
-  const amounts = t("budget-limit-amounts", { usage: format.money(figures.usage), limit: format.money(figures.limit) });
+  const figureAmount = displayAmountIn(limit.unit, format);
+  const amounts = t("budget-limit-amounts", { usage: figureAmount(figures.confirmed), limit: figureAmount(figures.limit) });
+  const meterAmounts = t("budget-limit-amounts", { usage: figureAmount(figures.usage), limit: figureAmount(figures.limit) });
   const reset = describeReset(limit, status.provider_windows);
   const when = reset.kind === "never" ? undefined : formatWhen(reset.resetsAtMs, format.now, format.locale);
   return (
@@ -116,7 +118,7 @@ function LimitRow({ limit, status, format, version, open, onToggle, onEdit, onDe
         fraction={usedFraction(figures.usage, figures.limit)}
         tone={limit.state}
         label={name}
-        valueText={amounts}
+        valueText={meterAmounts}
       />
       <p className="limit__figures">
         <span className="limit__amounts">{amounts}</span>
@@ -126,8 +128,11 @@ function LimitRow({ limit, status, format, version, open, onToggle, onEdit, onDe
             {limit.state === "exhausted" ? t("budget-state-exhausted") : t("budget-state-warning")}
           </span>
         )}
-        {limit.state !== "exhausted" && <span>{t("budget-limit-left", { amount: format.money(figures.remaining) })}</span>}
-        {limit.held > 0 && <span>{t("budget-limit-held", { amount: format.nanoMoney(limit.held) })}</span>}
+        {limit.state !== "exhausted" && <span>{t("budget-limit-left", { amount: figureAmount(figures.remaining) })}</span>}
+        {figures.held > 0 && <span>{t("budget-limit-held", { amount: figureAmount(figures.held) })}</span>}
+        {figures.unreconciled > 0 && (
+          <span>{t("budget-limit-unreconciled", { amount: figureAmount(figures.unreconciled) })}</span>
+        )}
         <span className="limit__reset" title={when}>
           {resetText(reset, format)}
         </span>

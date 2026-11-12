@@ -5,7 +5,7 @@
  * - a spent limit answers 402 on each wire (`billing_error` for Anthropic,
  *   `insufficient_quota` for OpenAI), never retried, naming the limit;
  * - an operation dispatch holds, commits with the provider's cost, books the
- *   estimate when the reply reports none, and releases on error;
+ *   estimate when the reply reports none, and preserves ambiguity on error;
  * - a server tool refused by a limit comes back as the tool's result.
  */
 
@@ -26,7 +26,7 @@ import { requestContext } from "~/lib/http/request-context"
 import { traceIdMiddleware } from "~/lib/http/trace"
 import { state } from "~/lib/runtime-state/state"
 import { closeUsageStore, recordTokenUsageEvent } from "~/lib/token-usage"
-import { getNanoAiuSpend } from "~/lib/token-usage/spend"
+import { getNanoAiuSpend, getUnreconciledSpend } from "~/lib/token-usage/spend"
 import { createImagesRoutes } from "~/routes/images/route"
 import { pluginServerToolListings } from "~/routes/messages/server-tools/plugin-listings"
 import { runOperation } from "~/routes/passthrough"
@@ -350,6 +350,13 @@ async function globalSpend(): Promise<number> {
   return sum
 }
 
+async function globalUnreconciledSpend(): Promise<number> {
+  const [sum] = await getUnreconciledSpend({ kind: "global" }, [
+    { startMs: 0, endMs: null },
+  ])
+  return sum
+}
+
 const imageCall = (signal = new AbortController().signal) => ({
   operation: "images.generations" as const,
   model: "gpt-image-test",
@@ -387,16 +394,17 @@ describe("an operation dispatch under a limit", () => {
     expect(await globalSpend()).toBe(0.7 * AIU)
   })
 
-  test("a reply with no cost is booked at the estimate", async () => {
+  test("a reply with no cost keeps its estimate unreconciled", async () => {
     const operations = fakeDispatch(() => Promise.resolve({ json: { ok: 1 } }))
 
     await runOperation(operations, imageCall())
 
     expect(await globalSpend()).toBe(0.6 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
     expect(await heldAfterwards()).toBe(0)
   })
 
-  test("an upstream error releases the hold and books nothing", async () => {
+  test("an upstream error retains the estimate as unreconciled", async () => {
     const operations = fakeDispatch(() =>
       Promise.reject(new Error("upstream 502")),
     )
@@ -406,13 +414,14 @@ describe("an operation dispatch under a limit", () => {
     )
 
     expect(await heldAfterwards()).toBe(0)
-    expect(await globalSpend()).toBe(0)
-    // The room is back: the same call is admitted again.
+    expect(await globalSpend()).toBe(0.6 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
+    // The remaining room still admits another call.
     const retry = fakeDispatch(() => Promise.resolve({ json: { ok: 1 } }))
     expect(await runOperation(retry, imageCall())).toEqual({ ok: 1 })
   })
 
-  test("an abandoned call releases its hold too", async () => {
+  test("an abandoned dispatched call becomes unreconciled", async () => {
     const controller = new AbortController()
     const operations = fakeDispatch(() => {
       controller.abort()
@@ -425,6 +434,7 @@ describe("an operation dispatch under a limit", () => {
     expect(error).toBeInstanceOf(DOMException)
 
     expect(await heldAfterwards()).toBe(0)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
   })
 
   test("a refused call never reaches the provider", async () => {
@@ -599,6 +609,103 @@ describe("a server tool under a limit", () => {
 
     expect(run.ok).toBe(false)
     expect(executed).toBe(0)
+    expect(await heldAfterwards()).toBe(0)
+  })
+
+  test("an estimated tool error without spend keeps the hold unreconciled", async () => {
+    const plugin = definePlugin(
+      "error-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          estimate: () => ({
+            operation: "images.generations",
+            provider: "copilot",
+            body: { prompt: "x", quality: "low" },
+          }),
+          execute: () =>
+            Promise.resolve({
+              isError: true,
+              content: [{ type: "text", text: "provider failed" }],
+            }),
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["error-tools"])
+    setBudget({ limits: [limit("all", { kind: "global" }, 10 * AIU)] })
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const run = await listing.run(toolUse, call)
+
+    expect(run.ok).toBe(false)
+    expect(await globalSpend()).toBe(0.6 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
+  })
+
+  test("reported spend settles even when the tool then throws", async () => {
+    const plugin = definePlugin(
+      "billed-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          estimate: () => ({
+            operation: "images.generations",
+            provider: "copilot",
+            body: { prompt: "x", quality: "low" },
+          }),
+          execute: (_input, received) => {
+            received.reportSpend?.({
+              operation: "images.generations",
+              model: "gpt-image-test",
+              provider: "copilot",
+              result: {
+                usage: { input_tokens: 3 },
+                cost: {
+                  unit: "nano_aiu",
+                  amount: 250_000_000,
+                  estimated: false,
+                },
+              },
+            })
+            return Promise.reject(new Error("failed after billing"))
+          },
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["billed-tools"])
+    setBudget({ limits: [limit("all", { kind: "global" }, 10 * AIU)] })
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const run = await listing.run(toolUse, call)
+
+    expect(run.ok).toBe(false)
+    expect(toolText(run)).toContain("failed after billing")
+    expect(await globalSpend()).toBe(0.25 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0)
+    expect(
+      (
+        await getNanoAiuSpend({ kind: "plugin", id: "billed-tools" }, [
+          { startMs: 0, endMs: null },
+        ])
+      )[0],
+    ).toBe(0.25 * AIU)
+    expect(
+      (
+        await getNanoAiuSpend({ kind: "plugin", id: "images" }, [
+          { startMs: 0, endMs: null },
+        ])
+      )[0],
+    ).toBe(0)
     expect(await heldAfterwards()).toBe(0)
   })
 })

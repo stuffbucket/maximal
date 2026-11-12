@@ -16,9 +16,9 @@ import type {
 } from "~/lib/config/settings-types"
 
 import {
-  getNanoAiuSpend,
   getOldestSpendMs,
   getRequestTimes,
+  getSpendBreakdown,
 } from "~/lib/token-usage/spend"
 import { isTokenUsageStorageEnabled } from "~/lib/token-usage/store"
 
@@ -145,21 +145,24 @@ async function limitStatus(
   // Cost is shown in the display unit; tokens are shown as they are.
   const shown = (amount: number): number =>
     metric === "nano_aiu" ? nanoAiuToDisplay(amount, display) : amount
-  const [[usage, usageDaily, usageWeekly], oldest, requestTimes] =
-    await Promise.all([
-      getNanoAiuSpend(
-        scope,
-        [period, fixedPeriod("daily", nowMs), fixedPeriod("weekly", nowMs)],
-        metric,
-      ),
-      // A rolling window resets when its oldest counted spend ages out.
-      period.rollingMs === undefined ?
-        undefined
-      : getOldestSpendMs(scope, period, metric),
-      limit.maxRequests === undefined ?
-        undefined
-      : getRequestTimes(scope, period),
-    ])
+  const ranges = [
+    period,
+    fixedPeriod("daily", nowMs),
+    fixedPeriod("weekly", nowMs),
+  ]
+  const [spend, oldest, requestTimes] = await Promise.all([
+    getSpendBreakdown(scope, ranges, metric),
+    // A rolling window resets when its oldest counted spend ages out.
+    period.rollingMs === undefined ?
+      undefined
+    : getOldestSpendMs(scope, period, metric),
+    limit.maxRequests === undefined ?
+      undefined
+    : getRequestTimes(scope, period),
+  ])
+  const [usage, usageDaily, usageWeekly] = spend.usage
+  const [unreconciled, unreconciledDaily, unreconciledWeekly] =
+    spend.unreconciled
   const requests = requestTimes?.length ?? null
   const endMs =
     period.rollingMs === undefined ?
@@ -187,8 +190,11 @@ async function limitStatus(
     paused: paused(limit.id),
     usage,
     held: held(limit.scope, metric),
+    unreconciled,
     usage_daily: usageDaily,
     usage_weekly: usageWeekly,
+    unreconciled_daily: unreconciledDaily,
+    unreconciled_weekly: unreconciledWeekly,
     period_start: iso(period.startMs),
     resets_at: endMs === null ? null : iso(endMs),
     reset_basis: period.basis,
@@ -207,6 +213,7 @@ async function limitStatus(
       limit: shown(limit.limit),
       effective_limit: shown(cap),
       usage: shown(usage),
+      unreconciled: shown(unreconciled),
       limit_remaining: shown(remaining),
     },
   }

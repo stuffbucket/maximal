@@ -10,6 +10,7 @@ import {
 import type { BudgetConfig } from "~/lib/budget/schema"
 
 import { buildBudgetStatus } from "~/lib/budget/status"
+import { createUsageDbBudgetStore } from "~/lib/budget/store"
 import { BudgetStatusResponse } from "~/lib/config/settings-types"
 import { requestContext } from "~/lib/http/request-context"
 import { closeUsageStore, recordTokenUsageEvent } from "~/lib/token-usage"
@@ -306,6 +307,7 @@ describe("budget status", () => {
       limit: 4,
       effective_limit: 4,
       usage: 3,
+      unreconciled: 0,
       limit_remaining: 1,
     })
 
@@ -318,5 +320,46 @@ describe("budget status", () => {
     expect(override.budgets[0].display.usage).toBeCloseTo(0.06, 12)
     // Stored amounts never change with the display.
     expect(override.budgets[0].limit).toBe(4 * AIU)
+  })
+})
+
+test("status reports a recovered hold as unreconciled usage", async () => {
+  const store = createUsageDbBudgetStore()
+  await store.openHold({
+    id: "crashed-chat",
+    createdAtMs: NOW - 60_000,
+    operation: "messages",
+    key: "unidentified",
+    provider: "copilot",
+    model: "gpt-test",
+    estimateNanoAiu: AIU / 2,
+    estimateInputTokens: 0,
+    estimateOutputTokens: 0,
+  })
+  await store.recover(NOW)
+
+  const status = await buildBudgetStatus(
+    {
+      limits: [
+        {
+          id: "all",
+          scope: { kind: "global" },
+          limit: AIU,
+          limitReset: "daily",
+          action: "block",
+        },
+      ],
+    },
+    { nowMs: NOW, windows: [] },
+  )
+
+  expect(status.budgets[0]).toMatchObject({
+    usage: AIU / 2,
+    unreconciled: AIU / 2,
+    usage_daily: AIU / 2,
+    unreconciled_daily: AIU / 2,
+    usage_weekly: AIU / 2,
+    unreconciled_weekly: AIU / 2,
+    display: { usage: 0.005, unreconciled: 0.005 },
   })
 })

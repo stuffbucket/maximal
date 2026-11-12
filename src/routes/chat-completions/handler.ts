@@ -2,7 +2,7 @@ import type { Context } from "hono"
 
 import { streamSSE, type SSEMessage } from "hono/streaming"
 
-import { admitChat } from "~/lib/budget/runtime"
+import { admitChat, createBudgetUsageFinisher } from "~/lib/budget/runtime"
 import { getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
@@ -25,8 +25,8 @@ import {
 } from "~/lib/platform/utils"
 import { state } from "~/lib/runtime-state/state"
 import {
-  createCopilotTokenUsageRecorder,
   normalizeOpenAIUsage,
+  prepareCopilotTokenUsageEvent,
   resolveTokenUsageSessionId,
   type UsageTokens,
   withCopilotCost,
@@ -42,15 +42,20 @@ const logger = createHandlerLogger("chat-completions-handler")
 
 const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
 
+function createUsageFinisher(
+  hold: Parameters<typeof createBudgetUsageFinisher>[0],
+  options: Parameters<typeof prepareCopilotTokenUsageEvent>[0],
+) {
+  return createBudgetUsageFinisher(hold, (usage) =>
+    prepareCopilotTokenUsageEvent(options, usage),
+  )
+}
+
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   let payload = await c.req.json<ChatCompletionsPayload>()
   payload.model = reverseId(payload.model)
-  await admitChat("chat_completions", {
-    model: payload.model,
-    maxTokens: payload.max_tokens,
-  })
   const mapping = resolveModelMapping({
     requestedModel: payload.model,
     rules: getConfig().modelMappings ?? [],
@@ -63,7 +68,6 @@ export async function handleCompletion(c: Context) {
   payload.model = mapping.resolvedModel
   debugJsonTail(logger, "Request payload:", { value: payload, tailLength: 400 })
 
-  // Find the selected model
   const selectedModel = state.models?.data.find(
     (model) => model.id === payload.model,
   )
@@ -82,6 +86,7 @@ export async function handleCompletion(c: Context) {
 
   if (state.manualApprove) await awaitApproval()
 
+  const advertisedMaxTokens = payload.max_tokens
   if (isNullish(payload.max_tokens)) {
     payload = {
       ...payload,
@@ -90,8 +95,11 @@ export async function handleCompletion(c: Context) {
     debugJson(logger, "Set max_tokens to:", payload.max_tokens)
   }
 
+  const hold = await admitChat("chat_completions", {
+    model: payload.model,
+    maxTokens: advertisedMaxTokens,
+  })
   const requestId = generateRequestIdFromPayload(payload)
-  logger.debug("Generated request ID:", requestId)
 
   // Chat completions carries no conversation id, so the recorded session is
   // empty unless the client sent x-session-affinity; the interaction id sent
@@ -105,20 +113,27 @@ export async function handleCompletion(c: Context) {
     cacheTtlS: responsesCacheTtlSeconds(undefined),
     cacheTtlRequested: false,
   })
-  const recordUsage = createCopilotTokenUsageRecorder({
-    endpoint: "chat_completions",
+  const usageOptions = {
+    endpoint: "chat_completions" as const,
     sessionId: usageSessionId,
     model: payload.model,
-  })
+  }
+  const finishUsage = createUsageFinisher(hold, usageOptions)
 
-  const response = await createChatCompletions(payload, {
-    requestId,
-    sessionId: interactionId,
-  })
+  let response: Awaited<ReturnType<typeof createChatCompletions>>
+  try {
+    response = await createChatCompletions(payload, {
+      requestId,
+      sessionId: interactionId,
+    })
+  } catch (error) {
+    await hold.unreconcile("usage-missing")
+    throw error
+  }
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response:", response)
-    recordUsage(
+    await finishUsage(
       withCopilotCost(
         normalizeOpenAIUsage(response.usage),
         response.copilot_usage,
@@ -131,17 +146,24 @@ export async function handleCompletion(c: Context) {
   return streamSSE(c, async (stream) => {
     let usage: UsageTokens = {}
 
-    for await (const chunk of response) {
-      debugJson(logger, "Streaming chunk:", chunk)
-      const parsedChunk = parseChatCompletionChunk(chunk)
-      const chunkUsage = readUsage(parsedChunk)
-      if (chunkUsage) {
-        usage = normalizeOpenAIUsage(chunkUsage)
+    try {
+      for await (const chunk of response) {
+        debugJson(logger, "Streaming chunk:", chunk)
+        const parsedChunk = parseChatCompletionChunk(chunk)
+        const chunkUsage = readUsage(parsedChunk)
+        if (chunkUsage) {
+          usage = withCopilotCost(
+            normalizeOpenAIUsage(chunkUsage),
+            asRecord(asRecord(parsedChunk)?.copilot_usage),
+          )
+        }
+        await stream.writeSSE(chunk as SSEMessage)
       }
-      await stream.writeSSE(chunk as SSEMessage)
+    } catch (error) {
+      await finishUsage(usage, "stream-interrupted")
+      throw error
     }
-
-    recordUsage(usage)
+    await finishUsage(usage)
   })
 }
 

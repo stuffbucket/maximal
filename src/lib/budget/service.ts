@@ -5,29 +5,33 @@
  * limit whose scope covers the call is checked: `spent + held + estimate`
  * must fit under it, else the call is refused (a `block` limit) or warned
  * about (a `warn` limit, or a `block` one past its warning threshold). The
- * admitted call holds its estimate until it `commit`s (the hold is dropped;
- * the actual cost reaches the ledger through the usage row the caller
- * records) or `release`s (the call failed before it was billed).
+ * admitted call holds its estimate until authoritative usage settles it,
+ * a definitely unbilled call releases it, or an ambiguous dispatched call
+ * becomes unreconciled spend.
  *
- * Spend comes from one source: `token_usage_events`. Each limit keeps a
- * ledger entry for its current period, loaded from the database when the
- * period starts (and when its scope or provider window changes) and kept
- * current from the usage rows recorded after, so a check never waits on the
- * database's write queue. Rows recorded while an entry loads are buffered and
- * added to it. A call with no estimate (chat, and server tools today) is
- * admitted while `spent + held < limit`: it can go over by what is in flight.
+ * Spend comes from `token_usage_events` plus unreconciled `budget_holds`.
+ * Each limit keeps a ledger entry for its current period, loaded from the
+ * database when the period starts (and when its scope or provider window
+ * changes) and kept current from recorded usage and newly unreconciled holds,
+ * so a check never waits on the database's write queue after loading. Rows
+ * recorded while an entry loads are buffered and added to it. A call with no
+ * estimate is admitted while `spent + held < limit`: it can go over by what is
+ * in flight.
  *
  * Everything the service touches is injected: the clock, the config, the
  * database store, the provider windows and the usage stream. Between the
- * check and the hold there is no await, so concurrent callers can't both
- * claim the same room.
+ * check and the in-memory hold there is no await, so concurrent callers can't
+ * both claim the same room; `reserve` resolves only after that hold is durable.
  */
 
 import consola from "consola"
 import { randomUUID } from "node:crypto"
 
+import type { PersistedTokenUsageEvent } from "~/lib/token-usage/store"
+
 import type { ApprovalState, LimitEvent } from "./approvals"
 import type { BudgetRefusal } from "./errors"
+import type { BudgetHold, ObservedBudgetTokens } from "./hold"
 import type { BudgetOverride } from "./overrides"
 import type { BudgetPeriod, FollowedWindow } from "./periods"
 import type { BudgetOperation, BudgetSubject, ResolvedScope } from "./scope"
@@ -53,6 +57,8 @@ import { resolveScope, scopeMatches } from "./scope"
 import { resolveBudgetDisplay } from "./units"
 import { refusalMessage } from "./wording"
 
+export type { BudgetHold, ObservedBudgetTokens } from "./hold"
+
 /** What a caller knows before a billed call. */
 export interface BudgetIntent extends BudgetSubject {
   operation: BudgetOperation
@@ -67,15 +73,16 @@ export interface BudgetIntent extends BudgetSubject {
   estimateOutputTokens?: number
 }
 
-export interface BudgetHold {
-  readonly id: string
-  /** What is held: the estimate, 0 when no limit covers the call. */
-  readonly estimateNanoAiu: number
-  /** The call finished (billed or not): drop the hold. Idempotent. */
-  commit(actual?: { nanoAiu?: number }): void
-  /** The call failed before it was billed, or was abandoned: drop the hold.
-   *  Idempotent. */
-  release(reason: "upstream-error" | "aborted" | "client-gone"): void
+export function noopBudgetHold(id: string): BudgetHold {
+  return {
+    id,
+    estimateNanoAiu: 0,
+    persisted: false,
+    settle: () => Promise.resolve(),
+    commit: () => Promise.resolve(),
+    release: () => Promise.resolve(),
+    unreconcile: () => Promise.resolve(),
+  }
 }
 
 export interface BudgetWarning {
@@ -151,13 +158,24 @@ export interface BudgetStore {
     scope: ResolvedScope,
     range: { startMs: number; endMs: number | null },
   ): Promise<ReadonlyArray<number>>
-  openHold(hold: StoredHold): void
+  openHold(hold: StoredHold): Promise<void>
   closeHold(close: {
     id: string
-    state: "committed" | "released"
+    state: "committed" | "released" | "orphaned"
     actualNanoAiu?: number
     closedAtMs: number
-  }): void
+  }): Promise<void>
+  /** Insert authoritative usage and commit its open hold in one transaction. */
+  settleHold(
+    events: ReadonlyArray<PersistedTokenUsageEvent>,
+    close: {
+      id: string
+      state: "committed" | "orphaned"
+      actualNanoAiu?: number
+      closedAtMs: number
+      observedTokens?: ObservedBudgetTokens
+    },
+  ): Promise<void>
 }
 
 /** One recorded usage row, as the ledger reads it. */
@@ -172,6 +190,7 @@ export interface SpendEvent extends BudgetSubject {
 export interface BudgetService {
   /** Check the limits and, when the call is admitted, hold its estimate. */
   reserve(intent: BudgetIntent): Promise<BudgetDecision>
+  reserveCleared(intent: BudgetIntent): Promise<BudgetHold>
   /** The same check without a hold. */
   check(intent: BudgetIntent): Promise<BudgetCheck>
   /** What calls in progress hold that `scope` covers, in nano-AIU or the
@@ -239,7 +258,7 @@ interface LedgerEntry {
   ready: boolean
   loading: Promise<void>
   /** Rows recorded while the entry loads. */
-  buffered: Array<SpendEvent>
+  buffered: Array<{ event: SpendEvent; countRequest: boolean }>
   /** A rolling window's counted costs; `committed` is their sum. Rows age
    *  out when the window moves (`advance`). */
   costs?: Array<{ createdAtMs: number; nanoAiu: number }>
@@ -258,16 +277,25 @@ interface OpenHold {
   estimate: Estimate
 }
 
-const NO_HOLD = (id: string): BudgetHold => ({
-  id,
-  estimateNanoAiu: 0,
-  commit() {},
-  release() {},
-})
+interface HoldHandleInput {
+  id: string
+  estimates: Estimate
+  persisted: boolean
+  createdAtMs: number
+  subject: BudgetSubject
+}
 
 function readFailed(error: unknown): [] {
   consola.warn("Budget: could not read spend; counting from now", error)
   return []
+}
+
+function notifyPersisted(callback: (() => void) | undefined): void {
+  try {
+    callback?.()
+  } catch (error) {
+    consola.warn("Budget: a persisted usage listener failed", error)
+  }
 }
 
 const whole = (value: number | undefined): number =>
@@ -358,23 +386,27 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
   let started: Promise<void> | undefined
   let unsubscribe: (() => void) | undefined
 
-  function onSpend(event: SpendEvent): void {
+  function onSpend(event: SpendEvent, countRequest = true): void {
     for (const entry of entries.values()) {
       if (!entry.ready) {
-        entry.buffered.push(event)
+        entry.buffered.push({ event, countRequest })
         continue
       }
-      if (counts(entry, event)) add(entry, event)
+      if (counts(entry, event)) add(entry, event, countRequest)
     }
   }
 
-  function add(entry: LedgerEntry, event: SpendEvent): void {
+  function add(
+    entry: LedgerEntry,
+    event: SpendEvent,
+    countRequest = true,
+  ): void {
     const amount = amountOf(event, entry.metric)
     entry.committed += amount
     if (amount > 0) {
       entry.costs?.push({ createdAtMs: event.createdAtMs, nanoAiu: amount })
     }
-    entry.requests?.push(event.createdAtMs)
+    if (countRequest) entry.requests?.push(event.createdAtMs)
   }
 
   function counts(entry: LedgerEntry, event: SpendEvent): boolean {
@@ -423,8 +455,10 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
         entry.committed = costs.reduce((sum, cost) => sum + cost.nanoAiu, 0)
         if (rolling) entry.costs = costs
         if (requestTimes !== undefined) entry.requests = requestTimes
-        for (const event of entry.buffered) {
-          if (counts(entry, event)) add(entry, event)
+        for (const buffered of entry.buffered) {
+          if (counts(entry, buffered.event)) {
+            add(entry, buffered.event, buffered.countRequest)
+          }
         }
         entry.buffered = []
         entry.ready = true
@@ -746,74 +780,163 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     }
   }
 
-  function openHold(intent: BudgetIntent): BudgetHold {
+  function createHoldHandle(input: HoldHandleInput): BudgetHold {
+    const { id, estimates, persisted, createdAtMs, subject } = input
+    const accountOrphan = (
+      observedTokens: ObservedBudgetTokens = { input: false, output: false },
+    ): void => {
+      onSpend(
+        {
+          createdAtMs,
+          nanoAiu: estimates.nanoAiu,
+          inputTokens: observedTokens.input ? 0 : estimates.inputTokens,
+          outputTokens: observedTokens.output ? 0 : estimates.outputTokens,
+          ...subject,
+        },
+        false,
+      )
+    }
+
+    let closed = false
+    let closing: Promise<void> | undefined
+    const finish = (
+      persist: () => Promise<void>,
+      afterPersist?: () => void,
+    ): Promise<void> => {
+      if (closed) return Promise.resolve()
+      if (closing) return closing
+      closing = persist()
+        .then(() => {
+          afterPersist?.()
+          holds.delete(id)
+          closed = true
+        })
+        .finally(() => {
+          if (!closed) closing = undefined
+        })
+      return closing
+    }
+    const close = (
+      state: "committed" | "released" | "orphaned",
+      actualNanoAiu?: number,
+    ): Promise<void> =>
+      finish(
+        async () => {
+          if (persisted) {
+            await deps.store.closeHold({
+              id,
+              state,
+              ...(actualNanoAiu === undefined ? {} : { actualNanoAiu }),
+              closedAtMs: clock(),
+            })
+          }
+        },
+        () => {
+          if (state === "orphaned" && persisted) accountOrphan()
+        },
+      )
+
+    return {
+      id,
+      estimateNanoAiu: estimates.nanoAiu,
+      persisted,
+      settle: (events, actual, afterPersist) =>
+        finish(
+          async () => {
+            if (persisted) {
+              await deps.store.settleHold(events, {
+                id,
+                state: "committed",
+                ...(actual?.nanoAiu === undefined ?
+                  {}
+                : { actualNanoAiu: actual.nanoAiu }),
+                closedAtMs: clock(),
+              })
+            }
+          },
+          () => notifyPersisted(afterPersist),
+        ),
+      commit: (actual) => close("committed", actual?.nanoAiu),
+      release: () => close("released"),
+      unreconcile: (_reason, events, options) => {
+        if (!events || events.length === 0 || !persisted) {
+          return close("orphaned")
+        }
+        return finish(
+          async () => {
+            await deps.store.settleHold(events, {
+              id,
+              state: "orphaned",
+              closedAtMs: clock(),
+              observedTokens: options?.observedTokens,
+            })
+          },
+          () => {
+            accountOrphan(options?.observedTokens)
+            notifyPersisted(options?.afterPersist)
+          },
+        )
+      },
+    }
+  }
+
+  async function openHold(intent: BudgetIntent): Promise<BudgetHold> {
     const id = newId()
     const estimates = estimatesOf(intent)
-    const estimate = estimates.nanoAiu
-    const reserves =
-      estimate > 0 || estimates.inputTokens > 0 || estimates.outputTokens > 0
+    const persisted =
+      estimates.nanoAiu > 0
+      || estimates.inputTokens > 0
+      || estimates.outputTokens > 0
+    const createdAtMs = clock()
     const subject: BudgetSubject = {
       key: intent.key,
       ...(intent.plugin === undefined ? {} : { plugin: intent.plugin }),
       ...(intent.provider === undefined ? {} : { provider: intent.provider }),
       ...(intent.model === undefined ? {} : { model: intent.model }),
     }
+    // Claim room before awaiting SQLite so another caller cannot take it.
     holds.set(id, { subject, estimate: estimates })
-    // Only a hold that reserves something is worth writing ahead.
-    if (reserves) {
-      deps.store.openHold({
-        id,
-        createdAtMs: clock(),
-        operation: intent.operation,
-        ...subject,
-        ...(intent.tool === undefined ? {} : { tool: intent.tool }),
-        estimateNanoAiu: estimate,
-        estimateInputTokens: estimates.inputTokens,
-        estimateOutputTokens: estimates.outputTokens,
-      })
-    }
-    const close = (
-      state: "committed" | "released",
-      actualNanoAiu?: number,
-    ): void => {
-      if (!holds.delete(id)) return
-      if (reserves) {
-        deps.store.closeHold({
+    if (persisted) {
+      try {
+        await deps.store.openHold({
           id,
-          state,
-          ...(actualNanoAiu === undefined ? {} : { actualNanoAiu }),
-          closedAtMs: clock(),
+          createdAtMs,
+          operation: intent.operation,
+          ...subject,
+          ...(intent.tool === undefined ? {} : { tool: intent.tool }),
+          estimateNanoAiu: estimates.nanoAiu,
+          estimateInputTokens: estimates.inputTokens,
+          estimateOutputTokens: estimates.outputTokens,
         })
+      } catch (error) {
+        holds.delete(id)
+        throw error
       }
     }
-    return {
-      id,
-      estimateNanoAiu: estimate,
-      commit: (actual) => {
-        close("committed", actual?.nanoAiu)
-      },
-      release: () => {
-        close("released")
-      },
-    }
+    return createHoldHandle({ id, estimates, persisted, createdAtMs, subject })
   }
 
   return {
     async reserve(intent) {
       const active = await settled(intent)
       if (active.length === 0) {
-        return { ok: true, hold: NO_HOLD(newId()), warnings: [] }
+        return { ok: true, hold: noopBudgetHold(newId()), warnings: [] }
       }
-      // No await from here: the check and the hold are one step.
+      // `openHold` claims room before awaiting its durable write.
       const { refusal, warnings } = evaluate(active, intent)
       if (refusal) return { ok: false, refusal }
-      const hold = openHold(intent)
+      const hold = await openHold(intent)
       if (hold.estimateNanoAiu > 0) {
         for (const item of active) logEvent("approved", item, intent)
       }
       announce(active, warnings, intent)
       return { ok: true, hold, warnings }
     },
+
+    reserveCleared: async (intent) =>
+      (await settled(intent)).length === 0 ?
+        noopBudgetHold(newId())
+      : openHold(intent),
 
     async check(intent) {
       const active = await settled(intent)

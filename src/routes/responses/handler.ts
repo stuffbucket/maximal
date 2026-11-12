@@ -5,7 +5,7 @@ import { streamSSE } from "hono/streaming"
 import type { Model } from "~/services/copilot/get-models"
 
 import { cachedCodexModelCatalog } from "~/apps/codex/models-catalog"
-import { admitChat } from "~/lib/budget/runtime"
+import { admitChat, createBudgetUsageFinisher } from "~/lib/budget/runtime"
 import {
   getConfig,
   getPromptCacheRetention,
@@ -14,7 +14,7 @@ import {
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { requestContext, setRequestUsage } from "~/lib/http/request-context"
-import { asRecord, readNestedUsage } from "~/lib/http/untrusted-frame"
+import { asRecord } from "~/lib/http/untrusted-frame"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
 import {
   modelMappingErrorBody,
@@ -28,8 +28,8 @@ import {
 import { generateRequestIdFromPayload, getUUID } from "~/lib/platform/utils"
 import { state } from "~/lib/runtime-state/state"
 import {
-  createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,
+  prepareCopilotTokenUsageEvent,
   resolveTokenUsageSessionId,
   type UsageTokens,
   withCopilotCost,
@@ -71,6 +71,8 @@ import {
   compactInputByLatestCompaction,
   getLatestCompactionMessageIndex,
   getResponsesRequestOptions,
+  isResponsesTerminalEvent,
+  usageFromResponsesTerminalEvent,
 } from "./utils"
 
 const logger = createHandlerLogger("responses-handler")
@@ -84,10 +86,6 @@ export const handleResponses = async (c: Context) => {
 
   const payload = await c.req.json<ResponsesPayload>()
   payload.model = reverseId(payload.model)
-  await admitChat("responses", {
-    model: payload.model,
-    maxTokens: payload.max_output_tokens,
-  })
   const mapping = resolveModelMapping({
     requestedModel: payload.model,
     rules: getConfig().modelMappings ?? [],
@@ -113,11 +111,11 @@ export const handleResponses = async (c: Context) => {
   )
   logger.debug("Extracted session ID:", sessionId)
   const interactionId = getUUID(requestId)
-  const recordUsage = createCopilotTokenUsageRecorder({
-    endpoint: "responses",
+  const usageOptions = {
+    endpoint: "responses" as const,
     sessionId,
     model: payload.model,
-  })
+  }
 
   useFunctionApplyPatch(payload)
 
@@ -184,47 +182,77 @@ export const handleResponses = async (c: Context) => {
     await awaitApproval()
   }
 
-  const response = await createResponses(payload, {
-    vision,
-    initiator,
-    requestId,
-    sessionId: interactionId,
+  const hold = await admitChat("responses", {
+    model: payload.model,
+    maxTokens: payload.max_output_tokens,
   })
+  const finishUsage = createBudgetUsageFinisher(hold, (usage) =>
+    prepareCopilotTokenUsageEvent(usageOptions, usage),
+  )
+
+  let response: Awaited<ReturnType<typeof createResponses>>
+  try {
+    response = await createResponses(payload, {
+      vision,
+      initiator,
+      requestId,
+      sessionId: interactionId,
+    })
+  } catch (error) {
+    await hold.unreconcile("usage-missing")
+    throw error
+  }
 
   if (isStreamingRequested(payload) && isAsyncIterable(response)) {
     logger.debug("Forwarding native Responses stream")
     return streamSSE(c, async (stream) => {
       const idTracker = createStreamIdTracker()
       let usage: UsageTokens = {}
+      let terminalSeen = false
 
-      for await (const chunk of response) {
-        debugJson(logger, "Responses stream chunk:", chunk)
-        const parsedEvent = parseResponsesStreamEvent(chunk)
-        if (
-          parsedEvent?.type === "response.completed"
-          || parsedEvent?.type === "response.failed"
-          || parsedEvent?.type === "response.incomplete"
-        ) {
-          usage = normalizeResponsesUsage(
-            readNestedUsage(parsedEvent, "response"),
-          )
+      try {
+        for await (const chunk of response) {
+          debugJson(logger, "Responses stream chunk:", chunk)
+          const parsedEvent = parseResponsesStreamEvent(chunk)
+          terminalSeen ||= isResponsesTerminalEvent(parsedEvent)
+          const terminalUsage = usageFromResponsesTerminalEvent(parsedEvent)
+          if (terminalUsage) usage = terminalUsage
+
+          const chunkRecord = asRecord(chunk)
+          const chunkData =
+            typeof chunkRecord?.data === "string" ? chunkRecord.data : ""
+          const chunkEvent =
+            typeof chunkRecord?.event === "string" ?
+              chunkRecord.event
+            : undefined
+          const processedData = fixStreamIds(chunkData, chunkEvent, idTracker)
+
+          await stream.writeSSE({
+            id:
+              typeof chunkRecord?.id === "string" ? chunkRecord.id : undefined,
+            event: chunkEvent,
+            data: processedData,
+          })
         }
-
-        const chunkRecord = asRecord(chunk)
-        const chunkData =
-          typeof chunkRecord?.data === "string" ? chunkRecord.data : ""
-        const chunkEvent =
-          typeof chunkRecord?.event === "string" ? chunkRecord.event : undefined
-        const processedData = fixStreamIds(chunkData, chunkEvent, idTracker)
-
-        await stream.writeSSE({
-          id: typeof chunkRecord?.id === "string" ? chunkRecord.id : undefined,
-          event: chunkEvent,
-          data: processedData,
-        })
+      } catch (error) {
+        await finishUsage(usage, "stream-interrupted")
+        throw error
       }
-
-      recordUsage(usage)
+      if (!terminalSeen) {
+        logger.warn("Responses stream ended without a terminal event")
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({
+            type: "error",
+            code: "server_error",
+            message: "Responses stream ended without a terminal event",
+            param: null,
+          }),
+        })
+        await finishUsage(usage, "stream-interrupted")
+        return
+      }
+      await finishUsage(usage)
     })
   }
 
@@ -232,7 +260,7 @@ export const handleResponses = async (c: Context) => {
     value: response,
     tailLength: 400,
   })
-  recordUsage(
+  await finishUsage(
     withCopilotCost(
       normalizeResponsesUsage((response as ResponsesResult).usage),
       (response as ResponsesResult).copilot_usage,

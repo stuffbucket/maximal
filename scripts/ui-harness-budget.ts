@@ -66,6 +66,8 @@ interface LimitSeed {
   fill: number
   /** nano-AIU reserved by calls in progress. */
   held?: number
+  /** nano-AIU conservatively counted while final billing is unknown. */
+  unreconciled?: number
 }
 
 export interface BudgetSeed {
@@ -332,6 +334,7 @@ const limitsSeed: BudgetSeed["limits"] = [
     action: "block",
     fill: 0.86,
     held: 600_000_000,
+    unreconciled: 200_000_000,
   },
   {
     id: "key-claude-code-daily",
@@ -452,6 +455,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
   const inScope = (row: LedgerRow, scope: Scope): boolean => rowInScope(row, scope, filters)
   const listeners = new Set<(status: BudgetStatusResponse) => void>()
   const held = new Map<string, number>()
+  const unreconciled = new Map<string, number>()
 
   const followable = (ref: string): FollowedWindow | undefined => {
     const found = windows.find((window) => `${window.provider}:${window.id}` === ref)
@@ -478,6 +482,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
     const step = raw >= 500_000_000_000 ? 50_000_000_000 : raw >= 100_000_000_000 ? 5_000_000_000 : 1_000_000_000
     const rounded = entry.fill >= 1 ? Math.floor(raw / step) * step : Math.ceil(raw / step) * step
     if (entry.held) held.set(entry.id, entry.held)
+    if (entry.unreconciled) unreconciled.set(entry.id, entry.unreconciled)
     return {
       id: entry.id,
       ...(entry.label ? { label: entry.label } : {}),
@@ -495,6 +500,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
     const shown = display()
     const period = resolvePeriod(entry.limitReset, nowMs, followable)
     const usage = spend(entry.scope, period.startMs, period.endMs)
+    const uncertain = Math.min(usage, unreconciled.get(entry.id) ?? 0)
     const remaining = Math.max(0, entry.limit - usage)
     const dayStart = startOfUtcDay(nowMs)
     return {
@@ -516,8 +522,11 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
       limit_remaining: remaining,
       usage,
       held: held.get(entry.id) ?? 0,
+      unreconciled: uncertain,
       usage_daily: spend(entry.scope, dayStart, dayStart + DAY_MS),
       usage_weekly: spend(entry.scope, startOfUtcWeek(nowMs), null),
+      unreconciled_daily: uncertain,
+      unreconciled_weekly: uncertain,
       period_start: new Date(period.startMs).toISOString(),
       resets_at: period.endMs === null ? null : new Date(period.endMs).toISOString(),
       reset_basis: period.basis,
@@ -530,6 +539,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
         limit: nanoAiuToDisplay(entry.limit, shown),
         effective_limit: nanoAiuToDisplay(entry.limit, shown),
         usage: nanoAiuToDisplay(usage, shown),
+        unreconciled: nanoAiuToDisplay(uncertain, shown),
         limit_remaining: nanoAiuToDisplay(remaining, shown),
       },
     }

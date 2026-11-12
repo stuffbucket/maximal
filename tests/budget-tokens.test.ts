@@ -422,7 +422,7 @@ describe("tokens over the usage database", () => {
   test("orphaned holds count their token estimates", async () => {
     seed()
     const store = createUsageDbBudgetStore()
-    store.openHold({
+    await store.openHold({
       id: "crashed",
       createdAtMs: NOON - 500,
       operation: "messages",
@@ -432,7 +432,7 @@ describe("tokens over the usage database", () => {
       estimateInputTokens: 40,
       estimateOutputTokens: 60,
     })
-    store.openHold({
+    await store.openHold({
       id: "open",
       createdAtMs: NOON - 400,
       operation: "messages",
@@ -564,7 +564,7 @@ describe("a token limit in the service", () => {
       expect(second.refusal.held).toBe(900)
     }
 
-    if (first.ok) first.hold.commit()
+    if (first.ok) await first.hold.commit()
     expect(h.calls.closed).toHaveLength(1)
     expect(
       (await h.service.reserve(intent({ estimateOutputTokens: 101 }))).ok,
@@ -586,7 +586,7 @@ describe("a token limit in the service", () => {
     const decision = await h.service.reserve(intent())
     expect(decision.ok).toBe(true)
     expect(h.calls.opened).toEqual([])
-    if (decision.ok) decision.hold.commit()
+    if (decision.ok) await decision.hold.commit()
     expect(h.calls.closed).toEqual([])
   })
 
@@ -632,7 +632,7 @@ describe("a token limit in the service", () => {
       const decision = await h.service.reserve(intent(estimate))
       expect(decision.ok).toBe(true)
       expect(h.calls.opened).toHaveLength(1)
-      if (decision.ok) decision.hold.release("aborted")
+      if (decision.ok) await decision.hold.release("aborted")
       expect(h.calls.closed).toHaveLength(1)
     }
   })
@@ -790,6 +790,18 @@ describe("a request cap", () => {
     h.emit(event({ createdAtMs: NOON - 500 }))
     gate.release()
     expect((await pending).ok).toBe(false)
+  })
+
+  test("an orphan without a usage row does not invent a recorded request", async () => {
+    const h = harness([capped(1)])
+    const decision = await h.service.reserve(
+      intent({ estimateNanoAiu: AIU / 10 }),
+    )
+    if (!decision.ok) throw new Error("expected admission")
+
+    await decision.hold.unreconcile("usage-missing")
+
+    expect((await h.service.check(intent())).ok).toBe(true)
   })
 
   test("a warn rule never refuses on its cap", async () => {

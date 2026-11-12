@@ -535,6 +535,7 @@
   "budget-limit-amounts": "{usage} su {limit}",
   "budget-limit-left": "{amount} rimanenti",
   "budget-limit-held": "{amount} in corso",
+  "budget-limit-unreconciled": "{amount} in attesa di riconciliazione",
   "budget-state-warning": "Quasi esaurito",
   "budget-state-exhausted": "Esaurito",
   "budget-reset-never": "Non si azzera mai",

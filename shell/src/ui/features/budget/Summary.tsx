@@ -6,7 +6,7 @@ import type { Problem } from "../../problems";
 
 import { blockingLimit, describeReset, formatRelative, formatWhen, limitFigures } from "./format";
 import type { BudgetFormat } from "./hooks";
-import { scopeName } from "./labels";
+import { displayAmountIn, scopeName } from "./labels";
 
 interface SummaryProps {
   status: BudgetStatusResponse | null;
@@ -49,16 +49,17 @@ export function Summary({ status, problem, format, onRetry }: SummaryProps): JSX
   const blocked = status && format ? blockingLimit(status) : undefined;
   const headline = status && format ? headlineLimit(status) : undefined;
   const figures = headline && format ? limitFigures(headline, format.display) : undefined;
+  const headlineAmount = headline && format ? displayAmountIn(headline.unit, format) : undefined;
   const parts =
     status ?
       [
         status.enabled ? t("budget-status-enforcing") : t("budget-status-paused"),
         t("budget-status-limits", { n: status.budgets.length }),
-        ...(headline && figures && format ?
+        ...(headline && figures && headlineAmount ?
           [
             t("budget-status-spent", {
-              usage: format.money(figures.usage),
-              limit: format.money(figures.limit),
+              usage: headlineAmount(figures.usage),
+              limit: headlineAmount(figures.limit),
               period: periodKind(headline),
             }),
           ]

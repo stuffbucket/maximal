@@ -86,9 +86,15 @@ export const BudgetLimitStatus = z.object({
   usage: NanoAiuAmount,
   /** Held by calls in progress (their estimates), not yet spent. */
   held: NanoAiuAmount,
+  /** Conservative estimates for dispatched calls whose final bill is unknown.
+   *  This is a subset of `usage`, not an additional amount. */
+  unreconciled: NanoAiuAmount,
   /** Spend since 00:00 UTC today, and since Monday 00:00 UTC. */
   usage_daily: NanoAiuAmount,
   usage_weekly: NanoAiuAmount,
+  /** Unreconciled subsets of the daily and weekly usage figures. */
+  unreconciled_daily: NanoAiuAmount,
+  unreconciled_weekly: NanoAiuAmount,
   period_start: z.string(),
   /** Null for a limit that never resets. */
   resets_at: z.string().nullable(),
@@ -110,6 +116,7 @@ export const BudgetLimitStatus = z.object({
     limit: z.number().min(0),
     effective_limit: z.number().min(0),
     usage: z.number().min(0),
+    unreconciled: z.number().min(0),
     limit_remaining: z.number().min(0),
   }),
 })

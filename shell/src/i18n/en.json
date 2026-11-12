@@ -535,6 +535,7 @@
   "budget-limit-amounts": "{usage} of {limit}",
   "budget-limit-left": "{amount} left",
   "budget-limit-held": "{amount} in progress",
+  "budget-limit-unreconciled": "{amount} awaiting reconciliation",
   "budget-state-warning": "Nearly spent",
   "budget-state-exhausted": "Spent",
   "budget-reset-never": "Never resets",

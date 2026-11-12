@@ -535,6 +535,7 @@
   "budget-limit-amounts": "{usage} из {limit}",
   "budget-limit-left": "осталось {amount}",
   "budget-limit-held": "{amount} в обработке",
+  "budget-limit-unreconciled": "{amount} ожидает сверки",
   "budget-state-warning": "Почти исчерпан",
   "budget-state-exhausted": "Исчерпан",
   "budget-reset-never": "Не сбрасывается",
