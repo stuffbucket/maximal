@@ -1,7 +1,7 @@
 // Layout contracts for the Budget surface. These run against the shared UI
 // harness (scenario `budget-limits`: limits that are fine, nearly spent and
 // spent, with a week of activity).
-import { expect, test } from "@playwright/test"
+import { type Page, expect, test } from "@playwright/test"
 
 const BASE = process.env.UI_HARNESS_URL ?? "http://127.0.0.1:4747"
 const BUDGET = `${BASE}/ui/settings/#budget`
@@ -43,10 +43,39 @@ test("the top bar keeps four surface buttons and hides the Settings tabs", async
   await expect(page.locator("[data-settings-nav]")).toBeHidden()
 })
 
-test("has one display heading and sections in order", async ({ page }) => {
+test("has one display heading and sections in order: limits, activity, settings", async ({
+  page,
+}) => {
   await expect(page.locator(".budget .section__title")).toHaveCount(1)
   const titles = await page.locator(".budget h2").allTextContents()
-  expect(titles).toEqual(["Overview", "Limits", "Activity"])
+  expect(titles).toEqual(["Limits", "Activity", "Settings"])
+  // The switch lives under Settings, below the limits and activity.
+  const limitsBox = await page.locator("#budget-limits-title").boundingBox()
+  const enforceBox = await page.locator("#budget-enforce").boundingBox()
+  expect(limitsBox && enforceBox && limitsBox.y < enforceBox.y).toBe(true)
+})
+
+test("a one-line status above the limits keeps the switch state in view", async ({
+  page,
+}) => {
+  const status = page.locator("#budget-status")
+  await expect(status).toBeVisible()
+  await expect(status).toContainText(/Enforcing|Not enforcing/)
+  await expect(status).toContainText(/\d+ limits?/)
+  const statusBox = await status.boundingBox()
+  const limitsBox = await page.locator("#budget-limits-title").boundingBox()
+  expect(statusBox && limitsBox && statusBox.y < limitsBox.y).toBe(true)
+})
+
+test("the export button says what it downloads", async ({ page }) => {
+  const button = page.getByRole("button", {
+    name: "Download activity statement (CSV)",
+  })
+  await expect(button).toBeVisible()
+  await expect(button).toHaveAttribute(
+    "title",
+    /maximal-activity-week-by-model\.csv/,
+  )
 })
 
 test("limit meters name their figures and a spent limit says so", async ({
@@ -100,4 +129,87 @@ test("a change from elsewhere arrives without reloading", async ({
   expect(put.ok()).toBe(true)
   await expect(page.locator(".limit")).toHaveCount(before + 1)
   await page.screenshot({ path: "test-results/budget-limits.png" })
+})
+
+// The limit editor never throws away what was typed.
+async function openAddDialog(page: Page) {
+  await page.setViewportSize({ width: 900, height: 700 })
+  await page.locator(".budget-block__head .btn").first().click()
+  const dialog = page.locator("dialog.budget-editor[open]")
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toHaveCSS("opacity", "1")
+  return dialog
+}
+
+test("a bad amount keeps the editor open with every value, and names the problem", async ({
+  page,
+}) => {
+  const dialog = await openAddDialog(page)
+  await dialog.getByLabel("Name").fill("My cap")
+  const amount = dialog.locator("#budget-field-amount")
+  await amount.fill("lots")
+  await dialog.getByRole("button", { name: "Save limit" }).click()
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator(".budget-field__error")).toContainText(
+    "Enter an amount like 100 or $100",
+  )
+  await expect(dialog.locator(".budget-field__error")).not.toContainText(
+    "above zero",
+  )
+  await expect(amount).toHaveValue("lots")
+  await expect(dialog.getByLabel("Name")).toHaveValue("My cap")
+  await expect(amount).toBeFocused()
+  // Zero is a different problem and says so.
+  await amount.fill("0")
+  await dialog.getByRole("button", { name: "Save limit" }).click()
+  await expect(dialog.locator(".budget-field__error")).toContainText(
+    "above zero",
+  )
+  await expect(dialog).toBeVisible()
+})
+
+test("a click on the backdrop or Escape leaves an edited editor open", async ({
+  page,
+}) => {
+  const dialog = await openAddDialog(page)
+  const amount = dialog.locator("#budget-field-amount")
+  await amount.fill("lots")
+  // The corner of the window is the backdrop.
+  await page.mouse.click(4, 4)
+  await expect(dialog).toBeVisible()
+  await expect(amount).toHaveValue("lots")
+  // So is the dialog's own padding.
+  const box = await dialog.boundingBox()
+  if (!box) throw new Error("no dialog box")
+  await page.mouse.click(box.x + 3, box.y + 3)
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(dialog).toBeVisible()
+  await expect(amount).toHaveValue("lots")
+  // Fixing the amount and saving still works, with the unit typed in.
+  await amount.fill("$100")
+  await dialog.getByRole("button", { name: "Save limit" }).click()
+  await expect(dialog).toBeHidden()
+})
+
+test("an untouched editor closes on the backdrop and on Escape, and Cancel always closes", async ({
+  page,
+}) => {
+  let dialog = await openAddDialog(page)
+  await page.mouse.click(4, 4)
+  await expect(dialog).toBeHidden()
+  dialog = await openAddDialog(page)
+  await page.keyboard.press("Escape")
+  await expect(dialog).toBeHidden()
+  dialog = await openAddDialog(page)
+  await dialog.locator("#budget-field-amount").fill("5")
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(dialog).toBeHidden()
+})
+
+test("the amount field carries its unit", async ({ page }) => {
+  const dialog = await openAddDialog(page)
+  await expect(dialog.locator(".input-adorn__text")).toHaveText("$")
 })

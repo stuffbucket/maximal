@@ -58,7 +58,7 @@ export const FirstRun = at("budget-empty");
 export const InCredits = at("budget-credits");
 /** No usage database: every amount reads zero. */
 export const NoUsageDatabase = at("budget-storage-off");
-/** The status can't load: a banner across the Overview with the one remedy. */
+/** The status can't load: a banner at the top with the one remedy. */
 export const LoadError = at("budget-limits", ["/settings/api/budget"]);
 /** The spend behind the chart can't load: the error sits in Activity. */
 export const ActivityLoadError = at("budget-limits", ["/settings/api/budget/activity"]);

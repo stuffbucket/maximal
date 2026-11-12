@@ -58,9 +58,9 @@ logical constraints and are never derived from `devicePixelRatio`.
   Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.
 - **Budget**: a section of the Settings pane, so the same `.topbar` and centered
-  column (`--content-max`), with the topbar center empty. Three typographic
-  sections divided by `--space-7`: Overview (the one Fraunces heading), Limits
-  and Activity. Limits are hairline-divided rows, not cards; Activity is a chart
+  column (`--content-max`), with the topbar center empty. A one-line
+  summary, then three typographic sections divided by `--space-7`: Limits (the
+  one Fraunces heading), Activity and Settings. Limits are hairline-divided rows, not cards; Activity is a chart
   over a table. Add and edit happen in a native dialog that scrolls on its own in
   a short window.
 

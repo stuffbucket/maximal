@@ -5,7 +5,7 @@ import { Budget } from "../../../../shell/src/ui/features/budget/Budget";
 import type { MockApiParameters } from "../mock/fetch-mock";
 
 /**
- * The Budget surface: Overview, Limits and Activity over `/settings/api/budget`
+ * The Budget surface: the summary, Limits, Activity and Settings over `/settings/api/budget`
  * and `/settings/api/budget/activity` from the mock sidecar
  * (scripts/ui-harness-budget.ts, a small working budget service over a made-up
  * spend ledger). Every story is a backend state; changes made in a story
@@ -32,7 +32,7 @@ export const NoLimitsYet = state({ scenario: "budget-no-limits" });
 export const FirstRun = state({ scenario: "budget-empty" });
 /** Amounts shown in AI credits instead of US dollars. */
 export const InCredits = state({ scenario: "budget-credits" });
-/** No usage database: every amount reads zero, and the Overview says why. */
+/** No usage database: every amount reads zero, and the summary says why. */
 export const NoUsageDatabase = state({ scenario: "budget-storage-off" });
 
 export const Loading = state({
@@ -60,7 +60,7 @@ export const ActivityLoadError = state({
     "/settings/api/budget/activity": { status: 500, body: { error: { message: "Usage history is unreadable." } } },
   },
 });
-/** Activity is slow: the Overview and Limits are up while it loads. */
+/** Activity is slow: the summary and Limits are up while it loads. */
 export const ActivityLoading = state({
   scenario: "budget-limits",
   overrides: { "/settings/api/budget/activity": "hang" },
@@ -109,6 +109,18 @@ export const SaveFailure: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole("button", { name: "Add a limit" }));
     await userEvent.type(await canvas.findByLabelText("Amount"), "2");
+    await userEvent.click(await canvas.findByRole("button", { name: "Save limit" }));
+  },
+};
+
+/** An amount that isn't one: the caption says what to type, the field is focused, and the dialog keeps every value. */
+export const AmountProblem: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Add a limit" }));
+    await userEvent.type(await canvas.findByLabelText("Name"), "My cap");
+    await userEvent.type(await canvas.findByLabelText("Amount"), "lots");
     await userEvent.click(await canvas.findByRole("button", { name: "Save limit" }));
   },
 };

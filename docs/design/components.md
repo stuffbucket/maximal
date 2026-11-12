@@ -199,18 +199,20 @@ it become links, opened in the system browser. Glyphs are Maximal's own
 ## Budget
 
 The fourth surface of the unified window (`shell/src/ui/features/budget/`, a
-React island in the Settings bundle). One scrolling column of three typographic
-sections, no cards: **Overview**, **Limits**, **Activity**. The first heading
-(Overview, `.section__title`) is the window's one Fraunces moment; the others
-step down to Commissioner (`.budget-block__title`). The window's own name is in
-the native title bar, so no heading repeats it.
+React island in the Settings bundle). One scrolling column: a one-line summary,
+then three typographic sections, no cards: **Limits**, **Activity**,
+**Settings**. Limits and Activity are what people open the window for, so they
+come first. The first heading (Limits, `.section__title`) is the window's one
+Fraunces moment; the others step down to Commissioner
+(`.budget-block__title`). The window's own name is in the native title bar, so
+no heading repeats it.
 
-- **Overview.** Two `.form` rows (an on/off `Switch` for enforcement, a `.select`
-  for the display unit), then what each provider reports: its allowances grouped
-  under the provider's name, each a label, the percent used, a meter and
-  "Resets <date> (<relative>)". These are the provider's figures and can lag, so
-  the section says so; limits count what Maximal records. A spent blocking limit
-  and a missing usage database each show a notice `Callout` above the form.
+- **Summary.** One line (`.budget-status`) above the Limits heading: whether
+  limits are enforced, how many exist, and how far the limit a request would hit
+  first (else the widest) has got, e.g. "Enforcing · 2 limits · $12.40 of $100
+  today". It is muted while enforcement is off. A spent blocking limit, a missing
+  usage database and a status that failed to load each show under it as a notice
+  `Callout` or `ProblemCallout`.
 - **Limits.** A hairline-divided list (`.limits`), one row per limit that exists,
   in the server's order (widest scope first, so a row never jumps as spend
   changes). A row is the name (with a `.chip` for its scope when it has a name of
@@ -227,17 +229,35 @@ the native title bar, so no heading repeats it.
   plugin, one provider, listing only what exists), amount in the display unit,
   warn-at percent, when it resets (with each window the provider reported, else
   daily, weekly or never) and whether reaching it refuses requests or only warns.
-  A validation problem is a caption under its field; a refused save is an error
-  `Callout` inside the dialog. Deleting asks in a `ConfirmDialog`.
+  The amount field (`.input-adorn`) shows its unit inside it (`$` on the side the
+  locale writes it, or "credits" after) so nobody has to type it. Typing is
+  forgiving: a currency sign or code ("$100", "100 USD"), a credit word ("100
+  credits", "AIU", "cr"), spaces and the locale's thousands separators all read,
+  and a unit other than the display unit is converted at the status's
+  `credit_usd` (`parseAmountDetailed` in `format.ts`). A validation problem is a
+  caption under its field that says what is wrong ("Enter an amount like 100 or
+  $100"; zero has its own wording), focuses the field and keeps the dialog and
+  every value as they were; a refused save is an error `Callout` inside the
+  dialog. **Edits are never discarded by accident:** while the form differs from
+  what it opened with, a click on the backdrop (or in the dialog's padding) and
+  Escape do nothing, and Cancel is the explicit way out. An untouched form closes
+  on either. Deleting asks in a `ConfirmDialog`.
 - **Activity.** Period and group pickers, the period's total, a chart, a table of
-  the same rows and an Export CSV button (the shell's save dialog; a plain
-  download in a browser). By model, plugin, client key or provider the chart is a
+  the same rows and a "Download activity statement (CSV)" button (the shell's
+  save dialog; a plain download in a browser) whose tooltip and file name
+  (`maximal-activity-<period>-by-<group>.csv`) name the period and grouping. By model, plugin, client key or provider the chart is a
   thin segmented bar (`.budget-share`): five parts in `--series-1` to
   `--series-5`, the tail folded into a neutral "Other", and a swatch on each
   table row standing in for a legend. By day it is columns (`.budget-columns`, at
   most `--size-lg` wide, `--radius-chip` rounded tops, one baseline) with the busiest
   day labelled. The chart never carries a number the table doesn't, and rows that
   spent nothing are not listed. A table longer than ten rows folds under "Show all".
+
+- **Settings.** Two `.form` rows (an on/off `Switch` for enforcement, a `.select`
+  for the display unit), then what each provider reports: its allowances grouped
+  under the provider's name, each a label, the percent used, a meter and
+  "Resets <date> (<relative>)". These are the provider's figures and can lag, so
+  the section says so; limits count what Maximal records.
 
 All text is in the catalog (`budget-*` keys); amounts and dates go through `Intl`
 in the active locale, with the unit passed as an ICU argument.

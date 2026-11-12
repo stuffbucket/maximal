@@ -93,7 +93,16 @@ export function Activity({ format, version }: ActivityProps): JSX.Element {
             : t("budget-activity-sub-plain")}
           </p>
         </div>
-        <Button variant="secondary" onClick={() => void exportCsv()} disabled={exporting || rows.length === 0}>
+        <Button
+          variant="secondary"
+          onClick={() => void exportCsv()}
+          disabled={exporting || rows.length === 0}
+          title={t("budget-export-tip", {
+            file: csvFileName(period, group),
+            period: t(`budget-period-${period}`),
+            group: t(`budget-group-${group}`),
+          })}
+        >
           <DownloadGlyph />
           {exporting ? t("common-working") : t("budget-export")}
         </Button>
