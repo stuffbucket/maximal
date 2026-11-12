@@ -10,7 +10,7 @@ read and change the board through the same tools.
 | Package | What it holds |
 |---|---|
 | `packages/figjam-plugin` | The Figma plugin: the sandbox (`src/legacy/code.js`), the panel (`src/legacy/ui.html`), and `scripts/build.ts`, which writes an importable plugin folder. |
-| `packages/figjam-bridge` | The bridge (`src/bridge.ts`, HTTP and WebSocket on port 4150), the chat store (`src/chats-store.ts`, SQLite with FTS5) and the `figjam` CLI (`src/cli.ts`). |
+| `packages/figjam-bridge` | The bridge (`src/server.ts`, HTTP and WebSocket on port 4150; `src/bridge.ts` is its CLI entry), the chat store (`src/chats-store.ts`, SQLite with FTS5) and the `figjam` CLI (`src/cli.ts`). |
 | `packages/figjam-layout` | Layout and edge routing for boards. The recommended pipeline is plain TypeScript; the older baseline strategies use elkjs and libavoid-js. |
 
 The sandbox and panel are still the single-file sources they started as. The
@@ -97,6 +97,33 @@ Files live under Maximal's data directory, `<data>/figjam/`:
 `<data>` is `COPILOT_API_HOME` when set; otherwise `%APPDATA%\maximal` on
 Windows, `$XDG_DATA_HOME/maximal`, or `~/.local/share/maximal`.
 
+### Embedding
+
+`startBridge` (`@stuffbucket/maximal-figjam-bridge/server`) runs the same
+bridge in-process; `bun run figjam:bridge` is a thin wrapper around it.
+
+```ts
+const bridge = await startBridge({
+  port: 0, // default FIGJAM_BRIDGE_PORT, else 4150; 0 picks a free port
+  hostname: "127.0.0.1",
+  dataDir, // default: the data directory described below
+  onEvent: (e) => { /* BridgeEvent */ },
+})
+bridge.port
+bridge.status() // { port, version, boards, pending, clients }
+await bridge.approve("grumpy-lynx") // name optional when one request is pending
+await bridge.deny("grumpy-lynx")
+bridge.forget(clientId)
+await bridge.stop() // closes sockets and the listener, frees the port
+```
+
+`approve` and `deny` return the admin API's JSON body plus `status` (the HTTP
+status it would carry), so a miss reads `{ ok: false, status: 404, error }`.
+`BridgeEvent` is one of `pair-requested` (`name`, `user?`, `board?`), `paired`
+(`name`, `clientId`), `pair-denied`, `pair-expired`, `board-connected` and
+`board-disconnected` (`name`, `board?`). State is module-level, so one bridge
+per process: a second `startBridge` before `stop()` throws.
+
 ## Tests
 
 ```sh
@@ -110,7 +137,8 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
   global. They need Node rather than Bun, because Bun's `vm` doesn't keep a
   context's top-level `var` bindings in sync with the context object.
 - `figjam-bridge` starts a bridge on a spare port with a temporary data
-  directory and drives pairing the way the panel and the CLI do.
+  directory and drives pairing the way the panel and the CLI do, both as a
+  subprocess (the CLI path) and in-process through `startBridge`.
 - `figjam-layout` runs the recommended pipeline on the capability-map fixture
   (about 10s): every hard check must pass, and its crossings, wire length and
   name-tag counts are pinned, so a routing change shows up as a deliberate

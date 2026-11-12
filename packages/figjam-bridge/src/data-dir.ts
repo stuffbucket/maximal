@@ -20,6 +20,6 @@ export function dataDir(): string {
 // Bridge admin token for HTTP and the figjam CLI (panels never see it; they get
 // their own token when the user approves their pairing request): 32 random
 // bytes, base64url, at <data>/figjam/pairing-token, mode 0600.
-export function pairingTokenPath(): string {
-  return path.join(dataDir(), "figjam", "pairing-token")
+export function pairingTokenPath(base: string = dataDir()): string {
+  return path.join(base, "figjam", "pairing-token")
 }
