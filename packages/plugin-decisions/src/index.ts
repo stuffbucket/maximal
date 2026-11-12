@@ -9,14 +9,21 @@ import type { Context, PluginModule } from "@stuffbucket/maximal-plugin-sdk"
 import {
   bindingsStatus,
   relayOperation,
+  serverToolWhileAvailable,
   responsesUsage,
 } from "@stuffbucket/maximal-plugin-sdk"
 
+import { decideTool } from "./decide"
 import { DECISIONS_MANIFEST, type DecisionsConfig } from "./manifest"
 
 export const name = DECISIONS_MANIFEST.id
 
-export const inject = ["operations", "providers", "surface"] as const
+export const inject = [
+  "operations",
+  "providers",
+  "serverTools",
+  "surface",
+] as const
 
 const PATH = "/v1/decisions"
 
@@ -35,8 +42,19 @@ export const apply: PluginModule<DecisionsConfig>["apply"] = (
       }),
   })
 
-  const refresh = () =>
+  const tool =
+    config.tools.decide ?
+      serverToolWhileAvailable(
+        ctx,
+        config.bindings,
+        decideTool(ctx, config, PATH),
+      )
+    : undefined
+  // The tool is offered to Claude only while the model is.
+  const refresh = () => {
     ctx.surface.setStatus(bindingsStatus(ctx, config.bindings, PATH))
+    tool?.sync()
+  }
   refresh()
   // The catalog (and so "is the model offered to this account") changes
   // after sign-in and on every refresh.
