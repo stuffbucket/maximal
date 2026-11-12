@@ -15,6 +15,7 @@ import { EventBus } from "~/lib/runtime-state/event-bus"
 const modelsCache = new SingletonCache<ModelsResponse>({ name: "models" })
 const copilotTokenCache = new SingletonCache<string>({ name: "copilot_token" })
 const modelEvents = new EventBus<{ changed: ModelsResponse }>()
+const providerEvents = new EventBus<{ changed: undefined }>()
 
 export interface State {
   githubToken?: string
@@ -102,6 +103,7 @@ export function setCopilotToken(token: string): void {
   if (state.copilotToken === token) return
   state.copilotToken = token
   copilotTokenCache.set(token)
+  providerEvents.publish("changed", undefined)
 }
 
 export function setUserName(name: string): void {
@@ -131,8 +133,10 @@ export function clearTokenTrio(
   },
 ): void {
   if (fields.github) state.githubToken = undefined
+  const copilotChanged = fields.copilot && state.copilotToken !== undefined
   if (fields.copilot) state.copilotToken = undefined
   if (fields.userName) state.userName = undefined
+  if (copilotChanged) providerEvents.publish("changed", undefined)
 }
 
 // ── Shared presence accessors ────────────────────────────────────────────────
@@ -170,10 +174,23 @@ export function subscribeModelCatalogChanged(listener: () => void): () => void {
   })
 }
 
+export function subscribeProviderStateChanged(
+  listener: () => void,
+): () => void {
+  return providerEvents.subscribe("changed", () => {
+    try {
+      listener()
+    } catch (error) {
+      consola.warn("provider state listener failed", error)
+    }
+  })
+}
+
 export function setModels(models: ModelsResponse): void {
   state.models = models
   modelsCache.set(models)
   modelEvents.publish("changed", models)
+  providerEvents.publish("changed", undefined)
 }
 
 /**

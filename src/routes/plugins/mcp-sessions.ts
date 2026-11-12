@@ -25,6 +25,7 @@ import {
   isPluginGatewayError,
   type PluginGateway,
   type PluginGatewayError,
+  type PluginGenerationLease,
   type PluginGatewayEvent,
   type PluginToolListing,
   type ToolCallContext,
@@ -32,6 +33,11 @@ import {
 import consola from "consola"
 import { randomUUID } from "node:crypto"
 
+import {
+  type AffinedGenerationCall,
+  GenerationAffinityCoordinator,
+  type GenerationAffinityDiagnostics,
+} from "~/lib/plugins/generation-affinity"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 
 // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
@@ -48,6 +54,12 @@ export interface McpSessionOptions {
   /** Most sessions at once, across plugins; the oldest idle one makes room. */
   maxSessions: number
   listChangedDelayMs: number
+  /** Parent/runner seam: release this generation's upstream MCP session. */
+  releaseUpstreamSession: (
+    generationId: string,
+    sessionId: string,
+    signal: AbortSignal,
+  ) => Promise<void>
 }
 
 interface Session {
@@ -124,7 +136,7 @@ function notReady(displayName: string, reason: string): CallToolResult {
  * it is a tool the client remembers from before, and the result says why.
  */
 function refusal(
-  gateway: PluginGateway,
+  gateway: Pick<PluginGenerationLease, "get">,
   pluginId: string,
   error: PluginGatewayError,
 ): CallToolResult {
@@ -225,11 +237,37 @@ export class McpSessions {
   readonly #opening = new Set<Session>()
   readonly #listChangedTimers = new Map<string, ReturnType<typeof setTimeout>>()
   readonly #options: McpSessionOptions
+  readonly #affinity: GenerationAffinityCoordinator
   #watched: { gateway: PluginGateway; unsubscribe: () => void } | undefined
   #sweeper: ReturnType<typeof setInterval> | undefined
 
   constructor(options: McpSessionOptions) {
     this.#options = options
+    this.#affinity = new GenerationAffinityCoordinator({
+      acquireGeneration: () => {
+        const gateway = options.getGateway()
+        if (!gateway) throw new Error("Plugin gateway is unavailable.")
+        return gateway.acquireGeneration()
+      },
+      releaseUpstreamSession: options.releaseUpstreamSession,
+      closeDownstream: (sessionId) => {
+        const session = this.#sessions.get(sessionId)
+        return session ? this.close(session) : Promise.resolve()
+      },
+      onMigrated: (sessionId) => {
+        const session = this.#sessions.get(sessionId)
+        if (session) this.#scheduleListChanged(session)
+      },
+    })
+  }
+
+  /** Supervisor seam: the gateway pointer has atomically moved to this generation. */
+  cutoverGeneration(generationId: string, drainDeadline: number): void {
+    this.#affinity.cutover(generationId, drainDeadline)
+  }
+
+  affinityDiagnostics(): GenerationAffinityDiagnostics {
+    return this.#affinity.diagnostics()
   }
 
   get(id: string, pluginId: string): Session | undefined {
@@ -291,6 +329,9 @@ export class McpSessions {
       inflight: 0,
       closed: false,
     }
+    session.server.setRequestHandler("tools/list", () =>
+      this.#listTools(session),
+    )
     session.server.setRequestHandler("tools/call", (request, ctx) =>
       this.#callTool(session, request, ctx),
     )
@@ -338,10 +379,18 @@ export class McpSessions {
     if (session.closed) return
     session.closed = true
     this.#opening.delete(session)
-    if (session.id !== undefined) this.#sessions.delete(session.id)
+    if (session.id !== undefined) {
+      this.#sessions.delete(session.id)
+      const timer = this.#listChangedTimers.get(session.id)
+      if (timer) clearTimeout(timer)
+      this.#listChangedTimers.delete(session.id)
+    }
     if (this.#sessions.size === 0 && this.#sweeper) {
       clearInterval(this.#sweeper)
       this.#sweeper = undefined
+    }
+    if (session.id !== undefined) {
+      await this.#affinity.closeSession(session.id)
     }
     await session.server.close().catch(() => undefined)
   }
@@ -353,6 +402,7 @@ export class McpSessions {
     this.#listChangedTimers.clear()
     this.#watched?.unsubscribe()
     this.#watched = undefined
+    await this.#affinity.closeAll()
   }
 
   #createServer(pluginId: string): LowLevelServer {
@@ -361,14 +411,26 @@ export class McpSessions {
       { name: pluginId, version: BUILD_VERSION },
       { capabilities: { tools: { listChanged: true } } },
     )
-    server.setRequestHandler("tools/list", () => {
-      const gateway = this.#options.getGateway()
-      const plugin = gateway?.get(pluginId)
-      const tools = plugin && gateway ? gateway.listTools(pluginId) : []
-      const connector = plugin?.displayName ?? pluginId
-      return { tools: tools.map((tool) => toMcpTool(tool, connector)) }
-    })
     return server
+  }
+
+  async #listTools(session: Session): Promise<{ tools: Array<Tool> }> {
+    if (session.id === undefined) return { tools: [] }
+    let call: AffinedGenerationCall | undefined
+    try {
+      call = await this.#affinity.acquire(session.id)
+      const plugin = call.generation.get(session.pluginId)
+      const tools = plugin ? call.generation.listTools(session.pluginId) : []
+      const connector = plugin?.displayName ?? session.pluginId
+      return { tools: tools.map((tool) => toMcpTool(tool, connector)) }
+    } catch (error) {
+      // A lifecycle/cutover race is a temporarily empty catalog, not a server
+      // crash or an escaping PluginGatewayError.
+      if (isPluginGatewayError(error)) return { tools: [] }
+      throw error
+    } finally {
+      call?.release()
+    }
   }
 
   #initialized(session: Session, id: string): void {
@@ -392,37 +454,44 @@ export class McpSessions {
   ): Promise<CallToolResult> {
     const { pluginId } = session
     const gateway = this.#options.getGateway()
-    if (!gateway) return notReady(pluginId, "Maximal is stopping.")
-    const { name } = request.params
-    const args = request.params.arguments ?? {}
-    const call = callContext(session, request, ctx)
-    const listing = gateway
-      .listTools(pluginId)
-      .find((tool) => tool.name === name)
-    if (listing?.permission === "ask") {
-      const connector = gateway.get(pluginId)?.displayName ?? pluginId
-      const decision = await this.#approve(session, ctx, {
-        connector,
-        tool: name,
-        args,
-      })
-      if (decision.refused) return decision.refused
-      if (decision.approved) call.approved = true
-    }
-    let result
+    if (!gateway || session.id === undefined)
+      return notReady(pluginId, "Maximal is stopping.")
+    const affined = await this.#affinity.acquire(session.id)
+    const generation = affined.generation
     try {
-      result = await gateway.callTool(pluginId, name, args, call)
-    } catch (error) {
-      if (!isPluginGatewayError(error)) throw error
-      return refusal(gateway, pluginId, error)
+      const { name } = request.params
+      const args = request.params.arguments ?? {}
+      const call = callContext(session, request, ctx)
+      const listing = generation
+        .listTools(pluginId)
+        .find((tool) => tool.name === name)
+      if (listing?.permission === "ask") {
+        const connector = generation.get(pluginId)?.displayName ?? pluginId
+        const decision = await this.#approve(session, ctx, {
+          connector,
+          tool: name,
+          args,
+        })
+        if (decision.refused) return decision.refused
+        if (decision.approved) call.approved = true
+      }
+      let result
+      try {
+        result = await generation.callTool(pluginId, name, args, call)
+      } catch (error) {
+        if (!isPluginGatewayError(error)) throw error
+        return refusal(generation, pluginId, error)
+      }
+      const advertised = generation
+        .listTools(pluginId)
+        .find((tool) => tool.name === name)?.outputSchema
+      return session.server.projectCallToolResult(
+        result as CallToolResult,
+        advertised,
+      )
+    } finally {
+      affined.release()
     }
-    const advertised = gateway
-      .listTools(pluginId)
-      .find((tool) => tool.name === name)?.outputSchema
-    return session.server.projectCallToolResult(
-      result as CallToolResult,
-      advertised,
-    )
   }
 
   /**
@@ -492,21 +561,22 @@ export class McpSessions {
       for (const session of sessions) void this.close(session)
       return
     }
-    this.#scheduleListChanged(event.pluginId)
+    for (const session of sessions) this.#scheduleListChanged(session)
   }
 
-  #scheduleListChanged(pluginId: string): void {
-    if (this.#listChangedTimers.has(pluginId)) return
+  #scheduleListChanged(session: Session): void {
+    if (session.id === undefined || this.#listChangedTimers.has(session.id))
+      return
+    const { id, pluginId } = session
     const timer = setTimeout(() => {
-      this.#listChangedTimers.delete(pluginId)
-      for (const session of this.#forPlugin(pluginId)) {
-        session.server.sendToolListChanged().catch((error: unknown) => {
-          consola.debug(`MCP ${pluginId}: list_changed not delivered`, error)
-        })
-      }
+      this.#listChangedTimers.delete(id)
+      if (session.closed) return
+      session.server.sendToolListChanged().catch((error: unknown) => {
+        consola.debug(`MCP ${pluginId}: list_changed not delivered`, error)
+      })
     }, this.#options.listChangedDelayMs)
     timer.unref()
-    this.#listChangedTimers.set(pluginId, timer)
+    this.#listChangedTimers.set(id, timer)
   }
 
   #sweepIdle(): void {

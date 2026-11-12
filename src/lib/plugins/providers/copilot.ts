@@ -11,15 +11,22 @@ import type {
   UpstreamProvider,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import consola from "consola"
+
 import type { sendRequest } from "~/lib/http/send-request"
+import type { ParentProviderBroker } from "~/lib/plugins/provider-broker"
 
 import { copilotWindowsFromUsage } from "~/lib/budget/copilot-windows"
 import { listProviderWindows } from "~/lib/budget/provider-windows"
 import { adviseUpstreamError } from "~/lib/errors/upstream-error-advice"
 import {
+  providerFromBroker,
+  type ProviderInvocationJournal,
+} from "~/lib/plugins/provider-broker"
+import {
   hasCopilotToken,
   state,
-  subscribeModelCatalogChanged,
+  subscribeProviderStateChanged,
 } from "~/lib/runtime-state/state"
 import { extractCopilotCost } from "~/lib/token-usage"
 import {
@@ -36,6 +43,8 @@ export interface CopilotProviderDeps {
   /** Reads GitHub's `/copilot_internal/user` reply, which carries the
    *  quotas; the real call by default. */
   getUsage?: () => Promise<unknown>
+  /** Durably fence availability/catalog changes before notifying plugins. */
+  commitControlMutation?: (digest: string) => Promise<void>
 }
 
 function modelInfo(model: Model): ProviderModelInfo {
@@ -49,23 +58,77 @@ function modelInfo(model: Model): ProviderModelInfo {
   }
 }
 
-export function createCopilotProvider(
+function readCopilotState() {
+  return {
+    available: hasCopilotToken(),
+    models: Object.freeze(
+      (state.models?.data ?? []).map((model) => modelInfo(model)),
+    ),
+  }
+}
+
+export function createCopilotProviderBroker(
   deps: CopilotProviderDeps = {},
-): UpstreamProvider {
+): ParentProviderBroker {
+  const listeners = new Set<() => void>()
+  let revision = 0
+  let published = readCopilotState()
+  let unsubscribeState: (() => void) | undefined
+  let publishTail = Promise.resolve()
+  const publish = (next: ReturnType<typeof readCopilotState>): void => {
+    const commit = async (): Promise<void> => {
+      if (deps.commitControlMutation) {
+        await deps.commitControlMutation(JSON.stringify(next))
+      }
+      revision += 1
+      published = next
+      for (const listener of listeners) {
+        try {
+          listener()
+        } catch (error) {
+          consola.warn("Copilot provider listener failed", error)
+        }
+      }
+    }
+    if (!deps.commitControlMutation) {
+      void commit()
+      return
+    }
+    publishTail = publishTail
+      .then(() => commit())
+      .catch((error: unknown) => {
+        // A failed durable fence must not publish an unfenced provider view.
+        consola.warn("Could not commit Copilot provider state", error)
+      })
+  }
+  const snapshot = () => {
+    const current = unsubscribeState ? published : readCopilotState()
+    return Object.freeze({ revision, ...current })
+  }
   return {
     id: COPILOT_PROVIDER_ID,
     displayName: "GitHub Copilot",
+    snapshot,
+    subscribe(listener) {
+      listeners.add(listener)
+      if (!unsubscribeState) {
+        published = readCopilotState()
+        unsubscribeState = subscribeProviderStateChanged(() => {
+          publish(readCopilotState())
+        })
+      }
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size > 0) return
+        unsubscribeState?.()
+        unsubscribeState = undefined
+      }
+    },
     postJson: (path, body, options) =>
       postCopilotJson(path, body, {
         ...options,
         sendRequest: deps.sendRequest,
       }),
-    model(id) {
-      const model = state.models?.data.find((entry) => entry.id === id)
-      return model ? modelInfo(model) : undefined
-    },
-    onCatalogChange: (listener) => subscribeModelCatalogChanged(listener),
-    available: () => hasCopilotToken(),
     adviseError: ({ status, text, call }) =>
       adviseUpstreamError(status, text, {
         models: state.models?.data ?? [],
@@ -87,4 +150,12 @@ export function createCopilotProvider(
       return copilotWindowsFromUsage(usage)
     },
   }
+}
+
+/** Current public direct-provider API, projected from the parent broker. */
+export function createCopilotProvider(
+  deps: CopilotProviderDeps = {},
+  journal?: ProviderInvocationJournal,
+): UpstreamProvider {
+  return providerFromBroker(createCopilotProviderBroker(deps), journal)
 }

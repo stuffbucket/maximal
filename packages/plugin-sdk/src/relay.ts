@@ -98,16 +98,34 @@ export async function relayOperation(
   if (!provider) {
     throw new OperationUnavailableError(request.operation, request.model)
   }
+  const { invocationId, providerCallId, sequence } = request
   const json = await provider.postJson<Record<string, unknown>>(
     spec.path,
     withUpstreamModel(request.body, request.binding.upstreamModel),
-    { signal: request.signal, errorMessage: spec.errorMessage },
+    {
+      signal: request.signal,
+      errorMessage: spec.errorMessage,
+      invocation: {
+        invocationId,
+        providerCallId,
+        sequence,
+        operation: request.operation,
+        model: request.binding.upstreamModel,
+      },
+    },
   )
   const cost = provider.cost(json, {
     operation: request.operation,
     model: request.binding.upstreamModel,
   })
-  return { json, usage: spec.usage(json), ...(cost ? { cost } : {}) }
+  return {
+    json,
+    usage: spec.usage(json),
+    ...(cost ? { cost } : {}),
+    invocationId,
+    providerCallId,
+    sequence,
+  }
 }
 
 /**

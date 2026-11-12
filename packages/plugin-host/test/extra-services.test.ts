@@ -18,7 +18,13 @@ import {
   type LifecycleHarness,
   runPluginConformance,
 } from "../src/testing"
-import { fakeHost, noop, runCleanups, tempDir } from "./helpers"
+import {
+  fakeHost,
+  noop,
+  runCleanups,
+  tempDir,
+  testSettingsAuthority,
+} from "./helpers"
 
 /** A fake app service: reports which plugin asked for it. */
 interface Greeter {
@@ -79,9 +85,15 @@ function hostWith(
   plugins: Array<PluginModule>,
   extra?: Array<PluginServiceFactory>,
 ) {
+  const storageRoot = tempDir()
   return createPluginHost({
     plugins,
-    services: { host: fakeHost(), storageRoot: tempDir(), extra },
+    services: {
+      host: fakeHost(),
+      storageRoot,
+      settingsAuthority: testSettingsAuthority(storageRoot),
+      extra,
+    },
   })
 }
 

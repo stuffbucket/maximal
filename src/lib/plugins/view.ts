@@ -187,8 +187,8 @@ function toView(
   return {
     id: snapshot.id,
     kind: snapshot.kind,
-    // The host loads a static first-party set: every plugin is built in.
-    source: "built-in",
+    // Expose provenance class only; an external module's specifier is private.
+    source: snapshot.source.type,
     displayName: snapshot.displayName,
     description: snapshot.description,
     ...(snapshot.homepage === undefined ? {} : { homepage: snapshot.homepage }),
@@ -197,6 +197,17 @@ function toView(
     lifecycle: snapshot.lifecycle,
     ...(snapshot.lifecycle === "failed" && snapshot.error !== undefined ?
       { error: snapshot.error }
+    : {}),
+    ...((
+      snapshot.lifecycle === "waiting"
+      && snapshot.waitingForServices !== undefined
+    ) ?
+      { waitingForServices: [...snapshot.waitingForServices] }
+    : {}),
+    ...((
+      snapshot.lifecycle === "waiting" && snapshot.waitingReason !== undefined
+    ) ?
+      { waitingReason: snapshot.waitingReason }
     : {}),
     ...(snapshot.status === undefined ? {} : { status: snapshot.status }),
     toolCounts: toolCounts(tools),

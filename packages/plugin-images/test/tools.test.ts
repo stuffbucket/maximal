@@ -12,6 +12,7 @@ import {
   type LifecycleHarness,
 } from "@stuffbucket/maximal-plugin-host/testing"
 import {
+  type ServerToolCall,
   type ServerToolSpend,
   type ToolResult,
 } from "@stuffbucket/maximal-plugin-sdk"
@@ -86,13 +87,26 @@ async function start(
   await harness.setConfig("images", { outputDir: out, ...config })
   await harness.waitForStatus("images", (status) => status?.code === "ready")
   const spends: Array<ServerToolSpend> = []
-  const call = (tool: string, input: Record<string, unknown>) =>
-    harness.gateway.callServerTool("images", tool, input, {
+  let invocationCount = 0
+  const call = (tool: string, input: Record<string, unknown>) => {
+    const invocationId = `test-invocation-${++invocationCount}`
+    let sequence = 0
+    const options: ServerToolCall = {
       signal: new AbortController().signal,
       model: "claude-test",
       client: "claude-code",
+      invocationId,
+      nextProviderCall: (operation, model) => ({
+        invocationId,
+        providerCallId: `${invocationId}-call-${sequence + 1}`,
+        sequence: ++sequence,
+        operation,
+        model,
+      }),
       reportSpend: (spend) => spends.push(spend),
-    })
+    }
+    return harness.gateway.callServerTool("images", tool, input, options)
+  }
   const approve = () => harness.runAction("images", APPROVE_ACTION)
   return { fake, harness, call, approve, spends }
 }
@@ -121,7 +135,7 @@ describe("registration", () => {
       })
       // No path, count or other live state in what is sent upstream on every turn.
       expect(tool.description).not.toContain(out)
-      expect(tool.estimate).toBeFunction()
+      expect(tool.billed).toBe(true)
     }
     const before = JSON.stringify(tools.map((tool) => tool.description))
     await harness.setConfig("images", { outputDir: inputs })
@@ -141,16 +155,26 @@ describe("registration", () => {
 
   test("the estimate names the operation, provider and what prices it", async () => {
     const { harness } = await start()
-    const view = (name: string) =>
-      harness.gateway.serverTools().find((tool) => tool.name === name)
+    const estimate = async (name: string, input: Record<string, unknown>) => {
+      const prepared = await harness.gateway.prepareServerTool(
+        "images",
+        name,
+        input,
+      )
+      try {
+        return prepared.estimate
+      } finally {
+        prepared.release()
+      }
+    }
 
-    expect(view("generate_image")?.estimate?.({ prompt: "x", n: 2 })).toEqual({
+    expect(await estimate("generate_image", { prompt: "x", n: 2 })).toEqual({
       operation: "images.generations",
       provider: "copilot",
       body: { quality: "low", n: 2 },
     })
     expect(
-      view("edit_image")?.estimate?.({
+      await estimate("edit_image", {
         prompt: "x",
         quality: "high",
         images: ["/a.png"],
@@ -161,9 +185,9 @@ describe("registration", () => {
       body: { quality: "high", n: 1 },
     })
     // Invalid input has no estimate; `execute` refuses it.
-    expect(view("generate_image")?.estimate?.({ prompt: "" })).toBeUndefined()
+    expect(await estimate("generate_image", { prompt: "" })).toBeUndefined()
     expect(
-      view("generate_image")?.estimate?.({ prompt: "x", n: 99 }),
+      await estimate("generate_image", { prompt: "x", n: 99 }),
     ).toBeUndefined()
   })
 })

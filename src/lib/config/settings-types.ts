@@ -652,10 +652,14 @@ export const PluginView = z.object({
   manifest: PluginManifestView,
   /** Desired state (config.json → plugins.<id>.enabled). */
   enabled: z.boolean(),
-  lifecycle: z.enum(["disabled", "starting", "active", "failed"]),
+  lifecycle: z.enum(["disabled", "waiting", "starting", "active", "failed"]),
   /** Why it failed (unreadable settings file, path-qualified config
    *  issues, apply error). Only with `lifecycle: "failed"`. */
   error: z.string().optional(),
+  /** Required services keeping a waiting plugin pending. */
+  waitingForServices: z.array(z.string()).optional(),
+  /** Human-readable reason for a waiting plugin. */
+  waitingReason: z.string().optional(),
   /** The running plugin's own report (`ctx.surface.setStatus`). */
   status: PluginStatus.optional(),
   /** Counts over the same tools the detail's `tools` lists (live or cached). */

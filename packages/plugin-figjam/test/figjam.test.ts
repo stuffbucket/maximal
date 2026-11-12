@@ -3,10 +3,19 @@
  * WebSocket the way the Figma plugin does, on a spare port with a temporary
  * data directory (never the real one, never port 4150).
  */
+import { createPluginHost } from "@stuffbucket/maximal-plugin-host"
+import {
+  ExclusiveResourceLeaseRegistry,
+  type HostServices,
+} from "@stuffbucket/maximal-plugin-sdk"
+import {
+  createFileStorage,
+  createStorageSettingsAuthority,
+} from "@stuffbucket/maximal-plugin-sdk/runtime"
 import { loadPlugin, waitFor } from "@stuffbucket/maximal-plugin-sdk/testing"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -24,6 +33,8 @@ let dataDir: string
 let storageDir: string
 let port: number
 const cleanups: Array<() => Promise<void> | void> = []
+
+function ignore(): void {}
 
 function freePort(): number {
   const probe = Bun.listen({
@@ -59,6 +70,48 @@ async function load(
   )
   cleanups.push(() => loaded.dispose())
   return loaded
+}
+
+async function loadCandidate() {
+  const pluginStorage = path.join(storageDir, "figjam")
+  await mkdir(pluginStorage, { recursive: true })
+  await writeFile(
+    path.join(pluginStorage, "settings.json"),
+    JSON.stringify({
+      $schema: "maximal-plugin-settings/1",
+      plugin: "figjam",
+      version: 1,
+      config: { port },
+    }),
+  )
+  const storage = createFileStorage(storageDir)
+  const host: HostServices = {
+    appVersion: "1.0.0",
+    maximalPort: () => 4141,
+    logger: {
+      debug: ignore,
+      info: ignore,
+      warn: ignore,
+      error: ignore,
+    },
+    openExternal: () => Promise.resolve(),
+  }
+  const gateway = createPluginHost({
+    plugins: [createFigjamPlugin({ dataDir })],
+    services: {
+      host,
+      storageRoot: storageDir,
+      storage,
+      settingsAuthority: createStorageSettingsAuthority(storage),
+    },
+    resourceActivation: {
+      mode: "candidate",
+      leases: new ExclusiveResourceLeaseRegistry(),
+    },
+  })
+  cleanups.push(() => gateway.dispose())
+  await gateway.reconcile({ figjam: { enabled: true } })
+  return gateway
 }
 
 const status = (loaded: Loaded) => loaded.status()
@@ -275,6 +328,27 @@ describe("FigJam plugin: pairing", () => {
 })
 
 describe("FigJam plugin: the port", () => {
+  test("a candidate declares the port without binding before commit", async () => {
+    const gateway = await loadCandidate()
+
+    expect(await portIsFree(port)).toBe(true)
+    expect(gateway.resourceLifecycle().list()).toMatchObject([
+      {
+        pluginId: "figjam",
+        declaration: {
+          mode: "exclusive",
+          resources: [`figjam-bridge:${port}`],
+        },
+        phase: "prepared",
+      },
+    ])
+
+    await gateway.resourceLifecycle().commit()
+    expect(await portIsFree(port)).toBe(false)
+    await gateway.resourceLifecycle().revoke()
+    expect(await portIsFree(port)).toBe(true)
+  })
+
   test("stopping the plugin frees the port", async () => {
     const loaded = await load()
     await waitFor(statusIs(loaded, "plugin-not-built"))

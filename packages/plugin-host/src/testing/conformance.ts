@@ -14,6 +14,7 @@ import type {
 
 import {
   createFileStorage,
+  createStorageSettingsAuthority,
   injectedServices,
   isInjectList,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
@@ -258,10 +259,13 @@ async function checkManifest(suite: Suite): Promise<void> {
 }
 
 function buildBareHost(suite: Suite, plugin: PluginModule) {
+  const storage = createFileStorage("/nonexistent-plugin-conformance")
   return createPluginHost({
     plugins: [plugin],
     services: {
       storageRoot: "/nonexistent-plugin-conformance",
+      storage,
+      settingsAuthority: createStorageSettingsAuthority(storage),
       host: {
         appVersion: "0.0.0-test",
         maximalPort: () => 4141,

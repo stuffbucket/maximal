@@ -13,6 +13,17 @@ import type { PluginRuntime } from "./state"
 
 import { isInjectList } from "./validate"
 
+export {
+  createStorageSettingsAuthority,
+  isPluginSettingsConflictError,
+  type PluginSettingsAuthority,
+  type PluginSettingsCommit,
+  PluginSettingsConflictError,
+  type PluginSettingsProposal,
+  type PluginSettingsProposalKind,
+  type PluginSettingsRevision,
+  type PluginSettingsTransaction,
+} from "./authority"
 export { createFileStorage } from "./file-storage"
 export { nonJsonPath, normalizeManifest } from "./manifest"
 export { operationDispatchOf, operationsService } from "./operations"
@@ -62,6 +73,7 @@ export {
   normalizeToolDefinition,
   type ParsedPluginConfig,
   parsePluginConfig,
+  providedServices,
   toConfigIssues,
   validatePluginList,
   validatePluginModule,
@@ -75,19 +87,58 @@ const FIBER_ACTIVE = 2
  * config is validated once by the host (path-qualified errors, async
  * schemas) and the parsed value is handed to `apply` as-is.
  */
-export function toCordisPlugin(module: PluginModule): Plugin.Object<unknown> {
+export function toCordisPlugin(
+  module: PluginModule,
+  onApplyResult?: (result: unknown) => unknown,
+): Plugin.Object<unknown> {
   return {
     name: module.name,
     inject:
       isInjectList(module.inject) ? [...module.inject] : { ...module.inject },
-    apply: (ctx: Context, config: unknown) => module.apply(ctx, config),
+    ...(module.provides === undefined ? {} : { provide: [...module.provides] }),
+    apply: async (ctx: Context, config: unknown) => {
+      const result = await module.apply(ctx, config)
+      if (onApplyResult !== undefined) return await onApplyResult(result)
+    },
   }
 }
 
 /**
- * Start `plugin` under `root` with an already-validated config, attach the
- * fiber to `runtime`, and wait for `apply`. On failure the fiber is disposed,
- * the slot released, and the error rethrown.
+ * Mount `plugin` under `root` and attach its runtime slot. The returned fiber
+ * may legally be PENDING while Cordis waits for declared services; callers
+ * choose separately whether and when to await a lifecycle settlement.
+ */
+// eslint-disable-next-line max-params -- exported host entry point; its positional signature is part of the runtime API
+export async function mountPlugin(
+  root: Context,
+  runtime: PluginRuntime,
+  id: string,
+  plugin: Plugin.Object<unknown>,
+  config: unknown,
+): Promise<Fiber> {
+  const handle = root.plugin(plugin, config)
+  const fiber = handle.ctx.fiber
+  try {
+    runtime.attach(id, handle)
+    return fiber
+  } catch (error) {
+    try {
+      await fiber.dispose()
+    } catch {
+      // Preserve the attach failure; cordis reports disposer failures itself.
+    }
+    throw error
+  }
+}
+
+/** Wait for the fiber's current Cordis lifecycle work to settle. */
+export async function settlePlugin(fiber: Fiber): Promise<Fiber> {
+  return await fiber.await()
+}
+
+/**
+ * Compatibility helper for testbeds that require immediate activation. The
+ * mutable host uses `mountPlugin` directly so PENDING fibers remain mounted.
  */
 // eslint-disable-next-line max-params -- exported host entry point; its positional signature is part of the runtime API
 export async function activatePlugin(
@@ -97,12 +148,9 @@ export async function activatePlugin(
   plugin: Plugin.Object<unknown>,
   config: unknown,
 ): Promise<Fiber> {
-  const fiber = root.plugin(plugin, config)
-  runtime.attach(id, fiber)
+  const fiber = await mountPlugin(root, runtime, id, plugin, config)
   try {
-    // `root.plugin()` returns the fiber wrapped as a thenable that settles
-    // to the underlying fiber once startup finished (or throws its error).
-    const settled = await fiber
+    const settled = await settlePlugin(fiber)
     // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- FiberState is a const enum and cannot be imported under isolatedModules (see FIBER_ACTIVE)
     if (settled.state !== FIBER_ACTIVE) {
       throw new Error(

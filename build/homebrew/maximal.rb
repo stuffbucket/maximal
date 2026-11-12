@@ -33,6 +33,7 @@ class Maximal < Formula
 
   def install
     bin.install "maximal"
+    libexec.install "plugin-builtins"
   end
 
   service do

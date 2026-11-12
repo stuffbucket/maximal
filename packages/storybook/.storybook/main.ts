@@ -5,12 +5,14 @@ import type { StorybookConfig } from "@storybook/react-vite";
 import react from "@vitejs/plugin-react";
 import { mergeConfig } from "vite";
 
+import { ignoreStorybookWatchPath } from "../scripts/watch-policy.ts";
+
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = resolve(PKG, "../..");
 
 const config: StorybookConfig = {
   framework: "@storybook/react-vite",
-  stories: ["../src/**/*.stories.@(ts|tsx)"],
+  stories: ["../src/**/*.mdx", "../src/**/*.stories.@(ts|tsx)"],
   addons: ["@storybook/addon-docs", "@storybook/addon-a11y"],
   staticDirs: [
     // Self-hosted fonts, same files the Settings window serves.
@@ -41,13 +43,10 @@ const config: StorybookConfig = {
       server: {
         // shell/src, scripts/ and src/lib live outside this package.
         fs: { allow: [REPO] },
-        // .ui/ is static output restaged on every shell save (scripts/dev.ts);
-        // window stories reload it themselves, so don't full-reload the preview.
-        // A predicate rather than a glob: Vite's watcher doesn't glob-match
-        // dot-directories reliably.
-        watch: {
-          ignored: (file: string) => /[\\/](\.ui|storybook-static)([\\/]|$)/.test(file),
-        },
+        // .ui/ is static output restaged on every shell save (scripts/dev.ts).
+        // Let Vite observe it so its built-in full reload refreshes the window
+        // story iframe; only the one-shot static build output stays ignored.
+        watch: { ignored: ignoreStorybookWatchPath },
       },
     });
   },

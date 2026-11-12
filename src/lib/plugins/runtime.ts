@@ -12,9 +12,14 @@ import { settingsEventBus } from "~/lib/config/settings-events"
 
 import { removeLegacyClaudeDesktopEntries } from "./clients/claude-desktop-cleanup"
 import { syncPluginClient } from "./clients/sync"
-import { composePluginGateway } from "./compose"
+import { composePluginGateway, reloadComposedPluginInventory } from "./compose"
 import { getPluginGateway, setPluginGateway } from "./gateway"
 import { queuePluginNotice, takePluginNotices } from "./notices"
+import { productionGenerationManagerOf } from "./runner/generation-manager"
+import {
+  isPackagedPluginRuntime,
+  startProductionPluginRunner,
+} from "./runner/production"
 import {
   dropLegacyPluginConfig,
   legacyPluginConfigs,
@@ -101,6 +106,10 @@ export interface StartPluginsOptions {
   /** Use this gateway instead of composing the built-in plugins (the
    *  connectors bench passes one built from `composePluginGateway`). */
   gateway?: PluginGateway
+  /** Runner seam for startup policy tests. */
+  startRunner?: typeof startProductionPluginRunner
+  /** Runtime classification seam for startup policy tests. */
+  packagedRuntime?: boolean
 }
 
 /**
@@ -115,7 +124,34 @@ export async function startPlugins(
   removeLegacyClaudeDesktopEntries()
   let gateway: PluginGateway
   try {
-    gateway = options.gateway ?? composePluginGateway()
+    if (options.gateway) gateway = options.gateway
+    else {
+      const packagedRuntime =
+        options.packagedRuntime ?? isPackagedPluginRuntime()
+      try {
+        const supervised = await (
+          options.startRunner ?? startProductionPluginRunner
+        )()
+        if (supervised) gateway = supervised
+        else if (packagedRuntime)
+          throw new Error(
+            "This Maximal release has no compatible packaged built-in plugin generation.",
+          )
+        else {
+          consola.info(
+            "No packaged plugin generation is available in source mode; using the in-process built-ins",
+          )
+          gateway = composePluginGateway()
+        }
+      } catch (error) {
+        if (packagedRuntime) throw error
+        consola.warn(
+          "The supervised plugin generation is unavailable in source mode; using the in-process built-ins",
+          error,
+        )
+        gateway = composePluginGateway()
+      }
+    }
   } catch (error) {
     consola.error("Plugins are unavailable", error)
     return undefined
@@ -137,6 +173,7 @@ export async function startPlugins(
     }
     notifyPluginsChanged()
   })
+  await reloadComposedPluginInventory(gateway, getConfig().pluginInventory)
   await importLegacyPluginConfigs(gateway)
   await gateway.reconcile(getConfig().plugins)
   syncPluginClients()
@@ -148,7 +185,24 @@ export async function startPlugins(
 export async function applyPluginSettings(): Promise<void> {
   const gateway = getPluginGateway()
   if (!gateway) return
-  await gateway.reconcile(getConfig().plugins)
+  const config = getConfig()
+  await reloadComposedPluginInventory(gateway, config.pluginInventory)
+  // A supervised gateway cuts over to whichever sealed generation is selected
+  // now (N -> N+1; `config.pluginInventory` is staged into one) before the
+  // settings are applied to the serving generation. A failed candidate leaves
+  // the current generation serving.
+  const manager = productionGenerationManagerOf(gateway)
+  if (manager) {
+    try {
+      await manager.refresh()
+    } catch (error) {
+      consola.warn(
+        "Could not switch plugin generations; the current generation keeps serving",
+        error,
+      )
+    }
+  }
+  await gateway.reconcile(config.plugins)
   syncPluginClients()
 }
 

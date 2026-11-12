@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 
 import { SCENARIOS } from "../../../../scripts/ui-harness-fixtures";
 import { Models } from "../../../../shell/src/ui/features/models/Models";
+import { modelTypeLabel } from "../../../../shell/src/ui/features/models/model-type-label";
 import type { MockApiParameters } from "../mock/fetch-mock";
 
 /** The Models section reads /settings/api/models; every story is a backend state. */
@@ -15,8 +16,35 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const state = (mockApi: MockApiParameters): Story => ({ parameters: { mockApi } });
+const signedInModels = SCENARIOS["signed-in"].models;
 
 export const Loaded = state({ scenario: "signed-in" });
+export const ExpandedCatalog: Story = {
+  parameters: { mockApi: { scenario: "signed-in" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const types = [...new Set(signedInModels.models.map((model) => model.type))];
+    await expect(
+      canvasElement.querySelectorAll("details.advanced-section"),
+    ).toHaveLength(types.length);
+
+    for (const type of types) {
+      const label = await canvas.findByText(modelTypeLabel(type), {
+        exact: false,
+      });
+      const summary = label.closest("summary");
+      if (!(summary instanceof HTMLElement)) {
+        throw new Error(`Missing disclosure for model type ${type}`);
+      }
+      await userEvent.click(summary);
+      await expect(summary.closest("details")).toHaveAttribute("open");
+    }
+
+    for (const model of signedInModels.models) {
+      await expect(canvas.getByText(model.id, { exact: true })).toBeVisible();
+    }
+  },
+};
 export const SignedOut = state({ scenario: "signed-out" });
 export const Loading = state({ overrides: { "/settings/api/models": "hang" } });
 export const LoadError = state({
@@ -39,7 +67,6 @@ export const RefreshNotSignedIn: Story = {
 /** Refresh takes a beat so the in-progress state is visible. */
 export const SlowRefresh = state({ scenario: "signed-in", latencyMs: 1500 });
 
-const signedInModels = SCENARIOS["signed-in"].models;
 const modelsReply = (claudeCodeAuto: typeof signedInModels.claude_code_auto) => ({
   status: 200,
   body: { ...signedInModels, claude_code_auto: claudeCodeAuto },

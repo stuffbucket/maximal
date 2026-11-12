@@ -68,6 +68,8 @@ export const ANONYMOUS_REQUEST: ServerToolRequest = {
  * Pure: `payload` is only read. Apply the result with
  * {@link applyServerToolDeclarations}.
  */
+// Planning keeps every offer/release branch together so lease ownership is auditable.
+// eslint-disable-next-line complexity
 export function planServerTools(input: PlanServerToolsInput): ServerToolPlan {
   const { payload, listings, declared, request, logger } = input
   const clientTools = payload.tools ?? []
@@ -79,6 +81,7 @@ export function planServerTools(input: PlanServerToolsInput): ServerToolPlan {
 
   const tools = new Map<string, PlannedServerTool>()
   const declarations: Array<ServerToolDeclaration> = []
+  const releases: Array<() => void> = []
   let offersAlways = false
 
   // Plain code-unit order: the same set of tools declares the same bytes on
@@ -89,21 +92,30 @@ export function planServerTools(input: PlanServerToolsInput): ServerToolPlan {
       logger.warn(
         `server tool "${listing.name}" from ${listing.owner} skipped: ${tools.get(listing.name)?.owner} already provides it`,
       )
+      listing.release?.()
       continue
     }
     if (listing.offer === "when-client-declares") {
-      if (!declared.has(listing.name)) continue
+      if (!declared.has(listing.name)) {
+        listing.release?.()
+        continue
+      }
     } else {
-      if (!agentTurn || !listing.clients.includes(request.client)) continue
+      if (!agentTurn || !listing.clients.includes(request.client)) {
+        listing.release?.()
+        continue
+      }
       if (clientNames.has(listing.name)) {
         logger.warn(
           `server tool "${listing.name}" from ${listing.owner} not offered: the client declares a tool with that name`,
         )
+        listing.release?.()
         continue
       }
       offersAlways = true
     }
     tools.set(listing.name, bind(listing, request))
+    if (listing.release) releases.push(listing.release)
     if (!clientNames.has(listing.name)) {
       declarations.push({
         name: listing.name,
@@ -112,7 +124,17 @@ export function planServerTools(input: PlanServerToolsInput): ServerToolPlan {
       })
     }
   }
-  return { tools, declarations, offersAlways }
+  let released = false
+  return {
+    tools,
+    declarations,
+    offersAlways,
+    release: () => {
+      if (released) return
+      released = true
+      for (const release of releases) release()
+    },
+  }
 }
 
 function byName(a: ServerToolListing, b: ServerToolListing): number {

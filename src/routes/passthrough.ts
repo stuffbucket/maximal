@@ -93,38 +93,41 @@ export async function runOperation(
   budget?: BudgetService,
 ): Promise<Record<string, unknown>> {
   const model = requestedModel(call.model)
-  const target = operations.resolve(call.operation, model)
-  if (!target) throw new OperationUnavailableError(call.operation, model)
-  await admitUpstreamRequest()
-  const store = requestContext.getStore()
-  const { json } = await dispatchWithBudget(
-    operations,
-    {
-      operation: call.operation,
-      model,
-      body: call.body,
-      signal: call.signal,
-      origin: {
-        kind: "http",
-        client: deriveUsageClient(
-          store?.usage.apiKeyLabel,
-          store?.userAgent ?? "",
-        ),
+  const prepared = operations.prepare(call.operation, model)
+  if (!prepared) throw new OperationUnavailableError(call.operation, model)
+  try {
+    await admitUpstreamRequest()
+    const store = requestContext.getStore()
+    const { json } = await dispatchWithBudget(
+      prepared,
+      {
+        body: call.body,
+        signal: call.signal,
+        origin: {
+          kind: "http",
+          client: deriveUsageClient(
+            store?.usage.apiKeyLabel,
+            store?.userAgent ?? "",
+          ),
+        },
       },
-    },
-    {
-      provider: target.binding.provider,
-      budget,
-      record: (result) =>
-        prepareOperationUsage(
-          {
-            operation: call.operation,
-            model,
-            provider: target.binding.provider,
-          },
-          result,
-        ),
-    },
-  )
-  return json
+      {
+        provider: prepared.binding.provider,
+        budget,
+        record: (result) =>
+          prepareOperationUsage(
+            {
+              operation: call.operation,
+              model,
+              provider: prepared.binding.provider,
+              pluginId: prepared.pluginId,
+            },
+            result,
+          ),
+      },
+    )
+    return json
+  } finally {
+    prepared.release()
+  }
 }

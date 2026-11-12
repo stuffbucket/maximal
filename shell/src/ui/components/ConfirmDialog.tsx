@@ -1,4 +1,6 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
+
+import { ModalDialog } from "./ModalDialog";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -30,41 +32,9 @@ export function ConfirmDialog({
   busy = false,
   onConfirm,
   onCancel,
-}: ConfirmDialogProps): JSX.Element | null {
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
-
-  // Sync `open` prop with the imperative <dialog> state. showModal()
-  // is what gives us the focus trap + backdrop; close() tears them
-  // down. Wrap in try/catch because showModal() throws if the dialog
-  // is already open and vice versa — harmless in normal flow but
-  // possible under strict-mode double effects.
-  useEffect(() => {
-    const el = dialogRef.current;
-    if (!el) return;
-    if (open && !el.open) {
-      try {
-        el.showModal();
-      } catch {
-        /* ignore */
-      }
-    } else if (!open && el.open) {
-      try {
-        el.close();
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [open]);
-
-  // Initial focus on Cancel after showModal(). Browsers autofocus the
-  // first interactive element otherwise, which would land on Confirm
-  // for a destructive dialog — wrong default.
-  useEffect(() => {
-    if (open) cancelRef.current?.focus();
-  }, [open]);
-
-  if (!open) return null;
+}: ConfirmDialogProps): JSX.Element {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
 
   const onCancelGuard = (): void => {
     if (busy) return;
@@ -75,47 +45,43 @@ export function ConfirmDialog({
     void onConfirm();
   };
 
-  // The <dialog>'s built-in close event fires on ESC. Route it through
-  // our cancel path so callers don't have to special-case keyboard
-  // dismissal. Same for backdrop clicks (event.target === dialog).
   return (
-    <dialog
-      ref={dialogRef}
+    <ModalDialog
+      open={open}
       className="confirm-dialog"
-      onClose={onCancelGuard}
-      onCancel={(e) => {
-        e.preventDefault();
-        onCancelGuard();
-      }}
-      onClick={(e) => {
-        if (e.target === dialogRef.current) onCancelGuard();
-      }}
+      ariaLabelledBy={titleId}
+      initialFocusRef={cancelRef}
+      onDismiss={onCancelGuard}
     >
-      <div className="confirm-dialog__panel">
-        <h2 className="confirm-dialog__title">{title}</h2>
-        <div className="confirm-dialog__body">{body}</div>
-        <div className="confirm-dialog__actions">
-          <button
-            ref={cancelRef}
-            type="button"
-            className="btn btn--ghost"
-            onClick={onCancelGuard}
-            disabled={busy}
-          >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            className={
-              tone === "danger" ? "btn btn--destructive" : "btn btn--primary"
-            }
-            onClick={onConfirmClick}
-            disabled={busy}
-          >
-            {busy ? "Working…" : confirmLabel}
-          </button>
+      {open ? (
+        <div className="confirm-dialog__panel">
+          <h2 className="confirm-dialog__title" id={titleId}>
+            {title}
+          </h2>
+          <div className="confirm-dialog__body">{body}</div>
+          <div className="confirm-dialog__actions">
+            <button
+              ref={cancelRef}
+              type="button"
+              className="btn btn--ghost"
+              onClick={onCancelGuard}
+              disabled={busy}
+            >
+              {cancelLabel}
+            </button>
+            <button
+              type="button"
+              className={
+                tone === "danger" ? "btn btn--destructive" : "btn btn--primary"
+              }
+              onClick={onConfirmClick}
+              disabled={busy}
+            >
+              {busy ? "Working…" : confirmLabel}
+            </button>
+          </div>
         </div>
-      </div>
-    </dialog>
+      ) : null}
+    </ModalDialog>
   );
 }

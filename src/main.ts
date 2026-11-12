@@ -3,7 +3,24 @@
 import { defineCommand, runMain, parseArgs } from "citty"
 
 import { HELPER_SUBCOMMAND } from "./lib/auth/api-key-helper-tokens"
+import { INTERNAL_PLUGIN_RUNNER_COMMAND } from "./lib/plugins/runner/command"
 import { BUILD_VERSION } from "./lib/update/build-info"
+
+const internalRunnerInvocation =
+  process.argv[1] === INTERNAL_PLUGIN_RUNNER_COMMAND
+  || process.argv[2] === INTERNAL_PLUGIN_RUNNER_COMMAND
+if (internalRunnerInvocation) {
+  const { runInternalPluginRunner } = await import("./lib/plugins/runner/entry")
+  try {
+    await runInternalPluginRunner()
+    process.disconnect?.()
+    process.exit(0)
+  } catch (error) {
+    console.error("Plugin runner failed:", error)
+    process.disconnect?.()
+    process.exit(1)
+  }
+}
 
 const cliArgs = {
   apiKeyHelper: {

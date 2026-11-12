@@ -29,8 +29,9 @@ export type RemoteUsage<T> =
 /**
  * Why a refresh was asked for.
  * - `load`: the page opened.
- * - `shown`: the Dashboard view was selected (also how sign-in, sign-out and
- *   account switches in Settings reach it: they happen while it's hidden).
+ * - `auth-changed`: Settings observed a sign-in, sign-out, or account switch;
+ *   discard auth-owned state and re-read immediately.
+ * - `shown`: the Dashboard view was selected.
  * - `visible`: the window came back into view.
  * - `traffic`: the live token feed saw new requests, so the network is up.
  * - `retry`: the backoff timer after a failure.
@@ -38,6 +39,7 @@ export type RemoteUsage<T> =
  */
 export type UsageRefreshTrigger =
   | "load"
+  | "auth-changed"
   | "shown"
   | "visible"
   | "traffic"
@@ -65,6 +67,7 @@ export const USAGE_RETRY_DELAYS_MS: ReadonlyArray<number> = [
  */
 export const USAGE_MIN_GAP_MS: Readonly<Record<UsageRefreshTrigger, number>> = {
   load: 0,
+  "auth-changed": 0,
   retry: 0,
   shown: 15_000,
   visible: 15_000,
@@ -98,10 +101,10 @@ export function usageRefreshDue<T>(
   if (now - lastAttemptAt < USAGE_MIN_GAP_MS[trigger]) return false;
   switch (trigger) {
     case "load":
+    case "auth-changed":
     case "shown":
-      // Showing the Dashboard always revalidates (the snapshot stays on
-      // screen meanwhile): an account change in Settings leaves no other
-      // trace here, and a ready snapshot may be the old account's.
+      // Page load, authoritative auth transitions, and deliberate navigation
+      // always revalidate. Auth transitions clear their snapshot in request().
       return true;
     case "retry":
       return usage.status === "unavailable";
@@ -129,7 +132,7 @@ export function shownSnapshot<T>(
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 export interface UsageRefresherOptions<T> {
-  fetchUsage: () => Promise<T>;
+  fetchUsage: (signal: AbortSignal) => Promise<T>;
   /** The reply means "not signed in" (the person has to act). */
   isSignedOut: (error: unknown) => boolean;
   /** One line for the hover text of the "unavailable" status. */
@@ -162,6 +165,8 @@ export function createUsageRefresher<T>(
 
   let usage: RemoteUsage<T> = { status: "idle" };
   let inFlight: Promise<void> | null = null;
+  let abortController: AbortController | null = null;
+  let attemptGeneration = 0;
   let lastAttemptAt = Number.NEGATIVE_INFINITY;
   let lastFailureAt = 0;
   let failures = 0;
@@ -186,12 +191,20 @@ export function createUsageRefresher<T>(
     }, wait);
   }
 
-  async function attempt(): Promise<void> {
+  async function attempt(
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<void> {
     try {
-      const data = await options.fetchUsage();
+      const data = await options.fetchUsage(signal);
+      if (generation !== attemptGeneration) return;
       usage = { status: "ready", snapshot: { data, fetchedAt: now() } };
       failures = 0;
     } catch (error) {
+      // An auth transition supersedes and aborts the previous account's read.
+      // Some fetch implementations reject on abort while others may still
+      // settle normally, so the generation is the authority in either case.
+      if (generation !== attemptGeneration) return;
       if (options.isSignedOut(error)) {
         usage = { status: "signed-out" };
         failures = 0;
@@ -210,7 +223,24 @@ export function createUsageRefresher<T>(
   }
 
   function request(trigger: UsageRefreshTrigger): Promise<void> {
-    if (inFlight) return inFlight;
+    const authChanged = trigger === "auth-changed";
+    if (inFlight && !authChanged) return inFlight;
+
+    if (authChanged) {
+      // Quotas and signed-out state belong to an auth identity. Clear them
+      // before fetching so another account's state cannot flash while the
+      // authoritative auth transition is revalidated.
+      attemptGeneration += 1;
+      abortController?.abort();
+      abortController = null;
+      inFlight = null;
+      stopTimer();
+      failures = 0;
+      lastFailureAt = 0;
+      usage = { status: "unavailable", snapshot: null };
+      options.onChange();
+    }
+
     const snapshot = shownSnapshot(usage);
     const due = usageRefreshDue(trigger, usage, {
       now: now(),
@@ -226,8 +256,13 @@ export function createUsageRefresher<T>(
     // The first read: show the quota layout as "waiting" until it lands.
     const first = usage.status === "idle";
     if (first) usage = { status: "unavailable", snapshot: null };
-    const settled = attempt().finally(() => {
+    const generation = ++attemptGeneration;
+    const controller = new AbortController();
+    abortController = controller;
+    const settled = attempt(generation, controller.signal).finally(() => {
+      if (inFlight !== settled) return;
       inFlight = null;
+      abortController = null;
     });
     inFlight = settled;
     if (first) options.onChange();

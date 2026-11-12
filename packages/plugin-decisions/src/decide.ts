@@ -185,7 +185,8 @@ export function decideTool(
         path,
         errorMessage: "Failed to create decisions",
         body: { input: input.input, questions: input.questions },
-        signal: call.signal,
+        operation: "decisions",
+        call,
       })
       return "error" in result ? result.error : formatDecisions(result.reply)
     },

@@ -50,10 +50,24 @@ build embeds them (text imports, so a compiled Maximal can write the plugin with
 If the port is taken (for example by `bun run figjam:bridge`), the status is an
 error that names the port, with **Try again**. The plugin is
 `packages/plugin-figjam`; it's a thin shell over `startBridge` and the
-figjam-plugin build (see Embedding). The port the Figma plugin calls Maximal on
-is not a setting: the plugin asks the host (`ctx.host.maximalPort()`), which
-answers with the port Maximal is actually serving on, and the folder is rebuilt
-when that changes. An old `maximalPort` value in a saved config is ignored.
+figjam-plugin build (see Embedding). It declares the bridge as the exclusive
+resource `figjam-bridge:<port>`: `apply` registers actions and status without
+opening the listener, `prepare` only checks that the transition is still live,
+and `commit` tries to bind after the parent lease is held. During initial
+activation, a bind failure retains that logical reservation and the operable
+error/Retry surface; handoff and recovery commits rethrow bind failures because
+they must prove readiness. `revoke` waits until sockets and the listener are
+closed and the port is free, and `resume` binds the previous generation again
+after a rejected handoff. A generation replacement therefore
+prepares B, revokes A, then commits B; a pre-durable failure revokes B before A
+resumes. The parent keeps the lease through child termination and authoritative reap; a
+serving generation is then revived and rebound under that retained lease. It
+releases the lease only after acknowledged revoke or final settled shutdown
+when no revival is intended. The port the Figma plugin calls Maximal on is not
+a setting: the plugin asks the host
+(`ctx.host.maximalPort()`), which answers with the port Maximal is actually
+serving on, and the folder is rebuilt when that changes. An old `maximalPort`
+value in a saved config is ignored.
 
 ## Build and run the plugin (developers)
 

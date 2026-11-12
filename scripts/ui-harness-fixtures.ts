@@ -134,7 +134,7 @@ const ISO = (offsetMs = 0): string => new Date(1_750_000_000_000 + offsetMs).toI
 
 // ---- shared building blocks (overridden per scenario as needed) ------------
 const baseModels: ModelsListResponse = {
-  count: 5,
+  count: 8,
   loaded_at: new Date().toISOString(),
   claude_code_auto: {
     applied: true,
@@ -217,11 +217,44 @@ const baseModels: ModelsListResponse = {
       capabilities: { vision: true, tool_calls: true, streaming: true, reasoning: true },
     },
     {
+      id: "gpt-6-luna-decisions",
+      name: "GPT-6 Luna Decisions",
+      vendor: "OpenAI",
+      family: "gpt-6-luna-decisions",
+      type: "decisions",
+      preview: false,
+      context_window_tokens: null,
+      max_output_tokens: null,
+      capabilities: { vision: false, tool_calls: false, streaming: false, reasoning: false },
+    },
+    {
+      id: "microsoft-decision-1",
+      name: "Microsoft Decision 1",
+      vendor: "Microsoft",
+      family: "microsoft-decision-1",
+      type: "decisions",
+      preview: false,
+      context_window_tokens: null,
+      max_output_tokens: null,
+      capabilities: { vision: false, tool_calls: false, streaming: false, reasoning: false },
+    },
+    {
       id: "text-embedding-3-small",
       name: "Embedding V3 small",
       vendor: "Azure OpenAI",
       family: "text-embedding-3-small",
       type: "embeddings",
+      preview: false,
+      context_window_tokens: null,
+      max_output_tokens: null,
+      capabilities: { vision: false, tool_calls: false, streaming: false, reasoning: false },
+    },
+    {
+      id: "gpt-image-2.5-flare",
+      name: "GPT Image 2.5 Flare",
+      vendor: "OpenAI",
+      family: "gpt-image-2.5-flare",
+      type: "image",
       preview: false,
       context_window_tokens: null,
       max_output_tokens: null,

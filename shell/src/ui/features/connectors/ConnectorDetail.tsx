@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState, type RefObject } from "react";
 
 import { t } from "../../../i18n";
 import type { PluginClientId, PluginView } from "../../../proxy/client";
@@ -14,7 +14,7 @@ import { connectorLine } from "./connector-state";
 import { ConnectorStatusBlock } from "./ConnectorStatusBlock";
 import { ConnectorText } from "./ConnectorText";
 import { standaloneText } from "./clients";
-import { BackGlyph, ConnectorTile, NoticeGlyph } from "./glyphs";
+import { CloseGlyph, ConnectorTile, NoticeGlyph } from "./glyphs";
 import { ToolPermissions } from "./ToolPermissions";
 import { useConnectorDetail } from "./useConnectorDetail";
 
@@ -30,35 +30,31 @@ interface ConnectorDetailProps {
   summary: PluginView;
   /** Bumped by the list on every server nudge; the detail refetches. */
   version: number;
-  /** Move focus to the page's heading on open (the user opened it here). */
-  focusOnOpen: boolean;
+  headingId: string;
+  headingRef: RefObject<HTMLHeadingElement>;
   onFresh: (connector: PluginView) => void;
-  onBack: () => void;
+  onDismiss: () => void;
 }
 
 /**
- * One connector's page inside the Connectors section: back to the list, its
- * name and on/off switch, what it says about itself (state, detail, facts,
- * buttons), which apps get it and its endpoint, its tool permissions, its
- * configuration, and where it connects. Typographic sections divided by
- * hairlines, no cards: the page is the entity.
+ * One Cordis plugin's modal content: its identity and on/off switch, what it
+ * says about itself (state, detail, facts, buttons), and every section that
+ * applies to its kind. Connector-only sections stay absent for extensions.
  */
-export function ConnectorDetail({ summary, version, focusOnOpen, onFresh, onBack }: ConnectorDetailProps): JSX.Element {
+export function ConnectorDetail({
+  summary,
+  version,
+  headingId,
+  headingRef,
+  onFresh,
+  onDismiss,
+}: ConnectorDetailProps): JSX.Element {
   const { detail, problem, reload, update, setPermissions, runAction } = useConnectorDetail(
     summary.id,
     version,
     onFresh,
   );
   const connector: PluginView = detail ?? summary;
-  const headingRef = useRef<HTMLHeadingElement | null>(null);
-
-  // Opening moves focus to the page's heading, so the next Tab continues
-  // from the top of the page rather than from the row that disappeared.
-  useEffect(() => {
-    if (focusOnOpen) headingRef.current?.focus();
-    // Once, on open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // The change in flight, shown in place of the server's state so the
   // controls don't snap back for the moment a save takes.
@@ -104,16 +100,9 @@ export function ConnectorDetail({ summary, version, focusOnOpen, onFresh, onBack
 
   return (
     <article className="connector-detail" data-connector={connector.id} aria-busy={busy}>
-      <div>
-        <Button variant="ghost" size="sm" className="connector-detail__back" onClick={onBack}>
-          <BackGlyph />
-          {t("connectors-back")}
-        </Button>
-      </div>
-
       <header className="connector-detail__head">
         <ConnectorTile size="lg" />
-        <h3 className="connector-detail__name" ref={headingRef} tabIndex={-1}>
+        <h3 className="connector-detail__name" id={headingId} ref={headingRef} tabIndex={-1}>
           {connector.displayName}
         </h3>
         <div className="connector-detail__control">
@@ -129,125 +118,135 @@ export function ConnectorDetail({ summary, version, focusOnOpen, onFresh, onBack
             label={enabled ? t("connectors-switch-on") : t("connectors-switch-off")}
           />
         </div>
+        <Button
+          variant="ghost"
+          className="btn--icon connector-detail__close"
+          aria-label={t("common-close")}
+          onClick={onDismiss}
+        >
+          <CloseGlyph />
+        </Button>
       </header>
 
-      <p className="connector-detail__desc">{connector.description}</p>
+      <div className="connector-detail__body">
+        <p className="connector-detail__desc">{connector.description}</p>
 
-      {problem && (
-        <ProblemCallout problem={problem} onRetry={() => void reload()} onRestarted={() => void reload()} />
-      )}
+        {problem && (
+          <ProblemCallout problem={problem} onRetry={() => void reload()} onRestarted={() => void reload()} />
+        )}
 
-      {failedToStart ? (
-        <Callout tone="error" title={t("connectors-failed-title", { connector: connector.displayName })}>
-          {connector.error && <p>{connector.error}</p>}
-          <p>
-            {/* The form can fix it only when the settings file was readable. */}
-            {detail?.configSchema && detail.config
-              ? t("connectors-failed-hint-config")
-              : t("connectors-failed-hint")}
-          </p>
-        </Callout>
-      ) : (
-        // Off says itself through the switch; no second "Off" line under it.
-        line && <ConnectorStatusBlock line={line} status={connector.status} onAction={runAction} />
-      )}
+        {failedToStart ? (
+          <Callout tone="error" title={t("connectors-failed-title", { connector: connector.displayName })}>
+            {connector.error && <p>{connector.error}</p>}
+            <p>
+              {/* The form can fix it only when the settings file was readable. */}
+              {detail?.configSchema && detail.config
+                ? t("connectors-failed-hint-config")
+                : t("connectors-failed-hint")}
+            </p>
+          </Callout>
+        ) : (
+          // Off says itself through the switch; no second "Off" line under it.
+          line && <ConnectorStatusBlock line={line} status={connector.status} onAction={runAction} />
+        )}
 
-      {failed && (
-        <ProblemCallout
-          problem={failed.problem}
-          onRetry={() => void save(failed.change)}
-          onRestarted={() => void reload()}
-        />
-      )}
-
-      {isConnector && (
-      <section className="connector-section" aria-labelledby={`${connector.id}-connect-title`}>
-        <div className="connector-section__head">
-          <h4 className="connector-section__title" id={`${connector.id}-connect-title`}>
-            {t("connectors-connect-title")}
-          </h4>
-        </div>
-        {connector.clients.length > 0 && (
-          <ClientMenu
-            connector={connector.displayName}
-            clients={connector.clients}
-            selected={chosen}
-            disabled={busy}
-            onChange={setClient}
+        {failed && (
+          <ProblemCallout
+            problem={failed.problem}
+            onRetry={() => void save(failed.change)}
+            onRestarted={() => void reload()}
           />
         )}
-        {connector.clients.map(
-          (client) =>
-            client.standalone && (
-              <span className="connector-section__hint connector-notice" key={client.id}>
-                <span className="connector-notice__mark">
-                  <NoticeGlyph />
-                </span>
-                <span>{standaloneText(connector.displayName, client.id, client.standalone)}</span>
-              </span>
-            ),
-        )}
-        <p className="connector-section__hint">{t("connectors-endpoint-hint")}</p>
-        <div className="connector-endpoint">
-          <code className="connector-endpoint__url mono">{connector.endpoint}</code>
-          <Button
-            size="sm"
-            aria-label={t("connectors-endpoint-copy-aria", { connector: connector.displayName })}
-            onClick={() => void copyEndpoint()}
-          >
-            {copied ? t("common-copied") : t("common-copy")}
-          </Button>
-        </div>
-      </section>
-      )}
 
-      {detail && isConnector && <ToolPermissions connector={detail} onChange={setPermissions} />}
-
-      {/* An unreadable settings file has no config to edit, and Maximal
-          won't write over it; the callout above says what to do instead. */}
-      {detail?.configSchema && (detail.config || detail.lifecycle !== "failed") && (
-        <ConfigForm connector={{ ...detail, configSchema: detail.configSchema }} onSave={update} />
-      )}
-
-      {(upstream || connector.homepage) && (
-        <section className="connector-section" aria-labelledby={`${connector.id}-about-title`}>
+        {isConnector && (
+        <section className="connector-section" aria-labelledby={`${connector.id}-connect-title`}>
           <div className="connector-section__head">
-            <h4 className="connector-section__title" id={`${connector.id}-about-title`}>
-              {t("connectors-about-title")}
+            <h4 className="connector-section__title" id={`${connector.id}-connect-title`}>
+              {t("connectors-connect-title")}
             </h4>
           </div>
-          <dl className="kv">
-            {upstream && (
-              <>
-                <div className="kv__row">
-                  <dt>{t("connectors-about-server")}</dt>
-                  <dd className="mono connector-about__value">{upstream.endpoint}</dd>
-                </div>
-                <div className="kv__row">
-                  <dt>{t("connectors-about-sign-in")}</dt>
-                  <dd>{authLabel(upstream.auth.type)}</dd>
-                </div>
-                {upstream.terms && (
-                  <div className="kv__row">
-                    <dt>{t("connectors-about-terms")}</dt>
-                    <dd className="connector-about__value">
-                      <ConnectorText text={upstream.terms.url} />
-                    </dd>
-                  </div>
-                )}
-              </>
-            )}
-            {connector.homepage && (
-              <div className="kv__row">
-                <dt>{t("connectors-about-homepage")}</dt>
-                <dd className="connector-about__value">
-                  <ConnectorText text={connector.homepage} />
-                </dd>
-              </div>
-            )}
-          </dl>
+          {connector.clients.length > 0 && (
+            <ClientMenu
+              connector={connector.displayName}
+              clients={connector.clients}
+              selected={chosen}
+              disabled={busy}
+              onChange={setClient}
+            />
+          )}
+          {connector.clients.map(
+            (client) =>
+              client.standalone && (
+                <span className="connector-section__hint connector-notice" key={client.id}>
+                  <span className="connector-notice__mark">
+                    <NoticeGlyph />
+                  </span>
+                  <span>{standaloneText(connector.displayName, client.id, client.standalone)}</span>
+                </span>
+              ),
+          )}
+          <p className="connector-section__hint">{t("connectors-endpoint-hint")}</p>
+          <div className="connector-endpoint">
+            <code className="connector-endpoint__url mono">{connector.endpoint}</code>
+            <Button
+              size="sm"
+              aria-label={t("connectors-endpoint-copy-aria", { connector: connector.displayName })}
+              onClick={() => void copyEndpoint()}
+            >
+              {copied ? t("common-copied") : t("common-copy")}
+            </Button>
+          </div>
         </section>
-      )}
+        )}
+
+        {detail && isConnector && <ToolPermissions connector={detail} onChange={setPermissions} />}
+
+        {/* An unreadable settings file has no config to edit, and Maximal
+            won't write over it; the callout above says what to do instead. */}
+        {detail?.configSchema && (detail.config || detail.lifecycle !== "failed") && (
+          <ConfigForm connector={{ ...detail, configSchema: detail.configSchema }} onSave={update} />
+        )}
+
+        {(upstream || connector.homepage) && (
+          <section className="connector-section" aria-labelledby={`${connector.id}-about-title`}>
+            <div className="connector-section__head">
+              <h4 className="connector-section__title" id={`${connector.id}-about-title`}>
+                {t("connectors-about-title")}
+              </h4>
+            </div>
+            <dl className="kv">
+              {upstream && (
+                <>
+                  <div className="kv__row">
+                    <dt>{t("connectors-about-server")}</dt>
+                    <dd className="mono connector-about__value">{upstream.endpoint}</dd>
+                  </div>
+                  <div className="kv__row">
+                    <dt>{t("connectors-about-sign-in")}</dt>
+                    <dd>{authLabel(upstream.auth.type)}</dd>
+                  </div>
+                  {upstream.terms && (
+                    <div className="kv__row">
+                      <dt>{t("connectors-about-terms")}</dt>
+                      <dd className="connector-about__value">
+                        <ConnectorText text={upstream.terms.url} />
+                      </dd>
+                    </div>
+                  )}
+                </>
+              )}
+              {connector.homepage && (
+                <div className="kv__row">
+                  <dt>{t("connectors-about-homepage")}</dt>
+                  <dd className="connector-about__value">
+                    <ConnectorText text={connector.homepage} />
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </section>
+        )}
+      </div>
     </article>
   );
 }

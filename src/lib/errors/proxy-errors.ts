@@ -33,6 +33,8 @@ import { HTTPException } from "hono/http-exception"
 
 import { markAuthDegraded } from "~/lib/auth/auth-controller"
 import { BudgetExceededError, type BudgetRefusal } from "~/lib/budget/errors"
+import { DAY_MS } from "~/lib/budget/periods"
+import { NANO_AIU_PER_CREDIT } from "~/lib/budget/units"
 import {
   anthropicErrorBody,
   anthropicErrorType,
@@ -97,8 +99,6 @@ const OPERATION_PATHS: Readonly<Record<string, string>> = {
   "images.edits": "/v1/images/edits",
 }
 
-const NANO_AIU_PER_CREDIT = 1_000_000_000
-const DAY_MS = 86_400_000
 const IN_FLIGHT_RETRY_SECONDS = 5
 
 const credits = (nano: number): number => nano / NANO_AIU_PER_CREDIT

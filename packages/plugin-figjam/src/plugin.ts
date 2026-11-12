@@ -15,6 +15,16 @@ export function createFigjamPlugin(
     apply: (ctx, config) => {
       const controller = new FigjamController(ctx, config, options)
       controller.start()
+      return {
+        declaration: {
+          mode: "exclusive" as const,
+          resources: [`figjam-bridge:${config.port}`],
+        },
+        prepare: (context) => context.signal.throwIfAborted(),
+        commit: (context) => controller.bind(context),
+        revoke: (context) => controller.unbind(context),
+        resume: (context) => controller.bind(context),
+      }
     },
   }
 }

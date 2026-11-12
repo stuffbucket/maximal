@@ -160,11 +160,15 @@ connector is ready, else a `.connector-dot` in a status token plus a
 short word (Off, Needs setup, Signing in, Starting, Error, Failed), and a
 quiet chevron.
 
-**Page.** Opening a row replaces the list in place (`#connectors/<id>`,
-mirrored with `replaceState`); "← Your connectors" goes back and returns
-focus to the row. Opening from the list moves focus to the page's heading.
-No cards: the page is the entity, laid out as hairline-divided
-typographic sections:
+**Plugin detail dialog.** Opening a row keeps the list mounted and presents
+the plugin in a large native modal (`#connectors/<id>`, mirrored with
+`replaceState`). The browser makes the list inert and traps focus; Escape,
+the backdrop, and the pinned close button dismiss the dialog, clear the hash,
+and return focus to the row. Focus starts on the plugin heading. One body
+scrolls below the pinned identity/switch/close header. Native modal stacking
+allows an action's `ConfirmDialog` to open safely above the detail. No nested
+cards: the plugin is the surface, laid out as hairline-divided typographic
+sections, and sections appear only when they apply to that plugin kind:
 
 - Head: tile, name, on/off switch; then the description and the
   connector's own report — status line, detail, facts (`.kv`), action
@@ -195,6 +199,11 @@ typographic sections:
   start). Save / Revert; the connector's validation lands as a caption
   under the field it names.
 - About: where it connects, how it signs in, its terms and website.
+
+Extensions use the same detail dialog, status/actions, switch, configuration,
+and About sections, but omit connector-only app, MCP endpoint, and tool
+permission sections. This keeps FigJam and Work IQ in one plugin-detail pattern
+without presenting controls that do not apply.
 
 Text a connector supplies is shown as written; only http(s) addresses in
 it become links, opened in the system browser. Glyphs are Maximal's own

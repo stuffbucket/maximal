@@ -2118,23 +2118,34 @@ html[data-os="macos"] .topbar {
   max-width: 60ch;
 }
 
-/* ---- Confirm dialog ----
-   Uses native <dialog>. The element itself sits at the top layer
-   (free, no z-index gymnastics); ::backdrop styles the scrim. */
-.confirm-dialog {
+/* ---- Modal dialogs ----
+   Native <dialog> owns the top layer, inert background, focus containment,
+   and nested modal stacking. Content decides whether the surface is compact
+   (confirmation) or a large, internally scrolling detail view. */
+.modal-dialog {
   padding: 0;
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-card);
   background: var(--surface-card);
   color: var(--text-base-color);
-  max-width: 420px;
-  width: calc(100% - var(--space-6));
   box-shadow: var(--elevation-modal);
   font-family: var(--font-body);
 }
 
-.confirm-dialog::backdrop {
+.modal-dialog::backdrop {
   background: rgb(0 0 0 / 0.5);
+}
+
+.confirm-dialog {
+  width: calc(100% - var(--space-6));
+  max-width: 420px;
+}
+
+.plugin-details-dialog {
+  width: calc(100% - var(--space-6));
+  max-width: var(--content-max);
+  max-height: calc(100dvh - var(--space-6));
+  overflow: hidden;
 }
 
 .confirm-dialog__panel {
@@ -2182,17 +2193,17 @@ html[data-os="macos"] .topbar {
 
 /* Default: a subtle fade-in. Respect reduced-motion as a hard contract. */
 @media (prefers-reduced-motion: no-preference) {
-  .confirm-dialog[open] {
-    animation: confirm-dialog-in 120ms ease-out;
+  .modal-dialog[open] {
+    animation: modal-dialog-in 120ms ease-out;
   }
-  .confirm-dialog[open]::backdrop {
-    animation: confirm-backdrop-in 120ms ease-out;
+  .modal-dialog[open]::backdrop {
+    animation: modal-backdrop-in 120ms ease-out;
   }
-  @keyframes confirm-dialog-in {
+  @keyframes modal-dialog-in {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  @keyframes confirm-backdrop-in {
+  @keyframes modal-backdrop-in {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
@@ -2804,28 +2815,32 @@ html[data-os="macos"] .topbar {
   background: var(--status-error);
 }
 
-/* Page */
+/* Plugin detail dialog: identity stays pinned while one body scrolls. */
 .connector-detail {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
   min-width: 0;
-}
-
-.connector-detail__back {
-  gap: var(--space-2);
-  margin-inline-start: calc(-1 * var(--space-3));
-}
-
-.connector-detail__back svg {
-  width: var(--size-sm);
-  height: var(--size-sm);
+  max-height: inherit;
 }
 
 .connector-detail__head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.connector-detail__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .connector-detail__name {
@@ -2843,7 +2858,7 @@ html[data-os="macos"] .topbar {
   -webkit-user-select: none;
 }
 
-/* Focus lands here when the page opens (it isn't in the tab order); the
+/* Focus lands here when the dialog opens (it isn't in the tab order); the
    ring shows only when that came from the keyboard. */
 .connector-detail__name:focus-visible {
   outline: var(--focus-ring);
@@ -2855,6 +2870,15 @@ html[data-os="macos"] .topbar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+
+.connector-detail__close {
+  flex: 0 0 auto;
+}
+
+.connector-detail__close svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
 }
 
 .connector-detail__saving {

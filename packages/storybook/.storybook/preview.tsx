@@ -60,7 +60,17 @@ const preview: Preview = {
     controls: { expanded: true },
     a11y: { test: "todo" },
     options: {
-      storySort: { order: ["Foundations", ["Tokens", "Contrast"], "Components", "Settings", "Windows"] },
+      storySort: {
+        order: [
+          "Overview",
+          "Foundations",
+          ["Tokens", "Contrast"],
+          "Components",
+          "Settings",
+          "Windows",
+          ["Dashboard", "Sessions", "Settings"],
+        ],
+      },
     },
   },
 };

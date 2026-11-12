@@ -10,7 +10,7 @@ import { CheckGlyph, ChevronGlyph, ConnectorTile, NoticeGlyph } from "./glyphs";
 interface ConnectorListProps {
   connectors: Array<PluginView>;
   onOpen: (id: string) => void;
-  /** Each row's button, so focus can come back to it from the detail page. */
+  /** Each row's button, so focus can come back to it from the detail dialog. */
   rowRefs: MutableRefObject<Map<string, HTMLButtonElement>>;
 }
 
@@ -45,6 +45,7 @@ export function ConnectorList({ connectors, onOpen, rowRefs }: ConnectorListProp
                 <button
                   type="button"
                   className="connector-row__open"
+                  aria-haspopup="dialog"
                   ref={(el) => {
                     if (el) rowRefs.current.set(connector.id, el);
                     else rowRefs.current.delete(connector.id);

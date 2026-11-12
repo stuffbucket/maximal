@@ -29,6 +29,8 @@ import type { Context, MiddlewareHandler } from "hono"
 
 import { Hono } from "hono"
 
+import type { GenerationAffinityDiagnostics } from "~/lib/plugins/generation-affinity"
+
 import { hasForeignOrigin } from "~/lib/auth/origin"
 import {
   createAuthMiddleware,
@@ -36,6 +38,7 @@ import {
   isLoopbackAddress,
 } from "~/lib/auth/request-auth"
 import { getPluginGateway } from "~/lib/plugins/gateway"
+import { pluginGenerationLifecycle } from "~/lib/plugins/generation-lifecycle"
 
 import { type McpSessionOptions, McpSessions } from "./mcp-sessions"
 
@@ -45,15 +48,29 @@ const ERRORS = {
   MCP_BUSY: [503, "Too many MCP sessions are open."],
 } as const satisfies Record<string, readonly [403 | 404 | 503, string]>
 
+export interface McpGenerationLifecycle {
+  releaseUpstreamSession(
+    generationId: string,
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<void>
+  subscribeCutovers(
+    listener: (generationId: string, drainDeadline: number) => void,
+  ): () => void
+}
+
 export interface PluginMcpRoutesOptions extends Partial<McpSessionOptions> {
   getGateway?: () => PluginGateway | undefined
   getRequestIp?: (c: Context) => string | null
+  generationLifecycle?: McpGenerationLifecycle
 }
 
 export interface PluginMcpRoutes {
   readonly app: Hono
   /** Open sessions, for one plugin or all. */
   sessionCount(pluginId?: string): number
+  cutoverGeneration(generationId: string, drainDeadline: number): void
+  affinityDiagnostics(): GenerationAffinityDiagnostics
   closeAll(): Promise<void>
 }
 
@@ -75,12 +92,25 @@ export function createPluginMcpRoutes(
 ): PluginMcpRoutes {
   const getGateway = options.getGateway ?? getPluginGateway
   const getRequestIp = options.getRequestIp ?? defaultGetRequestIp
+  const releaseUpstreamSession =
+    options.generationLifecycle?.releaseUpstreamSession.bind(
+      options.generationLifecycle,
+    )
+    ?? options.releaseUpstreamSession
+    ?? (() =>
+      Promise.reject(new Error("MCP generation lifecycle is not configured.")))
   const sessions = new McpSessions({
     getGateway,
     idleTimeoutMs: options.idleTimeoutMs ?? 30 * 60_000,
     maxSessions: options.maxSessions ?? 64,
     listChangedDelayMs: options.listChangedDelayMs ?? 100,
+    releaseUpstreamSession,
   })
+  const unsubscribeCutovers = options.generationLifecycle?.subscribeCutovers(
+    (generationId, drainDeadline) => {
+      sessions.cutoverGeneration(generationId, drainDeadline)
+    },
+  )
   // Same decision as the main-port middleware, minus its bypass lists.
   const mainPortAuth: MiddlewareHandler = createAuthMiddleware({
     allowUnauthenticatedPaths: [],
@@ -140,8 +170,17 @@ export function createPluginMcpRoutes(
   return {
     app,
     sessionCount: (pluginId) => sessions.count(pluginId),
-    closeAll: () => sessions.closeAll(),
+    cutoverGeneration: (generationId, drainDeadline) => {
+      sessions.cutoverGeneration(generationId, drainDeadline)
+    },
+    affinityDiagnostics: () => sessions.affinityDiagnostics(),
+    closeAll: async () => {
+      unsubscribeCutovers?.()
+      await sessions.closeAll()
+    },
   }
 }
 
-export const pluginMcpRoutes = createPluginMcpRoutes()
+export const pluginMcpRoutes = createPluginMcpRoutes({
+  generationLifecycle: pluginGenerationLifecycle,
+})

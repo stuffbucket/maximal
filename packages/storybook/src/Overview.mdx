@@ -1,0 +1,48 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="Overview" />
+
+# Maximal UI
+
+Use this library to review the design system, individual components, Settings
+states, and complete application windows. The theme and locale controls in the
+toolbar apply across the library.
+
+## Foundations
+
+- <a href="./?path=/story/foundations-tokens--all-tokens" target="_top">Tokens</a> — generated color, type, spacing, sizing, and layout values.
+- <a href="./?path=/story/foundations-contrast--all-pairings" target="_top">Contrast</a> — required text, control, and status-color pairings in both themes.
+
+## Components
+
+- <a href="./?path=/story/components-button--all-variants" target="_top">Button</a>
+- <a href="./?path=/story/components-confirmdialog--interactive" target="_top">Confirm dialog</a>
+- <a href="./?path=/story/components-feedback--error-with-retry" target="_top">Feedback</a>
+- <a href="./?path=/story/components-layout--stack-playground" target="_top">Layout</a>
+- <a href="./?path=/story/components-linkcheckbox--checked" target="_top">Link checkbox</a>
+- <a href="./?path=/story/components-toggles--switch-control" target="_top">Toggles</a>
+
+Component stories expose useful variants in **Controls**. Interaction stories
+also report their steps under **Interactions**, while every story can be checked
+under **Accessibility**.
+
+## Settings surfaces
+
+- <a href="./?path=/story/settings-api-clients--section" target="_top">API clients</a>
+- <a href="./?path=/story/settings-apps--panel" target="_top">Apps</a>
+- <a href="./?path=/story/settings-connectors--list" target="_top">Connectors</a>
+- <a href="./?path=/story/settings-figjam--list-ready" target="_top">FigJam</a>
+- <a href="./?path=/story/settings-models--loaded" target="_top">Models</a>
+
+These stories isolate one production section at a time and pair it with the
+mock sidecar states that exercise loading, empty, degraded, and failure paths.
+
+## Complete windows
+
+- <a href="./?path=/story/windows-dashboard--live-traffic" target="_top">Dashboard — live traffic</a>
+- <a href="./?path=/story/windows-sessions--live-sessions" target="_top">Sessions</a>
+- <a href="./?path=/story/windows-settings--account-signed-in" target="_top">Settings</a>
+
+Window stories use the real built UI at the application's default dimensions.
+They are the final review surface for composition, navigation, responsive
+behavior, and cross-section state.

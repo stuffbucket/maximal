@@ -375,7 +375,12 @@ export async function handleCompletion(c: Context) {
     // One server-tool request may make several upstream calls. Until that loop
     // can settle one durable hold against all turns atomically, gate it without
     // reserving a hold that no single turn owns.
-    await gateChat("messages", budgetRequest)
+    try {
+      await gateChat("messages", budgetRequest)
+    } catch (error) {
+      loop.plan.release()
+      throw error
+    }
     return await handleViaServerToolLoop(loop, {
       c,
       payload: anthropicPayload,

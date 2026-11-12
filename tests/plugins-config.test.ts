@@ -57,6 +57,19 @@ describe("plugins config schema", () => {
     })
   })
 
+  test("accepts a strict relative inventory entry", () => {
+    expect(
+      validateAppConfig({
+        pluginInventory: { entry: "plugins/inventory.json" },
+      }).pluginInventory,
+    ).toEqual({ entry: "plugins/inventory.json" })
+    expect(() =>
+      validateAppConfig({
+        pluginInventory: { entry: "inventory.json", install: true },
+      }),
+    ).toThrow()
+  })
+
   test("rejects an unknown client", () => {
     expect(() =>
       validateAppConfig({

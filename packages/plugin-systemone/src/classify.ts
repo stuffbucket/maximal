@@ -141,7 +141,8 @@ export function classifyTool(
         path,
         errorMessage: "Failed to run SystemOne",
         body: { state: input.state, questions: input.questions },
-        signal: call.signal,
+        operation: "systemone",
+        call,
       })
       return "error" in result ?
           result.error

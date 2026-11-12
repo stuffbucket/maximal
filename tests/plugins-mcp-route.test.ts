@@ -9,12 +9,14 @@ import {
 } from "@modelcontextprotocol/client"
 import {
   blockedToolText,
+  PluginGatewayError,
   unapprovedToolText,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
-import { pluginMcpRoutes } from "~/routes/plugins/mcp"
+import { setPluginGateway } from "~/lib/plugins/gateway"
+import { createPluginMcpRoutes, pluginMcpRoutes } from "~/routes/plugins/mcp"
 import { server } from "~/server"
 
 import {
@@ -171,6 +173,31 @@ afterEach(async () => {
 })
 
 describe("/mcp/<pluginId>", () => {
+  test("subscribes the mandatory generation lifecycle wiring", async () => {
+    let cutover: ((generationId: string, deadline: number) => void) | undefined
+    let unsubscribed = 0
+    const routes = createPluginMcpRoutes({
+      generationLifecycle: {
+        releaseUpstreamSession: () => Promise.resolve(),
+        subscribeCutovers: (listener) => {
+          cutover = listener
+          return () => {
+            unsubscribed += 1
+          }
+        },
+      },
+    })
+
+    expect(cutover).toBeFunction()
+    cutover?.("n+1", Date.now() + 1000)
+    expect(routes.affinityDiagnostics()).toEqual({
+      pinnedSessions: [],
+      drainBlockers: [],
+    })
+    await routes.closeAll()
+    expect(unsubscribed).toBe(1)
+  })
+
   test("lists the plugin's tools with schemas and annotations", async () => {
     const client = await connect()
     expect(client.getServerVersion()?.name).toBe("demo")
@@ -187,6 +214,42 @@ describe("/mcp/<pluginId>", () => {
       inputSchema: { type: "object", required: ["text"] },
       annotations: { readOnlyHint: true },
     })
+  })
+
+  test("turns a listTools lifecycle race into an empty catalog", async () => {
+    const target = plugins.gateway
+    const racing = new Proxy(target, {
+      get(gateway, property) {
+        if (property === "acquireGeneration") {
+          return () => {
+            const lease = gateway.acquireGeneration()
+            return {
+              ...lease,
+              listTools: () => {
+                throw new PluginGatewayError(
+                  "unknown-plugin",
+                  "demo",
+                  "generation retired",
+                )
+              },
+            }
+          }
+        }
+        const value: unknown = Reflect.get(gateway, property)
+        if (typeof value !== "function") return value
+        return (...args: Array<unknown>): unknown => {
+          const result: unknown = Reflect.apply(value, gateway, args)
+          return result
+        }
+      },
+    })
+    setPluginGateway(racing)
+    try {
+      const client = await connect()
+      expect(await client.listTools()).toEqual({ tools: [] })
+    } finally {
+      setPluginGateway(target)
+    }
   })
 
   test("calls a tool with the downstream session id", async () => {

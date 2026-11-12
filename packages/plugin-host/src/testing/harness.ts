@@ -27,6 +27,7 @@ import type {
 import { PLUGIN_SETTINGS_FILE } from "@stuffbucket/maximal-plugin-sdk"
 import {
   createFileStorage,
+  createStorageSettingsAuthority,
   errorMessage,
   type PluginServiceFactory,
   type PluginStorageBackend,
@@ -579,11 +580,17 @@ class Harness implements LifecycleHarness {
       entries.push(entry)
     }
     this.#files = createFileStorage(this.storageRoot)
+    const storage = recordingStorage(
+      this.#files,
+      record,
+      this.#expectedSettings,
+    )
     this.gateway = createPluginHost({
       plugins: options.plugins,
       services: {
         storageRoot: this.storageRoot,
-        storage: recordingStorage(this.#files, record, this.#expectedSettings),
+        storage,
+        settingsAuthority: createStorageSettingsAuthority(storage),
         host: recordingHost(options, record, this.opened),
         extra: options.extraServices,
       },

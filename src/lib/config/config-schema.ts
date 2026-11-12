@@ -224,6 +224,11 @@ export const AppConfigSchema = z
     plugins: z
       .record(z.string().min(1).max(64), PluginSettingsEntrySchema)
       .optional(),
+    /** Data-only built-in inventory, rooted in Maximal's app directory. */
+    pluginInventory: z
+      .object({ entry: z.string().trim().min(1).max(512) })
+      .strict()
+      .optional(),
     // The parked MCP broker's config (`parked/mcp`), accepted silently so
     // existing config.json files don't warn. Not interpreted here; the plugin
     // migration reads `servers[]` defensively.

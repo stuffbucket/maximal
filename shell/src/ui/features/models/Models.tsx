@@ -9,16 +9,9 @@ import { ShieldCheckGlyph } from "../budget/glyphs";
 import { rulesHashForModel, rulesNamingModel } from "../budget/modelRules";
 
 import { AutoModelControls } from "./AutoModelControls";
+import { modelTypeLabel } from "./model-type-label";
 import { useModelRules } from "./useModelRules";
 import { useModels } from "./useModels";
-
-/** Human label for a `capabilities.type`. Falls back to a capitalized
- *  form for any type we don't have a friendlier name for. */
-function groupLabel(type: string): string {
-  if (type === "chat") return "Chat models";
-  if (type === "embeddings") return "Embeddings";
-  return type.charAt(0).toUpperCase() + type.slice(1);
-}
 
 /** Compact token count: 200000 → "200K", 1000000 → "1M", null → "—". */
 function formatTokens(n: number | null): string {
@@ -100,22 +93,17 @@ function ModelRow({ model, rules }: { model: ModelSummary; rules: ReadonlyArray<
 function ModelGroup({
   type,
   models,
-  open,
   rulesFor,
 }: {
   type: string;
   models: Array<ModelSummary>;
-  open: boolean;
   rulesFor: (model: ModelSummary) => ReadonlyArray<BudgetLimitStatus>;
 }): JSX.Element {
   return (
-    <details
-      className="advanced-section"
-      open={open}
-    >
+    <details className="advanced-section">
       <summary className="advanced-section__summary">
         <span className="advanced-section__title">
-          {groupLabel(type)}{" "}
+          {modelTypeLabel(type)}{" "}
           <span className="models__count">{models.length}</span>
         </span>
       </summary>
@@ -208,12 +196,11 @@ export function Models(): JSX.Element {
             provider.
           </p>
         </EmptyState>
-      : groups.map(([type, list], index) => (
+      : groups.map(([type, list]) => (
           <ModelGroup
             key={type}
             type={type}
             models={list}
-            open={index === 0}
             rulesFor={rulesFor}
           />
         ))

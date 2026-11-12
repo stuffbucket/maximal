@@ -5,6 +5,7 @@ import type {
 import type {
   Context,
   PluginDisposer,
+  PluginLifecycleContext,
   PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
 
@@ -50,6 +51,10 @@ let previousStop: Promise<void> = Promise.resolve()
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
+
+function lifecycleAborted(context?: PluginLifecycleContext): boolean {
+  return context?.signal.aborted === true
+}
 
 function describeStartFailure(error: unknown, port: number): StartFailure {
   const message = errorMessage(error)
@@ -108,15 +113,14 @@ export class FigjamController {
   readonly #config: FigjamConfig
   readonly #options: FigjamPluginOptions
   readonly #pluginDir: string
-  readonly #waitFor = previousStop
   readonly #requests = new Map<string, PairRequest>()
-  #starting: Promise<BridgeHandle | undefined> = Promise.resolve(undefined)
+  #tail: Promise<void> = Promise.resolve()
   #handle: BridgeHandle | undefined
   #startFailure: StartFailure | undefined
   #folder: PluginFolder = "missing"
   #building = false
   #buildError: string | undefined
-  #stopped = false
+  #disposed = false
 
   constructor(
     ctx: Context,
@@ -129,66 +133,105 @@ export class FigjamController {
     this.#pluginDir = path.join(ctx.storage.dir, FIGMA_PLUGIN_DIR)
   }
 
-  // A method, not a field read: `stop()` can run while a start is awaited.
-  #isStopped(): boolean {
-    return this.#stopped
-  }
-
-  /** Register the plugin's actions and start the bridge in the background. */
+  /** Register actions and status without acquiring the exclusive bridge port. */
   start(): void {
-    this.#ctx.effect(() => this.stop, "figjam bridge")
+    this.#ctx.effect(
+      // eslint-disable-next-line unicorn/consistent-function-scoping -- cleanup captures this controller
+      () => () => {
+        void this.dispose()
+      },
+      "figjam bridge",
+    )
     this.#ctx.surface.registerAction(SETUP_ACTION, () => this.#build())
     this.#ctx.surface.registerAction(RETRY_ACTION, async () => {
-      if (this.#handle || this.#stopped) return
-      this.#starting = this.#launch()
-      await this.#starting
+      if (this.#handle || this.#disposed) return
+      await this.bind()
     })
-    this.#starting = this.#launch()
+    this.#render()
   }
 
-  /** Drop the actions and stop the bridge once any start in flight has finished. */
-  readonly stop = (): void => {
-    this.#stopped = true
-    for (const request of this.#requests.values()) request.dispose()
-    this.#requests.clear()
-    this.#handle = undefined
-    const starting = this.#starting
-    previousStop = previousStop.then(async () => {
+  /** Bind the bridge after the parent has granted this generation its lease. */
+  bind(context?: PluginLifecycleContext): Promise<void> {
+    return this.#enqueue(async () => {
+      if (this.#handle || this.#disposed) return
       try {
-        await (await starting)?.stop()
+        await this.#launch(context)
       } catch (error) {
-        this.#ctx.host.logger.warn(
-          `The FigJam bridge did not stop cleanly: ${errorMessage(error)}`,
-        )
+        // Initial activation remains operable so the person can free the port
+        // and use Try again. Handoff and recovery must prove readiness.
+        if (context?.purpose !== "activation") throw error
       }
     })
   }
 
-  async #launch(): Promise<BridgeHandle | undefined> {
+  /** Stop the physical bridge and resolve only after the port is released. */
+  unbind(context?: PluginLifecycleContext): Promise<void> {
+    return this.#enqueue(async () => {
+      context?.signal.throwIfAborted()
+      const handle = this.#handle
+      if (!handle) return
+      const stopping = previousStop.then(() => handle.stop())
+      previousStop = stopping.catch(() => undefined)
+      try {
+        await stopping
+      } catch (error) {
+        this.#ctx.host.logger.warn(
+          `The FigJam bridge did not stop cleanly: ${errorMessage(error)}`,
+        )
+        throw error
+      }
+      if (this.#handle === handle) this.#handle = undefined
+      for (const request of this.#requests.values()) request.dispose()
+      this.#requests.clear()
+      this.#render()
+    })
+  }
+
+  /** Permanently dispose this controller after the lifecycle has been revoked. */
+  async dispose(): Promise<void> {
+    this.#disposed = true
+    await this.unbind()
+  }
+
+  async #launch(context?: PluginLifecycleContext): Promise<void> {
     this.#startFailure = undefined
     this.#render()
     try {
-      await this.#waitFor
-      if (this.#isStopped()) return undefined
+      await previousStop
+      context?.signal.throwIfAborted()
+      if (this.#disposed) return
       const { dataDir } = this.#options
       const started = await startBridge({
         port: this.#config.port,
         ...(dataDir === undefined ? {} : { dataDir }),
         onEvent: (event) => this.#onEvent(event),
       })
+      if (this.#shouldStop(context)) {
+        await started.stop()
+        context?.signal.throwIfAborted()
+        return
+      }
       this.#handle = started
-      if (this.#isStopped()) return started
     } catch (error) {
       this.#startFailure = describeStartFailure(error, this.#config.port)
       this.#ctx.host.logger.warn(
         `The FigJam bridge did not start: ${this.#startFailure.detail}`,
       )
       this.#render()
-      return undefined
+      throw error
     }
     await this.#checkFolder()
     this.#sync()
-    return this.#handle
+  }
+
+  #shouldStop(context?: PluginLifecycleContext): boolean {
+    return this.#disposed || lifecycleAborted(context)
+  }
+
+  #enqueue(task: () => Promise<void>): Promise<void> {
+    const run = this.#tail.then(task, task)
+    this.#tail = run.catch(() => undefined)
+    return run
   }
 
   /** Learn what the plugin folder holds, and bring a stale one up to date. */
@@ -208,7 +251,7 @@ export class FigjamController {
   }
 
   async #build(): Promise<void> {
-    if (this.#building || this.#stopped) return
+    if (this.#building || this.#disposed) return
     this.#building = true
     this.#buildError = undefined
     this.#render()
@@ -231,7 +274,7 @@ export class FigjamController {
   }
 
   #onEvent(event: BridgeEvent): void {
-    if (this.#stopped) return
+    if (this.#disposed) return
     if (event.type === "pair-requested" && !this.#requests.has(event.name)) {
       this.#notify(event.name)
     }
@@ -261,7 +304,7 @@ export class FigjamController {
 
   /** Make the actions match the bridge's pending requests, then show the status. */
   #sync(): void {
-    if (this.#stopped) return
+    if (this.#disposed) return
     if (this.#handle) {
       const pending = new Set(
         this.#handle.status().pending.map((request) => request.name),
@@ -325,7 +368,7 @@ export class FigjamController {
   }
 
   #render(): void {
-    if (this.#stopped) return
+    if (this.#disposed) return
     const view = this.#handle?.status()
     this.#ctx.surface.setStatus(
       composeStatus({
