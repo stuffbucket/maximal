@@ -17,6 +17,7 @@ import { COPILOT_PROVIDER_ID } from "~/services/copilot/upstream-request"
 
 import { BudgetExceededError } from "./errors"
 import { findProviderWindow, listProviderWindows } from "./provider-windows"
+import { recordBudgetEvent } from "./reports/events"
 import { budgetKeyOf } from "./scope"
 import {
   createBudgetService,
@@ -84,6 +85,7 @@ export function getBudgetService(): BudgetService {
         })
       }),
     onWarning: announceWarning,
+    onEvent: recordBudgetEvent,
   })
   return service
 }

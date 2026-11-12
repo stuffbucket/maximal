@@ -4,6 +4,7 @@
  * counted because the call they reserved for may have been billed.
  */
 
+import { KEY_SQL, PROVIDER_SQL } from "~/lib/token-usage/aggregate"
 import {
   isTokenUsageStorageEnabled,
   readUsageDb,
@@ -16,11 +17,15 @@ export type SpendScope =
   | { kind: "global" }
   | { kind: "key" | "plugin" | "provider"; id: string }
 
-const SCOPE_SQL: Record<Exclude<SpendScope["kind"], "global">, string> = {
-  key: "COALESCE(client_label, CASE client WHEN 'other' THEN 'unidentified' ELSE client END) = ?",
+/** A scope as a `WHERE` fragment over `token_usage_events`, one `?` for the
+ *  scope's id. */
+export const SCOPE_SQL: Record<
+  Exclude<SpendScope["kind"], "global">,
+  string
+> = {
+  key: `${KEY_SQL} = ?`,
   plugin: "plugin_id = ?",
-  provider:
-    "(CASE source WHEN 'copilot' THEN 'copilot' ELSE COALESCE(provider_name, '') END) = ?",
+  provider: `(${PROVIDER_SQL}) = ?`,
 }
 
 /** The same scopes over `budget_holds`' columns. */
@@ -165,49 +170,4 @@ export async function getOldestSpendMs(
 ): Promise<number | undefined> {
   const rows = await getNanoAiuSpendRows(scope, range)
   return rows.length === 0 ? undefined : rows[0].createdAtMs
-}
-
-/** How activity rows are grouped. */
-export type ActivityGroup = "model" | "plugin" | "key" | "provider" | "day"
-
-const GROUP_SQL: Record<ActivityGroup, string> = {
-  model: "model",
-  plugin: "plugin_id",
-  key: "COALESCE(client_label, CASE client WHEN 'other' THEN 'unidentified' ELSE client END)",
-  provider:
-    "CASE source WHEN 'copilot' THEN 'copilot' ELSE COALESCE(provider_name, '') END",
-  day: "strftime('%Y-%m-%d', created_at_ms / 1000, 'unixepoch')",
-}
-
-export interface ActivityRow {
-  /** The group's value; null for rows with none (no plugin, say). */
-  key: string | null
-  nanoAiu: number
-  requests: number
-}
-
-/** Spend and request count since `sinceMs`, grouped, biggest spender first
- *  (by day: oldest first). Rows that spent nothing are left out. Empty when
- *  storage is off. */
-export async function getNanoAiuActivity(
-  group: ActivityGroup,
-  sinceMs: number,
-): Promise<Array<ActivityRow>> {
-  if (!isTokenUsageStorageEnabled()) return []
-  const expression = GROUP_SQL[group]
-  const order = group === "day" ? "group_key ASC" : "nano_aiu DESC, group_key"
-  const rows = await readUsageDb((db) =>
-    db
-      .prepare(
-        `SELECT ${expression} AS group_key, COALESCE(SUM(total_nano_aiu), 0) AS nano_aiu, COUNT(*) AS requests
-         FROM token_usage_events WHERE created_at_ms >= ?
-         GROUP BY group_key HAVING nano_aiu > 0 ORDER BY ${order}`,
-      )
-      .all(sinceMs),
-  )
-  return (rows as Array<Record<string, unknown>>).map((row) => ({
-    key: typeof row.group_key === "string" ? row.group_key : null,
-    nanoAiu: Number(row.nano_aiu),
-    requests: Number(row.requests),
-  }))
 }

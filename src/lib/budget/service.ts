@@ -78,6 +78,23 @@ export type BudgetCheck =
   | { ok: true; warnings: ReadonlyArray<BudgetWarning> }
   | { ok: false; refusal: BudgetRefusal }
 
+export type BudgetEventKind = "approved" | "refused" | "warned"
+
+/** A decision about one limit worth logging (`budget_events`): a call it
+ *  refused, the first call to cross its warning threshold in a period, or a
+ *  billed call admitted with an estimate held. */
+export interface BudgetEvent {
+  kind: BudgetEventKind
+  atMs: number
+  limitId: string
+  scope: BudgetScope
+  key: string
+  operation: BudgetOperation
+  estimateNanoAiu: number
+  usedNanoAiu: number
+  limitNanoAiu: number
+}
+
 /** A hold as the database keeps it, while it is open. */
 export interface StoredHold {
   id: string
@@ -146,6 +163,8 @@ export interface BudgetServiceDeps {
   /** Called once per limit and period when a call first crosses the
    *  limit's warning threshold. */
   onWarning?: (warning: BudgetWarning) => void
+  /** Called for each refusal, first warning and approved hold, to log it. */
+  onEvent?: (event: BudgetEvent) => void
   newId?: () => string
 }
 
@@ -448,8 +467,9 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
 
   function evaluate(
     active: ReadonlyArray<ActiveLimit>,
-    estimate: number,
+    intent: BudgetIntent,
   ): { refusal?: BudgetRefusal; warnings: Array<BudgetWarning> } {
+    const estimate = estimateOf(intent)
     const refusals: Array<BudgetRefusal> = []
     const warnings: Array<BudgetWarning> = []
     for (const item of active) {
@@ -457,6 +477,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
         const refusal = refusalFor(item, estimate)
         if (refusal) {
           refusals.push(refusal)
+          logEvent("refused", item, intent)
           continue
         }
       }
@@ -466,14 +487,39 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     return { refusal: decisive(refusals), warnings }
   }
 
+  /** Hand a decision to `onEvent`; a failing logger never fails a call. */
+  function logEvent(
+    kind: BudgetEventKind,
+    { limit, entry }: ActiveLimit,
+    intent: BudgetIntent,
+  ): void {
+    try {
+      deps.onEvent?.({
+        kind,
+        atMs: clock(),
+        limitId: limit.id,
+        scope: limit.scope,
+        key: intent.key,
+        operation: intent.operation,
+        estimateNanoAiu: estimateOf(intent),
+        usedNanoAiu: entry.committed,
+        limitNanoAiu: limit.limit,
+      })
+    } catch (error) {
+      consola.warn("Budget: an event handler failed", error)
+    }
+  }
+
   /** Tell `onWarning` once per limit and period. A rolling window has no
    *  period to start over, so a limit that drops back under its threshold
    *  is armed again. */
   function announce(
     active: ReadonlyArray<ActiveLimit>,
     warnings: ReadonlyArray<BudgetWarning>,
+    intent: BudgetIntent,
   ): void {
-    for (const { limit, entry } of active) {
+    for (const item of active) {
+      const { limit, entry } = item
       const warning = warnings.find(({ limitId }) => limitId === limit.id)
       const key = `${limit.id}@${entry.key}`
       if (!warning) {
@@ -482,6 +528,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
       }
       if (warned.has(key)) continue
       warned.add(key)
+      logEvent("warned", item, intent)
       try {
         deps.onWarning?.(warning)
       } catch (error) {
@@ -543,18 +590,21 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
         return { ok: true, hold: NO_HOLD(newId()), warnings: [] }
       }
       // No await from here: the check and the hold are one step.
-      const { refusal, warnings } = evaluate(active, estimateOf(intent))
+      const { refusal, warnings } = evaluate(active, intent)
       if (refusal) return { ok: false, refusal }
       const hold = openHold(intent)
-      announce(active, warnings)
+      if (hold.estimateNanoAiu > 0) {
+        for (const item of active) logEvent("approved", item, intent)
+      }
+      announce(active, warnings, intent)
       return { ok: true, hold, warnings }
     },
 
     async check(intent) {
       const active = await settled(intent)
-      const { refusal, warnings } = evaluate(active, estimateOf(intent))
+      const { refusal, warnings } = evaluate(active, intent)
       if (refusal) return { ok: false, refusal }
-      announce(active, warnings)
+      announce(active, warnings, intent)
       return { ok: true, warnings }
     },
 

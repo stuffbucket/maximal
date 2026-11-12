@@ -851,27 +851,156 @@ export const BudgetStatusResponse = z.object({
 })
 export type BudgetStatusResponse = z.infer<typeof BudgetStatusResponse>
 
-/** GET /settings/api/budget/activity: what was spent in the period so far,
- *  grouped, biggest spender first (by day, oldest first). Rows that spent
- *  nothing are left out. */
+/** The Dashboard's measures (`GET /token-usage`'s `totals` and `byModel`
+ *  rows, field for field) over some rows. */
+export const BudgetUsageTotals = z.object({
+  request_count: z.number().int().min(0),
+  input_tokens: z.number().int().min(0),
+  output_tokens: z.number().int().min(0),
+  cache_read_input_tokens: z.number().int().min(0),
+  cache_creation_input_tokens: z.number().int().min(0),
+  total_tokens: z.number().int().min(0),
+  total_nano_aiu: NanoAiuAmount,
+})
+export type BudgetUsageTotals = z.infer<typeof BudgetUsageTotals>
+
+/** GET /settings/api/budget/activity: usage in a range, grouped, biggest
+ *  spender first (by day or hour, oldest first). The range is `from`/`to`
+ *  (ISO), `range=24h|7d|30d|90d|all` or the original `period=day|week|month`
+ *  (since 00:00 UTC today, on Monday or on the 1st; `period` echoes it, and is
+ *  `range` for the other forms). Groups that spent nothing are left out
+ *  unless `include_free=true`. The token and `totals` fields are always sent;
+ *  they are optional here so older mocks still parse. */
 export const BudgetActivityResponse = z.object({
-  period: z.enum(["day", "week", "month"]),
-  group: z.enum(["model", "plugin", "key", "provider", "day"]),
-  /** 00:00 UTC today, on Monday, or on the 1st. */
+  period: z.enum(["day", "week", "month", "range"]),
+  group: z.enum(["model", "plugin", "key", "provider", "day", "hour"]),
+  /** Where the range starts (00:00 UTC today, on Monday, or on the 1st, for
+   *  `period`). */
   period_start: z.string(),
   display: z.object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate }),
+  /** The range as resolved at request time; `to` is exclusive. `label` is
+   *  `custom` for `from`/`to`. */
+  range: z
+    .object({
+      from: z.string(),
+      to: z.string(),
+      label: z.enum([
+        "24h",
+        "7d",
+        "30d",
+        "90d",
+        "all",
+        "day",
+        "week",
+        "month",
+        "custom",
+      ]),
+    })
+    .optional(),
+  /** Everything the range recorded (free groups included), like the
+   *  Dashboard's totals row. */
+  totals: BudgetUsageTotals.optional(),
   rows: z.array(
     z.object({
-      /** The group's value; null for rows with none (no plugin, say). */
+      /** The group's value; null for rows with none (no plugin, say). An
+       *  hour is `2026-11-11T14:00:00Z`, a day `2026-11-11`. */
       key: z.string().nullable(),
       nano_aiu: NanoAiuAmount,
       requests: z.number().int().min(0),
       /** `nano_aiu` in the display unit. */
       amount: z.number().min(0),
+      input_tokens: z.number().int().min(0).optional(),
+      output_tokens: z.number().int().min(0).optional(),
+      cache_read_input_tokens: z.number().int().min(0).optional(),
+      cache_creation_input_tokens: z.number().int().min(0).optional(),
+      total_tokens: z.number().int().min(0).optional(),
     }),
   ),
 })
 export type BudgetActivityResponse = z.infer<typeof BudgetActivityResponse>
+
+export const BudgetTimelineBucket = z.object({
+  start: z.string(),
+  /** Exclusive; a bucket is cut where a period resets. */
+  end: z.string(),
+  nano_aiu: NanoAiuAmount,
+  requests: z.number().int().min(0),
+  /** The rule's spend in its period, through the end of this bucket. */
+  cumulative_nano_aiu: NanoAiuAmount,
+  /** Requests the rule refused in the bucket (from `budget_events`). */
+  refused: z.number().int().min(0),
+  /** Start of the period the bucket belongs to. */
+  period_start: z.string(),
+  /** `nano_aiu` and `cumulative_nano_aiu` in the display unit. */
+  amount: z.number().min(0),
+  cumulative_amount: z.number().min(0),
+})
+
+export const BudgetTimelinePeriod = z.object({
+  start: z.string(),
+  /** Null for a rule that never resets. */
+  end: z.string().nullable(),
+  /** The boundaries are a guess (an earlier cycle of a followed window). */
+  estimated: z.boolean(),
+  /** Spend in the period so far, within the data read. */
+  spend_nano_aiu: NanoAiuAmount,
+  /** When spend first reached the warning line / the limit; null if never. */
+  warned_at: z.string().nullable(),
+  crossed_at: z.string().nullable(),
+  refused: z.number().int().min(0),
+})
+
+export const BudgetTimelineMarker = z.object({
+  kind: z.enum(["warned", "crossed", "refused"]),
+  at: z.string(),
+  period_start: z.string(),
+  /** `refused`: how many requests the bucket the marker stands for lost. */
+  count: z.number().int().min(0).optional(),
+  /** `refused`: what they would have cost (their estimates). */
+  estimate_nano_aiu: NanoAiuAmount.optional(),
+})
+
+/** GET /settings/api/budget/limits/:id/timeline?range=|from=&to=&bucket=:
+ *  how one rule performed over time. Buckets are UTC hours, days or weeks
+ *  (`bucket=hour|day|week`; default by the range's length), cut where the
+ *  rule's period resets so `cumulative_nano_aiu` never straddles a reset. The
+ *  limit line and warning line are constant (`limit`, `warn_line`). */
+export const BudgetTimelineResponse = z.object({
+  limit: z.object({
+    id: BudgetLimitId,
+    label: z.string().nullable(),
+    scope: BudgetScope,
+    action: BudgetLimitAction,
+    limit_reset: BudgetLimitReset,
+    warn_at: BudgetWarnAt,
+    /** The limit and the warning line (`limit * warn_at`, rounded up). */
+    limit: NanoAiuAmount,
+    warn_line: NanoAiuAmount,
+    display: z.object({
+      limit: z.number().min(0),
+      warn_line: z.number().min(0),
+    }),
+  }),
+  display: z.object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate }),
+  range: z.object({
+    from: z.string(),
+    to: z.string(),
+    label: z.enum(["24h", "7d", "30d", "90d", "all", "custom"]),
+    bucket: z.enum(["hour", "day", "week"]),
+  }),
+  buckets: z.array(BudgetTimelineBucket),
+  periods: z.array(BudgetTimelinePeriod),
+  markers: z.array(BudgetTimelineMarker),
+  totals: z.object({
+    nano_aiu: NanoAiuAmount,
+    requests: z.number().int().min(0),
+    refused: z.number().int().min(0),
+    /** The estimates of the refused requests that carried one. */
+    refused_estimate_nano_aiu: NanoAiuAmount,
+    periods_crossed: z.number().int().min(0),
+  }),
+})
+export type BudgetTimelineResponse = z.infer<typeof BudgetTimelineResponse>
 
 /** Body of PATCH /settings/api/budget. */
 export const BudgetSettingsPatchRequest = z

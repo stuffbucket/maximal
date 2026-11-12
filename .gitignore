@@ -43,7 +43,7 @@ test-results/
 playwright-report/
 # Stryker mutation testing
 .stryker-tmp/
-reports/
+/reports/
 # bun --compile temp executables (live in cwd, ~60MB each)
 .*.bun-build
 dist-release/
