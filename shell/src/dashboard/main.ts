@@ -1106,7 +1106,7 @@ function handleContentAreaClick(event: Event): void {
     return;
   }
 
-  if (event.target.closest('[data-usage-action="open-settings"]')) {
+  if (event.target.closest('[data-usage-action="open-account-settings"]')) {
     if (window.parent === window) {
       window.location.assign("/ui/settings/#account");
     } else {

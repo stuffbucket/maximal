@@ -477,6 +477,9 @@
   "dashboard-empty-summary": "Nenhum uso de tokens registrado para o período selecionado.",
   "dashboard-empty-events": "Nenhuma linha de detalhe de uso de tokens para o período selecionado.",
 
+  "dashboard-usage-account-title": "É necessário configurar a conta",
+  "dashboard-usage-account-body": "O início de sessão e a configuração da conta são geridos nas Configurações.",
+  "dashboard-usage-account-action": "Abrir configurações da conta",
   "dashboard-usage-waiting": "Aguardando os dados de uso do GitHub…",
   "dashboard-usage-reconnecting": "Atualizado {ago} · reconectando ao GitHub",
   "dashboard-error-summary": "O resumo de uso de tokens falhou",

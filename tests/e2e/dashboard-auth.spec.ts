@@ -32,9 +32,15 @@ test("signed-out remote quotas render an account state while local usage remains
   })
   const frame = page.frameLocator("[data-dashboard-frame]")
   await expect(frame.locator(".usage-signed-out")).toBeVisible()
-  await expect(frame.locator(".usage-signed-out")).toContainText(
-    "Not signed in",
+  const accountState = frame.locator(".usage-signed-out")
+  await expect(accountState).toContainText("Account setup required")
+  await expect(accountState).toContainText(
+    "Sign-in and account setup are handled in Settings.",
   )
+  await expect(
+    accountState.getByRole("button", { name: "Open Account settings" }),
+  ).toBeVisible()
+  await expect(accountState).not.toContainText("Sign in to GitHub")
   await expect(frame.locator(".usage-status")).toHaveCount(0)
   await expect(frame.locator("body")).not.toContainText(
     "GitHub token not found",
@@ -42,7 +48,7 @@ test("signed-out remote quotas render an account state while local usage remains
   await expect(frame.locator("#token-usage")).toBeVisible()
   await expect(frame.locator("#live-sessions")).toBeVisible()
 
-  await frame.locator('[data-usage-action="open-settings"]').click()
+  await frame.locator('[data-usage-action="open-account-settings"]').click()
   await expect(page).toHaveURL(/#account$/u)
   await expect(page.locator('[data-section="account"]')).toBeVisible()
 })

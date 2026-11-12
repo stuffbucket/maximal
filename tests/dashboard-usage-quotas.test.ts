@@ -87,10 +87,14 @@ describe("renderRemoteUsage", () => {
     expect(html).toContain('<p class="usage-status">')
   })
 
-  test("signed out keeps the sign-in prompt", () => {
+  test("signed out points to Account settings without owning sign-in", () => {
     const html = renderRemoteUsage({ status: "signed-out" }, options)
     expect(html).toContain("usage-signed-out")
-    expect(html).toContain('data-usage-action="open-settings"')
+    expect(html).toContain("Account setup required")
+    expect(html).toContain("Sign-in and account setup are handled in Settings.")
+    expect(html).toContain('data-usage-action="open-account-settings"')
+    expect(html).toContain("Open Account settings")
+    expect(html).not.toContain("Sign in to GitHub")
     expect(html).not.toContain("usage-quotas--unavailable")
   })
 

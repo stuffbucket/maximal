@@ -477,6 +477,9 @@
   "dashboard-empty-summary": "Aucune utilisation de jetons enregistrée pour la période sélectionnée.",
   "dashboard-empty-events": "Aucune ligne de détail d’utilisation des jetons pour la période sélectionnée.",
 
+  "dashboard-usage-account-title": "Configuration du compte requise",
+  "dashboard-usage-account-body": "La connexion et la configuration du compte s’effectuent dans Réglages.",
+  "dashboard-usage-account-action": "Ouvrir les réglages du compte",
   "dashboard-usage-waiting": "En attente des données d’utilisation de GitHub…",
   "dashboard-usage-reconnecting": "Mis à jour {ago} · reconnexion à GitHub",
   "dashboard-error-summary": "Échec du résumé d’utilisation des jetons",

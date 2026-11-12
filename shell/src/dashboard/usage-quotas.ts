@@ -130,12 +130,12 @@ function renderUnavailableColumn(
 function renderUsageSignedOut(): string {
   return `
     <div class="usage-signed-out">
-      <i data-lucide="log-in" aria-hidden="true"></i>
+      <i data-lucide="settings" aria-hidden="true"></i>
       <div class="usage-signed-out__content">
-        <strong>${escapeHtml(t("account-unauth-title"))}</strong>
-        <p>${escapeHtml(t("account-unauth-body"))}</p>
-        <button type="button" class="usage-signed-out__action" data-usage-action="open-settings">
-          ${escapeHtml(t("account-sign-in"))}
+        <strong>${escapeHtml(t("dashboard-usage-account-title"))}</strong>
+        <p>${escapeHtml(t("dashboard-usage-account-body"))}</p>
+        <button type="button" class="usage-signed-out__action" data-usage-action="open-account-settings">
+          ${escapeHtml(t("dashboard-usage-account-action"))}
         </button>
       </div>
     </div>`;
