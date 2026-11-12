@@ -13,4 +13,7 @@ export {
   type PluginGateway,
   PluginGatewayError,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
-export { createFileStorage } from "@stuffbucket/maximal-plugin-sdk/runtime"
+export {
+  createFileStorage,
+  type PluginServiceFactory,
+} from "@stuffbucket/maximal-plugin-sdk/runtime"

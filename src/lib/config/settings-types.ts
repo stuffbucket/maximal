@@ -513,8 +513,9 @@ export const PluginClientId = z.enum(["claude-code"])
 export type PluginClientId = z.infer<typeof PluginClientId>
 
 /** A connector exposes tools to MCP clients and gets host-managed tool
- *  permissions; an extension doesn't. Settings lists connectors only. */
-export const PluginKind = z.enum(["connector", "extension"])
+ *  permissions; an extension doesn't and isn't listed in Settings; a model
+ *  plugin has no MCP endpoint but is listed (toggle and config form). */
+export const PluginKind = z.enum(["connector", "extension", "model"])
 export type PluginKind = z.infer<typeof PluginKind>
 
 /** Where the plugin comes from: shipped with Maximal (`built-in`, shown as

@@ -12,7 +12,11 @@ import type {
   StandardSchemaV1,
 } from "@stuffbucket/maximal-plugin-sdk"
 
-import { createFileStorage } from "@stuffbucket/maximal-plugin-sdk/runtime"
+import {
+  createFileStorage,
+  injectedServices,
+  isInjectList,
+} from "@stuffbucket/maximal-plugin-sdk/runtime"
 import { describe, expect, test } from "bun:test"
 
 import { createPluginHost } from "../host"
@@ -249,7 +253,12 @@ async function checkManifest(suite: Suite): Promise<void> {
   // eslint-disable-next-line unicorn/prefer-structured-clone -- see above
   expect(JSON.parse(JSON.stringify(plugin.manifest))).toEqual(plugin.manifest)
   // The host validates the module and manifest on construction.
-  const gateway = createPluginHost({
+  const gateway = buildBareHost(suite, plugin)
+  await gateway.dispose()
+}
+
+function buildBareHost(suite: Suite, plugin: PluginModule) {
+  return createPluginHost({
     plugins: [plugin],
     services: {
       storageRoot: "/nonexistent-plugin-conformance",
@@ -258,9 +267,30 @@ async function checkManifest(suite: Suite): Promise<void> {
         logger: SILENT_LOGGER,
         openExternal: () => Promise.resolve(),
       },
+      extra: suite.options.harness?.extraServices,
     },
   })
-  await gateway.dispose()
+}
+
+/** Every injected service exists, and the host refuses one it does not provide. */
+async function checkInject(suite: Suite): Promise<void> {
+  const plugin = suite.plugin()
+  const names = injectedServices(plugin)
+  expect(names.length).toBeGreaterThan(0)
+  // Provided: the host accepts the plugin as declared (see the manifest check).
+  await buildBareHost(suite, plugin).dispose()
+  // Not provided: an unknown name is refused when the host is built.
+  const unknown = "conformance-no-such-service"
+  const widened: PluginModule = {
+    ...plugin,
+    inject:
+      isInjectList(plugin.inject) ?
+        [...plugin.inject, unknown]
+      : { ...plugin.inject, [unknown]: true },
+  }
+  expect(() => buildBareHost(suite, widened)).toThrow(
+    new RegExp(`requires missing service: ${unknown}`),
+  )
 }
 
 async function checkConfigSchema(suite: Suite): Promise<void> {
@@ -394,7 +424,9 @@ async function checkMigration(suite: Suite): Promise<void> {
       version: plugin.manifest.settingsVersion,
     })
     if (migration?.expected !== undefined)
-      expect({ config: stored?.config }).toEqual({ config: migration.expected })
+      expect({ config: stored?.config }).toEqual({
+        config: migration.expected,
+      })
     expect(harness.settingsTamperedWith(id)).toBe(false)
   } finally {
     await harness.dispose()
@@ -477,6 +509,8 @@ export function runPluginConformance(
   describe(title, () => {
     test("manifest is valid, plain JSON, and its id is the module name", () =>
       checkManifest(suite))
+    test("inject names only services the host provides", () =>
+      checkInject(suite))
     test("Config accepts {}", async () => {
       const result = await validateConfig(suite.plugin().Config, {})
       expect(result.issues ?? []).toEqual([])

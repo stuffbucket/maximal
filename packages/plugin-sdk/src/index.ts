@@ -3,13 +3,14 @@
  *
  * Plugins import cordis through this package so every plugin and the host
  * share one cordis runtime identity, and so the `Context` augmentation for
- * the host-provided services (`tools`, `surface`, `storage`, `host`) is in
- * scope.
+ * the host-provided services (`tools`, `surface`, `storage`, `host`, plus any `AppServices` the app adds)
+ * is in scope.
  */
 import type { Context } from "@deepseek-ai/cordis"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 import type {
+  AppServices,
   HostServices,
   PluginManifest,
   PluginStorage,
@@ -73,7 +74,7 @@ export interface PluginModule<C = unknown> {
 }
 
 declare module "@deepseek-ai/cordis" {
-  interface Context {
+  interface Context extends AppServices {
     tools: ToolRegistry
     surface: PluginSurface
     storage: PluginStorage
