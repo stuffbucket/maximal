@@ -17,6 +17,14 @@ type Story = StoryObj<typeof meta>;
 const state = (mockApi: MockApiParameters): Story => ({ parameters: { mockApi } });
 
 export const Loaded = state({ scenario: "signed-in" });
+export const ExpandedCatalog: Story = {
+  parameters: { mockApi: { scenario: "signed-in" } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      await within(canvasElement).findByText(/^Chat models/u),
+    );
+  },
+};
 export const SignedOut = state({ scenario: "signed-out" });
 export const Loading = state({ overrides: { "/settings/api/models": "hang" } });
 export const LoadError = state({

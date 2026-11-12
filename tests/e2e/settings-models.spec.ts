@@ -32,6 +32,36 @@ async function openModels(page: Page): Promise<void> {
   await expect(page.getByLabel("Auto permission checks")).toBeVisible()
 }
 
+test("starts catalog groups collapsed and keeps disclosure state in this mount", async ({
+  page,
+}) => {
+  await openModels(page)
+  const groups = page.locator("details.advanced-section:visible")
+  await expect(groups).not.toHaveCount(0)
+
+  for (const group of await groups.all()) {
+    await expect(group).not.toHaveAttribute("open")
+  }
+
+  const firstGroup = groups.first()
+  const summary = firstGroup.locator("summary")
+  await summary.click()
+  await expect(firstGroup).toHaveAttribute("open", "")
+
+  const refresh = page.waitForResponse("**/settings/api/models/refresh")
+  await page.getByRole("button", { name: "Refresh now" }).click()
+  await refresh
+  await expect(firstGroup).toHaveAttribute("open", "")
+
+  await page.reload()
+  await expect(page.getByLabel("Haiku alias")).toBeVisible()
+  for (const group of await page
+    .locator("details.advanced-section:visible")
+    .all()) {
+    await expect(group).not.toHaveAttribute("open")
+  }
+})
+
 test("renders accessible Automatic controls and preserves the other settings on save", async ({
   page,
 }) => {

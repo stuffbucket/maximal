@@ -88,17 +88,12 @@ function ModelRow({ model }: { model: ModelSummary }): JSX.Element {
 function ModelGroup({
   type,
   models,
-  open,
 }: {
   type: string;
   models: Array<ModelSummary>;
-  open: boolean;
 }): JSX.Element {
   return (
-    <details
-      className="advanced-section"
-      open={open}
-    >
+    <details className="advanced-section">
       <summary className="advanced-section__summary">
         <span className="advanced-section__title">
           {groupLabel(type)}{" "}
@@ -180,13 +175,8 @@ export function Models(): JSX.Element {
             provider.
           </p>
         </EmptyState>
-      : groups.map(([type, list], index) => (
-          <ModelGroup
-            key={type}
-            type={type}
-            models={list}
-            open={index === 0}
-          />
+      : groups.map(([type, list]) => (
+          <ModelGroup key={type} type={type} models={list} />
         ))
       }
     </div>
