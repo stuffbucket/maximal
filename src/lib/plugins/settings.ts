@@ -95,14 +95,16 @@ export function migrateLegacyWorkIq(config: AppConfig): AppConfig | undefined {
 }
 
 /**
- * Plugins that replaced routes Maximal always served (the decisions and
- * SystemOne pass-through routes). A plugin's own entry is absent for every
- * existing user, and absent means off, so without this their `/v1/decisions`
- * and `/v1/systemone` would start answering 404 on upgrade.
+ * Plugins that replaced routes Maximal always served (the decisions,
+ * SystemOne and image pass-through routes). A plugin's own entry is absent for
+ * every existing user, and absent means off, so without this their
+ * `/v1/decisions`, `/v1/systemone` and `/v1/images/*` would start answering
+ * 404 on upgrade.
  */
 export const DEFAULT_ON_PLUGINS: ReadonlyArray<string> = [
   "decisions",
   "systemone",
+  "images",
 ]
 
 /**
@@ -146,7 +148,9 @@ export function migratePluginSettings(): void {
     const defaults = migrateDefaultOnPlugins(getConfig())
     if (defaults) {
       writeConfig(defaults)
-      consola.info("Turned on the plugins that serve the decisions routes")
+      consola.info(
+        "Turned on the plugins that serve the decisions, SystemOne and image routes",
+      )
     }
   } catch (error) {
     consola.warn("Could not turn on the default plugins", error)

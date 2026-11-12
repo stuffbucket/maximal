@@ -9,13 +9,13 @@
  */
 
 import * as decisions from "@stuffbucket/maximal-plugin-decisions"
+import * as images from "@stuffbucket/maximal-plugin-images"
 import * as systemone from "@stuffbucket/maximal-plugin-systemone"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { HTTPError } from "~/lib/errors/http-errors"
 import { state } from "~/lib/runtime-state/state"
 import { closeUsageStore } from "~/lib/token-usage"
 import { createDecisionsRoutes } from "~/routes/decisions/route"
@@ -56,6 +56,39 @@ afterEach(async () => {
   Reflect.deleteProperty(process.env, DB_PATH_ENV)
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
   Object.assign(state, originalState)
+})
+
+/** The model ids the tests below send to the image routes, besides the
+ *  plugin's default. The images plugin serves what its bindings name, so the
+ *  tests bind them like a user would in Settings. */
+const IMAGE_TEST_MODELS = [
+  "gpt-image-2.5-flare",
+  "gpt-image-test",
+  "gpt-6-luna-decisions",
+  "gpt-x",
+]
+
+/** The decisions, SystemOne and images plugins on, installed as the running
+ *  gateway the routes dispatch through. */
+let plugins: TestGateway | undefined
+beforeEach(async () => {
+  const started = await startTestGateway(
+    [decisions, systemone, images],
+    ["decisions", "systemone", "images"],
+  )
+  await started.gateway.updateConfig("images", {
+    bindings: IMAGE_TEST_MODELS.map((model) => ({
+      model,
+      provider: "copilot",
+      upstreamModel: model,
+    })),
+  })
+  plugins = started
+})
+afterEach(async () => {
+  const started = plugins
+  plugins = undefined
+  await started?.dispose()
 })
 
 interface UsageRow {
@@ -109,10 +142,6 @@ function upstream400Response(): Response {
     }),
     { status: 400, headers: { "content-type": "text/plain" } },
   )
-}
-
-function upstream400(): HTTPError {
-  return new HTTPError("Failed upstream", upstream400Response())
 }
 
 /** A hidden catalog entry serving `endpoints`. */
@@ -186,18 +215,10 @@ const imagesResult = {
 
 describe("POST /v1/images/generations", () => {
   test("relays the reply unchanged and records usage against the request model", async () => {
-    const seen: Array<unknown> = []
-    const app = withUsage([
-      [
-        "/v1/images",
-        createImagesRoutes({
-          createImageGeneration: (payload) => {
-            seen.push(payload)
-            return Promise.resolve(structuredClone(imagesResult))
-          },
-        }),
-      ],
-    ])
+    const calls = captureFetch(() =>
+      Response.json(structuredClone(imagesResult)),
+    )
+    const app = withUsage([["/v1/images", createImagesRoutes()]])
     const payload = {
       model: "gpt-image-test",
       prompt: "a red square",
@@ -210,7 +231,8 @@ describe("POST /v1/images/generations", () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual(imagesResult)
-    expect(seen).toEqual([payload])
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(String(calls[0].body))).toEqual(payload)
     const rows = await usageRows(app)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
@@ -225,14 +247,8 @@ describe("POST /v1/images/generations", () => {
   })
 
   test("an upstream 400 comes back in OpenAI's error format", async () => {
-    const app = withUsage([
-      [
-        "/v1/images",
-        createImagesRoutes({
-          createImageGeneration: () => Promise.reject(upstream400()),
-        }),
-      ],
-    ])
+    captureFetch(upstream400Response)
+    const app = withUsage([["/v1/images", createImagesRoutes()]])
 
     const response = await postJson(app, "/v1/images/generations", {
       model: "gpt-x",
@@ -326,18 +342,8 @@ describe("POST /v1/images/generations", () => {
 
   test("refuses while signed out, in OpenAI's format", async () => {
     state.githubToken = undefined
-    let called = false
-    const app = withUsage([
-      [
-        "/v1/images",
-        createImagesRoutes({
-          createImageGeneration: () => {
-            called = true
-            return Promise.resolve(imagesResult)
-          },
-        }),
-      ],
-    ])
+    const calls = captureFetch(() => Response.json(imagesResult))
+    const app = withUsage([["/v1/images", createImagesRoutes()]])
 
     const response = await postJson(app, "/v1/images/generations", {
       model: "gpt-image-test",
@@ -348,7 +354,7 @@ describe("POST /v1/images/generations", () => {
     expect(response.headers.get("x-should-retry")).toBe("false")
     const body = (await response.json()) as { error: { code: string } }
     expect(body.error.code).toBe("maximal_not_signed_in")
-    expect(called).toBe(false)
+    expect(calls).toHaveLength(0)
   })
 })
 
@@ -422,21 +428,6 @@ describe("POST /v1/images/edits", () => {
       model: "gpt-image-test",
     })
   })
-})
-
-/** The decisions and SystemOne plugins on, installed as the running gateway
- *  the routes dispatch through. */
-let plugins: TestGateway | undefined
-beforeEach(async () => {
-  plugins = await startTestGateway(
-    [decisions, systemone],
-    ["decisions", "systemone"],
-  )
-})
-afterEach(async () => {
-  const started = plugins
-  plugins = undefined
-  await started?.dispose()
 })
 
 describe("POST /v1/decisions", () => {

@@ -6,6 +6,7 @@
  */
 
 import * as decisions from "@stuffbucket/maximal-plugin-decisions"
+import * as images from "@stuffbucket/maximal-plugin-images"
 import * as systemone from "@stuffbucket/maximal-plugin-systemone"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import fs from "node:fs"
@@ -37,14 +38,19 @@ afterEach(async () => {
 })
 
 describe("migrateDefaultOnPlugins", () => {
-  test("the decisions and systemone plugins are the default-on ones", () => {
-    expect([...DEFAULT_ON_PLUGINS].sort()).toEqual(["decisions", "systemone"])
+  test("the decisions, images and systemone plugins are the default-on ones", () => {
+    expect([...DEFAULT_ON_PLUGINS].sort()).toEqual([
+      "decisions",
+      "images",
+      "systemone",
+    ])
   })
 
   test("turns both on when the config has no say", () => {
     expect(migrateDefaultOnPlugins({})?.plugins).toEqual({
       decisions: { enabled: true },
       systemone: { enabled: true },
+      images: { enabled: true },
     })
   })
 
@@ -60,16 +66,18 @@ describe("migrateDefaultOnPlugins", () => {
     expect(migrated?.plugins).toEqual({
       decisions: { enabled: false },
       systemone: { clients: [], enabled: true },
+      images: { enabled: true },
       workiq: { enabled: true },
     })
   })
 
-  test("has nothing to do once both have a choice", () => {
+  test("has nothing to do once each has a choice", () => {
     expect(
       migrateDefaultOnPlugins({
         plugins: {
           decisions: { enabled: false },
           systemone: { enabled: true },
+          images: { enabled: false },
         },
       }),
     ).toBeUndefined()
@@ -87,8 +95,9 @@ describe("migratePluginSettings", () => {
     expect(getConfig().plugins).toEqual({
       decisions: { enabled: true },
       systemone: { enabled: true },
+      images: { enabled: true },
     })
-    expect(fs.readFileSync(PATHS.CONFIG_PATH, "utf8")).toContain("decisions")
+    expect(fs.readFileSync(PATHS.CONFIG_PATH, "utf8")).toContain("images")
   })
 
   test("is one-shot: a plugin the user turns off stays off at the next boot", () => {
@@ -103,13 +112,13 @@ describe("migratePluginSettings", () => {
 })
 
 describe("startPlugins on an existing user's config", () => {
-  test("serves decisions and systemone without the user touching anything", async () => {
+  test("serves decisions, systemone and images without the user touching anything", async () => {
     // A config from before the plugins existed: no `plugins` section.
     writeConfig({})
 
     const gateway = await startPlugins({
       gateway: composePluginGateway({
-        plugins: [decisions, systemone],
+        plugins: [decisions, systemone, images],
         storageRoot,
       }),
     })
@@ -120,6 +129,7 @@ describe("startPlugins on an existing user's config", () => {
       .map((entry) => [entry.model, ...entry.operations])
     expect(served?.sort()).toEqual([
       ["gpt-6-luna-decisions", "decisions"],
+      ["gpt-image-2.5-flare", "images.generations", "images.edits"],
       ["microsoft-decision-1", "systemone"],
     ])
   })

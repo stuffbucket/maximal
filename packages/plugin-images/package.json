@@ -1,0 +1,26 @@
+{
+  "name": "@stuffbucket/maximal-plugin-images",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Images capability plugin for maximal: serves image generation and edits (/v1/images/*) through a provider's models",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@stuffbucket/maximal-plugin-host": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

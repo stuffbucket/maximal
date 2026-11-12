@@ -1,13 +1,11 @@
 /**
  * `/v1/images/generations` and `/v1/images/edits`: dispatched to the
- * `images.generations` / `images.edits` operations (today Copilot's endpoints
- * of the same path, through the built-in handlers) and answered with the
- * JSON unchanged. An edit may be JSON or a multipart form; a form is re-sent
- * as a form.
+ * `images.generations` / `images.edits` operations (served by the images
+ * capability plugin) and answered with the JSON unchanged. An edit may be JSON
+ * or a multipart form; a form is re-sent as a form.
  *
- * `createImagesRoutes(deps)` lets tests inject the operation dispatch (or the
- * built-in upstream calls) without a process-wide `mock.module`
- * (docs/architecture.md § Testing gotchas).
+ * `createImagesRoutes(deps)` lets tests inject the operation dispatch without
+ * a process-wide `mock.module` (docs/architecture.md § Testing gotchas).
  */
 
 import type { OperationDispatch } from "@stuffbucket/maximal-plugin-sdk/gateway"
@@ -16,14 +14,11 @@ import { Hono } from "hono"
 
 import { requireGithubAuth } from "~/lib/auth/request-auth"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
-import {
-  type BuiltinOperationDeps,
-  createBuiltinOperationDispatch,
-} from "~/lib/operations/builtin"
+import { pluginOperations } from "~/lib/plugins/gateway"
 import { runOperation } from "~/routes/passthrough"
 
-export type ImagesRoutesDeps = Partial<BuiltinOperationDeps> & {
-  /** Serves the operations; the built-in Copilot handlers by default. */
+export interface ImagesRoutesDeps {
+  /** Serves the operations; the running plugin gateway's by default. */
   operations?: OperationDispatch
 }
 
@@ -31,7 +26,7 @@ const isMultipart = (contentType: string | undefined): boolean =>
   contentType?.toLowerCase().startsWith("multipart/form-data") ?? false
 
 export function createImagesRoutes(deps: ImagesRoutesDeps = {}): Hono {
-  const operations = deps.operations ?? createBuiltinOperationDispatch(deps)
+  const operations = deps.operations ?? pluginOperations
 
   // Errors propagate to the error handler, which answers in OpenAI's format;
   // the token gate's "not signed in" goes the same way.

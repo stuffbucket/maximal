@@ -32,6 +32,7 @@
     "packages/plugin-figjam",
     "packages/plugin-decisions",
     "packages/plugin-systemone",
+    "packages/plugin-images",
     "packages/figjam-plugin",
     "packages/figjam-bridge",
     "packages/figjam-layout"
@@ -105,6 +106,7 @@
     "@stuffbucket/maximal-plugin-decisions": "workspace:*",
     "@stuffbucket/maximal-plugin-figjam": "workspace:*",
     "@stuffbucket/maximal-plugin-host": "workspace:*",
+    "@stuffbucket/maximal-plugin-images": "workspace:*",
     "@stuffbucket/maximal-plugin-sdk": "workspace:*",
     "@stuffbucket/maximal-plugin-systemone": "workspace:*",
     "@stuffbucket/maximal-plugin-workiq": "workspace:*",

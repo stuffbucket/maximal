@@ -36,6 +36,7 @@ let storageRoot: string
 const DEFAULT_ON = {
   decisions: { enabled: true },
   systemone: { enabled: true },
+  images: { enabled: true },
 }
 
 function settingsPath(id: string): string {
