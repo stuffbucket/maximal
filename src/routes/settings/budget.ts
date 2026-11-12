@@ -29,6 +29,12 @@
  *   is the same rows as CSV.
  * - `GET /limits/:id/timeline?range=…&bucket=hour|day|week` — how one rule
  *   performed over time (`BudgetTimelineResponse`).
+ * - `POST /simulate` — replay recorded usage through draft rules
+ *   (`BudgetSimulateRequest` / `BudgetSimulateResponse`); applies nothing.
+ * - `GET /sessions?range=…&limit=` — what each session cost
+ *   (`BudgetSessionsResponse`).
+ * - `POST /suggest` — draft rules sized from sessions or a range
+ *   (`BudgetSuggestRequest` / `BudgetSuggestResponse`); applies nothing.
  *
  * Every change replies with the new snapshot and pushes it as
  * `budget.changed`. Auth-gated by the parent `/settings/api` middleware.
@@ -46,12 +52,18 @@ import {
   buildBudgetActivity,
   type ActivityGroup,
 } from "~/lib/budget/activity"
-import { DAY_MS } from "~/lib/budget/periods"
 import { buildBudgetPresets } from "~/lib/budget/presets"
 import {
   findProviderWindow,
   listProviderWindows,
 } from "~/lib/budget/provider-windows"
+import {
+  resolveReportRange,
+  runSessions,
+  runSimulation,
+  runSuggest,
+  type ReportContext,
+} from "~/lib/budget/reports/api"
 import {
   bucketCount,
   defaultBucket,
@@ -60,7 +72,6 @@ import {
 } from "~/lib/budget/reports/buckets"
 import { parseUsageRange } from "~/lib/budget/reports/range"
 import { buildLimitTimeline } from "~/lib/budget/reports/timeline"
-import { getFirstUsageMs } from "~/lib/budget/reports/usage"
 import { exportRules, planImport } from "~/lib/budget/rules"
 import { currentBudgetStatus, emitBudgetChanged } from "~/lib/budget/runtime"
 import {
@@ -83,8 +94,13 @@ import {
   BudgetRulesDocument,
   BudgetRulesImportRequest,
   BudgetRulesImportResponse,
+  BudgetSessionsResponse,
   BudgetSettingsPatchRequest,
+  BudgetSimulateRequest,
+  BudgetSimulateResponse,
   BudgetStatusResponse,
+  BudgetSuggestRequest,
+  BudgetSuggestResponse,
   BudgetTimelineResponse,
 } from "~/lib/config/settings-types"
 import { forwardError } from "~/lib/errors/error"
@@ -493,7 +509,7 @@ budgetRoutes.get("/limits/:id/timeline", async (c) => {
     if (!limit) return notFound(c)
 
     const nowMs = Date.now()
-    const parsed = parseUsageRange(
+    const parsed = await resolveReportRange(
       {
         range: c.req.query("range"),
         from: c.req.query("from"),
@@ -503,15 +519,7 @@ budgetRoutes.get("/limits/:id/timeline", async (c) => {
       "7d",
     )
     if (!parsed.ok) return validationError(c, parsed.message)
-    let { range } = parsed
-    if (range.label === "all") {
-      // Everything recorded: from the first row, not the epoch.
-      const firstMs = await getFirstUsageMs()
-      range = {
-        ...range,
-        fromMs: Math.min(firstMs ?? nowMs - DAY_MS, nowMs - 1),
-      }
-    }
+    const { range } = parsed
 
     const requested = c.req.query("bucket")
     if (requested !== undefined && !isBucketSize(requested)) {
@@ -541,6 +549,95 @@ budgetRoutes.get("/limits/:id/timeline", async (c) => {
       c,
       { schema: BudgetTimelineResponse, label: "Budget timeline" },
       timeline,
+    )
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+async function reportContext(): Promise<ReportContext> {
+  await listProviderWindows()
+  return {
+    nowMs: Date.now(),
+    config: getConfig().budget,
+    findWindow: (ref) => findProviderWindow(ref),
+  }
+}
+
+budgetRoutes.post("/simulate", async (c) => {
+  try {
+    const body = BudgetSimulateRequest.safeParse(
+      await c.req.json().catch(() => null),
+    )
+    if (!body.success) {
+      return validationError(c, "Invalid simulation", body.error.issues)
+    }
+    const result = await runSimulation(body.data, await reportContext())
+    if (!result.ok) return validationError(c, result.message)
+    return respondValidated(
+      c,
+      { schema: BudgetSimulateResponse, label: "Budget simulation" },
+      result.value,
+    )
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+const DEFAULT_SESSIONS = 100
+const MAX_SESSIONS = 500
+
+/** The `limit` query: absent is the default; anything but a whole number
+ *  from 1 to 500 is undefined. */
+function sessionLimit(value: string | undefined): number | undefined {
+  if (value === undefined) return DEFAULT_SESSIONS
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= MAX_SESSIONS ?
+      parsed
+    : undefined
+}
+
+budgetRoutes.get("/sessions", async (c) => {
+  try {
+    const requested = c.req.query("limit")
+    const limit = sessionLimit(requested)
+    if (limit === undefined) {
+      return validationError(c, `limit must be 1 to ${MAX_SESSIONS}`)
+    }
+    const result = await runSessions(
+      {
+        range: c.req.query("range"),
+        from: c.req.query("from"),
+        to: c.req.query("to"),
+        limit,
+      },
+      await reportContext(),
+    )
+    if (!result.ok) return validationError(c, result.message)
+    return respondValidated(
+      c,
+      { schema: BudgetSessionsResponse, label: "Budget sessions" },
+      result.value,
+    )
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+budgetRoutes.post("/suggest", async (c) => {
+  try {
+    const body = BudgetSuggestRequest.safeParse(
+      await c.req.json().catch(() => null),
+    )
+    if (!body.success) {
+      return validationError(c, "Invalid suggestion request", body.error.issues)
+    }
+    const result = await runSuggest(body.data, await reportContext())
+    if (!result.ok) return validationError(c, result.message)
+    return respondValidated(
+      c,
+      { schema: BudgetSuggestResponse, label: "Budget suggestions" },
+      result.value,
     )
   } catch (error) {
     return forwardError(c, error)

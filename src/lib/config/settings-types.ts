@@ -19,6 +19,7 @@ import { z } from "zod"
 import { ClaudeAutoTierState } from "../models/claude-auto-model-types"
 
 export * from "../budget/wire"
+export * from "../budget/wire-reports"
 
 export { ClaudeAutoTierState } from "../models/claude-auto-model-types"
 
