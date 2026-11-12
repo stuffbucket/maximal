@@ -1,5 +1,9 @@
+import type {
+  PluginStatus,
+  PluginView,
+} from "../../../../../src/lib/config/settings-types";
+
 import { t } from "../../../i18n";
-import type { PluginStatusState, PluginView } from "../../../proxy/client";
 
 /**
  * How a connector reads: a tone for the dot and some text.
@@ -9,13 +13,26 @@ import type { PluginStatusState, PluginView } from "../../../proxy/client";
  * is the connector's English `status.summary`, rendered as-is, except while
  * Maximal is still starting it. The list's label is Maximal's own short word.
  */
-export type ConnectorTone = PluginStatusState;
+export type ConnectorTone = PluginStatus["state"];
 
 export interface ConnectorLine {
   tone: ConnectorTone;
   /** Names the tone for people who can't see the dot's color. */
   toneLabel: string;
   text: string;
+}
+
+/** Plugin id encoded by the `#connectors/<id>` detail deep link. */
+export function connectorIdFromHash(hash: string): string | null {
+  const prefix = "#connectors/";
+  if (!hash.startsWith(prefix)) return null;
+  const encoded = hash.slice(prefix.length);
+  if (encoded === "") return null;
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
 }
 
 function toneLabel(tone: ConnectorTone): string {
@@ -44,6 +61,12 @@ export function connectorLine(connector: PluginView): ConnectorLine | null {
   if (connector.lifecycle === "starting") {
     return line("working", t("connectors-line-starting"));
   }
+  if (connector.lifecycle === "waiting") {
+    return line(
+      "needs-setup",
+      connector.waitingReason ?? t("connectors-status-needs-setup"),
+    );
+  }
   if (connector.status) return line(connector.status.state, connector.status.summary);
   return line("ready", t("connectors-line-running"));
 }
@@ -62,6 +85,13 @@ export function listStatus(connector: PluginView): ListStatus {
   }
   if (connector.lifecycle === "starting") {
     return { kind: "dot", tone: "working", label: t("connectors-status-starting") };
+  }
+  if (connector.lifecycle === "waiting") {
+    return {
+      kind: "dot",
+      tone: "needs-setup",
+      label: t("connectors-status-needs-setup"),
+    };
   }
   const state = connector.status?.state ?? "ready";
   if (state === "ready") return { kind: "ready", label: t("connectors-status-ready") };

@@ -12,9 +12,11 @@ import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import {
+  pluginGenerationTarget,
   resolveSidecarChannel,
   resolveSidecarVersion,
 } from "./build-sidecar-version"
+import { buildPluginBuiltIns } from "./build-plugin-builtins"
 
 interface BinaryBuild {
   args: Array<string>
@@ -117,6 +119,17 @@ for (const build of builds) {
   })
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
+
+const generationTarget = pluginGenerationTarget(triple)
+await buildPluginBuiltIns({
+  output: join(REPO, "shell/src-tauri/plugin-builtins"),
+  version,
+  channel,
+  gitSha: sha || "source",
+  runtime: `bun:${Bun.version}`,
+  platform: generationTarget.platform,
+  architecture: generationTarget.architecture,
+})
 
 function targetTriple(): string {
   const prefix = "--target-triple="

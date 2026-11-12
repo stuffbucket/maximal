@@ -272,6 +272,15 @@ describe("apt repository (deploy-pages.yml)", () => {
 })
 
 describe("packaged proxy", () => {
+  test("requires and installs the sealed built-in generation readably", () => {
+    const build = read("build/linux/build-maximal-deb.sh")
+
+    expect(build).toContain("$bindir/plugin-builtins/committed.json")
+    expect(build).toContain("$root/usr/lib/maximal/plugin-builtins")
+    expect(build).toContain("-type d -exec chmod 0755")
+    expect(build).toContain("-type f -exec chmod 0644")
+  })
+
   test("requires the glibc it was built against", () => {
     expect(read("build/linux/build-maximal-deb.sh")).toContain(
       "Depends: libc6 (>= 2.39)",

@@ -108,10 +108,10 @@ export function ChevronDownGlyph(): JSX.Element {
   );
 }
 
-export function BackGlyph(): JSX.Element {
+export function CloseGlyph(): JSX.Element {
   return (
     <Glyph>
-      <path d="M19 12H5.5M11 6l-6 6 6 6" />
+      <path d="m6 6 12 12M18 6 6 18" />
     </Glyph>
   );
 }

@@ -9,9 +9,9 @@ import { ConnectorsPanel } from "../../../../shell/src/ui/features/connectors/Co
 import type { MockApiParameters } from "../mock/fetch-mock";
 
 /**
- * Settings → Integrations → Connectors against the mock sidecar: the list,
- * and each connector page state. Pages open the way the app's
- * `#connectors/<id>` link does.
+ * Settings → Integrations → Connectors against the mock sidecar: the list
+ * stays visible behind each connector's modal detail state. Dialogs also open
+ * from the app's `#connectors/<id>` deep link.
  */
 const meta = {
   title: "Settings/Connectors",
@@ -22,7 +22,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const list = (mockApi: MockApiParameters): Story => ({ parameters: { mockApi } });
-const page = (mockApi: MockApiParameters, play?: Story["play"]): Story => ({
+const dialog = (mockApi: MockApiParameters, play?: Story["play"]): Story => ({
   args: { initialConnectorId: "workiq" },
   parameters: { mockApi },
   play,
@@ -41,31 +41,37 @@ export const ListLoading = list({ overrides: { "/settings/api/plugins": "hang" }
 /** Maximal not answering, after ~5s of automatic retries. */
 export const ListUnreachable = list({ overrides: { "/settings/api/plugins": "offline" } });
 /** Open a row, then come back: focus returns to the row. */
-export const ListOpenAndBack: Story = {
+export const ListOpenAndClose: Story = {
   ...list({ scenario: "connectors-list" }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole("button", { name: "Work IQ" }));
-    await userEvent.click(await canvas.findByRole("button", { name: /Your connectors/ }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Close" }));
     await waitFor(() => expect(canvas.getByRole("button", { name: "Work IQ" })).toHaveFocus());
   },
 };
 
-// ---- a connector's page ----------------------------------------------------------
+// ---- a connector's detail dialog ------------------------------------------------
 
 /** 14 tools in three groups; one write tool and one other tool blocked (Custom). */
-export const PageReady = page({ scenario: "connectors-detail-ready" });
-export const PageTermsNeeded = page({ scenario: "connectors-detail-terms-needed" });
+export const DialogReady = dialog({ scenario: "connectors-detail-ready" });
+/** A destructive plugin action stacks its confirmation above the detail dialog. */
+export const DialogConfirmation = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await userEvent.click(await canvas.findByRole("button", { name: "Sign out" }));
+  await canvas.findByRole("dialog", { name: "Sign out?" });
+});
+export const DialogTermsNeeded = dialog({ scenario: "connectors-detail-terms-needed" });
 /** Signed out: tools from the cached catalog, with when they were last seen. */
-export const PageSignInNeededCached = page({ scenario: "connectors-detail-signin-needed-cached" });
-export const PageWorking = page({ scenario: "connectors-detail-working" });
-export const PageError = page({ scenario: "connectors-detail-error" });
+export const DialogSignInNeededCached = dialog({ scenario: "connectors-detail-signin-needed-cached" });
+export const DialogWorking = dialog({ scenario: "connectors-detail-working" });
+export const DialogError = dialog({ scenario: "connectors-detail-error" });
 /** Didn't start: unreadable settings file. */
-export const PageFailed = page({ scenario: "connectors-detail-failed" });
+export const DialogFailed = dialog({ scenario: "connectors-detail-failed" });
 /** Didn't start: its configuration is invalid; the form is where to fix it. */
-export const PageConfigError = page({ scenario: "connectors-detail-config-error" });
+export const DialogConfigError = dialog({ scenario: "connectors-detail-config-error" });
 /** Saving the invalid endpoint again: the connector's complaint lands on the field. */
-export const PageConfigErrorSaved = page({ scenario: "connectors-detail-config-error" }, async ({ canvasElement }) => {
+export const DialogConfigErrorSaved = dialog({ scenario: "connectors-detail-config-error" }, async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   // Advanced is open: the connector failed, so its config is the suspect.
   const endpoint = await canvas.findByLabelText("Endpoint");
@@ -73,11 +79,11 @@ export const PageConfigErrorSaved = page({ scenario: "connectors-detail-config-e
   await userEvent.click(canvas.getByRole("button", { name: "Save" }));
   await canvas.findByText(/Invalid URL/);
 });
-export const PageClaudeCodeOff = page({ scenario: "connectors-claude-code-off" });
+export const DialogClaudeCodeOff = dialog({ scenario: "connectors-claude-code-off" });
 /** No app selected: the trigger says what it controls instead of repeating the section title. */
-export const PageNoAppsSelected = page({ scenario: "connectors-no-apps" });
+export const DialogNoAppsSelected = dialog({ scenario: "connectors-no-apps" });
 /** The app picker open: every app is listed and unsupported targets explain why. */
-export const PageClientMenu = page({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+export const DialogClientMenu = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await userEvent.click(await canvas.findByRole("button", { name: "Apps that get Work IQ" }));
   const menu = within(await canvas.findByRole("menu", { name: "Apps that get Work IQ" }));
@@ -87,19 +93,19 @@ export const PageClientMenu = page({ scenario: "connectors-detail-ready" }, asyn
   }
 });
 /** The Write/delete group's menu open: Custom is checked, not choosable. */
-export const PageGroupMenu = page({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+export const DialogGroupMenu = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await userEvent.click(await canvas.findByRole("button", { name: /Permission for Write\/delete tools/ }));
 });
 /** Ask's inputs and full schema open. */
-export const PageToolOpen = page({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+export const DialogToolOpen = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await userEvent.click(await canvas.findByRole("button", { name: /question, fileUrls, conversationId/ }));
   const schemas = canvas.getAllByRole("button", { name: "Full schema" });
   await userEvent.click(schemas[schemas.length - 3]);
 });
 /** Blocking a tool fails: the control snaps back and the banner says why. */
-export const PagePermissionSaveFails = page(
+export const DialogPermissionSaveFails = dialog(
   {
     scenario: "connectors-detail-ready",
     overrides: {
@@ -115,7 +121,7 @@ export const PagePermissionSaveFails = page(
     await userEvent.click(within(group).getByRole("radio", { name: "Blocked" }));
   },
 );
-export const PageLoadFails = page({
+export const DialogLoadFails = dialog({
   scenario: "connectors-detail-ready",
   overrides: { "/settings/api/plugins/workiq": "offline" },
 });

@@ -6,9 +6,9 @@
  */
 import type { Context } from "@deepseek-ai/cordis"
 
-import type { ModelBinding } from "./operations"
+import type { ModelBinding, ModelOperation } from "./operations"
 import type { UpstreamProvider } from "./providers"
-import type { ServerToolDefinition } from "./server-tools"
+import type { ServerToolCall, ServerToolDefinition } from "./server-tools"
 import type { ToolResult } from "./types"
 
 import { withUpstreamModel } from "./relay"
@@ -25,8 +25,13 @@ export const errorResult = (text: string): ToolResult => ({
 /** The first binding whose provider is registered, signed in and offers its model. */
 export function availableBinding(
   ctx: Context,
-  bindings: ReadonlyArray<ModelBinding>,
-): { binding: ModelBinding; provider: UpstreamProvider } | undefined {
+  bindings: ReadonlyArray<ModelBinding & { model: string }>,
+):
+  | {
+      binding: ModelBinding & { model: string }
+      provider: UpstreamProvider
+    }
+  | undefined {
   for (const binding of bindings) {
     const provider = ctx.providers.get(binding.provider)
     if (provider?.available() && provider.model(binding.upstreamModel)) {
@@ -43,7 +48,7 @@ export function availableBinding(
  */
 export function serverToolWhileAvailable(
   ctx: Context,
-  bindings: ReadonlyArray<ModelBinding>,
+  bindings: ReadonlyArray<ModelBinding & { model: string }>,
   definition: ServerToolDefinition,
 ): { sync(): void } {
   let registration: (() => void) | undefined
@@ -67,12 +72,13 @@ export function serverToolWhileAvailable(
  */
 export async function callBoundModel(
   ctx: Context,
-  bindings: ReadonlyArray<ModelBinding>,
+  bindings: ReadonlyArray<ModelBinding & { model: string }>,
   spec: {
     path: string
     errorMessage: string
     body: Record<string, unknown>
-    signal: AbortSignal
+    operation: ModelOperation
+    call: ServerToolCall
   },
 ): Promise<{ reply: Record<string, unknown> } | { error: ToolResult }> {
   const served = availableBinding(ctx, bindings)
@@ -82,14 +88,35 @@ export async function callBoundModel(
     }
   }
   try {
+    const invocation = spec.call.nextProviderCall(
+      spec.operation,
+      served.binding.upstreamModel,
+    )
     const reply = await served.provider.postJson<Record<string, unknown>>(
       spec.path,
       withUpstreamModel(spec.body, served.binding.upstreamModel),
-      { signal: spec.signal, errorMessage: spec.errorMessage },
+      {
+        signal: spec.call.signal,
+        errorMessage: spec.errorMessage,
+        invocation,
+      },
     )
+    const cost = served.provider.cost(reply, {
+      operation: spec.operation,
+      model: served.binding.upstreamModel,
+    })
+    spec.call.reportSpend?.({
+      invocationId: invocation.invocationId,
+      providerCallId: invocation.providerCallId,
+      sequence: invocation.sequence,
+      operation: spec.operation,
+      model: served.binding.model,
+      provider: served.binding.provider,
+      result: { usage: {}, ...(cost === undefined ? {} : { cost }) },
+    })
     return { reply }
   } catch (error) {
-    if (spec.signal.aborted) throw error
+    if (spec.call.signal.aborted) throw error
     const reason = error instanceof Error ? error.message : String(error)
     return { error: errorResult(`${spec.errorMessage}: ${reason}`) }
   }

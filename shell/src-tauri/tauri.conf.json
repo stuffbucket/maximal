@@ -38,6 +38,9 @@
     "externalBin": [
       "binaries/maximal"
     ],
+    "resources": [
+      "plugin-builtins"
+    ],
     "macOS": {
       "exceptionDomain": "localhost"
     },

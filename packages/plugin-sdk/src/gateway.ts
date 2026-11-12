@@ -7,7 +7,11 @@
  * guard, and the tool-permission wording the host and the MCP layer share.
  */
 import type { OperationDispatch } from "./operations"
-import type { ServerToolCall, ServerToolView } from "./server-tools"
+import type {
+  PreparedServerTool,
+  ServerToolCall,
+  ServerToolView,
+} from "./server-tools"
 import type {
   JsonSchemaObject,
   PluginKind,
@@ -40,7 +44,17 @@ export interface PluginSettingsEntry {
 
 export type PluginSettings = Record<string, PluginSettingsEntry>
 
-export type PluginLifecycle = "disabled" | "starting" | "active" | "failed"
+export type PluginLifecycle =
+  | "disabled"
+  | "waiting"
+  | "starting"
+  | "active"
+  | "failed"
+
+/** Where an inventory entry came from. Static constructor plugins are built in. */
+export type PluginSource =
+  | { type: "built-in" }
+  | { type: "external"; specifier: string }
 
 export interface PluginToolSummary {
   name: string
@@ -61,6 +75,8 @@ export interface PluginSnapshot {
   displayName: string
   description: string
   homepage?: string
+  /** Inventory provenance. */
+  source: PluginSource
   /** The plugin's static manifest (display + connector info; never secrets). */
   manifest: PluginManifest
   /** The plugin's current settings version (`manifest.settingsVersion`). */
@@ -77,6 +93,10 @@ export interface PluginSnapshot {
   lifecycle: PluginLifecycle
   /** Why the plugin failed (path-qualified config issues, apply error). */
   error?: string
+  /** Required Cordis services currently keeping a waiting fiber pending. */
+  waitingForServices?: Array<string>
+  /** Human-readable pending reason, including the missing service names when known. */
+  waitingReason?: string
   /** Last `ctx.surface.setStatus` of the running plugin. */
   status?: PluginStatus
   /** Live tools; empty unless the plugin is active. */
@@ -98,6 +118,7 @@ export type PluginGatewayEventType =
   | "tools"
   | "settings"
   | "notice"
+  | "inventory"
 
 export interface PluginGatewayEvent {
   type: PluginGatewayEventType
@@ -111,7 +132,37 @@ export type PluginToolListing = ToolDefinitionPublic & {
   permission: ToolPermission
 }
 
+/**
+ * Opaque pin to one plugin generation. Callers keep it across every await from
+ * permission/schema selection through terminal projection, then release it.
+ */
+export interface PluginGenerationLease {
+  /** Diagnostic identity only; callers must not route with it. */
+  readonly generationId: string
+  get(id: string): PluginSnapshot | undefined
+  listTools(pluginId: string): Array<PluginToolListing>
+  toolViews(pluginId: string): Array<PluginToolView>
+  serverTools(): Array<ServerToolView>
+  operations(): OperationDispatch
+  callTool(
+    pluginId: string,
+    name: string,
+    input: Record<string, unknown>,
+    call: ToolCallContext,
+  ): Promise<ToolResult>
+  /** Prepare estimate and execution against the exact leased definition. */
+  prepareServerTool(
+    pluginId: string,
+    name: string,
+    input: Record<string, unknown>,
+  ): Promise<PreparedServerTool>
+  /** Release this pin. Idempotent. */
+  release(): void
+}
+
 export interface PluginGateway {
+  /** Acquire the current generation without making a transport call. */
+  acquireGeneration(): PluginGenerationLease
   /**
    * Start/stop/reload plugin fibers to match `settings`. Serialised; failures
    * are isolated per plugin and reported via `lifecycle: "failed"` + `error`.
@@ -158,10 +209,17 @@ export interface PluginGateway {
    */
   serverTools(): Array<ServerToolView>
   /**
-   * Run one server tool. Throws `unknown-plugin` / `plugin-inactive` /
-   * `unknown-tool`. A tool that throws resolves to
-   * `{ isError: true, content: [{ type: "text", text }] }`, like `callTool`.
-   * The host sets `call.budget` to the tool's own `{ plugin, tool }`.
+   * Prepare one server tool input against the exact current definition. Its
+   * estimate is data, never an executable function exposed by the view.
+   */
+  prepareServerTool(
+    pluginId: string,
+    name: string,
+    input: Record<string, unknown>,
+  ): Promise<PreparedServerTool>
+  /**
+   * Compatibility convenience for direct callers. New flows hold a generation
+   * lease and use `prepareServerTool(...).execute(...)`.
    */
   callServerTool(
     pluginId: string,
@@ -216,6 +274,7 @@ const GATEWAY_ERROR_CODES = [
   "invalid-config",
   "invalid-permissions",
   "settings-unreadable",
+  "replacement-not-ready",
 ] as const
 
 export type PluginGatewayErrorCode = (typeof GATEWAY_ERROR_CODES)[number]
@@ -293,6 +352,7 @@ export type {
   OperationDispatch,
   OperationRequest,
   OperationResult,
+  PreparedOperation,
   ServedModel,
 } from "./operations"
 export type {
@@ -303,6 +363,7 @@ export type {
   UpstreamProvider,
 } from "./providers"
 export type {
+  PreparedServerTool,
   ServerToolBudget,
   ServerToolCall,
   ServerToolEstimate,

@@ -12,12 +12,21 @@
 
 import type {
   ModelOperation,
-  OperationDispatch,
   OperationRequest,
   OperationResult,
+  PreparedOperation,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import { randomUUID } from "node:crypto"
+
 import type { PersistedTokenUsageEvent } from "~/lib/token-usage/store"
+
+import {
+  ProviderInvocationError,
+  providerInvocationJournal,
+  type ProviderCallObservation,
+  type ProviderInvocationJournal,
+} from "~/lib/plugins/provider-broker"
 
 import { estimateOperationNanoAiu } from "./estimate"
 import {
@@ -26,7 +35,7 @@ import {
   settleBudgetUsage,
   unreconcileBudgetUsage,
 } from "./runtime"
-import { type BudgetService } from "./service"
+import { type BudgetService, type ObservedBudgetTokens } from "./service"
 
 /** The built-in capability whose usage rows (`plugin_id`) an operation counts
  *  under, so a `plugin:images` limit covers what it spent. */
@@ -41,14 +50,19 @@ export interface BudgetedDispatchOptions {
   /** The provider the operation resolved to. */
   provider: string
   /** Prepare the result's usage for atomic settlement. */
-  record: (result: OperationResult) => PersistedTokenUsageEvent | null
+  record: (
+    result: Pick<OperationResult, "usage" | "cost">,
+  ) => PersistedTokenUsageEvent | null
   /** Defaults to the app's service. */
   budget?: BudgetService
+  /** Defaults to the parent provider journal. */
+  journal?: ProviderInvocationJournal
 }
 
 /**
- * The result as it is booked: a reply that reports no cost is booked at the
- * hold's estimate (there is none when no limit covers the call).
+ * The result as it is booked: a reply that reports no cost is returned with
+ * the hold's estimate (there is none when no limit covers the call). Durable
+ * accounting still marks that estimate unreconciled rather than authoritative.
  */
 export function bookedResult<T extends Pick<OperationResult, "usage" | "cost">>(
   result: T,
@@ -63,20 +77,129 @@ export function bookedResult<T extends Pick<OperationResult, "usage" | "cost">>(
   }
 }
 
+interface CollectedUsage {
+  readonly events: Array<PersistedTokenUsageEvent>
+  readonly observedTokens: ObservedBudgetTokens
+  billedNanoAiu: number
+  completeBill: boolean
+  observedSuccess: boolean
+}
+
+function collectResult(
+  usage: CollectedUsage,
+  result: Pick<OperationResult, "usage" | "cost">,
+  record: BudgetedDispatchOptions["record"],
+): void {
+  const event = record(result)
+  if (event) usage.events.push(event)
+  usage.observedTokens.input ||=
+    typeof result.usage.input_tokens === "number"
+    || typeof result.usage.cache_read_input_tokens === "number"
+  usage.observedTokens.output ||= typeof result.usage.output_tokens === "number"
+  usage.observedSuccess = true
+  if (result.cost?.amount === undefined) usage.completeBill = false
+  else usage.billedNanoAiu += result.cost.amount
+}
+
+function observationResult(
+  observation: ProviderCallObservation,
+): Pick<OperationResult, "usage" | "cost"> | undefined {
+  if (observation.outcome !== "success") return undefined
+  return {
+    usage: {},
+    ...(observation.cost === undefined ? {} : { cost: observation.cost }),
+  }
+}
+
+async function settleCollected(
+  hold: Awaited<ReturnType<typeof reserveBudget>>,
+  usage: CollectedUsage,
+): Promise<void> {
+  if (usage.observedSuccess && usage.completeBill) {
+    await settleBudgetUsage(hold, usage.events, usage.billedNanoAiu)
+    return
+  }
+  await unreconcileBudgetUsage(hold, usage.events, {
+    reason: "usage-missing",
+    observedTokens: usage.observedTokens,
+  })
+}
+
+interface ObservationMatch {
+  readonly journal: ProviderInvocationJournal
+  readonly invocationId: string
+  readonly providerCallId: string
+  readonly sequence: number
+  readonly prepared: PreparedOperation
+  readonly provider: string
+}
+
+function requireMatchingObservation(
+  match: ObservationMatch,
+): ProviderCallObservation {
+  const observation = match.journal
+    .unacknowledged(match.invocationId)
+    .find(
+      (candidate) =>
+        candidate.invocation.providerCallId === match.providerCallId,
+    )
+  if (
+    !observation
+    || observation.outcome !== "success"
+    || observation.invocation.sequence !== match.sequence
+    || observation.invocation.operation !== match.prepared.operation
+    || observation.invocation.model !== match.prepared.binding.upstreamModel
+    || observation.provider !== match.provider
+  ) {
+    throw new ProviderInvocationError(
+      "Operation result did not match an observed provider call.",
+    )
+  }
+  return observation
+}
+
+interface OutstandingCollection {
+  readonly journal: ProviderInvocationJournal
+  readonly invocationId: string
+  readonly usage: CollectedUsage
+  readonly record: BudgetedDispatchOptions["record"]
+  readonly skipProviderCallId?: string
+}
+
+function collectOutstanding(collection: OutstandingCollection): void {
+  for (const observation of collection.journal.unacknowledged(
+    collection.invocationId,
+  )) {
+    if (observation.invocation.providerCallId === collection.skipProviderCallId)
+      continue
+    const observed = observationResult(observation)
+    if (observed) collectResult(collection.usage, observed, collection.record)
+    else collection.usage.completeBill = false
+  }
+}
+
 export async function dispatchWithBudget(
-  operations: OperationDispatch,
-  request: Omit<OperationRequest, "binding">,
+  prepared: PreparedOperation,
+  request: Omit<
+    OperationRequest,
+    | "operation"
+    | "model"
+    | "binding"
+    | "invocationId"
+    | "providerCallId"
+    | "sequence"
+  >,
   options: BudgetedDispatchOptions,
 ): Promise<OperationResult> {
   const hold = await reserveBudget(
     {
-      operation: request.operation,
+      operation: prepared.operation,
       provider: options.provider,
-      plugin: OPERATION_PLUGINS[request.operation],
-      model: request.model,
+      plugin: OPERATION_PLUGINS[prepared.operation],
+      model: prepared.model,
       key: currentBudgetKey(),
       estimateNanoAiu: estimateOperationNanoAiu(
-        request.operation,
+        prepared.operation,
         request.body,
       ),
     },
@@ -87,29 +210,63 @@ export async function dispatchWithBudget(
     throw request.signal.reason ?? new Error("Request aborted")
   }
 
-  let result: OperationResult
+  const journal = options.journal ?? providerInvocationJournal
+  const invocationId = randomUUID()
+  const providerCallId = randomUUID()
+  const sequence = 1
+  const usage: CollectedUsage = {
+    events: [],
+    observedTokens: { input: false, output: false },
+    billedNanoAiu: 0,
+    completeBill: true,
+    observedSuccess: false,
+  }
+  let terminalResult!: OperationResult
   try {
-    result = await operations.dispatch(request)
+    const result = await prepared.execute({
+      ...request,
+      invocationId,
+      providerCallId,
+      sequence,
+    })
+    if (
+      result.invocationId !== invocationId
+      || result.providerCallId !== providerCallId
+      || result.sequence !== sequence
+    ) {
+      throw new ProviderInvocationError(
+        "Operation result did not match its provider invocation identity.",
+      )
+    }
+    const observation = requireMatchingObservation({
+      journal,
+      invocationId,
+      providerCallId,
+      sequence,
+      prepared,
+      provider: options.provider,
+    })
+    terminalResult =
+      observation.cost === undefined ?
+        result
+      : { ...result, cost: observation.cost }
+    collectResult(usage, terminalResult, options.record)
   } catch (error) {
-    // Dispatch began, so a disconnect or provider failure without usage is
-    // ambiguous. Keep the estimate rather than silently treating it as free.
-    await hold.unreconcile("usage-missing")
+    collectOutstanding({ journal, invocationId, usage, record: options.record })
+    await settleCollected(hold, usage)
+    journal.finish(invocationId)
     throw error
   }
 
-  const booked = bookedResult(result, hold)
-  const event = options.record(result)
-  const events = event ? [event] : []
-  await (result.cost?.amount === undefined ?
-    unreconcileBudgetUsage(hold, events, {
-      reason: "usage-missing",
-      observedTokens: {
-        input:
-          typeof result.usage.input_tokens === "number"
-          || typeof result.usage.cache_read_input_tokens === "number",
-        output: typeof result.usage.output_tokens === "number",
-      },
-    })
-  : settleBudgetUsage(hold, events, result.cost.amount))
-  return booked
+  collectOutstanding({
+    journal,
+    invocationId,
+    usage,
+    record: options.record,
+    skipProviderCallId: providerCallId,
+  })
+  await settleCollected(hold, usage)
+  journal.acknowledge(invocationId, providerCallId, sequence)
+  journal.finish(invocationId)
+  return bookedResult(terminalResult, hold)
 }

@@ -46,6 +46,12 @@ export interface OperationRequest {
   /** JSON body, or the client's multipart form for `images.edits`. Relayed as-is. */
   body: Record<string, unknown> | FormData
   signal: AbortSignal
+  /** Stable parent-issued accounting identity. */
+  invocationId: string
+  /** Stable identity of the provider call made for this operation. */
+  providerCallId: string
+  /** Monotonic order of this provider call within the invocation. */
+  sequence: number
   /** Who asked (for usage rows and budget scopes). */
   origin:
     | { kind: "http"; client: string }
@@ -64,6 +70,10 @@ export interface OperationResult {
     total_tokens?: number
   }
   cost?: ProviderCost
+  /** Echoed accounting identities for idempotent parent settlement. */
+  invocationId: string
+  providerCallId: string
+  sequence: number
 }
 
 /** Registered by a capability plugin, for one operation and its bindings. */
@@ -89,17 +99,40 @@ export type ServedModel = {
   operations: ReadonlyArray<ModelOperation>
 } & ModelBinding
 
+/** A resolved operation pinned to the implementation that made the decision. */
+export interface PreparedOperation {
+  readonly operation: ModelOperation
+  readonly model: string
+  readonly pluginId: string
+  readonly binding: Readonly<ModelBinding>
+  /** Execute exactly this resolved implementation. */
+  execute(
+    request: Omit<OperationRequest, "operation" | "model" | "binding">,
+  ): Promise<OperationResult>
+  /** Release the generation pin. Idempotent. */
+  release(): void
+}
+
 /** Gateway-side (cordis-free) view of the registry for core routes. */
 export interface OperationDispatch {
   /**
    * Resolves `"provider/model"` exactly. A bare model resolves only when
-   * exactly one enabled binding serves it.
+   * exactly one enabled binding serves it. This informational read takes no
+   * lease; callers that will execute use {@link prepare} instead.
    */
   resolve(
     operation: ModelOperation,
     model: string,
   ): { pluginId: string; binding: ModelBinding } | undefined
-  /** Throws `OperationUnavailableError` when nothing resolves. */
+  /**
+   * Resolve and pin one implementation. The returned object owns one opaque
+   * generation lease from this first semantic decision through accounting.
+   */
+  prepare(
+    operation: ModelOperation,
+    model: string,
+  ): PreparedOperation | undefined
+  /** Compatibility convenience: prepare, execute and release one call. */
   dispatch(request: Omit<OperationRequest, "binding">): Promise<OperationResult>
   servedModels(): ReadonlyArray<ServedModel>
   /** Called whenever a registration is added or withdrawn. Returns an unsubscribe. */

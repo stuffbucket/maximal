@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- one budget lifecycle matrix shares its real-service setup */
 /**
  * Budget enforcement at the generic seams, with the real config and the
  * real service on an in-memory usage database (nothing is module-mocked):
@@ -9,7 +10,10 @@
  * - a server tool refused by a limit comes back as the tool's result.
  */
 
-import type { OperationDispatch } from "@stuffbucket/maximal-plugin-sdk/gateway"
+import type {
+  ModelOperation,
+  OperationDispatch,
+} from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import consola from "consola"
@@ -24,8 +28,13 @@ import { getConfig, writeConfig } from "~/lib/config/config"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
 import { requestContext } from "~/lib/http/request-context"
 import { traceIdMiddleware } from "~/lib/http/trace"
+import { providerInvocationJournal } from "~/lib/plugins/provider-broker"
 import { state } from "~/lib/runtime-state/state"
-import { closeUsageStore, recordTokenUsageEvent } from "~/lib/token-usage"
+import {
+  closeUsageStore,
+  getTokenUsageEventsPage,
+  recordTokenUsageEvent,
+} from "~/lib/token-usage"
 import { getNanoAiuSpend, getUnreconciledSpend } from "~/lib/token-usage/spend"
 import { createImagesRoutes } from "~/routes/images/route"
 import { pluginServerToolListings } from "~/routes/messages/server-tools/plugin-listings"
@@ -102,6 +111,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   consola.level = 3
+  providerInvocationJournal.reset()
   __resetBudgetServiceForTests()
   await closeUsageStore()
   __resetProviderWindowsForTests()
@@ -317,27 +327,87 @@ interface Dispatched {
   body: unknown
 }
 
+interface FakeInvocation {
+  operation: ModelOperation
+  model: string
+  invocationId: string
+  providerCallId: string
+  sequence: number
+}
+
 function fakeDispatch(
-  handler: () => Promise<{
+  handler: (request: FakeInvocation) => Promise<{
     json: Record<string, unknown>
     cost?: { unit: "nano_aiu"; amount: number; estimated: boolean }
   }>,
   seen: Array<Dispatched> = [],
+  upstreamModel?: string,
 ): OperationDispatch {
+  const execute = async (request: FakeInvocation, body: unknown) => {
+    seen.push({ operation: request.operation, body })
+    const result = await handler(request)
+    const alreadyObserved = providerInvocationJournal
+      .unacknowledged(request.invocationId)
+      .some(
+        (observation) =>
+          observation.invocation.providerCallId === request.providerCallId,
+      )
+    if (!alreadyObserved) {
+      providerInvocationJournal.observe({
+        invocation: request,
+        provider: COPILOT_PROVIDER_ID,
+        ...(result.cost === undefined ? {} : { cost: result.cost }),
+      })
+    }
+    return {
+      json: result.json,
+      usage: { input_tokens: 10, output_tokens: 20 },
+      ...(result.cost ? { cost: result.cost } : {}),
+      invocationId: request.invocationId,
+      providerCallId: request.providerCallId,
+      sequence: request.sequence,
+    }
+  }
   return {
     resolve: (_operation, model) => ({
       pluginId: "core",
-      binding: { provider: COPILOT_PROVIDER_ID, upstreamModel: model },
+      binding: {
+        provider: COPILOT_PROVIDER_ID,
+        upstreamModel: upstreamModel ?? model,
+      },
     }),
-    dispatch: async (request) => {
-      seen.push({ operation: request.operation, body: request.body })
-      const result = await handler()
-      return {
-        json: result.json,
-        usage: { input_tokens: 10, output_tokens: 20 },
-        ...(result.cost ? { cost: result.cost } : {}),
-      }
-    },
+    prepare: (operation, model) => ({
+      operation,
+      model,
+      pluginId: "core",
+      binding: {
+        provider: COPILOT_PROVIDER_ID,
+        upstreamModel: upstreamModel ?? model,
+      },
+      execute: (request) =>
+        execute(
+          {
+            operation,
+            model: upstreamModel ?? model,
+            invocationId: request.invocationId,
+            providerCallId: request.providerCallId,
+            sequence: request.sequence,
+          },
+          request.body,
+        ),
+      release: noop,
+    }),
+    dispatch: (request) =>
+      execute(
+        {
+          operation: request.operation,
+          model: request.model,
+          invocationId: request.invocationId,
+          providerCallId: request.providerCallId,
+          sequence: request.sequence,
+        },
+        request.body,
+      ),
     servedModels: () => [],
     subscribe: () => noop,
   }
@@ -394,6 +464,42 @@ describe("an operation dispatch under a limit", () => {
     expect(await globalSpend()).toBe(0.7 * AIU)
   })
 
+  test("matches provider evidence to the upstream model but books the binding-facing model", async () => {
+    const clientModel = "gpt-image-client-binding"
+    const upstreamModel = "gpt-image-provider-upstream"
+    let observedModel = ""
+    const operations = fakeDispatch(
+      (request) => {
+        observedModel = request.model
+        return Promise.resolve({
+          json: { ok: true },
+          cost: { unit: "nano_aiu", amount: 0.7 * AIU, estimated: false },
+        })
+      },
+      [],
+      upstreamModel,
+    )
+
+    await runOperation(operations, {
+      ...imageCall(),
+      model: clientModel,
+      body: { model: clientModel, prompt: "x", quality: "low" },
+    })
+
+    expect(observedModel).toBe(upstreamModel)
+    const page = await getTokenUsageEventsPage({
+      page: 1,
+      pageSize: 10,
+      period: "day",
+    })
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]).toMatchObject({
+      model: clientModel,
+      provider_name: COPILOT_PROVIDER_ID,
+      total_nano_aiu: 0.7 * AIU,
+    })
+  })
+
   test("a reply with no cost keeps its estimate unreconciled", async () => {
     const operations = fakeDispatch(() => Promise.resolve({ json: { ok: 1 } }))
 
@@ -419,6 +525,57 @@ describe("an operation dispatch under a limit", () => {
     // The remaining room still admits another call.
     const retry = fakeDispatch(() => Promise.resolve({ json: { ok: 1 } }))
     expect(await runOperation(retry, imageCall())).toEqual({ ok: 1 })
+  })
+
+  test("a successful provider observation is acknowledged and booked once", async () => {
+    const cost = 777_000_000
+    const operations = fakeDispatch((request) => {
+      providerInvocationJournal.observe({
+        invocation: request,
+        provider: "copilot",
+        cost: { unit: "nano_aiu", amount: cost, estimated: false },
+      })
+      return Promise.resolve({
+        json: { ok: true },
+        cost: { unit: "nano_aiu", amount: cost, estimated: false },
+      })
+    })
+
+    await runOperation(operations, imageCall())
+
+    expect(await globalSpend()).toBe(cost)
+    expect(providerInvocationJournal.recover()).toEqual([])
+  })
+
+  test("provider success followed by handler failure still settles the hold", async () => {
+    const cost = 654_000_000
+    const operations = fakeDispatch((request) => {
+      providerInvocationJournal.observe({
+        invocation: request,
+        provider: "copilot",
+        cost: { unit: "nano_aiu", amount: cost, estimated: false },
+      })
+      return Promise.reject(new Error("handler failed after provider reply"))
+    })
+
+    const error = await failure(runOperation(operations, imageCall()))
+
+    expect(error).toEqual(new Error("handler failed after provider reply"))
+    expect(await globalSpend()).toBe(cost)
+    expect(await heldAfterwards()).toBe(0)
+  })
+
+  test("an ambiguous provider failure is conservatively booked at the estimate", async () => {
+    const operations = fakeDispatch((request) => {
+      providerInvocationJournal.begin(request, "copilot")
+      return Promise.reject(new Error("connection lost after send"))
+    })
+
+    await failure(runOperation(operations, imageCall()))
+
+    expect(await globalSpend()).toBe(0.6 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
+    expect(await heldAfterwards()).toBe(0)
   })
 
   test("an abandoned dispatched call becomes unreconciled", async () => {
@@ -506,6 +663,7 @@ function toolText(run: { toolResult: { content: unknown } }): string {
 
 // ── a server tool refused by a limit ──────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function -- server-tool budget scenarios share one gateway fixture
 describe("a server tool under a limit", () => {
   const toolUse = {
     type: "tool_use" as const,
@@ -598,6 +756,145 @@ describe("a server tool under a limit", () => {
     expect(toolText(run)).toContain("blocked this request")
   })
 
+  test("duplicate spend reports for one provider call are booked once", async () => {
+    const cost = 321_000_000
+    const plugin = definePlugin(
+      "images-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          execute(_input, toolCall) {
+            const invocation = toolCall.nextProviderCall(
+              "images.generations",
+              "image-model",
+            )
+            providerInvocationJournal.observe({
+              invocation,
+              provider: "copilot",
+              cost: { unit: "nano_aiu", amount: cost, estimated: false },
+            })
+            const spend = {
+              ...invocation,
+              provider: "copilot",
+              result: {
+                usage: { input_tokens: 1, output_tokens: 1 },
+                cost: {
+                  unit: "nano_aiu" as const,
+                  amount: cost,
+                  estimated: false,
+                },
+              },
+            }
+            toolCall.reportSpend?.(spend)
+            toolCall.reportSpend?.(spend)
+            return Promise.resolve({
+              content: [{ type: "text" as const, text: "done" }],
+            })
+          },
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["images-tools"])
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const result = await listing.run(toolUse, call)
+
+    expect(result.ok).toBe(true)
+    expect(await globalSpend()).toBe(cost)
+  })
+
+  test("multiple provider calls are sequenced and each booked once", async () => {
+    const costs = [210_000_000, 340_000_000]
+    const plugin = definePlugin(
+      "images-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          execute(_input, toolCall) {
+            for (const [index, cost] of costs.entries()) {
+              const invocation = toolCall.nextProviderCall(
+                "images.generations",
+                `image-model-${index}`,
+              )
+              providerInvocationJournal.observe({
+                invocation,
+                provider: "copilot",
+                cost: { unit: "nano_aiu", amount: cost, estimated: false },
+              })
+              toolCall.reportSpend?.({
+                ...invocation,
+                provider: "copilot",
+                result: {
+                  usage: { output_tokens: 1 },
+                  cost: { unit: "nano_aiu", amount: cost, estimated: false },
+                },
+              })
+            }
+            return Promise.resolve({
+              content: [{ type: "text" as const, text: "done" }],
+            })
+          },
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["images-tools"])
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const result = await listing.run(toolUse, call)
+
+    expect(result.ok).toBe(true)
+    expect(await globalSpend()).toBe(costs[0] + costs[1])
+    expect(providerInvocationJournal.recover()).toEqual([])
+  })
+
+  test("parent-observed spend is booked when the tool fails before reporting", async () => {
+    const cost = 654_000_000
+    const plugin = definePlugin(
+      "images-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          execute(_input, toolCall) {
+            providerInvocationJournal.observe({
+              invocation: {
+                invocationId: toolCall.invocationId,
+                providerCallId: "provider-call-before-failure",
+                sequence: 1,
+                operation: "images.generations",
+                model: "image-model",
+              },
+              provider: "copilot",
+              cost: { unit: "nano_aiu", amount: cost, estimated: false },
+            })
+            throw new Error("runner stopped before reporting spend")
+          },
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["images-tools"])
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const result = await listing.run(toolUse, call)
+
+    expect(result.ok).toBe(false)
+    expect(await globalSpend()).toBe(cost)
+  })
+
   test("a tool that errors releases its hold", async () => {
     const { gateway } = await withImagePlugin()
     setBudget({ limits: [limit("all", { kind: "global" }, 10 * AIU)] })
@@ -663,17 +960,26 @@ describe("a server tool under a limit", () => {
             body: { prompt: "x", quality: "low" },
           }),
           execute: (_input, received) => {
+            const invocation = received.nextProviderCall(
+              "images.generations",
+              "gpt-image-test",
+            )
+            const cost = {
+              unit: "nano_aiu" as const,
+              amount: 250_000_000,
+              estimated: false,
+            }
+            providerInvocationJournal.observe({
+              invocation,
+              provider: "copilot",
+              cost,
+            })
             received.reportSpend?.({
-              operation: "images.generations",
-              model: "gpt-image-test",
+              ...invocation,
               provider: "copilot",
               result: {
                 usage: { input_tokens: 3 },
-                cost: {
-                  unit: "nano_aiu",
-                  amount: 250_000_000,
-                  estimated: false,
-                },
+                cost,
               },
             })
             return Promise.reject(new Error("failed after billing"))

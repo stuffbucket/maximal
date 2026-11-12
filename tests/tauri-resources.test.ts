@@ -50,8 +50,9 @@ describe("Tauri packaging contracts", () => {
     ).toBe(false)
   })
 
-  test("packages only the proxy sidecar (no MCP broker)", () => {
+  test("packages the proxy sidecar and sealed plugin generation", () => {
     expect(loadConf().bundle?.externalBin).toEqual(["binaries/maximal"])
+    expect(resourcePatterns(loadConf())).toContain("plugin-builtins")
   })
 
   test("contains Windows sidecars before their suspended process starts", () => {

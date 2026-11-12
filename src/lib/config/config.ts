@@ -94,6 +94,8 @@ export interface AppConfig {
   apps?: AppsConfig
   /** Built-in plugins by id: on/off, plugin config, client connections. */
   plugins?: PluginSettings
+  /** Optional data-only built-in inventory, relative to the app directory. */
+  pluginInventory?: { entry: string }
   /** The parked MCP broker's config (`parked/mcp`). Accepted and preserved,
    *  never interpreted by the build. */
   mcpBroker?: unknown

@@ -5,6 +5,8 @@
  * `plugins.changed` Settings event.
  */
 
+import type { PluginHostGateway } from "@stuffbucket/maximal-plugin-host"
+
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import path from "node:path"
 
@@ -235,6 +237,52 @@ describe("GET /settings/api/plugins", () => {
         },
       ],
       endpoint: views[0].endpoint,
+    })
+  })
+
+  test("validates waiting views and exposes external provenance without its specifier", async () => {
+    const mutable = plugins.gateway as PluginHostGateway
+    const providerBase = definePlugin(
+      "catalog-provider",
+      (ctx) => void ctx.provide("catalog", { ready: true }),
+      { kind: "extension" },
+    )
+    await mutable.addPlugin(
+      { ...providerBase, provides: ["catalog"] },
+      { type: "external", specifier: "private:catalog-provider" },
+    )
+    const consumerBase = definePlugin(
+      "catalog-consumer",
+      (ctx) => void ctx.get("catalog"),
+      { kind: "extension" },
+    )
+    await mutable.addPlugin(
+      {
+        ...consumerBase,
+        inject: [...(consumerBase.inject as ReadonlyArray<string>), "catalog"],
+      },
+      { type: "external", specifier: "private:catalog-consumer" },
+    )
+
+    const detailResponse = await patch("catalog-consumer", { enabled: true })
+    const detailRaw = await detailResponse.text()
+    expect(detailRaw).not.toContain("private:catalog")
+    expect(PluginDetailView.parse(JSON.parse(detailRaw))).toMatchObject({
+      id: "catalog-consumer",
+      source: "external",
+      lifecycle: "waiting",
+      waitingForServices: ["catalog"],
+      waitingReason: "Waiting for required service: catalog.",
+    })
+
+    const listResponse = await server.request("/settings/api/plugins")
+    const listRaw = await listResponse.text()
+    expect(listRaw).not.toContain("private:catalog")
+    const { plugins: views } = PluginsListResponse.parse(JSON.parse(listRaw))
+    expect(views.find((view) => view.id === "catalog-consumer")).toMatchObject({
+      source: "external",
+      lifecycle: "waiting",
+      waitingForServices: ["catalog"],
     })
   })
 

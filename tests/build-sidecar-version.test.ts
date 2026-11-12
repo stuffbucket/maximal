@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 import {
+  pluginGenerationTarget,
   resolveSidecarChannel,
   resolveSidecarVersion,
 } from "../scripts/build-sidecar-version"
@@ -11,6 +12,33 @@ const BUILD_SCRIPT = readFileSync(
   resolve(import.meta.dir, "../scripts/build-sidecar.ts"),
   "utf8",
 )
+
+describe("sidecar plugin generation target", () => {
+  test("maps every supported Rust triple explicitly", () => {
+    expect(pluginGenerationTarget("aarch64-apple-darwin")).toEqual({
+      platform: "darwin",
+      architecture: "arm64",
+    })
+    expect(pluginGenerationTarget("x86_64-apple-darwin")).toEqual({
+      platform: "darwin",
+      architecture: "x64",
+    })
+    expect(pluginGenerationTarget("x86_64-pc-windows-msvc")).toEqual({
+      platform: "win32",
+      architecture: "x64",
+    })
+    expect(pluginGenerationTarget("aarch64-unknown-linux-gnu")).toEqual({
+      platform: "linux",
+      architecture: "arm64",
+    })
+  })
+
+  test("rejects unsupported triples", () => {
+    expect(() => pluginGenerationTarget("wasm32-unknown-unknown")).toThrow(
+      "Unknown plugin generation triple",
+    )
+  })
+})
 
 describe("sidecar build version", () => {
   test("uses the exact explicit release version", () => {
@@ -25,6 +53,13 @@ describe("sidecar build version", () => {
 
   test("uses unknown when a local build has no commit", () => {
     expect(resolveSidecarVersion("0.4.41", "")).toBe("0.4.41-dev+unknown")
+  })
+
+  test("builds a sealed generation for the sidecar target", () => {
+    expect(BUILD_SCRIPT).toContain("pluginGenerationTarget(triple)")
+    expect(BUILD_SCRIPT).toContain("buildPluginBuiltIns({")
+    expect(BUILD_SCRIPT).toContain("shell/src-tauri/plugin-builtins")
+    expect(BUILD_SCRIPT).toContain("runtime: `bun:${Bun.version}`")
   })
 
   test("does not build the parked MCP broker", () => {

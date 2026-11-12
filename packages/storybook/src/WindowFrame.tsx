@@ -30,6 +30,8 @@ interface WindowFrameProps {
   section?: SettingsSection;
   /** A section's own sub-page, e.g. a connector id under "connectors". */
   page?: string;
+  /** Dashboard only: which observability surface the shared iframe opens. */
+  observabilityView?: "dashboard" | "sessions";
   theme: string;
   locale: string;
   /** Backend paths to answer with a 500, to show error states. */
@@ -41,21 +43,28 @@ interface WindowFrameProps {
  * its Tauri default size, backed by the mock sidecar for `scenario`.
  * Keyed on the URL so every arg change boots a fresh page + fresh mock.
  */
-export function WindowFrame({ surface, scenario, section, page, theme, locale, fail = [] }: WindowFrameProps): JSX.Element {
-  const query = new URLSearchParams([
-    ["scenario", scenario],
-    ["theme", theme],
-    ["locale", locale],
-    ...fail.map((path) => ["fail", path]),
-  ]).toString();
+export function WindowFrame({
+  surface,
+  scenario,
+  section,
+  page,
+  observabilityView,
+  theme,
+  locale,
+  fail = [],
+}: WindowFrameProps): JSX.Element {
+  const query = new URLSearchParams({ scenario, theme, locale });
+  if (observabilityView) query.set("surface", observabilityView);
+  for (const path of fail) query.append("fail", path);
+
   const hash = section ? `#${section}${page ? `/${page}` : ""}` : "";
-  const src = `ui/${surface}/index.html?${query}${hash}`;
+  const src = `ui/${surface}/index.html?${query.toString()}${hash}`;
   return (
     <iframe
       key={src}
       className={`sb-window sb-window--${surface}`}
       src={src}
-      title={`${surface} window — ${scenario}`}
+      title={`${observabilityView ?? surface} window — ${scenario}`}
     />
   );
 }

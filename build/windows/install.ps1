@@ -51,6 +51,7 @@ if (-not $Repo) {
 
 $InstallDir      = Join-Path $env:LOCALAPPDATA 'Programs\maximal'
 $BinPath         = Join-Path $InstallDir 'maximal.exe'
+$BuiltInsPath    = Join-Path $InstallDir 'plugin-builtins'
 # Older versions shipped an MCP broker beside the CLI; this version doesn't, so
 # an upgrade removes a leftover copy and the uninstaller removes it too.
 $BrokerPath      = Join-Path $InstallDir 'maximal-mcp-broker.exe'
@@ -170,7 +171,7 @@ foreach ($file in @($BrokerPath, $BinPath)) {
 
 $selfPath = $PSCommandPath
 Remove-Item -LiteralPath $selfPath -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
 exit $exitCode
 '@
   Set-Content -LiteralPath $Path -Value $script -Encoding UTF8
@@ -252,10 +253,16 @@ Get-Process -Name 'maximal', 'maximal-mcp-broker' -ErrorAction SilentlyContinue 
 # 3. Unpack to install dir ──────────────────────────────────────────
 Write-Host "Unpacking to $InstallDir ..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+# Content-addressed generation directories change between releases. Remove the
+# previous sealed root so an upgrade cannot retain unselected plugin bytes.
+Remove-Item -LiteralPath $BuiltInsPath -Recurse -Force -ErrorAction SilentlyContinue
 Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
 
 if (-not (Test-Path $BinPath)) {
   throw "Install failed: $BinPath not present after unpack"
+}
+if (-not (Test-Path (Join-Path $BuiltInsPath 'committed.json'))) {
+  throw "Install failed: packaged plugin generation not present after unpack"
 }
 Write-Host "  ✓ Installed $BinPath" -ForegroundColor Green
 Remove-Item -LiteralPath $BrokerPath -Force -ErrorAction SilentlyContinue

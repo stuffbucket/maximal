@@ -219,7 +219,7 @@ const dashboardIsActive = (): boolean =>
 // ending) goes through `usageRefresher.request`; see usage-refresh.ts for when
 // each one fetches.
 const usageRefresher = createUsageRefresher<UsageData>({
-  fetchUsage: () => fetchJson<UsageData>(USAGE_PATH),
+  fetchUsage: (signal) => fetchJson<UsageData>(USAGE_PATH, { signal }),
   isSignedOut: isNotAuthenticated,
   describeError: getErrorMessage,
   isActive: dashboardIsActive,
@@ -1230,6 +1230,8 @@ function init(): void {
       applyI18n();
       render();
       showObservabilitySurface(observabilitySurface);
+    } else if (msg.type === "maximal:auth-changed") {
+      void usageRefresher.request("auth-changed");
     } else if (
       msg.type === "maximal:surface" &&
       (msg.surface === "settings" ||

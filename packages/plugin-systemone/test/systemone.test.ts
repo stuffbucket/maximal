@@ -42,6 +42,9 @@ const request = (model: string, body: Record<string, unknown> = {}) => ({
   body: { model, ...body },
   signal: new AbortController().signal,
   origin: { kind: "http" as const, client: "test" },
+  invocationId: "test-invocation",
+  providerCallId: "test-provider-call",
+  sequence: 1,
 })
 
 describe("systemone plugin", () => {

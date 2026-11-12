@@ -7,6 +7,8 @@ import { PluginContractError } from "../errors"
 import {
   ACTION_ID_PATTERN,
   PLUGIN_ID_PATTERN,
+  PLUGIN_PROVIDED_SERVICE_PATTERN,
+  PLUGIN_SERVICE_NAMES,
   PLUGIN_SETTINGS_FILE,
   STORAGE_NAME_PATTERN,
   TOOL_NAME_PATTERN,
@@ -61,6 +63,37 @@ export function injectedServices(
   return entries as Array<string>
 }
 
+/** Validate and copy the service names in a plugin's `provides` export. */
+export function providedServices(
+  module: Pick<PluginModule, "name" | "provides">,
+): Array<string> {
+  if (module.provides === undefined) return []
+  if (!Array.isArray(module.provides)) {
+    throw new PluginContractError(
+      "invalid-module",
+      `Plugin "${module.name}" has an invalid provides declaration.`,
+      { pluginId: module.name },
+    )
+  }
+  const names = new Set<string>()
+  for (const value of module.provides as ReadonlyArray<unknown>) {
+    if (
+      typeof value !== "string"
+      || !PLUGIN_PROVIDED_SERVICE_PATTERN.test(value)
+      || (PLUGIN_SERVICE_NAMES as ReadonlyArray<string>).includes(value)
+      || names.has(value)
+    ) {
+      throw new PluginContractError(
+        "invalid-module",
+        `Plugin "${module.name}" has invalid or duplicate provided service ${JSON.stringify(value)}.`,
+        { pluginId: module.name },
+      )
+    }
+    names.add(value)
+  }
+  return [...names]
+}
+
 /**
  * Module-shape gate (monimal `genuinePlugin`): `name` matching
  * `PLUGIN_ID_PATTERN`, a valid `manifest` whose `id` equals `name`,
@@ -103,6 +136,7 @@ export function validatePluginModule(
   }
   const plugin = ns as unknown as PluginModule
   injectedServices(plugin)
+  providedServices(plugin)
   return plugin
 }
 
@@ -122,28 +156,43 @@ export function assertPluginDependencies(
   }
 }
 
-/** Validate a plugin list: shapes, ids, duplicate ids, injected services. */
+/**
+ * Validate a plugin list: shapes, ids, declared service providers and injected
+ * services. Plugin-provided names are resolved across the complete list, so a
+ * consumer may be listed before its provider and wait for it at runtime.
+ */
 export function validatePluginList(
   plugins: ReadonlyArray<unknown>,
   available: Iterable<string>,
 ): Array<PluginModule> {
-  const services = [...available]
+  const services = new Set(available)
   const seen = new Set<string>()
-  return plugins.map((candidate, index) => {
+  const validated = plugins.map((candidate, index) => {
     const plugin = validatePluginModule(candidate, `plugins[${index}]`)
     if (seen.has(plugin.name)) {
       throw new PluginContractError(
         "invalid-module",
         `Duplicate plugin id "${plugin.name}".`,
-        {
-          pluginId: plugin.name,
-        },
+        { pluginId: plugin.name },
       )
     }
     seen.add(plugin.name)
-    assertPluginDependencies(plugin, services)
     return plugin
   })
+  for (const plugin of validated) {
+    for (const service of providedServices(plugin)) {
+      if (services.has(service)) {
+        throw new PluginContractError(
+          "invalid-module",
+          `Plugin "${plugin.name}" declares service "${service}", but that service already has a provider.`,
+          { pluginId: plugin.name },
+        )
+      }
+      services.add(service)
+    }
+  }
+  for (const plugin of validated) assertPluginDependencies(plugin, services)
+  return validated
 }
 
 function issuePath(issue: StandardSchemaV1.Issue): string {

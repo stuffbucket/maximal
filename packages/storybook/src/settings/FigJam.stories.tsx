@@ -6,10 +6,10 @@ import type { MockApiParameters } from "../mock/fetch-mock";
 
 /**
  * The FigJam integration in Settings → Integrations → Connectors: an
- * `extension`-kind plugin, listed beside Work IQ. Its page has the status
+ * `extension`-kind plugin, listed beside Work IQ. Its modal has the status
  * block (state, detail, facts, buttons) and its settings, but no endpoint,
  * apps or tool permissions. Each scenario lists Work IQ (ready) and FigJam
- * in the stage named; pages open the way `#connectors/figjam` does.
+ * in the stage named; dialogs also open from `#connectors/figjam`.
  */
 const meta = {
   title: "Settings/FigJam",
@@ -20,7 +20,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const list = (mockApi: MockApiParameters): Story => ({ parameters: { mockApi } });
-const page = (mockApi: MockApiParameters, play?: Story["play"]): Story => ({
+const dialog = (mockApi: MockApiParameters, play?: Story["play"]): Story => ({
   args: { initialConnectorId: "figjam" },
   parameters: { mockApi },
   play,
@@ -39,38 +39,38 @@ export const ListPairing = list({ scenario: "figjam-pairing" });
 /** Bridge port taken: "Error". */
 export const ListPortInUse = list({ scenario: "figjam-port-in-use" });
 
-// ---- the page ------------------------------------------------------------------
+// ---- the detail dialog ---------------------------------------------------------
 
 /** Off: the switch says so; the bridge port is still editable under Settings. */
-export const PageOff = page({ scenario: "figjam-off" });
+export const DialogOff = dialog({ scenario: "figjam-off" });
 /** "Set up the Figma plugin" as the primary button. */
-export const PageNeedsSetup = page({ scenario: "figjam-needs-setup" });
+export const DialogNeedsSetup = dialog({ scenario: "figjam-needs-setup" });
 /** Manifest path and the Figma import instructions. */
-export const PageReady = page({ scenario: "figjam-ready" });
+export const DialogReady = dialog({ scenario: "figjam-ready" });
 /** Two boards connected. */
-export const PageConnected = page({ scenario: "figjam-connected" });
+export const DialogConnected = dialog({ scenario: "figjam-connected" });
 /** Approve and Deny for the waiting panel, beside Rebuild. */
-export const PagePairing = page({ scenario: "figjam-pairing" });
+export const DialogPairing = dialog({ scenario: "figjam-pairing" });
 /** Port 4150 is already in use: the error with "Try again". */
-export const PagePortInUse = page({ scenario: "figjam-port-in-use" });
+export const DialogPortInUse = dialog({ scenario: "figjam-port-in-use" });
 
-/** Setting up the Figma plugin moves the page from needs-setup to ready. */
-export const PageSetUp = page({ scenario: "figjam-needs-setup" }, async ({ canvasElement }) => {
+/** Setting up the Figma plugin moves the dialog from needs-setup to ready. */
+export const DialogSetUp = dialog({ scenario: "figjam-needs-setup" }, async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await userEvent.click(await canvas.findByRole("button", { name: "Set up the Figma plugin" }));
   await canvas.findByText("Ready for FigJam panels");
 });
 
 /** Approving the waiting panel connects it. */
-export const PageApprove = page({ scenario: "figjam-pairing" }, async ({ canvasElement }) => {
+export const DialogApprove = dialog({ scenario: "figjam-pairing" }, async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await userEvent.click(await canvas.findByRole("button", { name: /Approve "Roadmap workshop"/ }));
   await canvas.findByText("Connected to 2 FigJam boards");
 });
 
-/** The extension page has no MCP endpoint, apps or tool permissions. */
-export const PageHasNoConnectorSections: Story = {
-  ...page({ scenario: "figjam-ready" }),
+/** The extension dialog has no MCP endpoint, apps or tool permissions. */
+export const DialogHasNoConnectorSections: Story = {
+  ...dialog({ scenario: "figjam-ready" }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await canvas.findByText("Ready for FigJam panels");

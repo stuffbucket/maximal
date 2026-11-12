@@ -24,6 +24,7 @@ import { GuardedUpstream } from "../src/upstream/guarded"
 import { ConnectorLimiter } from "../src/upstream/limiter"
 import { resolveLimits } from "../src/upstream/limits"
 import { parseRetryAfter } from "../src/upstream/retry-after"
+import { abortable } from "../src/util"
 
 export interface RecordedCall {
   tool: string
@@ -173,17 +174,6 @@ export class MemoryUpstream implements Upstream {
   closeAll(): Promise<void> {
     return Promise.resolve()
   }
-}
-
-function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason as Error)
-    if (signal.aborted) onAbort()
-    signal.addEventListener("abort", onAbort, { once: true })
-    promise
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener("abort", onAbort))
-  })
 }
 
 /** A promise the test settles. */

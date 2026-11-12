@@ -1409,6 +1409,30 @@ const POLL_INTERVAL_MS = 2000;
 
 let currentAuthStatus: AuthStatus | null = null;
 let authPollTimer: ReturnType<typeof setTimeout> | null = null;
+let dashboardAuthIdentity: string | null = null;
+
+/** Auth states that authoritatively identify who owns /usage. Pending and error
+ * states retain the previous identity until sign-in reaches a terminal state. */
+function authIdentityForDashboard(status: AuthStatus): string | null {
+  if (status.state === "unauthenticated") return "unauthenticated";
+  if (status.state !== "authenticated") return null;
+  return `authenticated:${status.account_login}:${status.connected_since ?? ""}`;
+}
+
+function notifyDashboardOfAuthChange(status: AuthStatus): void {
+  const next = authIdentityForDashboard(status);
+  if (next === null) return;
+  const previous = dashboardAuthIdentity;
+  dashboardAuthIdentity = next;
+  if (previous === null || previous === next) return;
+  const frame = document.querySelector<HTMLIFrameElement>(
+    "[data-dashboard-frame]",
+  );
+  frame?.contentWindow?.postMessage(
+    { type: "maximal:auth-changed" },
+    window.location.origin,
+  );
+}
 
 /**
  * Live updates. While the Account section is open we hold one
@@ -1819,6 +1843,7 @@ function showGhAccountsForAuthenticated(): void {
 }
 
 function renderAccount(status: AuthStatus): void {
+  notifyDashboardOfAuthChange(status);
   currentAuthStatus = status;
   const active = accountKeyFor(status.state);
   // The uptime ticker only belongs to the authenticated card; the

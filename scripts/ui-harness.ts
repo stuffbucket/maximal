@@ -205,7 +205,7 @@ function overlayScript(): string {
         `<option value="${id}"${id === activeScenario ? " selected" : ""}>${SCENARIOS[id].label}</option>`,
     )
     .join("")
-  return `
+  const chooser = `
 <div id="__harness" style="position:fixed;z-index:99999;right:12px;bottom:12px;
   font:12px/1.4 ui-sans-serif,system-ui;background:#1b1b1f;color:#fafafa;
   border:1px solid #444;border-radius:10px;padding:10px 12px;box-shadow:0 6px 24px #0008;opacity:.95">
@@ -214,9 +214,11 @@ function overlayScript(): string {
     <span style="opacity:.7">Scenario</span>
     <select id="__harness-scn" style="background:#26262b;color:#fafafa;border:1px solid #555;border-radius:6px;padding:3px 6px">${opts}</select>
   </label>
-</div>
-<script>
+</div>`
+  return `<script>
 (function(){
+  if (window.top !== window.self) return;
+  document.body.insertAdjacentHTML('beforeend',${JSON.stringify(chooser)});
   var sel=document.getElementById('__harness-scn');
   sel.addEventListener('change',function(){
     fetch('/__harness/scenario',{method:'POST',headers:{'content-type':'application/json'},

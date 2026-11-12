@@ -9,10 +9,10 @@
  *   - the script downloads `maximal-<TAG>-windows-x64.zip` and a sidecar
  *     `.sha256`
  *   - it verifies the SHA before unpacking
- *   - it installs both sibling executables under
+ *   - it installs maximal.exe and the sealed plugin generation under
  *     %LocalAppData%\Programs\maximal
  *   - it adds that directory to the user PATH and registers the product
- *   - its ARP helper removes both binaries, PATH, ARP, and itself after the
+ *   - its ARP helper removes the install tree, PATH, and ARP after the
  *     running CLI exits
  *   - it does not own startup or first-run setup
  */
@@ -77,6 +77,18 @@ describe("windows installer template", () => {
     expect(ps).toContain("Get-Process -Name 'maximal', 'maximal-mcp-broker'")
   })
 
+  it("replaces and validates the sealed plugin generation", () => {
+    const ps = read(SCRIPT)
+    const remove = ps.indexOf(
+      "Remove-Item -LiteralPath $BuiltInsPath -Recurse -Force",
+    )
+    const expand = ps.indexOf("Expand-Archive")
+
+    expect(remove).toBeGreaterThan(-1)
+    expect(remove).toBeLessThan(expand)
+    expect(ps).toContain("Join-Path $BuiltInsPath 'committed.json'")
+  })
+
   it("adds the install dir to user PATH", () => {
     const ps = read(SCRIPT)
     expect(ps).toMatch(/SetEnvironmentVariable\(\s*'PATH'.*'User'/s)
@@ -110,6 +122,7 @@ describe("windows installer template", () => {
     expect(ps).toContain("Remove-Item -LiteralPath $ArpKey -Recurse -Force")
     expect(ps).toContain("foreach ($file in @($BrokerPath, $BinPath))")
     expect(ps).toContain("Remove-Item -LiteralPath $selfPath -Force")
+    expect(ps).toContain("Remove-Item -LiteralPath $InstallDir -Recurse -Force")
   })
 
   it("does not delete MSI-owned binaries", () => {

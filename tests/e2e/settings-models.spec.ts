@@ -2,6 +2,8 @@ import { type Page, expect, test } from "@playwright/test"
 
 import type { ModelsListResponse } from "../../src/lib/config/settings-types"
 
+import { modelTypeLabel } from "../../shell/src/ui/features/models/model-type-label"
+
 const BASE = process.env.UI_HARNESS_URL ?? "http://127.0.0.1:4747"
 const SETTINGS = `${BASE}/ui/settings/#models-keys`
 const MODELS = "**/settings/api/models"
@@ -31,6 +33,41 @@ async function openModels(page: Page): Promise<void> {
   await expect(page.getByLabel("Sonnet alias")).toBeVisible()
   await expect(page.getByLabel("Auto permission checks")).toBeVisible()
 }
+
+test("renders every catalog type collapsed and keeps disclosure state in this mount", async ({
+  page,
+}) => {
+  const catalog = await currentModels(page)
+  const types = [...new Set(catalog.models.map((model) => model.type))]
+  await openModels(page)
+  const groups = page.locator("details.advanced-section:visible")
+  await expect(groups).toHaveCount(types.length)
+
+  for (const [index, type] of types.entries()) {
+    const group = groups.nth(index)
+    await expect(group).not.toHaveAttribute("open")
+    await expect(group.locator("summary")).toContainText(modelTypeLabel(type))
+    await group.locator("summary").click()
+    await expect(group).toHaveAttribute("open", "")
+    for (const model of catalog.models.filter((entry) => entry.type === type)) {
+      await expect(group.getByText(model.id, { exact: true })).toBeVisible()
+    }
+  }
+
+  const refresh = page.waitForResponse("**/settings/api/models/refresh")
+  await page.getByRole("button", { name: "Refresh now" }).click()
+  await refresh
+  for (let index = 0; index < types.length; index += 1) {
+    await expect(groups.nth(index)).toHaveAttribute("open", "")
+  }
+
+  await page.reload()
+  await expect(page.getByLabel("Haiku alias")).toBeVisible()
+  await expect(groups).toHaveCount(types.length)
+  for (let index = 0; index < types.length; index += 1) {
+    await expect(groups.nth(index)).not.toHaveAttribute("open")
+  }
+})
 
 test("renders accessible Automatic controls and preserves the other settings on save", async ({
   page,

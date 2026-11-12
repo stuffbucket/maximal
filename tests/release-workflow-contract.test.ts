@@ -144,6 +144,38 @@ describe("release DAG", () => {
     expect(rawAssets).toContain("files: dist-release/*")
   })
 
+  test("seals target-specific built-ins before packaging every raw binary", async () => {
+    const binaries = workflowJob(await readWorkflow("release.yml"), "binaries")
+
+    for (const mapping of [
+      "bun-darwin-arm64) PLATFORM=darwin; ARCHITECTURE=arm64",
+      "bun-windows-x64) PLATFORM=win32; ARCHITECTURE=x64",
+      "bun-linux-x64) PLATFORM=linux; ARCHITECTURE=x64",
+      "bun-linux-arm64) PLATFORM=linux; ARCHITECTURE=arm64",
+    ]) {
+      expect(binaries).toContain(mapping)
+    }
+    expect(binaries).toContain("bun run scripts/build-plugin-builtins.ts")
+    expect(binaries).toContain("--output=dist-bin/plugin-builtins")
+    expect(binaries).toContain('--runtime="bun:$(bun --version)"')
+    expect(binaries).toContain('--platform="$PLATFORM"')
+    expect(binaries).toContain('--architecture="$ARCHITECTURE"')
+    expect(binaries.indexOf("build-plugin-builtins.ts")).toBeLessThan(
+      binaries.indexOf("- name: Package"),
+    )
+  })
+
+  test("stages and verifies sealed built-ins for Windows desktop and MSI packages", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const msi = workflowJob(workflow, "windows-msi")
+    const shell = workflowJob(workflow, "windows-shell")
+
+    expect(msi).toContain(String.raw`plugin-builtins\committed.json`)
+    expect(msi).toContain("-bindpath staging")
+    expect(shell).toContain("plugin-builtins/committed.json")
+    expect(shell).toContain(String.raw`shell\src-tauri\plugin-builtins`)
+  })
+
   test("aggregates checksums only after every checksum-producing lane", async () => {
     const checksums = workflowJob(
       await readWorkflow("release.yml"),
@@ -350,12 +382,14 @@ describe("release action supply chain", () => {
 })
 
 describe("parked MCP broker distribution", () => {
-  test("raw release archives carry only the maximal executable", async () => {
+  test("raw release archives carry maximal and its sealed plugin generation", async () => {
     const workflow = await readWorkflow("release.yml")
 
-    expect(workflow).toContain('7z a "../dist-release/${BASE}.zip" maximal.exe')
     expect(workflow).toContain(
-      'tar -czf "../dist-release/${BASE}.tar.gz" maximal',
+      '7z a "../dist-release/${BASE}.zip" maximal.exe plugin-builtins',
+    )
+    expect(workflow).toContain(
+      'tar -czf "../dist-release/${BASE}.tar.gz" maximal plugin-builtins',
     )
     expect(workflow).not.toContain("mcp-broker")
     expect(workflow).not.toContain("pnpm install --frozen-lockfile")
@@ -395,6 +429,7 @@ describe("parked MCP broker distribution", () => {
 
     // Not packaged.
     expect(wix).not.toContain('Source="maximal-mcp-broker.exe"')
+    expect(wix).toContain(String.raw`<Files Include="plugin-builtins\**" />`)
     expect(shellWorkflow).not.toContain("mcp-broker")
     expect(installerWorkflow).not.toContain("packages/mcp-broker")
     // Upgrade/uninstall still stops and removes a broker an older version left.

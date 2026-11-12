@@ -1,5 +1,8 @@
-import type { PluginModule } from "@stuffbucket/maximal-plugin-sdk"
-import type { Context } from "@stuffbucket/maximal-plugin-sdk"
+import type {
+  Context,
+  PluginModule,
+  PluginResourceLifecycle,
+} from "@stuffbucket/maximal-plugin-sdk"
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { afterEach, describe, expect, test } from "bun:test"
@@ -41,6 +44,119 @@ describe("createPluginHost validation", () => {
     )
   })
 
+  test("retains a failed-disable resource slot until physical revoke succeeds", async () => {
+    let failRevoke = true
+    let physical = false
+    const resources: PluginResourceLifecycle = {
+      declaration: {
+        mode: "exclusive",
+        resources: ["fixture:singleton"],
+      },
+      prepare: () => Promise.resolve(),
+      commit: () => {
+        physical = true
+        return Promise.resolve()
+      },
+      revoke: () => {
+        if (failRevoke) throw new Error("revoke failed")
+        physical = false
+        return Promise.resolve()
+      },
+      resume: () => Promise.resolve(),
+    }
+    const base = define("alpha", Empty, () => {})
+    const plugin: PluginModule = {
+      ...base,
+      apply: () => resources,
+    }
+    const { gateway } = createHost([plugin])
+    await gateway.reconcile({ alpha: { enabled: true } })
+    expect(physical).toBe(true)
+
+    expect(
+      String(
+        await gateway
+          .reconcile({ alpha: { enabled: false } })
+          .catch((error: unknown) => error),
+      ),
+    ).toContain("revoke failed")
+    expect(physical).toBe(true)
+    expect(gateway.resourceLifecycle().list()).toMatchObject([
+      {
+        pluginId: "alpha",
+        declaration: {
+          mode: "exclusive",
+          resources: ["fixture:singleton"],
+        },
+        phase: "committed",
+      },
+    ])
+
+    failRevoke = false
+    await gateway.reconcile({ alpha: { enabled: false } })
+    expect(physical).toBe(false)
+    expect(gateway.resourceLifecycle().list()).toEqual([])
+  })
+
+  test("retains a failed-activation slot when commit recovery cannot revoke", async () => {
+    let failRevoke = true
+    let physical = false
+    const resources: PluginResourceLifecycle = {
+      declaration: {
+        mode: "exclusive",
+        resources: ["fixture:activation-singleton"],
+      },
+      prepare: () => Promise.resolve(),
+      commit: () => {
+        physical = true
+        throw new Error("commit failed")
+      },
+      revoke: () => {
+        if (failRevoke) throw new Error("recovery revoke failed")
+        physical = false
+        return Promise.resolve()
+      },
+      resume: () => Promise.resolve(),
+    }
+    const base = define("alpha", Empty, (ctx) => {
+      ctx.tools.register(tool("temporary"))
+    })
+    const plugin: PluginModule = {
+      ...base,
+      apply: (ctx) => {
+        ctx.tools.register(tool("temporary"))
+        return resources
+      },
+    }
+    const { gateway } = createHost([plugin])
+
+    await gateway.reconcile({ alpha: { enabled: true } })
+    expect(physical).toBe(true)
+    expect(gateway.get("alpha")).toMatchObject({
+      lifecycle: "failed",
+      tools: [],
+    })
+    expect(gateway.resourceLifecycle().list()).toMatchObject([
+      {
+        pluginId: "alpha",
+        declaration: {
+          mode: "exclusive",
+          resources: ["fixture:activation-singleton"],
+        },
+        phase: "committed",
+      },
+    ])
+
+    failRevoke = false
+    await gateway.reconcile({ alpha: { enabled: false } })
+    expect(physical).toBe(false)
+    expect(gateway.get("alpha")).toMatchObject({
+      lifecycle: "disabled",
+      tools: [],
+    })
+    expect(gateway.resourceLifecycle().list()).toEqual([])
+  })
+
   test("starts with every plugin disabled", async () => {
     const { gateway } = createHost([define("alpha", Empty, () => {})])
     await gateway.reconcile(undefined)
@@ -51,6 +167,7 @@ describe("createPluginHost validation", () => {
         displayName: "ALPHA",
         description: "alpha plugin",
         homepage: "https://example.test/alpha",
+        source: { type: "built-in" },
         manifest: {
           id: "alpha",
           kind: "extension",

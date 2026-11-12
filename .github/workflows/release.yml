@@ -313,6 +313,22 @@ jobs:
             --define "__MAXIMAL_CHANNEL__=\"${CHANNEL}\"" \
             src/main.ts --outfile "$OUT"
 
+          case "$BUN_TARGET" in
+            bun-darwin-arm64) PLATFORM=darwin; ARCHITECTURE=arm64 ;;
+            bun-windows-x64) PLATFORM=win32; ARCHITECTURE=x64 ;;
+            bun-linux-x64) PLATFORM=linux; ARCHITECTURE=x64 ;;
+            bun-linux-arm64) PLATFORM=linux; ARCHITECTURE=arm64 ;;
+            *) echo "Unsupported plugin generation target: $BUN_TARGET" >&2; exit 1 ;;
+          esac
+          bun run scripts/build-plugin-builtins.ts \
+            --output=dist-bin/plugin-builtins \
+            --version="$MAXIMAL_VERSION" \
+            --channel="$CHANNEL" \
+            --git-sha="$MAXIMAL_GIT_SHA" \
+            --runtime="bun:$(bun --version)" \
+            --platform="$PLATFORM" \
+            --architecture="$ARCHITECTURE"
+
       - name: Package
         shell: bash
         run: |
@@ -321,9 +337,9 @@ jobs:
           mkdir -p dist-release
           cd dist-bin
           if [[ "${{ matrix.ext }}" == "zip" ]]; then
-            7z a "../dist-release/${BASE}.zip" maximal.exe
+            7z a "../dist-release/${BASE}.zip" maximal.exe plugin-builtins
           else
-            tar -czf "../dist-release/${BASE}.tar.gz" maximal
+            tar -czf "../dist-release/${BASE}.tar.gz" maximal plugin-builtins
           fi
           cd ../dist-release
           if command -v shasum >/dev/null 2>&1; then
@@ -817,6 +833,9 @@ jobs:
               exit 1
             }
           }
+          if (-not (Test-Path (Join-Path 'staging' 'plugin-builtins\committed.json'))) {
+            throw 'plugin-builtins/committed.json missing from zip'
+          }
           Get-ChildItem staging
 
       - name: Install WiX
@@ -1133,6 +1152,11 @@ jobs:
             if (-not (Test-Path $source)) { throw "$($entry.Key) missing from zip" }
             Copy-Item $source (Join-Path 'shell\src-tauri\binaries' $entry.Value) -Force
           }
+          $builtIns = Join-Path 'staging' 'plugin-builtins'
+          if (-not (Test-Path (Join-Path $builtIns 'committed.json'))) {
+            throw 'plugin-builtins/committed.json missing from zip'
+          }
+          Copy-Item $builtIns 'shell\src-tauri\plugin-builtins' -Recurse -Force
           Get-ChildItem 'shell\src-tauri\binaries'
 
       # The app verifies every in-place update against the public key in
@@ -1357,7 +1381,7 @@ jobs:
         run: |
           set -euo pipefail
           bun run tauri build --bundles deb \
-            --config "{\"version\":\"${VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"},\"bundle\":{\"externalBin\":[]}}"
+            --config "{\"version\":\"${VERSION}\",\"build\":{\"beforeBuildCommand\":\"\"},\"bundle\":{\"externalBin\":[],\"resources\":[]}}"
 
       - name: Repack as maximal-desktop
         env:

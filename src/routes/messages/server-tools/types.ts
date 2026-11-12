@@ -63,6 +63,8 @@ export interface ServerToolListing {
     toolUse: AnthropicToolUseBlock,
     call: ServerToolRunCall,
   ): Promise<ServerToolRun>
+  /** Release generation state captured while this listing was selected. */
+  release?: () => void
 }
 
 /** A server tool the plan offers on this request, bound to it. */
@@ -83,6 +85,8 @@ export interface ServerToolPlan {
   /** An `always` tool is among them, so the request goes through the loop
    *  whether or not the model calls anything. */
   offersAlways: boolean
+  /** Release every selected listing's generation pin. Idempotent. */
+  release(): void
 }
 
 /** How a server tool appears in the upstream `tools` array. */

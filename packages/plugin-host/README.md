@@ -16,6 +16,9 @@ const gateway = createPluginHost({
 })
 await gateway.importLegacyConfig("workiq", legacy)    // once, for a config.json `plugins.<id>.config`
 await gateway.reconcile(config.plugins)               // start what is enabled
+await gateway.addPlugin(externalModule, { type: "external", specifier: externalUrl })
+await gateway.replacePlugin("external-id", nextModule, { type: "external", specifier: externalUrl })
+await gateway.removePlugin("external-id")
 // … on settings change: await gateway.reconcile(next.plugins)
 // … on shutdown:        await gateway.dispose()
 ```
@@ -45,6 +48,9 @@ await gateway.reconcile(config.plugins)               // start what is enabled
   `active`, or `failed` if `apply` throws (partial contributions withdrawn).
   A changed stored config (key-sorted JSON) reloads the plugin; an unchanged
   one is left alone, even when `failed` — toggle `enabled` to retry.
+  A legal Cordis `PENDING` fiber remains mounted as gateway lifecycle
+  `waiting`, with `waitingForServices`/`waitingReason`; Cordis activates,
+  unloads and reactivates it as declared providers appear or disappear.
   Failures never affect other plugins. Unknown ids are ignored.
 - **`updateConfig(id, config)`**: validate (plain JSON + `Config`; failure ⇒
   `invalid-config` with `issues: [{ path, message }]`, file untouched) →
@@ -67,17 +73,43 @@ await gateway.reconcile(config.plugins)               // start what is enabled
   non-empty, its public definitions are stored in `tools.catalog` with
   `updatedAt`. `toolsSource` is `live` when the plugin is active with tools,
   else `cache` when a catalog exists, else `none`; `toolViews` follows it.
-- **Snapshots** carry `kind`, the normalised `manifest`, `settingsVersion`,
-  `configSchema`, `config` (validated, defaults applied; as stored when
-  invalid; `undefined` when unreadable), `toolsSource`, `catalogUpdatedAt`.
+- **Exclusive resources**: `apply` may return a `PluginResourceLifecycle` with
+  an explicit singleton declaration. Candidate mode runs `prepare` but never
+  binds; active mode acquires the shared parent lease before `commit`. Delayed
+  Cordis activation runs the same lifecycle per dependency epoch and its Cordis
+  disposer revokes that epoch before a later reactivation. A lease is released
+  only after `revoke` resolves, so an ambiguously bound resource or failed stop
+  keeps the lifecycle hooks, physical handle and lease quarantined for retry.
+  Generation handoff is candidate `prepare` → old `revoke` → candidate `commit`;
+  rollback revokes the candidate before `resume` recreates the old instance.
+- **Mutable inventory**: constructor modules remain static built-ins by default.
+  The host-private `PluginHostGateway` adds explicit `addPlugin`, `removePlugin`
+  and `replacePlugin` operations. Added entries follow the last reconciled
+  enable state; removal retains host-owned settings. A→B replacement validates
+  B before touching A, then stops/revokes A before starting B. A failed or
+  waiting B is normally stopped/revoked before the exact settings file and A
+  are restored. If B cannot be physically revoked, A's inventory record is
+  restored but remains inactive while B and its lease stay quarantined; a later
+  reconcile retries B's cleanup before restarting A. In either case
+  `replacement-not-ready` reports startup, cleanup and rollback failures.
+  Settings mutations share the inventory queue, so a successful concurrent
+  write runs wholly before replacement or after rollback.
+- **Snapshots** carry `source` (`built-in` or an external `specifier`), `kind`,
+  the normalised `manifest`, `settingsVersion`, `configSchema`, `config`
+  (validated, defaults applied; as stored when invalid; `undefined` when
+  unreadable), `toolsSource`, `catalogUpdatedAt`, and pending diagnostics.
 - **Errors**: `PluginGatewayError` with `code` `unknown-plugin`,
   `plugin-inactive`, `unknown-tool`, `unknown-action`, `invalid-config`,
-  `invalid-permissions`, or `settings-unreadable`.
+  `invalid-permissions`, `settings-unreadable`, or `replacement-not-ready`.
 - **Events**: `subscribe` delivers
-  `{ type: "lifecycle" | "status" | "tools" | "settings", pluginId }`;
+  `{ type: "lifecycle" | "status" | "tools" | "settings" | "notice" | "inventory", pluginId }`;
   listener exceptions are logged and contained.
 - **Storage**: `<storageRoot>/<id>/` created 0700 on first write; files
   written to a temp file with mode 0600 and renamed into place.
+- **Cordis adapter**: dependency scheduling stays entirely in Cordis 4.0.2.
+  The host uses its documented `internal/status` event plus public `Fiber.state`,
+  `Fiber.inject` and `Context.get(name, true)` to project lifecycle and missing
+  services; it has no parallel dependency graph or scheduler.
 - **Logging**: cordis-reported failures (apply, disposers), settings/config
   failures and failed catalog writes go to `services.host.logger`.
 - **`dispose()`** stops every plugin and the root context and waits for

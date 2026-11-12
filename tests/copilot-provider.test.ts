@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function -- provider integration scenarios share one stateful fixture */
 /**
  * The Copilot upstream provider, reached the way a plugin reaches it
  * (`ctx.providers.get("copilot")`) through a gateway composed by
@@ -19,6 +20,11 @@ import type { Model } from "~/services/copilot/get-models"
 import { HTTPError } from "~/lib/errors/http-errors"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
 import { composePluginGateway } from "~/lib/plugins/compose"
+import {
+  ProviderInvocationJournal,
+  providerInvocationJournal,
+} from "~/lib/plugins/provider-broker"
+import { createCopilotProviderBroker } from "~/lib/plugins/providers/copilot"
 import { setModels, state } from "~/lib/runtime-state/state"
 
 import { definePlugin } from "./helpers/plugins"
@@ -38,6 +44,7 @@ beforeEach(() => {
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup()
+  providerInvocationJournal.reset()
   Object.assign(state, originalState)
 })
 
@@ -125,6 +132,89 @@ const refusal = (message = "Model is not supported for this request.") =>
     { status: 400, headers: { "content-type": "application/json" } },
   )
 
+const invocation = (id: string, model = "gpt-image-2.5-flare") => ({
+  invocationId: id,
+  providerCallId: `${id}-call`,
+  sequence: 1,
+  operation: "images.generations" as const,
+  model,
+})
+
+const journalCall = (
+  invocationId: string,
+  providerCallId: string,
+  sequence: number,
+) => ({
+  invocationId,
+  providerCallId,
+  sequence,
+  operation: "images.generations" as const,
+  model: "image-model",
+})
+
+describe("provider invocation journal", () => {
+  test("enforces monotonic calls, identity reuse, and idempotent acknowledgments", () => {
+    const journal = new ProviderInvocationJournal()
+    const first = journalCall("invocation", "call-1", 1)
+    journal.begin(first, "copilot")
+    journal.observeSuccess(first, "copilot")
+    journal.acknowledge("invocation", "call-1", 1)
+    journal.acknowledge("invocation", "call-1", 1)
+    expect(() => journal.acknowledge("invocation", "call-1", 2)).toThrow(
+      "does not match",
+    )
+    expect(() =>
+      journal.begin(journalCall("invocation", "call-1", 2), "copilot"),
+    ).toThrow("reused")
+    expect(() =>
+      journal.begin(journalCall("invocation", "call-2", 1), "copilot"),
+    ).toThrow("monotonically")
+  })
+
+  test("bounds live invocations and total calls even after acknowledgment", () => {
+    const journal = new ProviderInvocationJournal({
+      maxInvocations: 1,
+      maxCallsPerInvocation: 2,
+    })
+    for (const sequence of [1, 2]) {
+      const current = journalCall("invocation", `call-${sequence}`, sequence)
+      journal.begin(current, "copilot")
+      journal.observeSuccess(current, "copilot")
+      journal.acknowledge("invocation", current.providerCallId, sequence)
+    }
+    expect(() =>
+      journal.begin(journalCall("invocation", "call-3", 3), "copilot"),
+    ).toThrow("too many provider calls")
+    expect(() =>
+      journal.begin(journalCall("other", "call-1", 1), "copilot"),
+    ).toThrow("journal is full")
+  })
+
+  test("recovery is ordered and tombstones ambiguous invocation ids", () => {
+    const journal = new ProviderInvocationJournal()
+    const second = journalCall("invocation", "call-2", 2)
+    const first = journalCall("invocation", "call-1", 1)
+    journal.begin(first, "copilot")
+    journal.begin(second, "copilot")
+    journal.observeSuccess(second, "copilot", {
+      unit: "nano_aiu",
+      amount: 2,
+      estimated: false,
+    })
+
+    expect(
+      journal.recover().map((entry) => ({
+        id: entry.invocation.providerCallId,
+        outcome: entry.outcome,
+      })),
+    ).toEqual([
+      { id: "call-1", outcome: "pending" },
+      { id: "call-2", outcome: "success" },
+    ])
+    expect(() => journal.begin(first, "copilot")).toThrow("cannot be replayed")
+  })
+})
+
 describe("the copilot provider", () => {
   test("is registered at host start and reports itself", async () => {
     const { provider } = await startProvider(() => Response.json({}))
@@ -142,7 +232,10 @@ describe("the copilot provider", () => {
     const result = await provider.postJson<{ data: Array<unknown> }>(
       "/v1/images/generations",
       { model: "gpt-image-2.5-flare", prompt: "x" },
-      { errorMessage: "Failed to create image" },
+      {
+        errorMessage: "Failed to create image",
+        invocation: invocation("post-json"),
+      },
     )
     expect(result).toEqual({ data: [{ b64_json: "AAAA" }] })
     expect(sent).toHaveLength(1)
@@ -154,13 +247,53 @@ describe("the copilot provider", () => {
     })
   })
 
+  test("journals one ordered billable observation per provider call id", async () => {
+    const { provider } = await startProvider(() =>
+      Response.json({ copilot_usage: { total_nano_aiu: 42 } }),
+    )
+    const invocation = {
+      invocationId: "invocation-1",
+      providerCallId: "provider-call-1",
+      sequence: 2,
+      operation: "images.generations" as const,
+      model: "gpt-image-2.5-flare",
+    }
+
+    await provider.postJson(
+      "/v1/images/generations",
+      { model: invocation.model, prompt: "x" },
+      { errorMessage: "Failed to create image", invocation },
+    )
+    const replayError = await provider
+      .postJson(
+        "/v1/images/generations",
+        { model: invocation.model, prompt: "x" },
+        { errorMessage: "Failed to create image", invocation },
+      )
+      .catch((error: unknown) => error)
+    expect(replayError).toBeInstanceOf(Error)
+    expect((replayError as Error).message).toContain("cannot be replayed")
+
+    expect(providerInvocationJournal.unacknowledged("invocation-1")).toEqual([
+      {
+        invocation,
+        provider: "copilot",
+        cost: { unit: "nano_aiu", amount: 42, estimated: false },
+        outcome: "success",
+      },
+    ])
+  })
+
   test("a refusal throws HTTPError carrying call.provider, endpoint and model", async () => {
     const { provider } = await startProvider(() => refusal())
     const error = await provider
       .postJson(
         "/v1/images/generations",
         { model: "gpt-6-luna-decisions", prompt: "x" },
-        { errorMessage: "Failed to create image" },
+        {
+          errorMessage: "Failed to create image",
+          invocation: invocation("refusal", "gpt-6-luna-decisions"),
+        },
       )
       .catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(HTTPError)
@@ -180,7 +313,10 @@ describe("the copilot provider", () => {
       await provider.postJson(
         "/v1/images/generations",
         await c.req.json<Record<string, unknown>>(),
-        { errorMessage: "Failed to create image" },
+        {
+          errorMessage: "Failed to create image",
+          invocation: invocation("advice", "gpt-6-luna-decisions"),
+        },
       )
       return c.json({})
     })
@@ -221,6 +357,47 @@ describe("the copilot provider", () => {
     ).toBeUndefined()
   })
 
+  test("fans one durably fenced source update out to every subscriber", async () => {
+    let releaseFence!: () => void
+    const fenced = new Promise<void>((resolve) => {
+      releaseFence = resolve
+    })
+    const digests: Array<string> = []
+    const broker = createCopilotProviderBroker({
+      commitControlMutation: (digest) => {
+        digests.push(digest)
+        return fenced
+      },
+    })
+    let first = 0
+    let second = 0
+    const stopFirst = broker.subscribe(() => {
+      first += 1
+    })
+    const stopSecond = broker.subscribe(() => {
+      second += 1
+    })
+    const before = broker.snapshot()
+
+    setModels({ object: "list", data: CATALOG })
+    await Promise.resolve()
+    expect(broker.snapshot()).toEqual(before)
+    expect(digests).toHaveLength(1)
+    releaseFence()
+    for (let attempt = 0; second === 0 && attempt < 100; attempt += 1)
+      await Bun.sleep(1)
+
+    expect(first).toBe(1)
+    expect(second).toBe(1)
+    expect(digests).toHaveLength(1)
+    expect(broker.snapshot()).toMatchObject({
+      revision: 1,
+      models: [{ id: "gpt-6-luna-decisions" }, { id: "gpt-image-2.5-flare" }],
+    })
+    stopFirst()
+    stopSecond()
+  })
+
   test("model() reads the cached catalog and onCatalogChange follows it", async () => {
     const { provider } = await startProvider(() => Response.json({}))
     state.models = undefined
@@ -229,6 +406,8 @@ describe("the copilot provider", () => {
     let changes = 0
     const stop = provider.onCatalogChange(() => (changes += 1))
     setModels({ object: "list", data: CATALOG })
+    for (let attempt = 0; changes === 0 && attempt < 100; attempt += 1)
+      await Bun.sleep(1)
     expect(changes).toBe(1)
     expect(provider.model("gpt-image-2.5-flare")).toEqual({
       id: "gpt-image-2.5-flare",
