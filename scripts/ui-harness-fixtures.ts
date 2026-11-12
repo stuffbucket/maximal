@@ -26,6 +26,7 @@ import type {
   PluginStatus,
   PluginToolView,
   PluginView,
+  PluginsAttentionResponse,
   ToolGroup,
 } from "../src/lib/config/settings-types"
 
@@ -825,6 +826,154 @@ export function listItem(detail: PluginDetailView): PluginView {
   return item
 }
 
+// ---- the FigJam extension (plugin of kind "extension") ----------------------
+// Statuses mirror packages/plugin-figjam/src/status.ts (composeStatus): same
+// codes, summaries, facts and actions. An extension has no MCP endpoint,
+// clients or tools, so its page is only the status block and its settings.
+// Off is `figjamDetail()` with no stage.
+export type FigjamStage =
+  | "needs-setup"
+  | "ready"
+  | "connected"
+  | "pairing"
+  | "port-in-use"
+
+const FIGJAM_PORT = 4150
+const FIGJAM_MANIFEST_PATH = "~/.local/share/copilot-api/plugins/figjam/figma-plugin/manifest.json"
+const FIGJAM_IMPORT_INSTRUCTIONS =
+  "In the Figma desktop app: Plugins → Development → Import plugin from manifest…, then choose this file."
+/** The id suffix `pairActionIds("Roadmap workshop")` yields. */
+const FIGJAM_PANEL = { name: "Roadmap workshop", suffix: "roadmap-workshop-26e61ac6" }
+
+/** The Settings status the FigJam plugin reports in each stage. */
+export function figjamStatus(stage: FigjamStage): PluginStatus {
+  const facts = (boards: string, pending: string): Array<{ label: string; value: string }> => [
+    { label: "Port", value: String(FIGJAM_PORT) },
+    { label: "Connected boards", value: boards },
+    { label: "Waiting for approval", value: pending },
+  ]
+  const manifestFact = { label: "Figma plugin manifest", value: FIGJAM_MANIFEST_PATH }
+  const rebuild = { id: "setup", label: "Rebuild the Figma plugin", kind: "secondary" as const }
+  switch (stage) {
+    case "needs-setup":
+      return {
+        state: "needs-setup",
+        code: "plugin-not-built",
+        summary: "Set up the Figma plugin to connect FigJam",
+        facts: facts("None", "None"),
+        actions: [{ id: "setup", label: "Set up the Figma plugin", kind: "primary" }],
+      }
+    case "ready":
+      return {
+        state: "ready",
+        code: "ready",
+        summary: "Ready for FigJam panels",
+        detail: FIGJAM_IMPORT_INSTRUCTIONS,
+        facts: [...facts("None", "None"), manifestFact],
+        actions: [rebuild],
+      }
+    case "connected":
+      return {
+        state: "ready",
+        code: "ready",
+        summary: "Connected to 2 FigJam boards",
+        detail: FIGJAM_IMPORT_INSTRUCTIONS,
+        facts: [...facts("Roadmap workshop, Retro board", "None"), manifestFact],
+        actions: [rebuild],
+      }
+    case "pairing": {
+      const pairActions = [
+        { id: `approve-${FIGJAM_PANEL.suffix}`, label: `Approve "${FIGJAM_PANEL.name}"`, kind: "primary" as const },
+        { id: `deny-${FIGJAM_PANEL.suffix}`, label: `Deny "${FIGJAM_PANEL.name}"`, kind: "secondary" as const },
+      ]
+      return {
+        state: "ready",
+        code: "ready",
+        summary: "A FigJam panel is waiting for approval",
+        detail: FIGJAM_IMPORT_INSTRUCTIONS,
+        facts: [...facts("None", FIGJAM_PANEL.name), manifestFact],
+        actions: [...pairActions, rebuild],
+        attention: {
+          summary: `A FigJam panel ("${FIGJAM_PANEL.name}") wants to connect`,
+          actions: pairActions,
+        },
+      }
+    }
+    case "port-in-use":
+      return {
+        state: "error",
+        code: "port-in-use",
+        summary: `Port ${FIGJAM_PORT} is already in use`,
+        detail: `Another program is listening on port ${FIGJAM_PORT}, possibly a FigJam bridge started with "bun run figjam:bridge". Stop it, or choose another bridge port in this plugin's settings.`,
+        actions: [{ id: "retry", label: "Try again" }],
+      }
+  }
+}
+
+/** Which stage a FigJam status was made from (the mock reseeds from its fixture). */
+export function figjamStageOf(status: PluginStatus | undefined): FigjamStage {
+  if (!status) return "needs-setup"
+  if (status.code === "port-in-use") return "port-in-use"
+  if (status.code !== "ready") return "needs-setup"
+  if (status.attention) return "pairing"
+  return status.summary.startsWith("Connected") ? "connected" : "ready"
+}
+
+/** The config schema the FigJam plugin publishes (z.toJSONSchema, input side). */
+export const figjamConfigSchema: PluginDetailView["configSchema"] = {
+  type: "object",
+  properties: {
+    port: {
+      type: "integer",
+      minimum: 1,
+      maximum: 65_535,
+      default: FIGJAM_PORT,
+      title: "Bridge port",
+      description:
+        "The local WebSocket port the FigJam panel connects to. Set up the Figma plugin again after changing it.",
+    },
+  },
+}
+
+/** FigJam's `GET /settings/api/plugins/:id`. Off when `stage` is omitted. */
+export function figjamDetail(stage?: FigjamStage): PluginDetailView {
+  const manifest: PluginDetailView["manifest"] = {
+    id: "figjam",
+    kind: "extension",
+    displayName: "FigJam",
+    description:
+      "Lets the Maximal agent panel in FigJam, and coding agents on this computer, read and change FigJam boards. Opens a local port.",
+  }
+  return {
+    id: manifest.id,
+    kind: manifest.kind,
+    source: "built-in",
+    displayName: manifest.displayName,
+    description: manifest.description,
+    manifest,
+    enabled: stage !== undefined,
+    lifecycle: stage ? "active" : "disabled",
+    ...(stage ? { status: figjamStatus(stage) } : {}),
+    toolCounts: toolCounts([]),
+    toolsSource: "none",
+    clients: [],
+    endpoint: "",
+    settingsVersion: 1,
+    config: { port: FIGJAM_PORT },
+    configSchema: figjamConfigSchema,
+    tools: [],
+  }
+}
+
+/** `GET /settings/api/plugins/attention`: each enabled, running plugin whose status asks for the person. */
+export function pluginAttentionItems(plugins: ReadonlyArray<PluginDetailView>): PluginsAttentionResponse["attention"] {
+  return plugins.flatMap((p) =>
+    p.enabled && p.lifecycle === "active" && p.status?.attention
+      ? [{ plugin: p.id, name: p.displayName, summary: p.status.attention.summary, actions: p.status.attention.actions }]
+      : [],
+  )
+}
+
 const workiqOff: Array<PluginDetailView> = [workiqDetail()]
 
 const recentClients: ActiveClientsFixture = {
@@ -1607,6 +1756,38 @@ export const SCENARIOS = {
   "connectors-standalone-plugin": {
     ...healthy("Connectors · Claude Code already has Work IQ from Microsoft’s plugin"),
     connectors: [workiqDetail({ stage: "ready", standalone: { name: "workiq@work-iq", source: "plugin" } })],
+  },
+
+  // FigJam rides alongside a ready Work IQ so the list shows connector and
+  // extension rows together; its page opens at #connectors/figjam.
+  "figjam-off": {
+    ...healthy("FigJam · extension off (listed beside Work IQ)"),
+    connectors: [workiqDetail({ stage: "ready" }), figjamDetail()],
+  },
+
+  "figjam-needs-setup": {
+    ...healthy("FigJam · on, the Figma plugin still to set up"),
+    connectors: [workiqDetail({ stage: "ready" }), figjamDetail("needs-setup")],
+  },
+
+  "figjam-ready": {
+    ...healthy("FigJam · ready: manifest path and import instructions"),
+    connectors: [workiqDetail({ stage: "ready" }), figjamDetail("ready")],
+  },
+
+  "figjam-connected": {
+    ...healthy("FigJam · ready, two boards connected"),
+    connectors: [workiqDetail({ stage: "ready" }), figjamDetail("connected")],
+  },
+
+  "figjam-pairing": {
+    ...healthy("FigJam · a panel is waiting for approval (attention, Approve / Deny)"),
+    connectors: [workiqDetail({ stage: "ready" }), figjamDetail("pairing")],
+  },
+
+  "figjam-port-in-use": {
+    ...healthy("FigJam · error: bridge port already in use"),
+    connectors: [workiqDetail({ stage: "ready" }), figjamDetail("port-in-use")],
   },
 
 } satisfies Record<string, Scenario>

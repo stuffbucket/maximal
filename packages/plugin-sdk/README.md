@@ -168,6 +168,10 @@ never destructured.
   `call` has `signal`, `sessionId?`, `model`, `client` and `budget?` (the
   `{ plugin, tool }` scope spend will be booked under; nothing enforces it yet).
   Server tools are not MCP tools and have no tool permissions.
+  `decision-tools.ts` has the shared pieces of a capability plugin that offers
+  its model this way: `serverToolWhileAvailable` (register only while a binding's
+  provider is signed in and offers the model), `callBoundModel`, `textResult`,
+  `errorResult`.
 
 ## Testing a plugin
 

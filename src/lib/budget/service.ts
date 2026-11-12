@@ -408,11 +408,10 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     active: ReadonlyArray<ActiveLimit>,
     warnings: ReadonlyArray<BudgetWarning>,
   ): void {
-    for (const warning of warnings) {
-      const entry = active.find(
-        ({ limit }) => limit.id === warning.limitId,
-      )?.entry
-      const key = `${warning.limitId}@${entry?.key ?? ""}`
+    for (const { limit, entry } of active) {
+      const warning = warnings.find(({ limitId }) => limitId === limit.id)
+      if (!warning) continue
+      const key = `${limit.id}@${entry.key}`
       if (warned.has(key)) continue
       warned.add(key)
       try {

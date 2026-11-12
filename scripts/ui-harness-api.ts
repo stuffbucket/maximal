@@ -24,8 +24,12 @@ import {
 import {
   type ResolvedScenario,
   type ScenarioId,
+  type FigjamStage,
   type WorkiqStage,
+  figjamStageOf,
+  figjamStatus,
   listItem,
+  pluginAttentionItems,
   resolveScenario,
   toolCounts,
   workiqStatus,
@@ -87,7 +91,13 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
   // Where each connector's setup stands, so enabling it again picks up where
   // the user left off (the real connector keeps this in its own storage).
   const stages = new Map<string, WorkiqStage>()
+  // The FigJam extension keeps its own stage (it has no sign-in or tools).
+  const figjamStages = new Map<string, FigjamStage>()
   for (const connector of fixture.connectors) {
+    if (connector.kind === "extension") {
+      figjamStages.set(connector.id, figjamStageOf(connector.status))
+      continue
+    }
     const code = connector.status?.code
     const stage: WorkiqStage | undefined =
       code === "terms-needed" ? "terms-needed"
@@ -109,6 +119,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
   /** Tools follow the stage: live once ready (catalog refreshed), else the
    *  last catalog stays as a cache; the user's permissions are kept. */
   const syncTools = (connector: PluginDetailView): void => {
+    if (connector.kind === "extension") return
     const live = connector.lifecycle === "active" && stages.get(connector.id) === "ready"
     if (live && connector.tools.length === 0) {
       connector.tools = workiqToolViews([])
@@ -125,6 +136,21 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     stages.set(id, stage)
     connector.status = workiqStatus(stage)
     syncTools(connector)
+    pluginsChanged()
+  }
+
+  /** The status a plugin reports when it (re)starts at the stage it last reached. */
+  const statusFor = (connector: PluginDetailView): PluginDetailView["status"] =>
+    connector.kind === "extension"
+      ? figjamStatus(figjamStages.get(connector.id) ?? "needs-setup")
+      : workiqStatus(stages.get(connector.id) ?? "terms-needed")
+
+  /** Move the FigJam extension to a stage, as its own status would. */
+  const setFigjamStage = (id: string, stage: FigjamStage): void => {
+    const connector = findConnector(id)
+    if (!connector) return
+    figjamStages.set(id, stage)
+    connector.status = figjamStatus(stage)
     pluginsChanged()
   }
 
@@ -262,6 +288,10 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (path === "/settings/api/plugins" && method === "GET") {
       return json({ plugins: state.connectors.map(listItem) })
     }
+    // Before `plugins/:id`, which would read "attention" as a plugin id.
+    if (path === "/settings/api/plugins/attention" && method === "GET") {
+      return json({ attention: pluginAttentionItems(state.connectors) })
+    }
     const pluginPath = /^\/settings\/api\/plugins\/([^/]+)$/.exec(path)
     if (pluginPath && method === "GET") {
       const connector = findConnector(decodeURIComponent(pluginPath[1]))
@@ -288,7 +318,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
         if (connector.enabled && connector.lifecycle === "failed") {
           connector.lifecycle = "active"
           delete connector.error
-          connector.status = workiqStatus(stages.get(id) ?? "terms-needed")
+          connector.status = statusFor(connector)
         }
       }
       if (typeof b.enabled === "boolean" && b.enabled !== connector.enabled) {
@@ -296,7 +326,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
         delete connector.error
         if (b.enabled) {
           connector.lifecycle = "active"
-          connector.status = workiqStatus(stages.get(id) ?? "terms-needed")
+          connector.status = statusFor(connector)
         } else {
           connector.lifecycle = "disabled"
           delete connector.status
@@ -340,7 +370,11 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       if (!connector.status?.actions?.some((a) => a.id === actionId)) {
         return json({ error: { message: "no such action" } }, 404)
       }
-      if (actionId === "accept-terms") setStage(id, "signin-needed")
+      if (connector.kind === "extension") {
+        // FigJam: setup and retry reach ready; approving a panel connects it.
+        if (actionId.startsWith("approve-")) setFigjamStage(id, "connected")
+        else setFigjamStage(id, "ready")
+      } else if (actionId === "accept-terms") setStage(id, "signin-needed")
       else if (actionId === "cancel-sign-in" || actionId === "sign-out") setStage(id, "signin-needed")
       else if (actionId === "sign-in") {
         // Signing in takes a while; the outcome arrives as a status change.

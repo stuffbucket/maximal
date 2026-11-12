@@ -20,6 +20,7 @@ import type {
   ToolRegistry,
 } from "./types"
 
+export * from "./decision-tools"
 export { PluginContractError, type PluginContractErrorCode } from "./errors"
 export {
   isOperationUnavailableError,

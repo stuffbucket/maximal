@@ -30,6 +30,16 @@ export const Config = z.object({
     description:
       "The models served on /v1/systemone, each bound to the provider model that answers it.",
   }),
+  tools: z
+    .object({
+      classify: z.boolean().default(true).meta({
+        title: "classify tool for Claude Code",
+        description:
+          "Offer the classify tool to Claude Code, so it can ask this model for yes/no, choice and score answers while it works. Free on Copilot.",
+      }),
+    })
+    .default({ classify: true })
+    .meta({ title: "Tools" }),
 })
 
 export type SystemOneConfig = z.output<typeof Config>
