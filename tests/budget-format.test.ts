@@ -116,6 +116,7 @@ function status(
     budgets: [],
     effective_budget: null,
     provider_windows: [],
+    filters: [],
     ...overrides,
   }
 }

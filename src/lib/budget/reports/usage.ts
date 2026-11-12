@@ -17,7 +17,7 @@ import {
   USAGE_TOTALS_SELECT,
   type UsageGroup,
 } from "~/lib/token-usage/aggregate"
-import { SCOPE_SQL, type SpendScope } from "~/lib/token-usage/spend"
+import { scopeWhere, type SpendScope } from "~/lib/token-usage/spend"
 import {
   isTokenUsageStorageEnabled,
   readUsageDb,
@@ -94,12 +94,9 @@ export async function getSpendRows(
   toMs: number,
 ): Promise<Array<SpendRow>> {
   if (!isTokenUsageStorageEnabled()) return []
-  const where = ["created_at_ms >= ?", "created_at_ms < ?"]
-  const values: Array<string | number> = [fromMs, toMs]
-  if (scope.kind !== "global") {
-    where.push(SCOPE_SQL[scope.kind])
-    values.push(scope.id)
-  }
+  const events = scopeWhere(scope, "events")
+  const where = ["created_at_ms >= ?", "created_at_ms < ?", ...events.clauses]
+  const values: Array<string | number> = [fromMs, toMs, ...events.values]
   const rows = await readUsageDb((db) =>
     db
       .prepare(

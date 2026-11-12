@@ -229,7 +229,7 @@ describe("a spent limit answers 402", () => {
     }
     expect(body.type).toBe("error")
     expect(body.error.type).toBe("billing_error")
-    expect(body.error.message).toContain("is used up")
+    expect(body.error.message).toContain("blocked this request")
   })
 
   test("on the OpenAI chat wire the same refusal is insufficient_quota", async () => {
@@ -568,7 +568,9 @@ describe("a server tool under a limit", () => {
       is_error: true,
     })
     const text = toolText(refused)
-    expect(text).toStartWith('Not run: Maximal rule "Limit tools" is used up')
+    expect(text).toStartWith(
+      'Not run: Maximal rule "Limit tools" blocked this request',
+    )
     expect(text).toContain("Maximal → Rules")
     expect(text).toContain("Don't retry this tool until the rule resets")
   })
@@ -583,7 +585,7 @@ describe("a server tool under a limit", () => {
 
     expect(run.ok).toBe(false)
     expect(executed).toBe(0)
-    expect(toolText(run)).toContain("is used up")
+    expect(toolText(run)).toContain("blocked this request")
   })
 
   test("a tool that errors releases its hold", async () => {
@@ -598,5 +600,34 @@ describe("a server tool under a limit", () => {
     expect(run.ok).toBe(false)
     expect(executed).toBe(0)
     expect(await heldAfterwards()).toBe(0)
+  })
+})
+
+describe("a filter limit under the chat endpoints", () => {
+  const filters = [
+    {
+      id: "image-models",
+      name: "Image models",
+      kind: "models" as const,
+      members: ["gpt-image-*"],
+    },
+  ]
+
+  test("counts the rows its models recorded and gates the requests that name them", async () => {
+    setBudget({
+      filters,
+      limits: [
+        limit("images-cap", { kind: "filter", id: "image-models" }, AIU),
+      ],
+    })
+    // Recorded under the model `gpt-image-test`.
+    spend(AIU, "messages")
+
+    expect(await failure(admitChat("messages", "gpt-image-2"))).toBeInstanceOf(
+      BudgetExceededError,
+    )
+    await admitChat("messages", "claude-sonnet-4")
+    // A request that names no model isn't one a model filter selects.
+    await admitChat("messages")
   })
 })

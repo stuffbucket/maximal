@@ -134,6 +134,9 @@ function inScope(row: LedgerRow, scope: Scope): boolean {
       return row.plugin === scope.id
     case "provider":
       return row.provider === scope.id
+    case "filter":
+      // The harness has no filters, so a filter selects nothing.
+      return false
   }
 }
 
@@ -244,7 +247,13 @@ export const budgetStorageOffSeed: BudgetSeed = { ...budgetLimitsSeed, storageEn
 
 // ---- the service ---------------------------------------------------------
 
-const SCOPE_ORDER: Record<Scope["kind"], number> = { global: 0, provider: 1, plugin: 2, key: 3 }
+const SCOPE_ORDER: Record<Scope["kind"], number> = {
+  global: 0,
+  provider: 1,
+  plugin: 2,
+  filter: 3,
+  key: 4,
+}
 
 const ACTIVITY_GROUPS = new Set(["model", "plugin", "key", "provider", "day"])
 const ACTIVITY_PERIODS = new Set(["day", "week", "month"])
@@ -363,6 +372,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
       budgets,
       effective_budget: (spent ?? tightest)?.id ?? null,
       provider_windows: windows,
+      filters: [],
     }
   }
 

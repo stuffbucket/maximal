@@ -82,6 +82,7 @@ export function getBudgetService(): BudgetService {
               "copilot"
             : (event.provider_name ?? ""),
           ...(event.plugin_id === null ? {} : { plugin: event.plugin_id }),
+          model: event.model,
         })
       }),
     onWarning: announceWarning,
@@ -135,6 +136,7 @@ export type ChatBudgetOperation = "chat_completions" | "messages" | "responses"
  *  its limits have room, and can go over by what is in flight. */
 export async function admitChat(
   operation: ChatBudgetOperation,
+  model?: string,
   budget?: BudgetService,
 ): Promise<void> {
   await admitBudget(
@@ -142,6 +144,7 @@ export async function admitChat(
       operation,
       provider: COPILOT_PROVIDER_ID,
       key: currentBudgetKey(),
+      ...(model === undefined ? {} : { model }),
       estimateNanoAiu: 0,
     },
     budget,

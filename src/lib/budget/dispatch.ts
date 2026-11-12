@@ -65,6 +65,7 @@ export async function dispatchWithBudget(
       operation: request.operation,
       provider: options.provider,
       plugin: OPERATION_PLUGINS[request.operation],
+      model: request.model,
       key: currentBudgetKey(),
       estimateNanoAiu: estimateOperationNanoAiu(
         request.operation,

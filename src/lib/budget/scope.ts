@@ -5,7 +5,11 @@
  * counts what it admits.
  */
 
-import type { BudgetScope } from "./schema"
+import type { SpendScope } from "~/lib/token-usage/spend"
+
+import type { BudgetFilterConfig, BudgetScope } from "./schema"
+
+import { globMatches } from "./glob"
 
 /** What a billed request is doing. Model operations and server tools carry a
  *  hold; the chat endpoints are gated on spend already recorded. */
@@ -27,7 +31,13 @@ export interface BudgetSubject {
   plugin?: string
   /** The provider that bills it (`copilot`), when known. */
   provider?: string
+  /** The model the call names, when it names one. */
+  model?: string
 }
+
+/** A scope with its filter looked up: what the ledger and the database
+ *  match rows against. */
+export type ResolvedScope = SpendScope
 
 /** The key a request or usage row belongs to: the API key's label, else the
  *  client Maximal recognised, else `unidentified`. */
@@ -39,10 +49,36 @@ export function budgetKeyOf(
   return client === "other" ? "unidentified" : client
 }
 
-export function scopeMatches(
+const FILTER_FIELD = {
+  models: "model",
+  clients: "key",
+  plugins: "plugin",
+} as const
+
+/** Look a `filter` scope's filter up. A filter that no longer exists selects
+ *  nothing, so its limit is inert rather than global. */
+export function resolveScope(
   scope: BudgetScope,
+  filters: ReadonlyArray<BudgetFilterConfig> | undefined,
+): ResolvedScope {
+  if (scope.kind !== "filter") return scope
+  const filter = filters?.find((candidate) => candidate.id === scope.id)
+  return {
+    kind: "members",
+    field: filter === undefined ? "model" : FILTER_FIELD[filter.kind],
+    members: filter?.members ?? [],
+  }
+}
+
+export function scopeMatches(
+  scope: ResolvedScope,
   subject: BudgetSubject,
 ): boolean {
+  if (scope.kind === "members") {
+    const value = subject[scope.field]
+    if (value === undefined) return false
+    return scope.members.some((member) => globMatches(member, value))
+  }
   if (scope.kind === "global") return true
   if (scope.kind === "key") return subject.key === scope.id
   if (scope.kind === "plugin") return subject.plugin === scope.id

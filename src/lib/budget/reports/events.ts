@@ -63,7 +63,12 @@ export interface StoredBudgetEvent {
 }
 
 function scopeOf(kind: unknown, id: unknown): BudgetScope {
-  if (kind === "key" || kind === "plugin" || kind === "provider") {
+  if (
+    kind === "key"
+    || kind === "plugin"
+    || kind === "provider"
+    || kind === "filter"
+  ) {
     return { kind, id: typeof id === "string" ? id : "" }
   }
   return { kind: "global" }

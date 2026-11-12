@@ -9,6 +9,7 @@
  */
 
 import type {
+  BudgetFilterStatus,
   BudgetLimitStatus,
   BudgetStatusResponse,
   ProviderQuotaWindowStatus,
@@ -36,6 +37,7 @@ import {
   type BudgetScope,
   type BudgetScopeKind,
 } from "./schema"
+import { resolveScope } from "./scope"
 import {
   nanoAiuToDisplay,
   resolveBudgetDisplay,
@@ -47,7 +49,8 @@ const SCOPE_ORDER: Record<BudgetScopeKind, number> = {
   global: 0,
   provider: 1,
   plugin: 2,
-  key: 3,
+  filter: 3,
+  key: 4,
 }
 
 function iso(ms: number): string {
@@ -66,6 +69,7 @@ function limitState(
 
 interface StatusContext {
   nowMs: number
+  filters: BudgetConfig["filters"]
   display: BudgetDisplay
   held: (scope: BudgetScope) => number
 }
@@ -73,10 +77,11 @@ interface StatusContext {
 async function limitStatus(
   limit: BudgetLimitConfig,
   period: BudgetPeriod,
-  { nowMs, display, held }: StatusContext,
+  { nowMs, display, held, filters }: StatusContext,
 ): Promise<BudgetLimitStatus> {
+  const scope = resolveScope(limit.scope, filters)
   const [[usage, usageDaily, usageWeekly], oldest] = await Promise.all([
-    getNanoAiuSpend(limit.scope, [
+    getNanoAiuSpend(scope, [
       period,
       fixedPeriod("daily", nowMs),
       fixedPeriod("weekly", nowMs),
@@ -84,7 +89,7 @@ async function limitStatus(
     // A rolling window resets when its oldest counted spend ages out.
     period.rollingMs === undefined ?
       undefined
-    : getOldestSpendMs(limit.scope, period),
+    : getOldestSpendMs(scope, period),
   ])
   const endMs =
     period.rollingMs === undefined ?
@@ -170,6 +175,24 @@ function windowStatus(
   }
 }
 
+/** Each filter, with the limits whose scope selects it. */
+export function filterStatuses(
+  budget: BudgetConfig | undefined,
+): Array<BudgetFilterStatus> {
+  return (budget?.filters ?? []).map((filter) => ({
+    id: filter.id,
+    name: filter.name,
+    kind: filter.kind,
+    members: filter.members,
+    used_by: (budget?.limits ?? [])
+      .filter(
+        (limit) =>
+          limit.scope.kind === "filter" && limit.scope.id === filter.id,
+      )
+      .map((limit) => limit.id),
+  }))
+}
+
 export interface BudgetStatusOptions {
   nowMs?: number
   /** Defaults to the windows observed so far. */
@@ -198,7 +221,12 @@ export async function buildBudgetStatus(
       limitStatus(
         limit,
         resolvePeriod(limit.limitReset, nowMs, (ref) => byRef.get(ref)),
-        { nowMs, display, held: options.held ?? (() => 0) },
+        {
+          nowMs,
+          display,
+          filters: budget?.filters,
+          held: options.held ?? (() => 0),
+        },
       ),
     ),
   )
@@ -208,6 +236,7 @@ export async function buildBudgetStatus(
     storage_enabled: isTokenUsageStorageEnabled(),
     budgets,
     effective_budget: effectiveBudget(budgets),
+    filters: filterStatuses(budget),
     provider_windows: windows.map((window) => windowStatus(window)),
   }
 }

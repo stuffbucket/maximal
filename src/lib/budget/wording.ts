@@ -58,16 +58,18 @@ export function refusalMessage(words: RefusalWords): string {
   const amount = (nano: number) => formatAmount(nano, display)
   const need =
     words.requested > 0 ?
-      `this request needs about ${amount(words.requested)}`
+      `the request needs about ${amount(words.requested)}`
     : ""
+  const blocked = `Maximal rule "${words.name}" blocked this request:`
+  const figures = `${amount(words.used)} of ${amount(words.limit)} used`
   let lead: string
   if (words.inFlight) {
     const left = amount(Math.max(0, words.limit - words.used))
-    lead = `Maximal rule "${words.name}" has ${left} left, and requests in progress already hold ${amount(words.held)} of it${need ? `; ${need}` : ""}.`
+    lead = `${blocked} it has ${left} left, and requests in progress already hold ${amount(words.held)} of it${need ? `; ${need}` : ""}.`
   } else if (words.used >= words.limit) {
-    lead = `Maximal rule "${words.name}" is used up: ${amount(words.used)} of ${amount(words.limit)} used${need ? `; ${need}` : ""}.`
+    lead = `${blocked} it is used up (${figures})${need ? `; ${need}` : ""}.`
   } else {
-    lead = `Maximal rule "${words.name}" doesn't have room for this request: ${amount(words.used)} of ${amount(words.limit)} used; ${need}.`
+    lead = `${blocked} ${figures}, and ${need}.`
   }
   return `${lead} ${resetSentence(words)} Raise or remove it in Maximal → Rules.`
 }

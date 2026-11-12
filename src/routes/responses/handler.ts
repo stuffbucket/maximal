@@ -81,10 +81,10 @@ const RESPONSES_ENDPOINT = "/responses"
 // eslint-disable-next-line complexity, max-lines-per-function
 export const handleResponses = async (c: Context) => {
   await checkRateLimit(state)
-  await admitChat("responses")
 
   const payload = await c.req.json<ResponsesPayload>()
   payload.model = reverseId(payload.model)
+  await admitChat("responses", payload.model)
   const mapping = resolveModelMapping({
     requestedModel: payload.model,
     rules: getConfig().modelMappings ?? [],

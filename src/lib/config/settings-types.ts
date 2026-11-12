@@ -18,6 +18,9 @@ import { z } from "zod"
 
 import {
   BudgetDisplayUnit,
+  BudgetFilterId,
+  BudgetFilterKind,
+  BudgetFilterMember,
   BudgetLimitAction,
   BudgetLimitId,
   BudgetLimitReset,
@@ -835,6 +838,17 @@ export type ProviderQuotaWindowStatus = z.infer<
   typeof ProviderQuotaWindowStatus
 >
 
+/** A reusable filter and the rules whose scope selects it. */
+export const BudgetFilterStatus = z.object({
+  id: BudgetFilterId,
+  name: z.string(),
+  kind: BudgetFilterKind,
+  members: z.array(BudgetFilterMember),
+  /** The ids of the rules scoped to this filter. */
+  used_by: z.array(BudgetLimitId),
+})
+export type BudgetFilterStatus = z.infer<typeof BudgetFilterStatus>
+
 /** GET /settings/api/budget, and the reply to every limit change. */
 export const BudgetStatusResponse = z.object({
   /** False when enforcement is switched off: limits are kept and reported,
@@ -848,6 +862,8 @@ export const BudgetStatusResponse = z.object({
   /** The blocking limit a request would hit first, or null. */
   effective_budget: BudgetLimitId.nullable(),
   provider_windows: z.array(ProviderQuotaWindowStatus),
+  /** The named filters a rule's `filter` scope can select. */
+  filters: z.array(BudgetFilterStatus),
 })
 export type BudgetStatusResponse = z.infer<typeof BudgetStatusResponse>
 
@@ -1086,6 +1102,131 @@ export const BudgetPresetsResponse = z.object({
   personas: z.array(BudgetPersonaPreset),
 })
 export type BudgetPresetsResponse = z.infer<typeof BudgetPresetsResponse>
+
+/** Body of PUT /settings/api/budget/filters/:id, which creates or replaces
+ *  the filter. */
+export const BudgetFilterPutRequest = z
+  .object({
+    name: z.string().trim().min(1).max(128),
+    kind: BudgetFilterKind,
+    members: z.array(BudgetFilterMember).min(1).max(256),
+  })
+  .strict()
+export type BudgetFilterPutRequest = z.infer<typeof BudgetFilterPutRequest>
+
+/** GET /settings/api/budget/filters. */
+export const BudgetFiltersResponse = z.object({
+  filters: z.array(BudgetFilterStatus),
+})
+export type BudgetFiltersResponse = z.infer<typeof BudgetFiltersResponse>
+
+// ── Rules export and import (/settings/api/budget/rules/*) ──────────────
+
+/** One rule as the rules document carries it: the PUT body's field names,
+ *  the amount in nano-AIU, every field explicit. */
+export const BudgetRuleLimit = z
+  .object({
+    id: BudgetLimitId,
+    label: z.string().trim().min(1).max(128).optional(),
+    scope: BudgetScope,
+    limit: NanoAiuAmount,
+    limit_reset: BudgetLimitReset,
+    warn_at: BudgetWarnAt,
+    action: BudgetLimitAction,
+  })
+  .strict()
+export type BudgetRuleLimit = z.infer<typeof BudgetRuleLimit>
+
+export const BudgetRuleFilter = z
+  .object({
+    id: BudgetFilterId,
+    name: z.string().trim().min(1).max(128),
+    kind: BudgetFilterKind,
+    members: z.array(BudgetFilterMember).min(1).max(256),
+  })
+  .strict()
+export type BudgetRuleFilter = z.infer<typeof BudgetRuleFilter>
+
+export const BudgetRulesDisplay = z
+  .object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate })
+  .strict()
+export type BudgetRulesDisplay = z.infer<typeof BudgetRulesDisplay>
+
+/** The rules document: what `GET /settings/api/budget/rules/export` returns
+ *  and `POST .../rules/import` takes. `display` is optional on import. */
+export const BudgetRulesDocument = z
+  .object({
+    version: z.literal(1),
+    filters: z.array(BudgetRuleFilter).max(128),
+    limits: z.array(BudgetRuleLimit).max(256),
+    display: BudgetRulesDisplay.optional(),
+  })
+  .strict()
+export type BudgetRulesDocument = z.infer<typeof BudgetRulesDocument>
+
+/** Body of POST /settings/api/budget/rules/import. `rules` is validated
+ *  against `BudgetRulesDocument` by the route (so a bad version or an
+ *  unknown scope gets its own message). */
+export const BudgetRulesImportRequest = z
+  .object({
+    rules: z.unknown(),
+    /** `merge` adds to what is there; `replace` makes it what the document
+     *  says, removing the rest. */
+    mode: z.enum(["merge", "replace"]),
+    /** True: report what would change and change nothing. */
+    dryRun: z.boolean(),
+    /** For `merge`: an imported id that is already used by something
+     *  different either replaces it (default) or is added under a free id
+     *  (`<id>-2`). */
+    collisions: z.enum(["replace", "rename"]).optional(),
+  })
+  .strict()
+export type BudgetRulesImportRequest = z.infer<typeof BudgetRulesImportRequest>
+
+/** What an import adds, changes and removes, for one list. */
+export interface BudgetRulesChangeSet<T> {
+  added: Array<T>
+  changed: Array<{ before: T; after: T }>
+  /** Only a `replace` import removes. */
+  removed: Array<T>
+  /** The ids that were already exactly so. */
+  unchanged: Array<string>
+}
+
+const changeSet = <T extends z.ZodType>(item: T) =>
+  z.object({
+    added: z.array(item),
+    changed: z.array(z.object({ before: item, after: item })),
+    removed: z.array(item),
+    unchanged: z.array(z.string()),
+  })
+
+/** The reply to POST /settings/api/budget/rules/import. */
+export const BudgetRulesImportResponse = z.object({
+  mode: z.enum(["merge", "replace"]),
+  dry_run: z.boolean(),
+  /** True once the import was written (never with `dry_run`). */
+  applied: z.boolean(),
+  filters: changeSet(BudgetRuleFilter),
+  limits: changeSet(BudgetRuleLimit),
+  /** `replace` takes the document's display unit and credit rate. */
+  display: z.object({
+    changed: z.boolean(),
+    before: BudgetRulesDisplay,
+    after: BudgetRulesDisplay,
+  }),
+  /** Ids a `rename` merge gave imported items. */
+  renamed: z.array(
+    z.object({
+      kind: z.enum(["filter", "limit"]),
+      from: z.string(),
+      to: z.string(),
+    }),
+  ),
+})
+export type BudgetRulesImportResponse = z.infer<
+  typeof BudgetRulesImportResponse
+>
 
 /** One validation problem. `path` is dotted and relative to the request
  *  body (`"config.endpoint"`, `"permissions.fetch"`; `""` = the body). */
