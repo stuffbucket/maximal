@@ -30,7 +30,7 @@ import type { BudgetRefusal } from "./errors"
 import type { BudgetPeriod, FollowedWindow } from "./periods"
 import type { BudgetOperation, BudgetSubject } from "./scope"
 
-import { resolvePeriod } from "./periods"
+import { resolvePeriod, rollingPeriodEnd } from "./periods"
 import {
   DEFAULT_WARN_AT,
   type BudgetConfig,
@@ -99,6 +99,12 @@ export interface BudgetStore {
   /** At start: holds a previous run left open become `orphaned`, and old
    *  closed ones are pruned. */
   recover(nowMs: number): Promise<void>
+  /** Every cost the scope's usage rows (and orphaned holds) incurred in the
+   *  range, for a rolling window that counts each as it ages. */
+  spendRows(
+    scope: BudgetScope,
+    range: { startMs: number; endMs: number | null },
+  ): Promise<ReadonlyArray<{ createdAtMs: number; nanoAiu: number }>>
   openHold(hold: StoredHold): void
   closeHold(close: {
     id: string
@@ -161,6 +167,9 @@ interface LedgerEntry {
   loading: Promise<void>
   /** Rows recorded while the entry loads. */
   buffered: Array<SpendEvent>
+  /** A rolling window's counted costs; `committed` is their sum. Rows age
+   *  out when the window moves (`advance`). */
+  costs?: Array<{ createdAtMs: number; nanoAiu: number }>
 }
 
 interface ActiveLimit {
@@ -189,6 +198,28 @@ function inPeriod(period: BudgetPeriod, ms: number): boolean {
 
 function scopeKey(scope: BudgetScope): string {
   return scope.kind === "global" ? "global" : `${scope.kind}:${scope.id}`
+}
+
+/** What a ledger entry counts: its scope and period. A rolling window's
+ *  period moves with the clock, so only its length identifies it. */
+function entryKeyOf(scope: BudgetScope, period: BudgetPeriod): string {
+  if (period.rollingMs !== undefined) {
+    return `${scopeKey(scope)}|rolling:${period.rollingMs}`
+  }
+  return `${scopeKey(scope)}|${period.startMs}|${period.endMs}`
+}
+
+/** When the entry's period resets: its end, or for a rolling window the
+ *  moment its oldest counted cost ages out (null with none). */
+function resetMsOf(entry: LedgerEntry): number | null {
+  if (entry.period.rollingMs === undefined) return entry.period.endMs
+  let oldest: number | undefined
+  for (const cost of entry.costs ?? []) {
+    if (oldest === undefined || cost.createdAtMs < oldest) {
+      oldest = cost.createdAtMs
+    }
+  }
+  return rollingPeriodEnd(oldest, entry.period.rollingMs)
 }
 
 /** The refusal that decides: one a reset must clear beats one that
@@ -222,7 +253,17 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
         entry.buffered.push(event)
         continue
       }
-      if (counts(entry, event)) entry.committed += event.nanoAiu
+      if (counts(entry, event)) add(entry, event)
+    }
+  }
+
+  function add(entry: LedgerEntry, event: SpendEvent): void {
+    entry.committed += event.nanoAiu
+    if (event.nanoAiu > 0) {
+      entry.costs?.push({
+        createdAtMs: event.createdAtMs,
+        nanoAiu: event.nanoAiu,
+      })
     }
   }
 
@@ -251,23 +292,38 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
   function load(entry: LedgerEntry): Promise<void> {
     // The read starts here, synchronously: rows recorded from now on are
     // buffered, and rows recorded before are queued ahead of the read.
-    return deps.store
-      .spend(entry.scope, {
-        startMs: entry.period.startMs,
-        endMs: entry.period.endMs,
-      })
+    const range = { startMs: entry.period.startMs, endMs: entry.period.endMs }
+    const rolling = entry.costs !== undefined
+    const read: Promise<Array<{ createdAtMs: number; nanoAiu: number }>> =
+      rolling ?
+        deps.store.spendRows(entry.scope, range).then((rows) => [...rows])
+      : deps.store
+          .spend(entry.scope, range)
+          .then((sum) => [{ createdAtMs: range.startMs, nanoAiu: sum }])
+    return read
       .catch((error: unknown) => {
         consola.warn("Budget: could not read spend; counting from now", error)
-        return 0
+        return []
       })
-      .then((sum) => {
-        entry.committed = sum
+      .then((costs) => {
+        entry.committed = costs.reduce((sum, cost) => sum + cost.nanoAiu, 0)
+        if (rolling) entry.costs = costs
         for (const event of entry.buffered) {
-          if (counts(entry, event)) entry.committed += event.nanoAiu
+          if (counts(entry, event)) add(entry, event)
         }
         entry.buffered = []
         entry.ready = true
       })
+  }
+
+  /** A rolling window moved on: costs older than it stop counting. */
+  function advance(entry: LedgerEntry, period: BudgetPeriod): void {
+    entry.period = period
+    if (!entry.ready || entry.costs === undefined) return
+    entry.costs = entry.costs.filter(
+      (cost) => cost.createdAtMs >= period.startMs,
+    )
+    entry.committed = entry.costs.reduce((sum, cost) => sum + cost.nanoAiu, 0)
   }
 
   /** The entry for each limit that covers `subject`, created or reloaded
@@ -284,9 +340,11 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
       const period = resolvePeriod(limit.limitReset, nowMs, (ref) =>
         deps.windows.lookup(ref),
       )
-      const key = `${scopeKey(limit.scope)}|${period.startMs}|${period.endMs}`
+      const key = entryKeyOf(limit.scope, period)
       let entry = entries.get(limit.id)
-      if (entry?.key !== key) {
+      if (entry?.key === key) {
+        if (period.rollingMs !== undefined) advance(entry, period)
+      } else {
         entry = {
           key,
           scope: limit.scope,
@@ -295,6 +353,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
           ready: false,
           loading: Promise.resolve(),
           buffered: [],
+          ...(period.rollingMs === undefined ? {} : { costs: [] }),
         }
         entries.set(limit.id, entry)
         entry.loading = load(entry)
@@ -341,16 +400,20 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     const inFlight = used < limit.limit && used + estimate <= limit.limit
     const display = resolveBudgetDisplay(deps.config())
     const nowMs = clock()
+    const resetsAtMs = resetMsOf(entry)
     const words = {
       name: limit.label ?? limit.id,
       limit: limit.limit,
       used,
       held,
       requested: estimate,
-      resetsAtMs: entry.period.endMs,
+      resetsAtMs,
       nowMs,
       inFlight,
       display,
+      ...(entry.period.rollingMs === undefined ?
+        {}
+      : { rollingMs: entry.period.rollingMs }),
     }
     return {
       limitId: limit.id,
@@ -360,7 +423,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
       used,
       held,
       requested: estimate,
-      resetsAtMs: entry.period.endMs,
+      resetsAtMs,
       resetEstimated: entry.period.estimated,
       inFlight,
       message: refusalMessage(words),
@@ -379,7 +442,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
       limitId: limit.id,
       used: entry.committed,
       limit: limit.limit,
-      resetsAtMs: entry.period.endMs,
+      resetsAtMs: resetMsOf(entry),
     }
   }
 
@@ -403,15 +466,20 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     return { refusal: decisive(refusals), warnings }
   }
 
-  /** Tell `onWarning` once per limit and period. */
+  /** Tell `onWarning` once per limit and period. A rolling window has no
+   *  period to start over, so a limit that drops back under its threshold
+   *  is armed again. */
   function announce(
     active: ReadonlyArray<ActiveLimit>,
     warnings: ReadonlyArray<BudgetWarning>,
   ): void {
     for (const { limit, entry } of active) {
       const warning = warnings.find(({ limitId }) => limitId === limit.id)
-      if (!warning) continue
       const key = `${limit.id}@${entry.key}`
+      if (!warning) {
+        warned.delete(key)
+        continue
+      }
       if (warned.has(key)) continue
       warned.add(key)
       try {

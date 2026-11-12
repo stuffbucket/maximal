@@ -8,7 +8,7 @@
  * run.
  */
 
-import { getNanoAiuSpend } from "~/lib/token-usage/spend"
+import { getNanoAiuSpend, getNanoAiuSpendRows } from "~/lib/token-usage/spend"
 import {
   enqueueUsageDbWrite,
   isTokenUsageStorageEnabled,
@@ -25,6 +25,10 @@ export function createUsageDbBudgetStore(): BudgetStore {
     async spend(scope, range) {
       const [sum] = await getNanoAiuSpend(scope, [range])
       return sum
+    },
+
+    spendRows(scope, range) {
+      return getNanoAiuSpendRows(scope, range)
     },
 
     async recover(nowMs) {

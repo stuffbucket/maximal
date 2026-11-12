@@ -140,7 +140,7 @@ export function formatPeriodStart(iso: string, locale: string): string {
 
 /** `<provider>:<window>` of the window a limit follows, or null. */
 export function followedWindow(reset: LimitReset): string | null {
-  return typeof reset === "object" ? reset.follow : null;
+  return typeof reset === "object" && "follow" in reset ? reset.follow : null;
 }
 
 /** The provider's window a `<provider>:<window>` reference names, if it has reported one. */
@@ -249,7 +249,9 @@ export function newLimitId(
 
 /** The reset select's value for a limit: `daily`, `weekly`, `never` or `follow:<ref>`. */
 export function resetChoice(reset: LimitReset): string {
-  return typeof reset === "object" ? `follow:${reset.follow}` : reset;
+  if (typeof reset === "string") return reset;
+  // Rolling and monthly resets have no choice in this editor yet.
+  return "follow" in reset ? `follow:${reset.follow}` : "daily";
 }
 
 /** The inverse of `resetChoice`; unknown text reads as `daily`. */

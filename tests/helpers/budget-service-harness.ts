@@ -132,6 +132,27 @@ export function harness(
       }
       return sum
     },
+    async spendRows(scope, range) {
+      calls.spend.push(range)
+      if (options.spendFails) throw new Error("database is down")
+      const found = rows
+        .filter(
+          (row) =>
+            row.nanoAiu > 0
+            && row.createdAtMs >= range.startMs
+            && (range.endMs === null || row.createdAtMs < range.endMs)
+            && scopeMatches(scope, row),
+        )
+        .map((row) => ({
+          createdAtMs: row.createdAtMs,
+          nanoAiu: row.nanoAiu,
+        }))
+      if (deferred) {
+        deferred.started()
+        await deferred.gate
+      }
+      return found
+    },
     recover() {
       calls.recover += 1
       return Promise.resolve()

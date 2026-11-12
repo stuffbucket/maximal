@@ -4,6 +4,13 @@
  *
  * - `daily` and `weekly` reset at 00:00 UTC (weeks start on Monday); `never`
  *   is a lifetime cap.
+ * - `{ monthly: { day } }` is a calendar month starting at 00:00 UTC on that
+ *   day (1 to 28, so every month has one).
+ * - `{ every: { hours | days } }` is a rolling window: spend counts while it
+ *   is younger than the window, so the oldest counted spend stops counting
+ *   exactly `window` after it was recorded. The period's start moves with
+ *   the clock and its end is that moment, known only from the spend
+ *   (`rollingPeriodEnd`).
  * - `{ follow }` runs from the window's previous reset to the `resetsAt` the
  *   provider last reported, so a reported reset that moves forward starts a
  *   new period. A rolling window runs `durationMs` back from `resetsAt`.
@@ -18,6 +25,7 @@
 import type { BudgetLimitReset } from "./schema"
 
 export const DAY_MS = 86_400_000
+export const HOUR_MS = 3_600_000
 const WEEK_MS = 7 * DAY_MS
 
 /** A provider window as period math needs it. */
@@ -37,6 +45,9 @@ export interface BudgetPeriod {
   basis: "fixed" | "provider" | "fallback"
   /** True when the boundaries are Maximal's guess, not the provider's. */
   estimated: boolean
+  /** Set for a rolling window: its length. `startMs` is the first instant
+   *  that still counts; `endMs` is null until `rollingPeriodEnd` sets it. */
+  rollingMs?: number
 }
 
 export function startOfUtcDay(nowMs: number): number {
@@ -62,6 +73,49 @@ export function fixedPeriod(
   return {
     startMs,
     endMs: startMs + lengthMs,
+    basis: "fixed",
+    estimated: false,
+  }
+}
+
+/** The rolling window of `durationMs` ending now. Spend recorded at `t`
+ *  counts while `nowMs - t < durationMs`. */
+export function rollingPeriod(durationMs: number, nowMs: number): BudgetPeriod {
+  return {
+    startMs: nowMs - durationMs + 1,
+    endMs: null,
+    basis: "fixed",
+    estimated: false,
+    rollingMs: durationMs,
+  }
+}
+
+/** When a rolling window's oldest counted spend stops counting; null with no
+ *  spend in the window (nothing to age out). */
+export function rollingPeriodEnd(
+  oldestSpendMs: number | undefined,
+  durationMs: number,
+): number | null {
+  return oldestSpendMs === undefined ? null : oldestSpendMs + durationMs
+}
+
+/** The length of an `every` reset, in ms. */
+export function everyDurationMs(
+  every: { hours: number } | { days: number },
+): number {
+  return "hours" in every ? every.hours * HOUR_MS : every.days * DAY_MS
+}
+
+/** The calendar month that started at 00:00 UTC on `day` (1 to 28) of this
+ *  or the previous month, whichever is the latest one that has begun. */
+export function monthlyPeriod(day: number, nowMs: number): BudgetPeriod {
+  const now = new Date(nowMs)
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth()
+  const started = nowMs >= Date.UTC(year, month, day) ? month : month - 1
+  return {
+    startMs: Date.UTC(year, started, day),
+    endMs: Date.UTC(year, started + 1, day),
     basis: "fixed",
     estimated: false,
   }
@@ -148,5 +202,9 @@ export function resolvePeriod(
   findWindow: (ref: string) => FollowedWindow | undefined,
 ): BudgetPeriod {
   if (typeof reset === "string") return fixedPeriod(reset, nowMs)
-  return followedPeriod(findWindow(reset.follow), nowMs)
+  if ("follow" in reset) return followedPeriod(findWindow(reset.follow), nowMs)
+  if ("every" in reset) {
+    return rollingPeriod(everyDurationMs(reset.every), nowMs)
+  }
+  return monthlyPeriod(reset.monthly.day, nowMs)
 }

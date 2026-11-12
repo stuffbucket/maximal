@@ -35,10 +35,18 @@ export interface RefusalWords {
   nowMs: number
   inFlight: boolean
   display: BudgetDisplay
+  /** Set for a rolling window: how long spend counts. */
+  rollingMs?: number
 }
 
 function resetSentence(words: RefusalWords): string {
   if (words.inFlight) return "Try again in a moment."
+  if (words.rollingMs !== undefined) {
+    const counts = `Spend counts for ${formatDuration(words.rollingMs)}.`
+    if (words.resetsAtMs === null) return counts
+    const iso = new Date(words.resetsAtMs).toISOString()
+    return `${counts} The oldest ages out ${iso} (in ${formatDuration(words.resetsAtMs - words.nowMs)}).`
+  }
   if (words.resetsAtMs === null) return "It never resets."
   const iso = new Date(words.resetsAtMs).toISOString()
   return `Resets ${iso} (in ${formatDuration(words.resetsAtMs - words.nowMs)}).`
@@ -55,11 +63,11 @@ export function refusalMessage(words: RefusalWords): string {
   let lead: string
   if (words.inFlight) {
     const left = amount(Math.max(0, words.limit - words.used))
-    lead = `Maximal budget "${words.name}" has ${left} left, and requests in progress already hold ${amount(words.held)} of it${need ? `; ${need}` : ""}.`
+    lead = `Maximal rule "${words.name}" has ${left} left, and requests in progress already hold ${amount(words.held)} of it${need ? `; ${need}` : ""}.`
   } else if (words.used >= words.limit) {
-    lead = `Maximal budget "${words.name}" is used up: ${amount(words.used)} of ${amount(words.limit)} used${need ? `; ${need}` : ""}.`
+    lead = `Maximal rule "${words.name}" is used up: ${amount(words.used)} of ${amount(words.limit)} used${need ? `; ${need}` : ""}.`
   } else {
-    lead = `Maximal budget "${words.name}" doesn't have room for this request: ${amount(words.used)} of ${amount(words.limit)} used; ${need}.`
+    lead = `Maximal rule "${words.name}" doesn't have room for this request: ${amount(words.used)} of ${amount(words.limit)} used; ${need}.`
   }
-  return `${lead} ${resetSentence(words)} Raise or remove it in Maximal → Budget.`
+  return `${lead} ${resetSentence(words)} Raise or remove it in Maximal → Rules.`
 }

@@ -194,11 +194,11 @@ describe("a spent limit answers 402", () => {
         spend_usd: 0.01,
         limit_nano_aiu: AIU,
         spend_nano_aiu: AIU,
-        remedy_hint: "Raise or remove it in Maximal → Budget.",
+        remedy_hint: "Raise or remove it in Maximal → Rules.",
       },
     })
-    expect(body.error.message).toContain('Maximal budget "Limit images-daily"')
-    expect(body.error.message).toContain("Maximal → Budget")
+    expect(body.error.message).toContain('Maximal rule "Limit images-daily"')
+    expect(body.error.message).toContain("Maximal → Rules")
     expect(body.error.metadata.resets_at).toMatch(/T00:00:00\.000Z$/u)
     expect(upstreamCalls).toBe(0)
   })
@@ -568,9 +568,9 @@ describe("a server tool under a limit", () => {
       is_error: true,
     })
     const text = toolText(refused)
-    expect(text).toStartWith('Not run: Maximal budget "Limit tools" is used up')
-    expect(text).toContain("Maximal → Budget")
-    expect(text).toContain("Don't retry this tool until the budget resets")
+    expect(text).toStartWith('Not run: Maximal rule "Limit tools" is used up')
+    expect(text).toContain("Maximal → Rules")
+    expect(text).toContain("Don't retry this tool until the rule resets")
   })
 
   test("a global limit refuses it as well, and the tool never runs", async () => {

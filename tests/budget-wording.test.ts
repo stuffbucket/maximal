@@ -67,19 +67,19 @@ describe("refusalMessage", () => {
 
   test("a spent limit says so, with what this call needs and when it resets", () => {
     expect(refusalMessage(base)).toBe(
-      'Maximal budget "Images per day" is used up: $0.03 of $0.03 used; this request needs about $0.006. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Budget.',
+      'Maximal rule "Images per day" is used up: $0.03 of $0.03 used; this request needs about $0.006. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Rules.',
     )
   })
 
   test("a call that doesn't fit says there's no room for it", () => {
     expect(refusalMessage({ ...base, used: 2.98 * AIU })).toBe(
-      'Maximal budget "Images per day" doesn\'t have room for this request: $0.03 of $0.03 used; this request needs about $0.006. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Budget.',
+      'Maximal rule "Images per day" doesn\'t have room for this request: $0.03 of $0.03 used; this request needs about $0.006. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Rules.',
     )
   })
 
   test("a call with no estimate leaves that clause out", () => {
     expect(refusalMessage({ ...base, requested: 0 })).toBe(
-      'Maximal budget "Images per day" is used up: $0.03 of $0.03 used. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Budget.',
+      'Maximal rule "Images per day" is used up: $0.03 of $0.03 used. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Rules.',
     )
   })
 
@@ -97,7 +97,7 @@ describe("refusalMessage", () => {
       inFlight: true,
     })
     expect(message).toBe(
-      'Maximal budget "Images per day" has $0.02 left, and requests in progress already hold $0.02 of it; this request needs about $0.006. Try again in a moment. Raise or remove it in Maximal → Budget.',
+      'Maximal rule "Images per day" has $0.02 left, and requests in progress already hold $0.02 of it; this request needs about $0.006. Try again in a moment. Raise or remove it in Maximal → Rules.',
     )
     expect(message).not.toContain("Resets")
   })

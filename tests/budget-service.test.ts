@@ -85,11 +85,11 @@ describe("reserve", () => {
       resetEstimated: false,
       inFlight: false,
     })
-    expect(refusal.message).toContain('Maximal budget "Images per day"')
+    expect(refusal.message).toContain('Maximal rule "Images per day"')
     expect(refusal.message).toContain("$0.008 of $0.01 used")
     expect(refusal.message).toContain("this request needs about $0.006")
     expect(refusal.message).toContain("Resets 2026-11-12T00:00:00.000Z")
-    expect(refusal.message).toContain("Maximal → Budget")
+    expect(refusal.message).toContain("Maximal → Rules")
     expect(h.service.heldNanoAiu({ kind: "global" })).toBe(0)
   })
 
