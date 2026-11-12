@@ -59,8 +59,9 @@ export interface ServerToolCall {
   client: string
   /**
    * Who a spend hold for this call is booked to. Set by the host
-   * (`{ plugin, tool }`). Nothing reads or enforces it yet: it is the seam
-   * budget holds will attach to.
+   * (`{ plugin, tool }`). The app core checks the budget limits that cover
+   * that pair before it runs the tool, and answers a refusal as the tool's
+   * result, so `execute` is never called for a refused call.
    */
   budget?: ServerToolBudget
 }

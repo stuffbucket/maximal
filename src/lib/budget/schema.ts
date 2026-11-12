@@ -82,6 +82,9 @@ const BudgetLimitConfigSchema = z
 
 export const BudgetConfigSchema = z
   .object({
+    /** False turns enforcement off (limits are kept and still reported);
+     *  absent means on. */
+    enabled: z.boolean().optional(),
     display: z
       .object({
         unit: BudgetDisplayUnit.optional(),

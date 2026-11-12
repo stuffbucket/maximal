@@ -47,6 +47,10 @@ Headers read:
 
 1. **Rate-limit check** — `checkRateLimit(state)`; a throttled request
    is rejected through the route's `forwardAnthropicError`.
+   **Budget gate** — `admitChat("messages")` right after it: while a
+   budget limit covering the request is spent, the request is refused
+   with `402` / `billing_error` and `x-should-retry: false` (see the
+   auth/transport wire spec's failure table). Nothing is held.
 2. **Unsupported top-level field stripping** —
    `stripUnsupportedTopLevelAnthropicFields()` drops `diagnostics`.
 3. **Model resolution** — `reverseId()`

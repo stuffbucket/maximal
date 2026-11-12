@@ -780,6 +780,8 @@ export const BudgetLimitStatus = z.object({
   limit_remaining: NanoAiuAmount,
   /** Spend in the current period. */
   usage: NanoAiuAmount,
+  /** Held by calls in progress (their estimates), not yet spent. */
+  held: NanoAiuAmount,
   /** Spend since 00:00 UTC today, and since Monday 00:00 UTC. */
   usage_daily: NanoAiuAmount,
   usage_weekly: NanoAiuAmount,
@@ -835,6 +837,9 @@ export type ProviderQuotaWindowStatus = z.infer<
 
 /** GET /settings/api/budget, and the reply to every limit change. */
 export const BudgetStatusResponse = z.object({
+  /** False when enforcement is switched off: limits are kept and reported,
+   *  none refuses a request. */
+  enabled: z.boolean(),
   display: z.object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate }),
   /** False when there is no usage database: every spend reads 0. */
   storage_enabled: z.boolean(),
@@ -845,6 +850,42 @@ export const BudgetStatusResponse = z.object({
   provider_windows: z.array(ProviderQuotaWindowStatus),
 })
 export type BudgetStatusResponse = z.infer<typeof BudgetStatusResponse>
+
+/** GET /settings/api/budget/activity: what was spent in the period so far,
+ *  grouped, biggest spender first (by day, oldest first). Rows that spent
+ *  nothing are left out. */
+export const BudgetActivityResponse = z.object({
+  period: z.enum(["day", "week", "month"]),
+  group: z.enum(["model", "plugin", "key", "provider", "day"]),
+  /** 00:00 UTC today, on Monday, or on the 1st. */
+  period_start: z.string(),
+  display: z.object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate }),
+  rows: z.array(
+    z.object({
+      /** The group's value; null for rows with none (no plugin, say). */
+      key: z.string().nullable(),
+      nano_aiu: NanoAiuAmount,
+      requests: z.number().int().min(0),
+      /** `nano_aiu` in the display unit. */
+      amount: z.number().min(0),
+    }),
+  ),
+})
+export type BudgetActivityResponse = z.infer<typeof BudgetActivityResponse>
+
+/** Body of PATCH /settings/api/budget. */
+export const BudgetSettingsPatchRequest = z
+  .object({
+    enabled: z.boolean().optional(),
+    display_unit: BudgetDisplayUnit.optional(),
+  })
+  .strict()
+  .refine((body) => Object.keys(body).length > 0, {
+    message: "give enabled or display_unit",
+  })
+export type BudgetSettingsPatchRequest = z.infer<
+  typeof BudgetSettingsPatchRequest
+>
 
 /** Body of PUT /settings/api/budget/limits/:id, which creates or replaces
  *  the limit. Give the amount as `limit` (nano-AIU) or as `amount` in the

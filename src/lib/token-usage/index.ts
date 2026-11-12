@@ -1,6 +1,7 @@
 import { requestContext, generateTraceId } from "~/lib/http/request-context"
 import { state } from "~/lib/runtime-state/state"
 import { pricedModelIsPaid } from "~/services/copilot/get-models"
+import { COPILOT_PROVIDER_ID } from "~/services/copilot/upstream-request"
 
 import type { RequestContextWindow } from "./request-meta"
 
@@ -125,7 +126,11 @@ function toPersistedEvent(
     input_tokens: normalizeToken(input.input_tokens),
     model: input.model.trim() || "unknown",
     output_tokens: normalizeToken(input.output_tokens),
-    provider_name: input.providerName?.trim() || null,
+    // Every row names the provider that billed it; Copilot's chat paths
+    // don't pass one.
+    provider_name:
+      input.providerName?.trim()
+      || (input.source === "copilot" ? COPILOT_PROVIDER_ID : null),
     session_id: resolveTokenUsageSessionId(
       input.sessionId,
       input.fallbackSessionId,
@@ -223,6 +228,14 @@ tokenUsageEventBus.subscribe("token_usage.recorded", enqueueTokenUsageWrite)
 /** Called after each request that used tokens. Returns an unsubscribe. */
 export function onTokenUsageRecorded(listener: () => void): () => void {
   return tokenUsageEventBus.subscribe("token_usage.recorded", () => listener())
+}
+
+/** Like `onTokenUsageRecorded`, with the recorded row. Runs after the row is
+ *  queued for storage, so a read that waits for the queue includes it. */
+export function onTokenUsageEvent(
+  listener: (event: PersistedTokenUsageEvent) => void,
+): () => void {
+  return tokenUsageEventBus.subscribe("token_usage.recorded", listener)
 }
 
 export function recordTokenUsageEvent(input: TokenUsageEventInput): void {

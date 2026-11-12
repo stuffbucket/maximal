@@ -2,6 +2,7 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
+import { admitChat } from "~/lib/budget/runtime"
 import { anthropicMessagesConfig, getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
@@ -277,6 +278,7 @@ function respondIfWarmup(
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
+  await admitChat("messages")
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   stripUnsupportedTopLevelAnthropicFields(anthropicPayload)

@@ -19,6 +19,7 @@
 
 import type {
   AuthStatus,
+  BudgetStatusResponse,
   PluginsListResponse,
 } from "~/lib/config/settings-types"
 
@@ -30,6 +31,9 @@ export interface SettingsEventMap {
   /** A plugin's lifecycle, status, tools or client choice changed; identical
    *  to GET /settings/api/plugins. */
   "plugins.changed": PluginsListResponse
+  /** A limit was added, changed or removed, or one crossed its warning
+   *  threshold; identical to GET /settings/api/budget. */
+  "budget.changed": BudgetStatusResponse
 }
 
 export const settingsEventBus = new EventBus<SettingsEventMap>()

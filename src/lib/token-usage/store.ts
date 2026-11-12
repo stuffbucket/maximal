@@ -2,6 +2,7 @@ import consola from "consola"
 import path from "node:path"
 import { z } from "zod"
 
+import { BUDGET_HOLDS_MIGRATION } from "~/lib/budget/migrations"
 import { PATHS } from "~/lib/platform/paths"
 import { registerProcessCleanup } from "~/lib/platform/process-cleanup"
 import {
@@ -292,6 +293,7 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
       )
     },
   },
+  BUDGET_HOLDS_MIGRATION,
 ]
 
 /** Migration step 2's columns: which client sent a request, how long its
