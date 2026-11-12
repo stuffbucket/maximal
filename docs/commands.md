@@ -170,7 +170,7 @@ It's an isolated package (`packages/storybook`, its own pnpm lockfile):
 
 ```sh
 bun run storybook:install   # once, or after packages/storybook/pnpm-lock.yaml changes
-bun run storybook           # dev server on :6006; restages the window stories on save
+bun run storybook           # dev server on :6006 (or the next free port); restages on save
 bun run storybook:build     # static build → packages/storybook/storybook-static
 bun run storybook:check     # fixtures vs. API schemas + stories vs. component props
 ```
