@@ -1,193 +1,21 @@
 /**
- * The budget service: holds, decisions and the spend ledger, with an injected
- * clock, config, store, provider windows and usage stream (nothing here
- * touches the real database or module-mocks anything).
+ * The budget service: holds, decisions and the spend ledger, through the
+ * injected-dependency harness in `helpers/budget-service-harness.ts`. The
+ * boundary, scoping and stored-field cases are in
+ * `budget-service-boundaries.test.ts`.
  */
 
 import { describe, expect, test } from "bun:test"
 
-import type { FollowedWindow } from "~/lib/budget/periods"
-import type { BudgetConfig } from "~/lib/budget/schema"
-
-import { scopeMatches } from "~/lib/budget/scope"
 import {
-  createBudgetService,
-  type BudgetIntent,
-  type BudgetStore,
-  type BudgetWarning,
-  type SpendEvent,
-  type StoredHold,
-} from "~/lib/budget/service"
-
-const AIU = 1_000_000_000
-const NOON = Date.UTC(2026, 10, 11, 12, 0, 0)
-const MIDNIGHT = Date.UTC(2026, 10, 12, 0, 0, 0)
-
-type Limit = NonNullable<BudgetConfig["limits"]>[number]
-
-function limit(overrides: Partial<Limit> & { id: string }): Limit {
-  return {
-    scope: { kind: "global" },
-    limit: AIU,
-    limitReset: "daily",
-    action: "block",
-    ...overrides,
-  }
-}
-
-function event(overrides: Partial<SpendEvent> = {}): SpendEvent {
-  return {
-    createdAtMs: NOON - 60_000,
-    nanoAiu: 0,
-    key: "claude-code",
-    provider: "copilot",
-    ...overrides,
-  }
-}
-
-function intent(overrides: Partial<BudgetIntent> = {}): BudgetIntent {
-  return {
-    operation: "images.generations",
-    key: "claude-code",
-    provider: "copilot",
-    plugin: "images",
-    estimateNanoAiu: 0,
-    ...overrides,
-  }
-}
-
-interface Harness {
-  service: ReturnType<typeof createBudgetService>
-  setNow(ms: number): void
-  setConfig(config: BudgetConfig | undefined): void
-  setWindow(ref: string, window: FollowedWindow | undefined): void
-  /** Record a usage row: stored, then announced, like the real recorder. */
-  emit(row: SpendEvent): void
-  rows: Array<SpendEvent>
-  warnings: Array<BudgetWarning>
-  calls: {
-    spend: Array<{ startMs: number; endMs: number | null }>
-    recover: number
-    subscribed: number
-    opened: Array<StoredHold>
-    closed: Array<{
-      id: string
-      state: string
-      actualNanoAiu?: number
-      closedAtMs: number
-    }>
-  }
-  /** Hold every store read until `releaseSpend()`. */
-  deferSpend(): { started: Promise<void>; release(): void }
-}
-
-function harness(
-  limits: Array<Limit>,
-  options: { spendFails?: boolean; enabled?: boolean } = {},
-): Harness {
-  let now = NOON
-  let config: BudgetConfig | undefined = {
-    limits,
-    ...(options.enabled === undefined ? {} : { enabled: options.enabled }),
-  }
-  const windows = new Map<string, FollowedWindow>()
-  const rows: Array<SpendEvent> = []
-  const listeners = new Set<(row: SpendEvent) => void>()
-  const warnings: Array<BudgetWarning> = []
-  let deferred: { started(): void; gate: Promise<void> } | undefined
-  const calls: Harness["calls"] = {
-    spend: [],
-    recover: 0,
-    subscribed: 0,
-    opened: [],
-    closed: [],
-  }
-
-  const store: BudgetStore = {
-    async spend(scope, range) {
-      calls.spend.push(range)
-      if (options.spendFails) throw new Error("database is down")
-      // Rows recorded before the read are in it; later ones are not.
-      const sum = rows
-        .filter(
-          (row) =>
-            row.createdAtMs >= range.startMs
-            && (range.endMs === null || row.createdAtMs < range.endMs)
-            && scopeMatches(scope, row),
-        )
-        .reduce((total, row) => total + row.nanoAiu, 0)
-      if (deferred) {
-        deferred.started()
-        await deferred.gate
-      }
-      return sum
-    },
-    recover() {
-      calls.recover += 1
-      return Promise.resolve()
-    },
-    openHold(hold) {
-      calls.opened.push(hold)
-    },
-    closeHold(close) {
-      calls.closed.push(close)
-    },
-  }
-
-  const service = createBudgetService({
-    clock: () => now,
-    config: () => config,
-    store,
-    windows: {
-      lookup: (ref) => windows.get(ref),
-      ready: () => Promise.resolve(),
-    },
-    spendEvents: (listener) => {
-      calls.subscribed += 1
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    onWarning: (warning) => warnings.push(warning),
-  })
-
-  return {
-    service,
-    setNow: (ms) => {
-      now = ms
-    },
-    setConfig: (next) => {
-      config = next
-    },
-    setWindow: (ref, window) => {
-      if (window) windows.set(ref, window)
-      else windows.delete(ref)
-    },
-    emit: (row) => {
-      rows.push(row)
-      for (const listener of listeners) listener(row)
-    },
-    rows,
-    warnings,
-    calls,
-    deferSpend: () => {
-      const gate = Promise.withResolvers<undefined>()
-      const started = Promise.withResolvers<undefined>()
-      deferred = {
-        started: () => {
-          started.resolve(undefined)
-        },
-        gate: gate.promise,
-      }
-      return {
-        started: started.promise,
-        release: () => {
-          deferred = undefined
-          gate.resolve(undefined)
-        },
-      }
-    },
-  }
-}
+  AIU,
+  MIDNIGHT,
+  NOON,
+  event,
+  harness,
+  intent,
+  limit,
+} from "./helpers/budget-service-harness"
 
 describe("with no limit that covers the call", () => {
   test("admits without a hold, a database read or a subscription", async () => {
@@ -200,7 +28,10 @@ describe("with no limit that covers the call", () => {
     )
 
     expect(decision.ok).toBe(true)
-    if (decision.ok) expect(decision.hold.estimateNanoAiu).toBe(0)
+    if (decision.ok) {
+      expect(decision.hold.estimateNanoAiu).toBe(0)
+      expect(decision.warnings).toEqual([])
+    }
     expect(h.calls.spend).toHaveLength(0)
     expect(h.calls.opened).toHaveLength(0)
   })
@@ -652,7 +483,7 @@ describe("holds in the store", () => {
     ])
 
     decision.hold.release("upstream-error")
-    expect(h.calls.closed).toEqual([
+    expect(h.calls.closed).toStrictEqual([
       { id: decision.hold.id, state: "released", closedAtMs: NOON },
     ])
   })
