@@ -8,14 +8,19 @@ import type { Context } from "hono"
 import { streamSSE } from "hono/streaming"
 
 import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
+import type { UsageTokens } from "~/lib/token-usage"
 import type { Model } from "~/services/copilot/get-models"
 
 import { emitStreamError } from "~/routes/messages/stream-error"
 
+import type { ServerToolPlan } from "../server-tools/types"
+
 import { type FlowBaseOptions } from "../api-flows"
+import { applyServerToolDeclarations } from "../server-tools/plan"
 import { runAgentLoop } from "./agent"
 import { type Executor, selectExecutor } from "./executor"
-import { attachClientShims, type WebToolPolicy } from "./rewriter"
+import { planWebTools } from "./listings"
+import { type WebToolPolicy } from "./rewriter"
 import { runStreamingAgent } from "./stream"
 import {
   buildCallOnce,
@@ -34,6 +39,12 @@ export interface WebToolsFlowArgs {
   /** Catalog entry for the resolved model; picks each turn's transport. */
   selectedModel?: Model
   executor?: Executor
+  /** The server tools this request offers, from `planServerTools`. Absent:
+   *  the web tools `policy` declares. */
+  serverTools?: ServerToolPlan
+  /** Told the request's total usage once the loop finished. Web-tools
+   *  requests leave it out and record nothing here, as before. */
+  recordUsage?: (usage: UsageTokens) => void
   /** Which transports this request may use. Omitted: today's web-tools
    *  choice (`/responses` or chat completions), see {@link TransportPolicy}. */
   transportPolicy?: TransportPolicy
@@ -43,7 +54,10 @@ export interface WebToolsFlowArgs {
 
 export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
   const { c, payload, options, policy, selectedModel } = args
-  attachClientShims(payload, policy)
+  const executor = args.executor ?? selectExecutor()
+  const serverTools =
+    args.serverTools ?? planWebTools({ payload, policy, executor })
+  applyServerToolDeclarations(payload, serverTools)
   const wantsStream = payload.stream === true
 
   const transport = selectTurnTransport(selectedModel, args.transportPolicy)
@@ -58,8 +72,6 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
     deps: args.deps,
   })
 
-  const executor = args.executor ?? selectExecutor()
-
   if (!wantsStream) {
     const finalResponse = await runAgentLoop({
       initialPayload: payload,
@@ -67,6 +79,8 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
       executor,
       callOnce: buildCallOnce(upstream),
       logger: options.logger,
+      serverTools,
+      recordUsage: args.recordUsage,
     })
     return c.json(finalResponse)
   }
@@ -85,6 +99,8 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
         transport,
         deps: upstream.deps,
         anthropicBetaHeader: upstream.anthropicBetaHeader,
+        serverTools,
+        recordUsage: args.recordUsage,
       })
     } catch (error) {
       await emitStreamError(stream, options.logger, {

@@ -15,6 +15,7 @@ import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import * as figjam from "@stuffbucket/maximal-plugin-figjam"
 import {
   createPluginHost,
+  serverToolsService,
   type HostServices,
   operationsService,
   type PluginModule,
@@ -126,6 +127,7 @@ export function composePluginGateway(
       extra: [
         operationsService,
         providersService([createCopilotProvider(options.copilot)]),
+        serverToolsService,
       ],
     },
   })

@@ -10,6 +10,8 @@ import type {
   PluginToolsSource,
   PluginToolListing,
   PluginToolView,
+  ServerToolCall,
+  ServerToolView,
   ToolCallContext,
   ToolDefinitionPublic,
   ToolPermission,
@@ -62,6 +64,8 @@ import {
   type PluginStorageBackend,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
 import path from "node:path"
+
+import { listServerToolViews, runServerTool } from "./server-tools"
 
 /** The size the SDK refuses to read a settings file above (1 MiB). */
 const MAX_SETTINGS_FILE_BYTES = 1024 * 1024
@@ -354,6 +358,37 @@ class PluginHost implements PluginGateway {
     const signal =
       lifetime ? AbortSignal.any([call.signal, lifetime]) : call.signal
     return await invokeTool(tool, input, { ...call, signal })
+  }
+
+  serverTools(): Array<ServerToolView> {
+    const active = [...this.#records.values()]
+      .filter((record) => record.lifecycle === "active")
+      .map((record) => record.id)
+    return listServerToolViews(this.#runtime, active)
+  }
+
+  // eslint-disable-next-line max-params -- implements the PluginGateway.callServerTool contract
+  async callServerTool(
+    pluginId: string,
+    name: string,
+    input: Record<string, unknown>,
+    call: ServerToolCall,
+  ): Promise<ToolResult> {
+    const record = this.#activeRecord(pluginId)
+    const tool = this.#runtime.serverTool(pluginId, name)
+    if (!tool)
+      throw new PluginGatewayError(
+        "unknown-tool",
+        pluginId,
+        `Plugin "${pluginId}" has no server tool "${name}".`,
+      )
+    return await runServerTool({
+      tool,
+      pluginId,
+      input,
+      call,
+      lifetime: record.lifetime?.signal,
+    })
   }
 
   async runAction(

@@ -17,6 +17,7 @@ export { createFileStorage } from "./file-storage"
 export { nonJsonPath, normalizeManifest } from "./manifest"
 export { operationDispatchOf, operationsService } from "./operations"
 export { providersService } from "./providers"
+export { serverToolsService } from "./server-tools"
 export {
   installPluginServices,
   type PluginServiceFactory,

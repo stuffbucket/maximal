@@ -11,7 +11,7 @@ import {
   reverseId,
 } from "~/lib/models/anthropic-id-rewrite"
 import { type AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
-import { COMPACT_REQUEST } from "~/lib/models/compact"
+import { COMPACT_REQUEST, type CompactType } from "~/lib/models/compact"
 import {
   modelMappingErrorBody,
   resolveModelMapping,
@@ -27,6 +27,10 @@ import {
   getRootSessionId,
 } from "~/lib/platform/utils"
 import { state } from "~/lib/runtime-state/state"
+import {
+  createCopilotTokenUsageRecorder,
+  type TokenUsageEndpoint,
+} from "~/lib/token-usage"
 import { deriveUsageClient } from "~/lib/token-usage/client"
 import {
   anthropicCacheTtlSeconds,
@@ -35,6 +39,7 @@ import {
 } from "~/lib/token-usage/request-meta"
 
 import {
+  type FlowBaseOptions,
   handleWithChatCompletions,
   handleWithMessagesApi,
   handleWithResponsesApi,
@@ -52,9 +57,17 @@ import {
   stripUnsupportedTopLevelAnthropicFields,
   stripToolReferenceTurnBoundary,
 } from "./preprocess"
+import { planServerToolsForRequest } from "./server-tools/for-request"
+import { type ServerToolPlan } from "./server-tools/types"
 import { parseSubagentMarkerFromFirstUser } from "./subagent-marker"
 import { isWarmupRequest, respondToWarmup } from "./warmup"
 import { handleWithWebToolsAgent, splitWebTools } from "./web-tools"
+import { type WebToolPolicy } from "./web-tools/rewriter"
+import {
+  selectTurnTransport,
+  type TransportPolicy,
+  type TurnTransport,
+} from "./web-tools/transport"
 
 const logger = createHandlerLogger("messages-handler")
 
@@ -83,6 +96,8 @@ function recordMessagesUsageMeta(input: {
   sessionId: string
   selectedModel: Model | undefined
   isCompact: boolean
+  /** The server-tools loop sends every turn over Responses or chat
+   *  completions, not native Messages. */
   viaWebTools: boolean
 }): void {
   const { c, payload, sessionId, selectedModel, isCompact, viaWebTools } = input
@@ -96,8 +111,8 @@ function recordMessagesUsageMeta(input: {
   setRequestUsage({
     sessionId,
     model: payload.model,
-    // Web tools always go upstream over Responses or chat completions (never
-    // native Messages) with no retention set: the automatic-cache rule.
+    // On the Responses or chat completions transport the request goes
+    // upstream with no retention set: the automatic-cache rule.
     cacheTtlS: viaWebTools ? responsesCacheTtlSeconds(undefined) : cacheTtlS,
     // The lifetime came from the client when it marked anything for caching.
     cacheTtlRequested: !viaWebTools && cacheTtlS > 0,
@@ -108,6 +123,13 @@ function recordMessagesUsageMeta(input: {
       longContext,
     }),
   })
+}
+
+/** The usage endpoint a loop turn on `transport` is recorded under. */
+const USAGE_ENDPOINT: Record<TurnTransport, TokenUsageEndpoint> = {
+  messages: "messages",
+  responses: "responses",
+  chat: "chat_completions",
 }
 
 const UUID_PATTERN =
@@ -145,6 +167,113 @@ function applyModelMapping(
   }
   payload.model = resolveCopilotVariant(c, payload, mapping.resolvedModel)
   return null
+}
+
+/** How a request's server tools take it through the loop. */
+interface ServerToolLoop {
+  plan: ServerToolPlan
+  /** Any server tool was planned, so the loop handles the request. */
+  active: boolean
+  transportPolicy: TransportPolicy | undefined
+  transport: TurnTransport
+}
+
+/**
+ * The server tools this request offers: the web tools the client declared,
+ * plus whatever plugins offer on every agent turn. Any of them sends the
+ * request through the loop. A request that offers an `always` tool goes over
+ * native Messages where the model allows it (thinking, cache_control and
+ * context editing survive); web tools alone keep their own transport.
+ */
+function planServerToolLoop(input: {
+  c: Context
+  payload: AnthropicMessagesPayload
+  webPolicy: WebToolPolicy
+  sessionId: string | undefined
+  compactType: CompactType
+  selectedModel: Model | undefined
+}): ServerToolLoop {
+  const plan = planServerToolsForRequest({
+    payload: input.payload,
+    webPolicy: input.webPolicy,
+    sessionId: input.sessionId,
+    compact: input.compactType !== 0,
+    signal: input.c.req.raw.signal,
+    logger,
+  })
+  const transportPolicy: TransportPolicy | undefined =
+    plan.offersAlways ? { nativeMessages: true } : undefined
+  return {
+    plan,
+    active: plan.tools.size > 0,
+    transportPolicy,
+    transport: selectTurnTransport(input.selectedModel, transportPolicy),
+  }
+}
+
+async function handleViaServerToolLoop(
+  loop: ServerToolLoop,
+  input: {
+    c: Context
+    payload: AnthropicMessagesPayload
+    options: FlowBaseOptions
+    webPolicy: WebToolPolicy
+    selectedModel: Model | undefined
+  },
+): Promise<Response> {
+  const { payload, options } = input
+  return await handleWithWebToolsAgent({
+    c: input.c,
+    payload,
+    options,
+    policy: input.webPolicy,
+    selectedModel: input.selectedModel,
+    serverTools: loop.plan,
+    transportPolicy: loop.transportPolicy,
+    // Requests that only carry web tools have never recorded their usage
+    // here; ones the loop took over from the ordinary flows must.
+    recordUsage:
+      loop.plan.offersAlways ?
+        createCopilotTokenUsageRecorder({
+          endpoint: USAGE_ENDPOINT[loop.transport],
+          fallbackSessionId: options.sessionId,
+          model: payload.model,
+          sessionId: resolveMessagesUsageSessionId(payload, options.sessionId),
+        })
+      : undefined,
+  })
+}
+
+/**
+ * Claude Code 2.0.28+ fires a tool-less "Warmup" request on startup (and
+ * around subagent spawns) that today round-trips upstream (~4s p50). When
+ * the request precisely matches the warmup shape, short-circuit it with a
+ * canned local response — no upstream call, no model mutation. The detector
+ * errs tight (a false positive would canned-respond to a real request); we
+ * also require the anthropic-beta header (warmups always carry it) to be
+ * extra conservative. Non-warmup no-tool turns fall through untouched.
+ */
+function respondIfWarmup(
+  c: Context,
+  payload: AnthropicMessagesPayload,
+  request: { anthropicBeta: string | undefined; compactType: CompactType },
+): Response | undefined {
+  const noTools = !payload.tools || payload.tools.length === 0
+  if (!request.anthropicBeta || !noTools || request.compactType !== 0) {
+    return undefined
+  }
+  if (isWarmupRequest(payload)) {
+    logger.debug("warmup short-circuit", {
+      model: payload.model,
+      stream: payload.stream ?? false,
+    })
+    return respondToWarmup(c, payload)
+  }
+  debugLazy(logger, () => [
+    "no-tool beta request, not warmup-shaped",
+    { msgCount: payload.messages.length },
+  ])
+  return undefined
 }
 
 export async function handleCompletion(c: Context) {
@@ -186,29 +315,13 @@ export async function handleCompletion(c: Context) {
     c.req.header("x-claude-code-compaction"),
   )
 
-  // Claude Code 2.0.28+ fires a tool-less "Warmup" request on startup (and
-  // around subagent spawns) that today round-trips upstream (~4s p50). When
-  // the request precisely matches the warmup shape, short-circuit it with a
-  // canned local response — no upstream call, no model mutation. The detector
-  // errs tight (a false positive would canned-respond to a real request); we
-  // also require the anthropic-beta header (warmups always carry it) to be
-  // extra conservative. Non-warmup no-tool turns fall through untouched.
   const anthropicBeta = c.req.header("anthropic-beta")
   logger.debug("Anthropic Beta header:", anthropicBeta)
-  const noTools = !anthropicPayload.tools || anthropicPayload.tools.length === 0
-  if (anthropicBeta && noTools && compactType === 0) {
-    if (isWarmupRequest(anthropicPayload)) {
-      logger.debug("warmup short-circuit", {
-        model: anthropicPayload.model,
-        stream: anthropicPayload.stream ?? false,
-      })
-      return respondToWarmup(c, anthropicPayload)
-    }
-    debugLazy(logger, () => [
-      "no-tool beta request, not warmup-shaped",
-      { msgCount: anthropicPayload.messages.length },
-    ])
-  }
+  const warmup = respondIfWarmup(c, anthropicPayload, {
+    anthropicBeta,
+    compactType,
+  })
+  if (warmup) return warmup
 
   if (compactType) {
     logger.debug("Compact request type:", compactType)
@@ -234,21 +347,31 @@ export async function handleCompletion(c: Context) {
 
   const selectedModel = findEndpointModel(anthropicPayload.model)
   anthropicPayload.model = selectedModel?.id ?? anthropicPayload.model
+
+  const loop = planServerToolLoop({
+    c,
+    payload: anthropicPayload,
+    webPolicy: webToolPolicy,
+    sessionId,
+    compactType,
+    selectedModel,
+  })
+
   recordMessagesUsageMeta({
     c,
     payload: anthropicPayload,
     sessionId: resolveMessagesUsageSessionId(anthropicPayload, sessionId),
     selectedModel,
     isCompact: compactType === COMPACT_REQUEST,
-    viaWebTools: webToolPolicy.declarations.length > 0,
+    viaWebTools: loop.active && loop.transport !== "messages",
   })
 
-  if (webToolPolicy.declarations.length > 0) {
-    return await handleWithWebToolsAgent({
+  if (loop.active) {
+    return await handleViaServerToolLoop(loop, {
       c,
       payload: anthropicPayload,
       options: { subagentMarker, requestId, sessionId, compactType, logger },
-      policy: webToolPolicy,
+      webPolicy: webToolPolicy,
       selectedModel,
     })
   }
