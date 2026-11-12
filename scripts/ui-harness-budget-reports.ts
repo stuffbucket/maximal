@@ -47,6 +47,12 @@ export interface ReportRow {
   provider: string
   nanoAiu: number
   requests: number
+  /** The session the requests belonged to; "" for none (unattributed). */
+  sessionId: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
 }
 
 /** A rule as the replays take it: the shape the service enforces. */
@@ -123,10 +129,12 @@ export function eventsFor(
   scope: Scope,
   fromMs: number,
   toMs: number,
+  only?: (row: ReportRow) => boolean,
 ): Array<UsageEvent> {
   const events: Array<UsageEvent> = []
   for (const row of context.rows) {
     if (row.atMs >= toMs) continue
+    if (only && !only(row)) continue
     if (!rowInScope(row, scope, context.filters)) continue
     const count = Math.max(1, row.requests)
     const base = Math.floor(row.nanoAiu / count)
@@ -436,6 +444,9 @@ export function simulateDraft(
   context: ReportContext,
   draft: ReportLimit,
   window: { fromMs: number; toMs: number },
+  only?: (row: ReportRow) => boolean,
+  /** Read usage from here instead of from the start of the draft's first period: a suggestion replays what it was sized from, nothing earlier. */
+  readFrom?: number,
 ): BudgetSimulationResult {
   const { fromMs, toMs } = window
   const source = periodsInRange(draft.limitReset, context.findWindow, { fromMs, toMs, nowMs: context.nowMs })
@@ -446,7 +457,7 @@ export function simulateDraft(
     : rolling ? fromMs - (rollingMs ?? 0)
     : source[0].endMs === null ? fromMs
     : Math.min(fromMs, source[0].startMs)
-  const events = eventsFor(context, draft.scope, readFromMs, toMs)
+  const events = eventsFor(context, draft.scope, readFrom ?? readFromMs, toMs, only)
   const ledger = createLedger(source)
   const periods: Array<SimPeriod> = rolling ?
       []

@@ -135,3 +135,11 @@ export const SaveFailure: Story = {
     );
   },
 };
+
+/**
+ * A model a rule names carries a shield-check that opens those rules: here the Claude models (a filter with a
+ * glob) and GPT-6.1 Sol. Rules that cover everything are said once above the list, not on every row.
+ */
+export const WithRules = state({ scenario: "budget-filters" });
+/** No rules: nothing is marked and nothing is said. */
+export const WithoutRules = state({ scenario: "budget-empty" });

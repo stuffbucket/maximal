@@ -3,6 +3,7 @@ import { t } from "../../../i18n";
 import {
   type ActivityGroup,
   type BudgetScope,
+  type LimitReset,
   type ResetDescription,
   formatDayKey,
   formatHourKey,
@@ -78,6 +79,26 @@ export function amountIn(unit: "cost" | "tokens", format: BudgetFormat): (value:
   return unit === "tokens" ?
       (value) => t("budget-tokens-amount", { n: value })
     : (value) => format.nanoMoney(value);
+}
+
+/** What a session is called in the picker: its key's label or client, or what its requests have in common when they carried no session id. */
+export function sessionName(session: { attributed: boolean; client: string; client_label: string | null }): string {
+  const who = session.client_label ?? session.client;
+  return session.attributed ? who : t("budget-session-unattributed", { client: who });
+}
+
+/** How a draft rule's reset reads: "Every day at 00:00 UTC", "Rolling 5 hours". */
+export function draftResetName(reset: LimitReset, windowLabel: (ref: string) => string): string {
+  if (typeof reset === "string") return t(`budget-reset-option-${reset}`);
+  if ("follow" in reset) return t("budget-reset-option-follow", { window: windowLabel(reset.follow) });
+  if ("every" in reset) {
+    const every = reset.every;
+    const [unit, n] = "minutes" in every ? (["minutes", every.minutes] as const)
+      : "hours" in every ? (["hours", every.hours] as const)
+      : (["days", every.days] as const);
+    return t("budget-draft-reset-rolling", { unit, n });
+  }
+  return t("budget-draft-reset-monthly", { day: reset.monthly.day });
 }
 
 /** When a limit resets, as a sentence: "Resets in 3 hours", "Never resets". */

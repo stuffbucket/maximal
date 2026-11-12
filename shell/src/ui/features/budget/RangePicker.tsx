@@ -11,6 +11,7 @@ interface RangePickerProps {
   presets?: ReadonlyArray<RangePreset>;
   /** Offer a custom pair of days. On by default. */
   custom?: boolean;
+  disabled?: boolean;
 }
 
 /** What a range option reads as: "24 hours", "7 days", "All time", "Custom". */
@@ -37,7 +38,7 @@ export function rangeLabel(kind: RangeKind): string {
  * like everything the API counts, and the second is the last day included. A
  * range that runs backwards says so under the fields and asks for nothing.
  */
-export function RangePicker({ id, value, onChange, presets = RANGE_PRESETS, custom = true }: RangePickerProps): JSX.Element {
+export function RangePicker({ id, value, onChange, presets = RANGE_PRESETS, custom = true, disabled = false }: RangePickerProps): JSX.Element {
   const kinds: Array<RangeKind> = custom ? [...presets, "custom"] : [...presets];
   const backwards = value.range === "custom" && value.from !== "" && value.to !== "" && customSpan(value) === null;
   return (
@@ -49,6 +50,7 @@ export function RangePicker({ id, value, onChange, presets = RANGE_PRESETS, cust
             type="button"
             className="range-seg__option"
             aria-pressed={value.range === kind}
+            disabled={disabled}
             onClick={() => onChange({ ...value, range: kind })}
           >
             {rangeLabel(kind)}
@@ -66,6 +68,7 @@ export function RangePicker({ id, value, onChange, presets = RANGE_PRESETS, cust
               value={value.from}
               max={value.to || undefined}
               aria-invalid={backwards || undefined}
+              disabled={disabled}
               onChange={(event) => onChange({ ...value, from: event.target.value })}
             />
           </div>
@@ -78,6 +81,7 @@ export function RangePicker({ id, value, onChange, presets = RANGE_PRESETS, cust
               value={value.to}
               min={value.from || undefined}
               aria-invalid={backwards || undefined}
+              disabled={disabled}
               onChange={(event) => onChange({ ...value, to: event.target.value })}
             />
           </div>

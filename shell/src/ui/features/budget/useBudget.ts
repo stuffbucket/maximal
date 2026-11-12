@@ -51,6 +51,9 @@ export function useBudget(): UseBudget {
     setStatus(next);
     setProblem(null);
     setVersion((v) => v + 1);
+    // The Models island is mounted beside this one. Share this stream's status
+    // rather than opening a second permanent EventSource for its rule badges.
+    window.dispatchEvent(new CustomEvent<BudgetStatusResponse>("maximal:budget-status", { detail: next }));
   }, []);
 
   const load = useCallback(async () => {

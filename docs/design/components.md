@@ -227,6 +227,37 @@ no heading repeats it.
   threshold, `--status-error` once spent; the track is a pale step of the same
   color. No rule exists until someone adds it, so the empty state is an
   `EmptyState` with "Add a rule"; there are never per-model rows.
+- **Rules from sessions.** Beside "Add a rule" (a quiet ghost button,
+  `.budget-block__actions`) sits "Create rules from sessions", which opens a native
+  `<dialog>` in the editor's shell (`.budget-sessions`) with two steps. *Pick*: a
+  `RangePicker` and the sessions in it (`GET .../sessions`, biggest spender first,
+  twelve shown, "Show all" for the rest), each row a checkbox label: the client or key,
+  when it started (UTC), its requests and minutes, its model mix as text ("claude-sonnet
+  62%, claude-opus 30%, and 2 more") and its cost. Picks survive a change of range
+  (a line says how many sit outside the one shown); none picked means all usage in the
+  range, which the button says. A select chooses the shape of the rules (Let Maximal
+  choose, Trying things out, Daily driver, Heavy agent use, Team; their amounts always
+  come from what was picked). *Review*: the suggestion (`POST .../suggest`) as a
+  hairline-divided list (`.draft`): the rule's name, scope chip and amount with its
+  reset, what it would have done to the usage it was sized from ("Over 36 periods it
+  would have been reached in 4 and refused 573 requests ($2.49)"), how the amount was
+  reached, and two actions: **Open in editor** (the editor opens over the dialog,
+  filled in, with its What if; a draft whose reset the editor cannot set yet, such as a
+  rolling one, can only be added) and **Add rule** (the row then says Added and stays).
+  "Add all N" adds the rest and stops at the first that fails, whose row says why.
+  `short_history` and `no_spend` notes are notices. Nothing picked or suggested is lost
+  to a stray click: once something is picked the backdrop and Escape do nothing and
+  Cancel or Done is the way out, as in the editor.
+- **Rules for one model.** The Models list marks a model with a shield-check (the glyph
+  of the Rules surface in the top bar, `.model-row__rules`, a link) when a rule names
+  it: a filter of models with a member (exact id or glob) that matches, or the model's
+  provider. A rule that covers everything is not marked on every row, since it would
+  say nothing about any one of them: the list says once, above the models, how many
+  cover everything, with a link to Rules. The shield opens `#rules/model/<id>` (the id
+  escaped), and Rules, which follows its address, lists every rule that applies to that
+  model, including those that cover everything, under a chip ("Showing rules for
+  gpt-6.1-sol", with how many of the rules it is) whose × (or `#rules`) clears it. A
+  model no rule applies to says so under the chip.
 - **How a rule is performing.** Each row carries a sparkline (`.spark`, the last
   seven days' spend, one line in `--series-1`, no axes) in a quiet button
   (`.limit__perf`, `aria-expanded`, a chevron beside it) that opens the rule's

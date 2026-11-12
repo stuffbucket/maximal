@@ -33,6 +33,7 @@ import {
   type BudgetSeed,
   budgetCreditsSeed,
   budgetEmptySeed,
+  budgetFiltersSeed,
   budgetLimitsSeed,
   budgetNoLimitsSeed,
   budgetOffSeed,
@@ -1805,6 +1806,11 @@ export const SCENARIOS = {
   "budget-limits": {
     ...healthy("Rules · rules fine, nearly spent and spent, with activity"),
     budget: budgetLimitsSeed,
+  },
+
+  "budget-filters": {
+    ...healthy("Rules · rules that name models (the Models list marks them)"),
+    budget: budgetFiltersSeed,
   },
 
   "budget-off": {

@@ -22,8 +22,21 @@ import type {
 import { type FollowedWindow, DAY_MS, HOUR_MS, resolvePeriod, startOfUtcDay, startOfUtcWeek } from "../src/lib/budget/periods"
 import { parseUsageRange } from "../src/lib/budget/reports/range"
 import { displayToNanoAiu, nanoAiuToDisplay } from "../src/lib/budget/units"
-import { BudgetLimitPutRequest, BudgetSettingsPatchRequest, BudgetSimulateRequest } from "../src/lib/config/settings-types"
-import { type ReportContext, type ReportLimit, buildTimeline, rowInScope, simulate } from "./ui-harness-budget-reports"
+import {
+  BudgetLimitPutRequest,
+  BudgetSettingsPatchRequest,
+  BudgetSimulateRequest,
+  BudgetSuggestRequest,
+} from "../src/lib/config/settings-types"
+import {
+  type ReportContext,
+  type ReportFilter,
+  type ReportLimit,
+  buildTimeline,
+  rowInScope,
+  simulate,
+} from "./ui-harness-budget-reports"
+import { buildSessions, suggest } from "./ui-harness-budget-sessions"
 
 type Scope = BudgetLimitStatus["scope"]
 type LimitReset = BudgetLimitStatus["limit_reset"]
@@ -63,6 +76,8 @@ export interface BudgetSeed {
   /** False for a first run: the ledger is empty, so nothing has been spent. */
   spending: boolean
   limits: ReadonlyArray<LimitSeed>
+  /** Reusable filters (named sets of models, clients or plugins) a rule's scope can select. */
+  filters?: ReadonlyArray<ReportFilter & { name: string }>
   /** Provider windows, dated relative to now. */
   windows: (nowMs: number) => Array<ProviderQuotaWindowStatus>
 }
@@ -261,8 +276,6 @@ function ledgerFor(nowMs: number): Array<LedgerRow> {
   return rows
 }
 
-const inScope = (row: LedgerRow, scope: Scope): boolean => rowInScope(row, scope, [])
-
 // ---- provider windows ----------------------------------------------------
 
 function monthWindow(nowMs: number, percentRemaining: number): ProviderQuotaWindowStatus {
@@ -346,6 +359,36 @@ export const budgetLimitsSeed: BudgetSeed = {
   windows: (nowMs) => [monthWindow(nowMs, 62.4), chatWindow(nowMs, 8)],
 }
 
+/**
+ * Rules that name models: a daily cap on every Claude model (a filter with a glob) and a weekly
+ * warning on one OpenAI model, next to the others. The Models list marks the models these name.
+ */
+export const budgetFiltersSeed: BudgetSeed = {
+  ...budgetLimitsSeed,
+  filters: [
+    { id: "claude-models", name: "Claude models", kind: "models", members: ["claude-*"] },
+    { id: "gpt-sol", name: "GPT-6.1 Sol", kind: "models", members: ["gpt-6.1-sol"] },
+  ],
+  limits: [
+    ...limitsSeed,
+    {
+      id: "claude-models-daily",
+      label: "Claude models per day",
+      scope: { kind: "filter", id: "claude-models" },
+      limitReset: "daily",
+      action: "block",
+      fill: 0.58,
+    },
+    {
+      id: "gpt-sol-weekly",
+      scope: { kind: "filter", id: "gpt-sol" },
+      limitReset: "weekly",
+      action: "warn",
+      fill: 0.9,
+    },
+  ],
+}
+
 /** The same limits with enforcement switched off: kept, listed, none refuses. */
 export const budgetOffSeed: BudgetSeed = { ...budgetLimitsSeed, enabled: false }
 
@@ -405,6 +448,8 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
   const ledger = seed.storageEnabled && seed.spending ? ledgerFor(startedAt) : []
   const windows = seed.windows(startedAt)
   const state = { enabled: seed.enabled, unit: seed.unit, creditUsd: 0.01 }
+  const filters = seed.filters ?? []
+  const inScope = (row: LedgerRow, scope: Scope): boolean => rowInScope(row, scope, filters)
   const listeners = new Set<(status: BudgetStatusResponse) => void>()
   const held = new Map<string, number>()
 
@@ -508,7 +553,13 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
       budgets,
       effective_budget: (spent ?? tightest)?.id ?? null,
       provider_windows: windows,
-      filters: [],
+      filters: filters.map((filter) => ({
+        id: filter.id,
+        name: filter.name,
+        kind: filter.kind,
+        members: [...filter.members],
+        used_by: limits.filter((entry) => entry.scope.kind === "filter" && entry.scope.id === filter.id).map((entry) => entry.id),
+      })),
     }
   }
 
@@ -613,7 +664,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
 
   const reportContext = (): ReportContext => ({
     rows: ledger,
-    filters: [],
+    filters,
     nowMs: Date.now(),
     findWindow: followable,
     display: display(),
@@ -659,6 +710,25 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
         to: params.get("to") ?? undefined,
         bucket: params.get("bucket") ?? undefined,
       })
+      return "status" in result ? validationError(result.message) : json(result)
+    }
+
+    if (path === "/settings/api/budget/sessions" && method === "GET") {
+      const params = url.searchParams
+      const limit = Number(params.get("limit") ?? 100)
+      const result = buildSessions(reportContext(), {
+        range: params.get("range") ?? undefined,
+        from: params.get("from") ?? undefined,
+        to: params.get("to") ?? undefined,
+        limit: Number.isFinite(limit) ? limit : 100,
+      })
+      return "status" in result ? validationError(result.message) : json(result)
+    }
+
+    if (path === "/settings/api/budget/suggest" && method === "POST") {
+      const body = BudgetSuggestRequest.safeParse(await req.json().catch(() => null))
+      if (!body.success) return validationError("Invalid suggestion request", body.error.issues)
+      const result = suggest(reportContext(), body.data, new Set(limits.map((entry) => entry.id)))
       return "status" in result ? validationError(result.message) : json(result)
     }
 

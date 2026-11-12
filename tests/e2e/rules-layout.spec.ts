@@ -541,3 +541,263 @@ test("the editor with what if still fits a short window and keeps Save reachable
   await dialog.locator(".whatif").scrollIntoViewIfNeeded()
   await page.screenshot({ path: "test-results/rules-whatif-640x480.png" })
 })
+
+// Create rules from sessions: pick sessions, suggest, review, add.
+async function openSessionsDialog(page: Page) {
+  await page.setViewportSize({ width: 900, height: 900 })
+  await page
+    .getByRole("button", { name: "Create rules from sessions" })
+    .first()
+    .click()
+  const dialog = page.locator("dialog.budget-sessions[open]")
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator(".session-row").first()).toBeVisible()
+  return dialog
+}
+
+test("the sessions picker lists what each session cost and the models it used", async ({
+  page,
+}) => {
+  const dialog = await openSessionsDialog(page)
+  const first = dialog.locator(".session-row").first()
+  await expect(first.locator(".session-row__cost")).toContainText("$")
+  await expect(first.locator(".session-row__meta").first()).toContainText(
+    /requests? ·/,
+  )
+  await expect(first.locator(".session-row__meta").nth(1)).toContainText("%")
+  // The biggest spender is first.
+  const costs = await dialog.locator(".session-row__cost").allTextContents()
+  const amounts = costs.map((cost) => Number(cost.replaceAll(/[^0-9.]/g, "")))
+  expect(amounts).toEqual([...amounts].sort((a, b) => b - a))
+})
+
+test("picking sessions changes what the button will size from, and survives a change of range", async ({
+  page,
+}) => {
+  const dialog = await openSessionsDialog(page)
+  const suggest = dialog.locator(".confirm-dialog__actions .btn--primary")
+  await expect(suggest).toHaveText("Suggest rules from all usage in this range")
+  await dialog.locator(".session-row__box").nth(0).check()
+  await dialog.locator(".session-row__box").nth(1).check()
+  await expect(suggest).toHaveText("Suggest rules from 2 sessions")
+  await expect(dialog.locator(".session-footer__sum")).toContainText(
+    "2 sessions picked",
+  )
+  // Another range: what was picked stays picked, and says so when it is out of view.
+  await dialog.getByRole("button", { name: "24 hours" }).click()
+  await expect(suggest).toHaveText("Suggest rules from 2 sessions")
+  // Clearing the picks goes back to all usage in the range.
+  await dialog.getByRole("button", { name: "Clear 2 picked" }).click()
+  await expect(suggest).toHaveText("Suggest rules from all usage in this range")
+})
+
+test("a suggestion shows each rule with what it would have done, and adding keeps the list", async ({
+  page,
+}) => {
+  const before = await page.locator(".limit").count()
+  const dialog = await openSessionsDialog(page)
+  await dialog.locator(".session-row__box").nth(0).check()
+  await dialog.locator(".confirm-dialog__actions .btn--primary").click()
+  const drafts = dialog.locator(".draft")
+  await expect(drafts.first()).toBeVisible()
+  await expect(dialog.locator(".form__hint").first()).toContainText(
+    "Sized from 1 session",
+  )
+  // Each draft says what it would have done and how it was sized.
+  await expect(drafts.first()).toContainText(
+    /it would (have been reached|never have been reached)/,
+  )
+  await expect(drafts.first()).toContainText(/sized to/i)
+  // Adding one leaves the list in place and the row says so.
+  await drafts.first().getByRole("button", { name: /^Add / }).click()
+  await expect(
+    drafts.first().getByRole("button", { name: /is added$/ }),
+  ).toBeDisabled()
+  await expect(page.locator(".limit")).toHaveCount(before + 1)
+  await expect(drafts.first()).toBeVisible()
+})
+
+test("a short history says so and suggests no weekly rule", async ({
+  page,
+}) => {
+  const dialog = await openSessionsDialog(page)
+  await dialog.locator(".confirm-dialog__actions .btn--primary").click()
+  await expect(dialog.locator(".draft").first()).toBeVisible()
+  await expect(dialog.locator(".callout")).toContainText("less than two weeks")
+  await expect(dialog.locator(".draft")).not.toContainText("Weekly cap")
+})
+
+test("with enough history there is a weekly rule too, and add all adds the rest", async ({
+  page,
+}) => {
+  const before = await page.locator(".limit").count()
+  const dialog = await openSessionsDialog(page)
+  await dialog.getByRole("button", { name: "30 days" }).click()
+  await dialog.locator(".confirm-dialog__actions .btn--primary").click()
+  await expect(dialog.locator(".draft").first()).toBeVisible()
+  await expect(dialog.locator(".callout")).toHaveCount(0)
+  await expect(dialog.locator(".draft")).toContainText([
+    "Daily cap",
+    "Weekly cap",
+  ])
+  const count = await dialog.locator(".draft").count()
+  await dialog.getByRole("button", { name: /^Add all/ }).click()
+  await expect(dialog.getByRole("button", { name: "Added" })).toHaveCount(count)
+  await expect(page.locator(".limit")).toHaveCount(before + count)
+})
+
+test("open in editor shows the draft filled in; a rolling draft can only be added", async ({
+  page,
+}) => {
+  let dialog = await openSessionsDialog(page)
+  await dialog.locator(".confirm-dialog__actions .btn--primary").click()
+  const first = dialog.locator(".draft").first()
+  await expect(first).toBeVisible()
+  const name = (await first.locator(".limit__name").textContent()) ?? ""
+  await first.getByRole("button", { name: "Open in editor" }).click()
+  const editor = page.locator(
+    "dialog.budget-editor:not(.budget-sessions)[open]",
+  )
+  await expect(editor).toBeVisible()
+  await expect(editor.getByLabel("Name")).toHaveValue(name)
+  await expect(editor.locator("#budget-field-amount")).not.toHaveValue("")
+  await expect(editor.locator(".whatif")).toBeVisible()
+  await expect(editor).toContainText("Suggested from your sessions")
+  await editor.getByRole("button", { name: "Cancel" }).click()
+  await expect(editor).toBeHidden()
+  // Back in the suggestion, nothing was lost.
+  await expect(first).toBeVisible()
+  // A rolling rule is one the editor can't set yet.
+  await dialog.getByRole("button", { name: "Back" }).click()
+  await dialog
+    .locator("#budget-sessions-persona")
+    .selectOption("heavy-agent-use")
+  await dialog.locator(".confirm-dialog__actions .btn--primary").click()
+  const rolling = dialog.locator(".draft").first()
+  await expect(rolling).toContainText("Rolling 5 hours")
+  await expect(
+    rolling.getByRole("button", { name: "Open in editor" }),
+  ).toBeDisabled()
+  dialog = page.locator("dialog.budget-sessions[open]")
+  await expect(dialog).toBeVisible()
+})
+
+test("the sessions dialog keeps what was picked: backdrop and Escape do nothing until it is untouched", async ({
+  page,
+}) => {
+  const dialog = await openSessionsDialog(page)
+  await dialog.locator(".session-row__box").first().check()
+  await page.mouse.click(4, 4)
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator(".session-row__box").first()).toBeChecked()
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(dialog).toBeHidden()
+  // Untouched, it closes on either.
+  const again = await openSessionsDialog(page)
+  await page.mouse.click(4, 4)
+  await expect(again).toBeHidden()
+})
+
+test("the sessions dialog fits a short window with its buttons reachable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 480 })
+  await page
+    .getByRole("button", { name: "Create rules from sessions" })
+    .first()
+    .click()
+  const dialog = page.locator("dialog.budget-sessions[open]")
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toHaveCSS("opacity", "1")
+  const box = await dialog.boundingBox()
+  expect(box).not.toBeNull()
+  if (!box) return
+  expect(box.y + box.height).toBeLessThanOrEqual(480)
+  await expect(
+    dialog.locator(".confirm-dialog__actions .btn--primary"),
+  ).toBeInViewport()
+  await page.screenshot({ path: "test-results/rules-sessions-640x480.png" })
+})
+
+// Models: a shield on the models a rule names, which opens those rules.
+async function openModels(page: Page) {
+  const reply = await page.request.post(`${BASE}/__harness/scenario`, {
+    data: { id: "budget-filters" },
+  })
+  expect(reply.ok()).toBe(true)
+  // The page is already loaded for another scenario: start over so it reads this one.
+  await page.goto("about:blank")
+  await page.goto(`${BASE}/ui/settings/#models`)
+  await page.addStyleTag({
+    content: "#__harness { display: none !important; }",
+  })
+  await expect(page.locator(".model-row").first()).toBeVisible()
+}
+
+test("the Models list marks the models a rule names, and says once what covers everything", async ({
+  page,
+}) => {
+  await openModels(page)
+  const rowOf = (name: string) =>
+    page.locator(".model-row", { hasText: name }).first()
+  await expect(
+    rowOf("Claude Haiku 5.5").locator(".model-row__rules"),
+  ).toBeVisible()
+  await expect(
+    rowOf("Claude Sonnet 5.5").locator(".model-row__rules"),
+  ).toBeVisible()
+  await expect(rowOf("GPT-6.1 Sol").locator(".model-row__rules")).toBeVisible()
+  // Named by no rule: no shield, however many cover everything.
+  await expect(rowOf("GPT-5.6 Luna").locator(".model-row__rules")).toHaveCount(
+    0,
+  )
+  await expect(page.locator(".models__rules-note")).toContainText(
+    "1 rule covers everything",
+  )
+  await expect(
+    rowOf("GPT-6.1 Sol").locator(".model-row__rules"),
+  ).toHaveAttribute("aria-label", "Show the rule for GPT-6.1 Sol")
+})
+
+test("a model's shield opens Rules filtered to its rules, with a chip that clears", async ({
+  page,
+}) => {
+  await openModels(page)
+  await page
+    .locator(".model-row", { hasText: "Claude Haiku 5.5" })
+    .first()
+    .locator(".model-row__rules")
+    .click()
+  await expect(page.locator('[data-surface-target="rules"]')).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  expect(new URL(page.url()).hash).toBe("#rules/model/claude-haiku-5-5")
+  const chip = page.locator(".rules-filter")
+  await expect(chip).toContainText("Showing rules for claude-haiku-5-5")
+  await expect(chip).toContainText("2 of 6 rules")
+  // The rules that apply to it: the one that covers everything and the Claude filter.
+  await expect(page.locator(".limit")).toHaveCount(2)
+  await expect(page.locator(".limits")).toContainText("Claude models per day")
+  await expect(page.locator(".limits")).not.toContainText("Client codex")
+  // Clearing shows every rule again and rewrites the address.
+  await chip.getByRole("button", { name: "Show all rules" }).click()
+  await expect(page.locator(".limit")).toHaveCount(6)
+  await expect(chip).toBeHidden()
+  expect(new URL(page.url()).hash).toBe("#rules")
+})
+
+test("a model no rule applies to says so, and the chip still clears", async ({
+  page,
+}) => {
+  await page.request.post(`${BASE}/__harness/scenario`, {
+    data: { id: "budget-no-limits" },
+  })
+  await page.goto("about:blank")
+  await page.goto(`${BASE}/ui/settings/#rules/model/gpt-6.1-sol`)
+  await expect(page.locator(".rules-filter")).toContainText("gpt-6.1-sol")
+  await page.getByRole("button", { name: "Show all rules" }).click()
+  await expect(page.locator(".rules-filter")).toBeHidden()
+})
