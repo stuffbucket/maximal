@@ -11,7 +11,10 @@ import type {
 } from "@stuffbucket/maximal-plugin-sdk"
 
 import { isOperationUnavailableError } from "@stuffbucket/maximal-plugin-sdk"
-import { operationsService } from "@stuffbucket/maximal-plugin-sdk/runtime"
+import {
+  createFileStorage,
+  operationsService,
+} from "@stuffbucket/maximal-plugin-sdk/runtime"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { createPluginHost, PluginContractError } from "../src/index"
@@ -174,6 +177,39 @@ describe("operations: registration and lifetime", () => {
       "alpha",
     )
     expect(gateway.operations().resolve("decisions", "other")).toBeUndefined()
+  })
+
+  test("record order wins a duplicate even when the first plugin's settings load last", async () => {
+    const files = createFileStorage(tempDir())
+    const gateway = createPluginHost({
+      plugins: [
+        serving("alpha", [{ model: "m1" }]),
+        serving("beta", [{ model: "other", upstreamModel: "m1" }]),
+      ],
+      services: {
+        host: fakeHost(),
+        storageRoot: tempDir(),
+        extra: [operationsService],
+        // Skew load timing: alpha's settings resolve after beta's.
+        storage: {
+          ...files,
+          dir: (id) => files.dir(id),
+          readText: async (id, name) => {
+            if (id === "alpha") await new Promise((r) => setTimeout(r, 50))
+            return files.readText(id, name)
+          },
+          writeText: (id, name, text) => files.writeText(id, name, text),
+          delete: (id, name) => files.delete(id, name),
+        },
+      },
+    })
+    gateways.push(gateway)
+    await gateway.reconcile({ alpha: on, beta: on })
+    expect(gateway.get("alpha")?.lifecycle).toBe("active")
+    expect(gateway.get("beta")?.lifecycle).toBe("failed")
+    expect(gateway.operations().resolve("decisions", "m1")?.pluginId).toBe(
+      "alpha",
+    )
   })
 
   test("the same upstream model under another operation or provider is not a duplicate", async () => {
