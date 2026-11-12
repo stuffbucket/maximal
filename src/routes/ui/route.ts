@@ -10,7 +10,8 @@ import { contentTypeForPath } from "~/lib/platform/web-content-types"
  *   - /ui/settings  — the React settings app (Bun-bundled)
  *   - /ui/dashboard — the usage dashboard (vanilla)
  *   - /ui/sessions  — the dashboard bundle's Sessions surface
- *   - /ui/budget    — the Budget surface, a section of the settings bundle
+ *   - /ui/rules     — the Rules surface, a section of the settings bundle
+ *     (/ui/budget is its former name and redirects the same way)
  *
  * One serving path for both, dev and prod:
  *   - Production: assets are embedded in the compiled binary via the
@@ -121,9 +122,11 @@ uiRoutes.get("/sessions/", (c) =>
   c.redirect("/ui/dashboard/?surface=sessions", 301),
 )
 
-// Budget is a React section of the Settings bundle, opened by its hash.
-uiRoutes.get("/budget", (c) => c.redirect("/ui/settings/#budget", 301))
-uiRoutes.get("/budget/", (c) => c.redirect("/ui/settings/#budget", 301))
+// Rules is a React section of the Settings bundle, opened by its hash. The
+// surface was called Budget, so old links to /ui/budget keep working.
+for (const path of ["/rules", "/rules/", "/budget", "/budget/"]) {
+  uiRoutes.get(path, (c) => c.redirect("/ui/settings/#rules", 301))
+}
 
 uiRoutes.get("/settings/", () =>
   serve("/ui/settings/index.html", "/ui/settings/index.html"),

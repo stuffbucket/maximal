@@ -1,17 +1,18 @@
-// Layout contracts for the Budget surface. These run against the shared UI
-// harness (scenario `budget-limits`: limits that are fine, nearly spent and
-// spent, with a week of activity).
+// Layout contracts for the Rules surface (called Budget before). These run
+// against the shared UI harness (scenario `budget-limits`: rules that are fine,
+// nearly spent and spent, with a week of activity).
 import { type Page, expect, test } from "@playwright/test"
 
 const BASE = process.env.UI_HARNESS_URL ?? "http://127.0.0.1:4747"
-const BUDGET = `${BASE}/ui/settings/#budget`
+const RULES = `${BASE}/ui/settings/#rules`
+const LEGACY_BUDGET = `${BASE}/ui/settings/#budget`
 
 test.beforeEach(async ({ page, request }) => {
   const res = await request.post(`${BASE}/__harness/scenario`, {
     data: { id: "budget-limits" },
   })
   expect(res.ok(), `UI harness not reachable at ${BASE}`).toBe(true)
-  await page.goto(BUDGET)
+  await page.goto(RULES)
   await page.addStyleTag({
     content: "#__harness { display: none !important; }",
   })
@@ -32,36 +33,57 @@ for (const [width, height] of [
   })
 }
 
+test("the old #budget link lands on Rules and rewrites itself to #rules", async ({
+  page,
+}) => {
+  const landedOnRules = async () => {
+    await expect(page.locator('[data-surface-target="rules"]')).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect(page.locator(".budget h2").first()).toHaveText("Rules")
+    expect(new URL(page.url()).hash).toBe("#rules")
+  }
+  // Followed inside the open window (a hashchange)...
+  await page.goto(`${BASE}/ui/settings/#account`)
+  await page.goto(LEGACY_BUDGET)
+  await landedOnRules()
+  // ...and opened cold (the boot path).
+  await page.goto("about:blank")
+  await page.goto(LEGACY_BUDGET)
+  await landedOnRules()
+})
+
 test("the top bar keeps four surface buttons and hides the Settings tabs", async ({
   page,
 }) => {
   await expect(page.locator("[data-surface-target]")).toHaveCount(4)
-  await expect(page.locator('[data-surface-target="budget"]')).toHaveAttribute(
+  await expect(page.locator('[data-surface-target="rules"]')).toHaveAttribute(
     "aria-pressed",
     "true",
   )
   await expect(page.locator("[data-settings-nav]")).toBeHidden()
 })
 
-test("has one display heading and sections in order: limits, activity, settings", async ({
+test("has one display heading and sections in order: rules, activity, settings", async ({
   page,
 }) => {
   await expect(page.locator(".budget .section__title")).toHaveCount(1)
   const titles = await page.locator(".budget h2").allTextContents()
-  expect(titles).toEqual(["Limits", "Activity", "Settings"])
-  // The switch lives under Settings, below the limits and activity.
+  expect(titles).toEqual(["Rules", "Activity", "Settings"])
+  // The switch lives under Settings, below the rules and activity.
   const limitsBox = await page.locator("#budget-limits-title").boundingBox()
   const enforceBox = await page.locator("#budget-enforce").boundingBox()
   expect(limitsBox && enforceBox && limitsBox.y < enforceBox.y).toBe(true)
 })
 
-test("a one-line status above the limits keeps the switch state in view", async ({
+test("a one-line status above the rules keeps the switch state in view", async ({
   page,
 }) => {
   const status = page.locator("#budget-status")
   await expect(status).toBeVisible()
   await expect(status).toContainText(/Enforcing|Not enforcing/)
-  await expect(status).toContainText(/\d+ limits?/)
+  await expect(status).toContainText(/\d+ rules?/)
   const statusBox = await status.boundingBox()
   const limitsBox = await page.locator("#budget-limits-title").boundingBox()
   expect(statusBox && limitsBox && statusBox.y < limitsBox.y).toBe(true)
@@ -78,7 +100,7 @@ test("the export button says what it downloads", async ({ page }) => {
   )
 })
 
-test("limit meters name their figures and a spent limit says so", async ({
+test("rule meters name their figures and a spent rule says so", async ({
   page,
 }) => {
   const meters = page.locator(".limit [role=meter]")
@@ -105,9 +127,9 @@ test("the editor dialog fits a short window and keeps its buttons reachable", as
   expect(box.y).toBeGreaterThanOrEqual(0)
   expect(box.y + box.height).toBeLessThanOrEqual(480)
   await expect(
-    dialog.getByRole("button", { name: "Save limit" }),
+    dialog.getByRole("button", { name: "Save rule" }),
   ).toBeInViewport()
-  await page.screenshot({ path: "test-results/budget-editor-640x480.png" })
+  await page.screenshot({ path: "test-results/rules-editor-640x480.png" })
 })
 
 test("a change from elsewhere arrives without reloading", async ({
@@ -128,10 +150,10 @@ test("a change from elsewhere arrives without reloading", async ({
   )
   expect(put.ok()).toBe(true)
   await expect(page.locator(".limit")).toHaveCount(before + 1)
-  await page.screenshot({ path: "test-results/budget-limits.png" })
+  await page.screenshot({ path: "test-results/rules-list.png" })
 })
 
-// The limit editor never throws away what was typed.
+// The rule editor never throws away what was typed.
 async function openAddDialog(page: Page) {
   await page.setViewportSize({ width: 900, height: 700 })
   await page.locator(".budget-block__head .btn").first().click()
@@ -148,7 +170,7 @@ test("a bad amount keeps the editor open with every value, and names the problem
   await dialog.getByLabel("Name").fill("My cap")
   const amount = dialog.locator("#budget-field-amount")
   await amount.fill("lots")
-  await dialog.getByRole("button", { name: "Save limit" }).click()
+  await dialog.getByRole("button", { name: "Save rule" }).click()
   await expect(dialog).toBeVisible()
   await expect(dialog.locator(".budget-field__error")).toContainText(
     "Enter an amount like 100 or $100",
@@ -161,7 +183,7 @@ test("a bad amount keeps the editor open with every value, and names the problem
   await expect(amount).toBeFocused()
   // Zero is a different problem and says so.
   await amount.fill("0")
-  await dialog.getByRole("button", { name: "Save limit" }).click()
+  await dialog.getByRole("button", { name: "Save rule" }).click()
   await expect(dialog.locator(".budget-field__error")).toContainText(
     "above zero",
   )
@@ -190,7 +212,7 @@ test("a click on the backdrop or Escape leaves an edited editor open", async ({
   await expect(amount).toHaveValue("lots")
   // Fixing the amount and saving still works, with the unit typed in.
   await amount.fill("$100")
-  await dialog.getByRole("button", { name: "Save limit" }).click()
+  await dialog.getByRole("button", { name: "Save rule" }).click()
   await expect(dialog).toBeHidden()
 })
 

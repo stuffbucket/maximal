@@ -1,5 +1,5 @@
 /**
- * The Budget window's number, time and grouping logic, free of the DOM and of
+ * The Rules window's number, time and grouping logic, free of the DOM and of
  * the i18n catalog so it can be tested on its own (tests/budget-format.test.ts).
  * Components pass the locale in and wrap these results in catalog strings.
  *

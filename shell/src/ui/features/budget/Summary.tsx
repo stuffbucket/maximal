@@ -40,7 +40,7 @@ function periodKind(limit: BudgetLimitStatus): "daily" | "weekly" | "never" | "c
 }
 
 /**
- * The top of the Budget surface: one line saying whether limits are enforced,
+ * The top of the Rules surface: one line saying whether limits are enforced,
  * how many exist and how far the headline one is, so the state is in view
  * without scrolling to the settings, then whatever needs attention (a spent
  * blocking limit, no usage database, a status that failed to load).

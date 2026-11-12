@@ -9,10 +9,10 @@ import { Summary } from "./Summary";
 const DEFAULT_DISPLAY = { unit: "usd", credit_usd: 0.01 } as const;
 
 /**
- * The Budget surface: a one-line summary, then Limits, Activity and Settings
+ * The Rules surface (named Budget before): a one-line summary, then Rules, Activity and Settings
  * as typographic sections in one scrolling column (no card grid; the surface's
  * name is in the native title bar, so the first heading is the section's).
- * Limits and Activity are what people come for, so they lead; the settings
+ * Rules and Activity are what people come for, so they lead; the settings
  * (enforcement, display unit, the provider's allowances) follow, and the
  * summary keeps the enforcement state in view meanwhile. Everything reads from
  * one live status, so a change in one section shows in the others.

@@ -5,7 +5,7 @@ import { Budget } from "../../../../shell/src/ui/features/budget/Budget";
 import type { MockApiParameters } from "../mock/fetch-mock";
 
 /**
- * The Budget surface: the summary, Limits, Activity and Settings over `/settings/api/budget`
+ * The Rules surface: the summary, Rules, Activity and Settings over `/settings/api/budget`
  * and `/settings/api/budget/activity` from the mock sidecar
  * (scripts/ui-harness-budget.ts, a small working budget service over a made-up
  * spend ledger). Every story is a backend state; changes made in a story
@@ -13,7 +13,7 @@ import type { MockApiParameters } from "../mock/fetch-mock";
  * same requests the app sends and come back as `budget.changed`.
  */
 const meta = {
-  title: "Budget/Budget",
+  title: "Rules/Rules",
   component: Budget,
   decorators: [(Story) => <div className="sb-pane"><Story /></div>],
 } satisfies Meta<typeof Budget>;
@@ -22,13 +22,13 @@ type Story = StoryObj<typeof meta>;
 
 const state = (mockApi: MockApiParameters): Story => ({ parameters: { mockApi } });
 
-/** Limits that are fine, nearly spent and spent, with a week of activity and the provider's allowances. */
+/** Rules that are fine, nearly spent and spent, with a week of activity and the provider's allowances. */
 export const Limits = state({ scenario: "budget-limits" });
-/** Enforcement switched off: the limits are kept and listed, none refuses a request. */
+/** Enforcement switched off: the rules are kept and listed, none refuses a request. */
 export const EnforcementOff = state({ scenario: "budget-off" });
-/** Spend and a provider allowance, but no limits yet: nothing is listed per model, and Add a limit is the way in. */
+/** Spend and a provider allowance, but no rules yet: nothing is listed per model, and Add a rule is the way in. */
 export const NoLimitsYet = state({ scenario: "budget-no-limits" });
-/** First run: no limits, no provider report, nothing spent. */
+/** First run: no rules, no provider report, nothing spent. */
 export const FirstRun = state({ scenario: "budget-empty" });
 /** Amounts shown in AI credits instead of US dollars. */
 export const InCredits = state({ scenario: "budget-credits" });
@@ -53,14 +53,14 @@ export const Unreachable = state({
   scenario: "budget-limits",
   overrides: { "/settings/api/budget": "offline", "/settings/api/budget/activity": "offline" },
 });
-/** The limits load but the spend behind the chart can't: the error sits in Activity, the rest stays usable. */
+/** The rules load but the spend behind the chart can't: the error sits in Activity, the rest stays usable. */
 export const ActivityLoadError = state({
   scenario: "budget-limits",
   overrides: {
     "/settings/api/budget/activity": { status: 500, body: { error: { message: "Usage history is unreadable." } } },
   },
 });
-/** Activity is slow: the summary and Limits are up while it loads. */
+/** Activity is slow: the summary and Rules are up while it loads. */
 export const ActivityLoading = state({
   scenario: "budget-limits",
   overrides: { "/settings/api/budget/activity": "hang" },
@@ -68,15 +68,15 @@ export const ActivityLoading = state({
 /** Changing the switch or unit takes a beat, so the controls disable while it saves. */
 export const SlowSave = state({ scenario: "budget-limits", latencyMs: 1200 });
 
-/** The add form, opened from "Add a limit". */
+/** The add form, opened from "Add a rule". */
 export const AddLimitDialog: Story = {
   parameters: { mockApi: { scenario: "budget-no-limits" } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(await within(canvasElement).findByRole("button", { name: "Add a limit" }));
+    await userEvent.click(await within(canvasElement).findByRole("button", { name: "Add a rule" }));
   },
 };
 
-/** The edit form for a limit that follows the provider's monthly allowance. */
+/** The edit form for a rule that follows the provider's monthly allowance. */
 export const EditLimitDialog: Story = {
   parameters: { mockApi: { scenario: "budget-limits" } },
   play: async ({ canvasElement }) => {
@@ -92,7 +92,7 @@ export const DeleteConfirm: Story = {
   },
 };
 
-/** Saving a limit the server refuses puts the reason in the dialog. */
+/** Saving a rule the server refuses puts the reason in the dialog. */
 export const SaveFailure: Story = {
   parameters: {
     mockApi: {
@@ -107,9 +107,9 @@ export const SaveFailure: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: "Add a limit" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Add a rule" }));
     await userEvent.type(await canvas.findByLabelText("Amount"), "2");
-    await userEvent.click(await canvas.findByRole("button", { name: "Save limit" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Save rule" }));
   },
 };
 
@@ -118,9 +118,9 @@ export const AmountProblem: Story = {
   parameters: { mockApi: { scenario: "budget-no-limits" } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: "Add a limit" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Add a rule" }));
     await userEvent.type(await canvas.findByLabelText("Name"), "My cap");
     await userEvent.type(await canvas.findByLabelText("Amount"), "lots");
-    await userEvent.click(await canvas.findByRole("button", { name: "Save limit" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Save rule" }));
   },
 };

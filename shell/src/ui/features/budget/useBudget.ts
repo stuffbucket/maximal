@@ -78,7 +78,7 @@ export function useBudget(): UseBudget {
     void load();
   }, [load]);
 
-  // main.ts dispatches this when the Budget surface is shown, so what was
+  // main.ts dispatches this when the Rules surface is shown, so what was
   // spent while another surface was up is current on arrival.
   useEffect(() => {
     const onRefresh = (): void => void load();

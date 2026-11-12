@@ -31,12 +31,15 @@ const SETTINGS_STYLES = readFileSync(
   resolve(REPO_ROOT, "shell/src/ui/styles/styles.css"),
   "utf8",
 )
+const EN_CATALOG = JSON.parse(
+  readFileSync(resolve(REPO_ROOT, "shell/src/i18n/en.json"), "utf8"),
+) as Record<string, string>
 const DASHBOARD_STYLES = readFileSync(
   resolve(REPO_ROOT, "shell/ui/dashboard/style.css"),
   "utf8",
 )
 
-describe("unified Settings, Dashboard, Sessions, Budget & Appearance contract", () => {
+describe("unified Settings, Dashboard, Sessions, Rules & Appearance contract", () => {
   test("uses a single topbar with Settings tabs and a four-surface switcher", () => {
     expect(SETTINGS_HTML).toContain(
       '<header class="topbar" data-tauri-drag-region>',
@@ -54,15 +57,18 @@ describe("unified Settings, Dashboard, Sessions, Budget & Appearance contract", 
     }
 
     expect(SETTINGS_HTML).toContain("topbar__surface-switcher")
-    for (const surface of ["settings", "dashboard", "sessions", "budget"]) {
+    for (const surface of ["settings", "dashboard", "sessions", "rules"]) {
       expect(SETTINGS_HTML).toContain(`data-surface-target="${surface}"`)
     }
     expect(SETTINGS_HTML).toContain("data-dashboard-frame")
     expect(SETTINGS_HTML).toContain("data-dashboard-controls")
     expect(SETTINGS_MAIN_TS).toContain('sessions: ["dashboard"]')
-    expect(SETTINGS_MAIN_TS).toContain('budget: ["budget"]')
-    expect(SETTINGS_HTML).toContain('data-section="budget"')
+    expect(SETTINGS_MAIN_TS).toContain('rules: ["rules"]')
+    expect(SETTINGS_HTML).toContain('data-section="rules"')
     expect(SETTINGS_HTML).toContain('id="budget-root"')
+    // The surface's old id is an alias, not a second section.
+    expect(SETTINGS_HTML).not.toContain('data-section="budget"')
+    expect(SETTINGS_HTML).not.toContain('data-surface-target="budget"')
     expect(SETTINGS_MAIN_TS).toContain('type: "maximal:surface"')
     expect(SETTINGS_MAIN_TS).toContain('safeInvoke("set_main_surface"')
   })
@@ -172,6 +178,8 @@ describe("unified Settings, Dashboard, Sessions, Budget & Appearance contract", 
     expect(SHELL_LIB_RS).toContain("menu_id::BUDGET")
     expect(SHELL_LIB_RS).toContain("open_budget_window")
     expect(SHELL_LIB_RS).toContain("ShellAction::Budget")
+    expect(SHELL_LIB_RS).toContain('pub const BUDGET: &str = "rules"')
+    expect(SHELL_LIB_RS).toContain('_RULES_ROUTE_CONTRACT: &str = "/ui/rules/"')
     expect(SHELL_LIB_RS).toContain("fn save_text_file")
     expect(SHELL_LIB_RS).toContain("fn set_main_surface")
     expect(SHELL_LIB_RS).toContain(
@@ -193,5 +201,22 @@ describe("unified Settings, Dashboard, Sessions, Budget & Appearance contract", 
     expect(DASHBOARD_STYLES).toContain("max-width: 1120px")
     expect(DASHBOARD_STYLES).toContain("margin-inline: auto")
     expect(DASHBOARD_STYLES).toContain("@media (max-width: 50em)")
+  })
+
+  test("names the fourth surface Rules in the window title, tray, Jump List and switcher", () => {
+    expect(EN_CATALOG["native-window-budget-title"]).toBe("Maximal — Rules")
+    expect(EN_CATALOG["native-tray-budget"]).toBe("Rules…")
+    expect(EN_CATALOG["nav-switch-to-budget"]).toBe("Rules")
+    // The tray item and the Windows Jump List task read the same string.
+    expect(SHELL_LIB_RS).toContain('"native-tray-budget"')
+    expect(SHELL_LIB_RS).toContain('"native-window-budget-title"')
+    expect(SETTINGS_MAIN_TS).toContain('t("nav-switch-to-budget")')
+  })
+
+  test("keeps the old Budget links alive as aliases of Rules", () => {
+    expect(SETTINGS_MAIN_TS).toContain("canonicalizeLocationHash()")
+    expect(SETTINGS_MAIN_TS).toContain("canonicalSection(")
+    // The launch argument pinned in existing Jump Lists still parses.
+    expect(SHELL_LIB_RS).toContain('"budget" => Some(Self::Budget)')
   })
 })

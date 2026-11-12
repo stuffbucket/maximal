@@ -120,7 +120,7 @@ export interface Scenario {
   connectors?: Array<PluginDetailView>
   clients?: ActiveClientsFixture
   dashboard?: DashboardFixture
-  /** The Budget window's limits, enforcement switch, unit and provider windows
+  /** The Rules window's rules (budget limits), enforcement switch, unit and provider windows
    *  (the mock service in ui-harness-budget.ts builds spend and activity). */
   budget?: BudgetSeed
 }
@@ -1803,32 +1803,32 @@ export const SCENARIOS = {
   },
 
   "budget-limits": {
-    ...healthy("Budget · limits fine, nearly spent and spent, with activity"),
+    ...healthy("Rules · rules fine, nearly spent and spent, with activity"),
     budget: budgetLimitsSeed,
   },
 
   "budget-off": {
-    ...healthy("Budget · enforcement off (limits kept)"),
+    ...healthy("Rules · enforcement off (rules kept)"),
     budget: budgetOffSeed,
   },
 
   "budget-empty": {
-    ...healthy("Budget · first run: no limits, nothing spent"),
+    ...healthy("Rules · first run: no rules, nothing spent"),
     budget: budgetEmptySeed,
   },
 
   "budget-no-limits": {
-    ...healthy("Budget · no limits yet, with spend and a provider allowance"),
+    ...healthy("Rules · no rules yet, with spend and a provider allowance"),
     budget: budgetNoLimitsSeed,
   },
 
   "budget-credits": {
-    ...healthy("Budget · amounts shown in AI credits"),
+    ...healthy("Rules · amounts shown in AI credits"),
     budget: budgetCreditsSeed,
   },
 
   "budget-storage-off": {
-    ...healthy("Budget · no usage database (every amount reads zero)"),
+    ...healthy("Rules · no usage database (every amount reads zero)"),
     budget: budgetStorageOffSeed,
   },
 
