@@ -87,7 +87,7 @@
     "test:e2e": "playwright test tests/e2e/",
     "test:e2e:plugins": "bun test tests/e2e-plugin-lifecycle.test.ts",
     "tokens:generate": "bun scripts/generate-css-tokens.ts",
-    "typecheck": "tsc",
+    "typecheck": "tsc && tsc -p .claude/skills/ui-layout-verification/tsconfig.json",
     "ui:harness": "bun run build:ui && bun run scripts/ui-harness.ts",
     "verify:build": "bun scripts/dev/verify-build.ts"
   },
