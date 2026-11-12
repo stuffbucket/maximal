@@ -214,6 +214,25 @@ describe("GET /settings/api/plugins", () => {
           available: false,
           reason: "Turn on Claude Code in Maximal first.",
         },
+        {
+          id: "claude-desktop",
+          selected: false,
+          available: false,
+          reason:
+            "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+        },
+        {
+          id: "codex",
+          selected: false,
+          available: false,
+          reason: "Maximal doesn't add connectors to Codex yet.",
+        },
+        {
+          id: "copilot-cli",
+          selected: false,
+          available: false,
+          reason: "Copilot CLI integration is coming soon.",
+        },
       ],
       endpoint: views[0].endpoint,
     })
@@ -390,7 +409,7 @@ describe("PATCH /settings/api/plugins/:id", () => {
     expect(
       (await invalid(await patch("alpha", { enabled: "yes" }))).issues,
     ).toEqual([{ path: "enabled", message: expect.any(String) as string }])
-    await invalid(await patch("alpha", { clients: ["claude-desktop"] }))
+    await invalid(await patch("alpha", { clients: ["unknown-client"] }))
     await invalid(await patch("alpha", { extra: true }))
     await invalid(await patch("alpha", { config: "x" }))
     const notJson = await server.request("/settings/api/plugins/alpha", {

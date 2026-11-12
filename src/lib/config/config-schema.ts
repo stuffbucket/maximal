@@ -112,8 +112,13 @@ const ClaudeCodeConfigSchema = z
   })
   .loose()
 
-/** Clients Maximal can register a plugin's MCP endpoint with. */
-const PluginClientIdSchema = z.enum(["claude-code"])
+/** Apps shown as possible destinations for a plugin's MCP endpoint. */
+const PluginClientIdSchema = z.enum([
+  "claude-code",
+  "claude-desktop",
+  "codex",
+  "copilot-cli",
+])
 
 /** One `plugins.<id>` entry. Absent (or `enabled` not true) means off. */
 const PluginSettingsEntrySchema = z

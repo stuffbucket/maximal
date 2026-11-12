@@ -4,16 +4,16 @@ import { t } from "../../../i18n";
 import type { PluginClientId, PluginView } from "../../../proxy/client";
 import { Button } from "../../components/Button";
 import { Callout } from "../../components/Callout";
-import { LinkCheckbox } from "../../components/LinkCheckbox";
 import { ProblemCallout } from "../../components/ProblemCallout";
 import { Switch } from "../../components/Switch";
 import type { Problem } from "../../problems";
 
+import { ClientMenu } from "./ClientMenu";
 import { ConfigForm } from "./ConfigForm";
 import { connectorLine } from "./connector-state";
 import { ConnectorStatusBlock } from "./ConnectorStatusBlock";
 import { ConnectorText } from "./ConnectorText";
-import { CLIENT_NAMES, standaloneText } from "./clients";
+import { standaloneText } from "./clients";
 import { BackGlyph, ConnectorTile, NoticeGlyph } from "./glyphs";
 import { ToolPermissions } from "./ToolPermissions";
 import { useConnectorDetail } from "./useConnectorDetail";
@@ -168,41 +168,24 @@ export function ConnectorDetail({ summary, version, focusOnOpen, onFresh, onBack
           </h4>
         </div>
         {connector.clients.length > 0 && (
-          <fieldset className="connector-clients" disabled={busy}>
-            <legend className="sr-only">
-              {t("connectors-client-legend", { connector: connector.displayName })}
-            </legend>
-            {connector.clients.map((client) => {
-              const name = CLIENT_NAMES[client.id];
-              const reason = client.available
-                ? undefined
-                : (client.reason ?? t("connectors-client-unavailable", { client: name }));
-              return (
-                <div className="connector-clients__row" key={client.id}>
-                  <LinkCheckbox
-                    label={name}
-                    href="#apps"
-                    checkboxLabel={t("connectors-client-aria", {
-                      connector: connector.displayName,
-                      client: name,
-                    })}
-                    checked={chosen.has(client.id)}
-                    unavailable={reason}
-                    onCheckedChange={(checked) => setClient(client.id, checked)}
-                  />
-                  {reason && <span className="connector-section__hint">{reason}</span>}
-                  {client.standalone && (
-                    <span className="connector-section__hint connector-notice">
-                      <span className="connector-notice__mark">
-                        <NoticeGlyph />
-                      </span>
-                      <span>{standaloneText(connector.displayName, client.id, client.standalone)}</span>
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </fieldset>
+          <ClientMenu
+            connector={connector.displayName}
+            clients={connector.clients}
+            selected={chosen}
+            disabled={busy}
+            onChange={setClient}
+          />
+        )}
+        {connector.clients.map(
+          (client) =>
+            client.standalone && (
+              <span className="connector-section__hint connector-notice" key={client.id}>
+                <span className="connector-notice__mark">
+                  <NoticeGlyph />
+                </span>
+                <span>{standaloneText(connector.displayName, client.id, client.standalone)}</span>
+              </span>
+            ),
         )}
         <p className="connector-section__hint">{t("connectors-endpoint-hint")}</p>
         <div className="connector-endpoint">

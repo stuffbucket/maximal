@@ -22,8 +22,12 @@ import type {
   ToolResult,
 } from "./types"
 
-/** Clients Maximal can register a plugin's MCP endpoint with. */
-export type PluginClientId = "claude-code"
+/** Apps shown as possible destinations for a plugin's MCP endpoint. */
+export type PluginClientId =
+  | "claude-code"
+  | "claude-desktop"
+  | "codex"
+  | "copilot-cli"
 
 /**
  * One `config.json` → `plugins.<id>` entry. Absent ⇒ disabled. The plugin's
