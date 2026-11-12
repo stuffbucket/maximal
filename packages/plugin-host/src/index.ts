@@ -15,5 +15,6 @@ export {
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 export {
   createFileStorage,
+  operationsService,
   type PluginServiceFactory,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"

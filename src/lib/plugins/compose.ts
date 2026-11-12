@@ -15,6 +15,7 @@ import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import {
   createPluginHost,
   type HostServices,
+  operationsService,
   type PluginModule,
 } from "@stuffbucket/maximal-plugin-host"
 import * as workiq from "@stuffbucket/maximal-plugin-workiq"
@@ -113,6 +114,7 @@ export function composePluginGateway(
     services: {
       host: { ...hostServices(), ...options.host },
       storageRoot: options.storageRoot ?? pluginStorageRoot(),
+      extra: [operationsService],
     },
   })
 }

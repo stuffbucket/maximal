@@ -15,6 +15,7 @@ import { isInjectList } from "./validate"
 
 export { createFileStorage } from "./file-storage"
 export { nonJsonPath, normalizeManifest } from "./manifest"
+export { operationDispatchOf, operationsService } from "./operations"
 export {
   installPluginServices,
   type PluginServiceFactory,
