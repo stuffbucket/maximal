@@ -12,16 +12,21 @@ import { ActivityChart, MAX_SEGMENTS, segmentColor } from "./ActivityChart";
 import { DownloadGlyph } from "./glyphs";
 import {
   ACTIVITY_GROUPS,
-  ACTIVITY_PERIODS,
   type ActivityGroup,
-  type ActivityPeriod,
   activityQuery,
+  activityTotals,
   csvFileName,
-  formatPeriodStart,
+  formatCompact,
+  formatSpan,
+  isTimeGroup,
+  rowFigures,
   topSegments,
 } from "./format";
 import type { BudgetFormat } from "./hooks";
 import { segmentName } from "./labels";
+import { RangePicker } from "./RangePicker";
+import { type RangeChoice, isRangeReady, rangeChoice } from "./range";
+import { UsageTotals } from "./UsageTotals";
 import { useBudgetActivity } from "./useBudgetActivity";
 
 interface ActivityProps {
@@ -32,27 +37,35 @@ interface ActivityProps {
 
 /** Rows shown before "Show all": enough to read at a glance, not a wall. */
 const VISIBLE_ROWS = 10;
+/** The most rows the table draws when expanded; the statement has every one. */
+const MAX_ROWS = 500;
 
 /**
- * Activity: where spending went in this period, by model, plugin, client key,
- * provider or day, as a chart and a table of the same rows, with a CSV
- * export. Groups that spent nothing are left out by the server, so a model
- * that was never used never appears.
+ * Activity: what was used over any range (24 hours to all time, or two days
+ * you pick), by model, plugin, client key, provider, day or hour. It reads like
+ * the Dashboard: a totals strip of the same measures (tokens in and out, cache,
+ * requests, cost), then a chart and a table with those measures per row, and a
+ * CSV statement of the same rows. A group that used nothing is still listed, as
+ * on the Dashboard, so the rows add up to the totals.
  */
 export function Activity({ format, version }: ActivityProps): JSX.Element {
-  const [period, setPeriod] = useState<ActivityPeriod>("week");
+  const [choice, setChoice] = useState<RangeChoice>(() => rangeChoice("7d", Date.now()));
   const [group, setGroup] = useState<ActivityGroup>("model");
   const [showAll, setShowAll] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportProblem, setExportProblem] = useState<Problem | null>(null);
-  const { activity, isLoading, problem } = useBudgetActivity(period, group, version);
+  const { activity, isLoading, problem, refresh } = useBudgetActivity(choice, group, version);
+  const ready = isRangeReady(choice);
+  const fileName = csvFileName(choice, group);
 
   const exportCsv = async (): Promise<void> => {
+    const query = activityQuery(choice, group);
+    if (query === null) return;
     setExporting(true);
     setExportProblem(null);
-    const result = await fetchBudgetCsv(activityQuery(period, group));
+    const result = await fetchBudgetCsv(query);
     if (result.ok) {
-      const outcome = await saveTextFile(csvFileName(period, group), result.data);
+      const outcome = await saveTextFile(fileName, result.data);
       if (outcome === "failed") {
         setExportProblem({
           title: t("budget-export-failed-title"),
@@ -67,18 +80,27 @@ export function Activity({ format, version }: ActivityProps): JSX.Element {
     setExporting(false);
   };
 
+  // The rows belong to the grouping they were fetched for, which can trail the picker by a beat.
+  const shownGroup = activity?.group ?? group;
+  const timeGroup = isTimeGroup(shownGroup);
   const rows = activity?.rows ?? [];
-  const sorted = group === "day" ? rows : [...rows].sort((a, b) => b.nano_aiu - a.nano_aiu);
-  const shown = showAll ? sorted : sorted.slice(0, VISIBLE_ROWS);
-  const totalNano = rows.reduce((sum, row) => sum + row.nano_aiu, 0);
-  const totalRequests = rows.reduce((sum, row) => sum + row.requests, 0);
+  // Things biggest spender first; a span of time newest first, the chart reads it the other way.
+  const sorted = timeGroup ? [...rows].reverse() : [...rows].sort((a, b) => b.nano_aiu - a.nano_aiu);
+  const shown = showAll ? sorted.slice(0, MAX_ROWS) : sorted.slice(0, VISIBLE_ROWS);
   // The same parts the share bar draws, so each row's swatch matches its segment.
-  const segments = group === "day" ? [] : topSegments(rows, MAX_SEGMENTS);
+  const charted = !timeGroup && rows.some((row) => row.nano_aiu > 0);
+  const segments = charted ? topSegments(rows, MAX_SEGMENTS) : [];
   const colorOf = (key: string | null): string | undefined => {
-    if (group === "day") return undefined;
+    if (!charted) return undefined;
     const index = segments.findIndex((segment) => !segment.other && segment.key === key);
     return index === -1 ? segmentColor(true, 0) : segmentColor(false, index);
   };
+  const span =
+    ready && activity?.range && format ?
+      activity.range.label === "all" ?
+        t("budget-activity-sub-all")
+      : t("budget-activity-sub", { span: formatSpan(activity.range.from, activity.range.to, format.locale) })
+    : t("budget-activity-sub-plain");
 
   return (
     <section className="budget-block" aria-labelledby="budget-activity-title">
@@ -87,19 +109,14 @@ export function Activity({ format, version }: ActivityProps): JSX.Element {
           <h2 className="budget-block__title" id="budget-activity-title">
             {t("budget-activity-title")}
           </h2>
-          <p className="section__sub">
-            {activity && format ?
-              t("budget-activity-sub", { date: formatPeriodStart(activity.period_start, format.locale) })
-            : t("budget-activity-sub-plain")}
-          </p>
+          <p className="section__sub">{span}</p>
         </div>
         <Button
           variant="secondary"
           onClick={() => void exportCsv()}
-          disabled={exporting || rows.length === 0}
+          disabled={exporting || !ready || rows.length === 0}
           title={t("budget-export-tip", {
-            file: csvFileName(period, group),
-            period: t(`budget-period-${period}`),
+            file: fileName,
             group: t(`budget-group-${group}`),
           })}
         >
@@ -109,24 +126,14 @@ export function Activity({ format, version }: ActivityProps): JSX.Element {
       </header>
 
       <div className="budget-controls">
-        <div className="budget-field budget-field--inline">
-          <label htmlFor="budget-period">{t("budget-period-label")}</label>
-          <select
-            id="budget-period"
-            className="select"
-            value={period}
-            onChange={(event) => {
-              setPeriod(event.target.value as ActivityPeriod);
-              setShowAll(false);
-            }}
-          >
-            {ACTIVITY_PERIODS.map((value) => (
-              <option key={value} value={value}>
-                {t(`budget-period-${value}`)}
-              </option>
-            ))}
-          </select>
-        </div>
+        <RangePicker
+          id="budget-activity-range"
+          value={choice}
+          onChange={(next) => {
+            setChoice(next);
+            setShowAll(false);
+          }}
+        />
         <div className="budget-field budget-field--inline">
           <label htmlFor="budget-group">{t("budget-group-label")}</label>
           <select
@@ -147,38 +154,54 @@ export function Activity({ format, version }: ActivityProps): JSX.Element {
         </div>
       </div>
 
-      {problem && <ProblemCallout problem={problem} />}
+      {problem && ready && <ProblemCallout problem={problem} onRetry={refresh} onRestarted={refresh} />}
       {exportProblem && <ProblemCallout problem={exportProblem} />}
-      {activity && activity.rows.length === 0 && !problem && (
+      {!ready && <p className="panel-status">{t("budget-range-incomplete")}</p>}
+      {ready && activity && activity.rows.length === 0 && !problem && (
         <EmptyState title={t("budget-activity-empty-title")}>
           <p>{t("budget-activity-empty-body")}</p>
         </EmptyState>
       )}
-      {!activity && isLoading && <p className="panel-status">{t("budget-loading")}</p>}
+      {ready && !activity && isLoading && <p className="panel-status">{t("budget-loading-activity")}</p>}
 
-      {activity && format && rows.length > 0 && (
-        <div className="budget-activity">
-          <p className="budget-activity__total">
-            <span className="budget-activity__amount">{format.nanoMoney(totalNano)}</span>
-            <span className="muted">{t("budget-activity-requests", { n: totalRequests })}</span>
-          </p>
+      {ready && activity && format && rows.length > 0 && (
+        <div className="budget-activity" aria-busy={isLoading}>
+          <UsageTotals figures={activityTotals(activity)} format={format} />
           <ActivityChart activity={activity} format={format} />
           <table className="table budget-table">
-            <caption className="sr-only">{t("budget-table-caption", { group: t(`budget-group-${group}`) })}</caption>
+            <caption className="sr-only">{t("budget-table-caption", { group: t(`budget-group-${shownGroup}`) })}</caption>
             <thead>
               <tr>
-                <th scope="col">{t(`budget-group-${group}`)}</th>
+                <th scope="col">{t(`budget-group-${shownGroup}`)}</th>
                 <th scope="col" className="budget-table__number">
-                  {t("budget-col-requests")}
+                  {t("dashboard-col-requests")}
                 </th>
                 <th scope="col" className="budget-table__number">
-                  {t("budget-col-spend")}
+                  {t("dashboard-col-input")}
+                </th>
+                <th scope="col" className="budget-table__number">
+                  {t("dashboard-col-output")}
+                </th>
+                <th scope="col" className="budget-table__number budget-table__long">
+                  {t("dashboard-col-cache-read")}
+                </th>
+                <th scope="col" className="budget-table__number budget-table__long">
+                  {t("dashboard-col-cache-write")}
+                </th>
+                <th scope="col" className="budget-table__number">
+                  {t("dashboard-col-cost")}
                 </th>
               </tr>
             </thead>
             <tbody>
               {shown.map((row, index) => {
                 const color = colorOf(row.key);
+                const figures = rowFigures(row);
+                const cell = (value: number): JSX.Element => (
+                  <td className="budget-table__number" title={value.toLocaleString(format.locale)}>
+                    {formatCompact(value, format.locale)}
+                  </td>
+                );
                 return (
                   <tr key={row.key ?? `none-${index}`}>
                     <th scope="row" className="budget-table__row">
@@ -186,10 +209,14 @@ export function Activity({ format, version }: ActivityProps): JSX.Element {
                         {color && (
                           <span className="budget-swatch" style={{ backgroundColor: color }} aria-hidden="true" />
                         )}
-                        {segmentName(group, row.key, false, format.locale)}
+                        {segmentName(shownGroup, row.key, false, format.locale)}
                       </span>
                     </th>
-                    <td className="budget-table__number">{row.requests.toLocaleString(format.locale)}</td>
+                    {cell(figures.requests)}
+                    {cell(figures.input)}
+                    {cell(figures.output)}
+                    {cell(figures.cacheRead)}
+                    {cell(figures.cacheWrite)}
                     <td className="budget-table__number">{format.money(row.amount)}</td>
                   </tr>
                 );
@@ -202,6 +229,9 @@ export function Activity({ format, version }: ActivityProps): JSX.Element {
                 {showAll ? t("budget-show-fewer") : t("budget-show-all", { n: sorted.length })}
               </Button>
             </div>
+          )}
+          {showAll && sorted.length > MAX_ROWS && (
+            <p className="section__sub">{t("budget-table-capped", { shown: MAX_ROWS, n: sorted.length })}</p>
           )}
         </div>
       )}

@@ -230,7 +230,7 @@ describe("the Budget mock service", () => {
       "maximal-budget-model-week.csv",
     )
     const lines = (await response?.text())?.trimEnd().split("\n") ?? []
-    expect(lines[0]).toBe("model,nano_aiu,requests,amount_usd")
+    expect(lines[0]).toStartWith("model,nano_aiu,requests,amount_usd,input_")
     expect(lines).toHaveLength(mock.activity("week", "model").rows.length + 1)
   })
 

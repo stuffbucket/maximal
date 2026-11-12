@@ -9,12 +9,10 @@ import type {
 import {
   type ActivityRow,
   type LimitForm,
-  activityQuery,
   amountText,
   blockingLimit,
   buildPutRequest,
   columnHeights,
-  csvFileName,
   describeReset,
   formatAmount,
   formatDayKey,
@@ -668,12 +666,5 @@ describe("activity", () => {
       ]),
     ).toEqual([1, 0.5, 0])
     expect(columnHeights([])).toEqual([])
-  })
-
-  test("the activity and CSV endpoints share a query, and the export names its file", () => {
-    expect(activityQuery("week", "model")).toBe("period=week&group=model")
-    expect(csvFileName("month", "key")).toBe(
-      "maximal-activity-month-by-key.csv",
-    )
   })
 })

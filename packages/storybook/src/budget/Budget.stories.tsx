@@ -68,6 +68,89 @@ export const ActivityLoading = state({
 /** Changing the switch or unit takes a beat, so the controls disable while it saves. */
 export const SlowSave = state({ scenario: "budget-limits", latencyMs: 1200 });
 
+const range = (canvasElement: HTMLElement) => within(canvasElement).findByRole("group", { name: "Range" });
+
+/** Activity over the last 24 hours, by hour: the totals strip, columns on an hourly axis, and a table newest hour first. */
+export const ActivityByHour: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(await within(await range(canvasElement)).findByRole("button", { name: "24 hours" }));
+    await userEvent.selectOptions(await within(canvasElement).findByLabelText("Group by"), "hour");
+  },
+};
+
+/** Ninety days by day: a long run of columns, packed closer, with the busiest day named under them. */
+export const ActivityNinetyDays: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(await within(await range(canvasElement)).findByRole("button", { name: "90 days" }));
+    await userEvent.selectOptions(await within(canvasElement).findByLabelText("Group by"), "day");
+  },
+};
+
+/** Everything recorded, by client key. */
+export const ActivityAllTime: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(await within(await range(canvasElement)).findByRole("button", { name: "All time" }));
+    await userEvent.selectOptions(await within(canvasElement).findByLabelText("Group by"), "key");
+  },
+};
+
+/** Custom opens two day fields; the range is UTC days, the last one included. */
+export const ActivityCustomRange: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(await within(await range(canvasElement)).findByRole("button", { name: "Custom" }));
+  },
+};
+
+/** A custom range that runs backwards says so and asks for nothing. */
+export const ActivityBackwardsRange: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await within(await range(canvasElement)).findByRole("button", { name: "Custom" }));
+    const from = await canvas.findByLabelText("From");
+    await userEvent.clear(from);
+    await userEvent.type(from, "2026-01-10");
+    const to = await canvas.findByLabelText("To");
+    await userEvent.clear(to);
+    await userEvent.type(to, "2026-01-05");
+  },
+};
+
+/** A range that recorded nothing: an empty state that says so and suggests a longer range. */
+export const ActivityNothingInRange: Story = {
+  parameters: {
+    mockApi: {
+      scenario: "budget-limits",
+      overrides: {
+        "/settings/api/budget/activity": {
+          status: 200,
+          body: {
+            period: "range",
+            group: "model",
+            period_start: "2026-11-04T00:00:00.000Z",
+            display: { unit: "usd", credit_usd: 0.01 },
+            range: { from: "2026-11-04T00:00:00.000Z", to: "2026-11-11T00:00:00.000Z", label: "7d" },
+            totals: {
+              request_count: 0,
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+              total_tokens: 0,
+              total_nano_aiu: 0,
+            },
+            rows: [],
+          },
+        },
+      },
+    },
+  },
+};
+
 /** The add form, opened from "Add a rule". */
 export const AddLimitDialog: Story = {
   parameters: { mockApi: { scenario: "budget-no-limits" } },

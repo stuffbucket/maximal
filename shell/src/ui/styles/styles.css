@@ -3885,7 +3885,81 @@ html[data-os="macos"] .topbar {
 .budget-controls {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3) var(--space-5);
+}
+
+/* How far back to look: a segmented row of ranges, the chosen one stepping
+   forward onto the card surface (the permission control's pattern), and under
+   Custom two day fields. */
+.range-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+.range-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.range-seg__option {
+  appearance: none;
+  padding: var(--space-1) var(--space-3);
+  min-height: var(--size-lg);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  background: transparent;
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+.range-seg__option:hover {
+  color: var(--text-strong);
+}
+
+.range-seg__option[aria-pressed="true"] {
+  color: var(--text-strong);
+  background: var(--surface-card);
+  border-color: var(--border-strong);
+  box-shadow: var(--elevation-card);
+}
+
+.range-seg__option:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.range-picker__custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.range-picker__date {
+  width: auto;
+}
+
+.range-picker__custom .budget-field__error {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .range-seg__option {
+    transition: none;
+  }
 }
 
 .budget-activity {
@@ -3894,18 +3968,52 @@ html[data-os="macos"] .topbar {
   gap: var(--space-4);
 }
 
-.budget-activity__total {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
+/* What the range recorded, in the Dashboard's measures: the total tokens as
+   the headline, the parts in a quiet row between hairlines. Every number is
+   text ink; hierarchy comes from size, not hue. Not a card. */
+.budget-totals {
+  display: grid;
+  gap: var(--space-4);
+  padding-block: var(--space-4);
+  border-block: var(--border-width-hairline) solid var(--border-subtle);
 }
 
-.budget-activity__amount {
-  font-size: var(--text-lg);
+.budget-totals__hero {
+  margin: 0;
+  display: flex;
+  flex-direction: column-reverse;
+}
+
+.budget-totals__hero-value {
+  font-size: var(--text-3xl);
   font-weight: var(--weight-lg);
+  line-height: var(--leading-2xl);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-totals__label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.budget-totals__parts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--size-2xl) * 3)), 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.budget-totals__parts div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-1);
+}
+
+.budget-totals__parts dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-md);
   color: var(--text-strong);
   font-variant-numeric: tabular-nums;
 }
@@ -3925,7 +4033,14 @@ html[data-os="macos"] .topbar {
   flex-shrink: 0;
 }
 
-/* Spend per day: columns on one baseline, at most one size-lg wide. */
+/* Spend per day or hour: columns on one baseline, each at most one size-lg
+   wide, with the span named under them. A long span packs its columns closer. */
+.budget-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .budget-columns {
   display: flex;
   align-items: stretch;
@@ -3933,33 +4048,23 @@ html[data-os="macos"] .topbar {
   height: calc(var(--size-2xl) * 4);
 }
 
+.budget-columns--dense {
+  gap: var(--border-width-hairline);
+}
+
+.budget-columns--packed {
+  gap: 0;
+}
+
 .budget-column {
   flex: 1 1 0;
   min-width: 0;
   max-width: var(--size-lg);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--space-5) 1fr var(--space-5);
-}
-
-.budget-column__value,
-.budget-column__label {
-  justify-self: center;
-  font-size: var(--text-sm);
-  line-height: var(--space-5);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.budget-column__value {
-  color: var(--text-base-color);
-}
-
-.budget-column__label {
-  color: var(--text-muted);
+  display: flex;
 }
 
 .budget-column__track {
+  flex: 1;
   display: flex;
   align-items: flex-end;
   border-block-end: var(--border-width-hairline) solid var(--border-subtle);
@@ -3972,6 +4077,38 @@ html[data-os="macos"] .topbar {
   background-color: var(--series-1);
   border-start-start-radius: var(--radius-chip);
   border-start-end-radius: var(--radius-chip);
+}
+
+.budget-column__bar--empty {
+  min-height: 0;
+}
+
+/* The first and last bucket, with the busiest named between them. */
+.budget-columns__axis {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Seven measures in a 640px window: tighter cells, headings that wrap. */
+.table.budget-table th,
+.table.budget-table td {
+  padding-inline: var(--space-2);
+}
+
+.table.budget-table thead th {
+  vertical-align: bottom;
+  white-space: normal;
+}
+
+/* German compounds (Cache-Schreibvorgänge) are wider than their column. */
+.table.budget-table thead .budget-table__long {
+  overflow-wrap: anywhere;
 }
 
 .table .budget-table__number {
@@ -3992,7 +4129,7 @@ html[data-os="macos"] .topbar {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .budget-swatch {
