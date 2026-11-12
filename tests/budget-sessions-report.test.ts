@@ -341,13 +341,13 @@ function recordMonth(): void {
   }
 }
 
-describe("POST /settings/api/budget/simulate", () => {
-  const dailyCap = {
-    scope: { kind: "global" },
-    limit_reset: "daily",
-    action: "block",
-  }
+const dailyCap = {
+  scope: { kind: "global" },
+  limit_reset: "daily",
+  action: "block",
+}
 
+describe("POST /settings/api/budget/simulate", () => {
   test("replays the usage through each draft, in the order given", async () => {
     recordMonth()
     const body = await json(
@@ -500,6 +500,54 @@ describe("POST /settings/api/budget/simulate", () => {
     for (const body of bad) {
       expect((await post(app, "simulate", body)).status).toBe(400)
     }
+  })
+})
+
+describe("POST /settings/api/budget/simulate, scopes and edges", () => {
+  test("a filter scope covers the rows its members match; an unknown filter is a 400", async () => {
+    recordMonth()
+    writeConfig({
+      budget: {
+        filters: [
+          {
+            id: "images-model",
+            name: "Images",
+            kind: "models",
+            members: ["gpt-image*"],
+          },
+        ],
+      },
+    })
+    const app = buildApp()
+    const [result] = (
+      await json(
+        await post(app, "simulate", {
+          range: "90d",
+          limits: [
+            {
+              scope: { kind: "filter", id: "images-model" },
+              limit: 1000 * AIU,
+              limit_reset: "never",
+              action: "warn",
+            },
+          ],
+        }),
+        (v) => BudgetSimulateResponse.parse(v),
+      )
+    ).results
+    expect(result.matched_requests).toBe(30)
+    expect(result.matched_nano_aiu).toBe(150 * AIU)
+    const unknown = await post(app, "simulate", {
+      limits: [
+        {
+          scope: { kind: "filter", id: "nope" },
+          limit: AIU,
+          limit_reset: "daily",
+          action: "block",
+        },
+      ],
+    })
+    expect(unknown.status).toBe(400)
   })
 
   test("with no usage, nothing happens and nothing is suggested", async () => {

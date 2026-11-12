@@ -282,6 +282,67 @@ describe("scope", () => {
   })
 })
 
+describe("a filter scope", () => {
+  const filters = [
+    {
+      id: "gpt-models",
+      name: "GPT models",
+      kind: "models" as const,
+      members: ["gpt-*"],
+    },
+    {
+      id: "ci-clients",
+      name: "CI",
+      kind: "clients" as const,
+      members: ["ci", "build-?"],
+    },
+  ]
+  const rows = [
+    row(at(2026, 11, 9, 1), 60, { model: "gpt-4", key: "laptop" }),
+    row(at(2026, 11, 9, 2), 60, { model: "claude-big", key: "build-1" }),
+    row(at(2026, 11, 9, 3), 60, { model: "gpt-mini", key: "ci" }),
+    row(at(2026, 11, 9, 4), 60),
+  ]
+
+  test("a models filter covers rows whose model matches a member, globs included", () => {
+    const result = simulateDraft(
+      draft({ scope: { kind: "filter", id: "gpt-models" }, limit: 100 }),
+      rows,
+      { ...week, filters },
+    )
+    expect(result.matchedRequests).toBe(2)
+    expect(result.matchedNanoAiu).toBe(120)
+  })
+
+  test("a clients filter covers rows by their key", () => {
+    const result = simulateDraft(
+      draft({ scope: { kind: "filter", id: "ci-clients" }, limit: 100 }),
+      rows,
+      { ...week, filters },
+    )
+    expect(result.matchedRequests).toBe(2)
+  })
+
+  test("a filter that no longer exists covers nothing, not everything", () => {
+    const result = simulateDraft(
+      draft({ scope: { kind: "filter", id: "gone" }, limit: 1 }),
+      rows,
+      { ...week, filters },
+    )
+    expect(result.matchedRequests).toBe(0)
+    expect(result.refusedRequests).toBe(0)
+  })
+
+  test("without filters in the context a filter scope covers nothing", () => {
+    const result = simulateDraft(
+      draft({ scope: { kind: "filter", id: "gpt-models" } }),
+      rows,
+      week,
+    )
+    expect(result.matchedRequests).toBe(0)
+  })
+})
+
 describe("the replay window", () => {
   test("spend from before the window, in the same period, counts toward the limit but isn't reported", () => {
     // A weekly limit; the week began Monday, the window starts Wednesday.
