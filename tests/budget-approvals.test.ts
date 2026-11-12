@@ -353,6 +353,7 @@ function budget(
 
 const hit = (over: Partial<LimitEvent> = {}): LimitEvent => ({
   limitId: "images-daily",
+  unit: "nano_aiu",
   periodKey: "p1",
   used: 4 * AIU,
   limit: 4 * AIU,

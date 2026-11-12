@@ -365,6 +365,8 @@ describe("filters over the usage database", () => {
       provider: "copilot",
       model: "claude-haiku-4",
       estimateNanoAiu: 100,
+      estimateInputTokens: 0,
+      estimateOutputTokens: 0,
     })
     store.openHold({
       id: "other",
@@ -374,6 +376,8 @@ describe("filters over the usage database", () => {
       provider: "copilot",
       model: "gpt-5",
       estimateNanoAiu: 200,
+      estimateInputTokens: 0,
+      estimateOutputTokens: 0,
     })
     await store.recover(NOON)
 
@@ -384,7 +388,9 @@ describe("filters over the usage database", () => {
     } as const
     expect(await sum(claude)).toBe(103)
     expect(
-      (await store.spendRows(claude, everything)).map((row) => row.nanoAiu),
+      (await store.spendRows(claude, everything, "nano_aiu")).map(
+        (row) => row.nanoAiu,
+      ),
     ).toEqual([1, 2, 100])
     const codex = { kind: "members", field: "key", members: ["codex"] } as const
     expect(await sum(codex)).toBe(105)

@@ -5,9 +5,11 @@
  */
 
 import type { ApprovalState, LimitEvent } from "~/lib/budget/approvals"
+import type { Presence } from "~/lib/budget/conditions"
 import type { FollowedWindow } from "~/lib/budget/periods"
 import type { BudgetConfig } from "~/lib/budget/schema"
 
+import { amountOf } from "~/lib/budget/metric"
 import { scopeMatches } from "~/lib/budget/scope"
 import {
   createBudgetService,
@@ -40,6 +42,8 @@ export function event(overrides: Partial<SpendEvent> = {}): SpendEvent {
   return {
     createdAtMs: NOON - 60_000,
     nanoAiu: 0,
+    inputTokens: 0,
+    outputTokens: 0,
     key: "claude-code",
     provider: "copilot",
     ...overrides,
@@ -61,6 +65,8 @@ export interface Harness {
   service: ReturnType<typeof createBudgetService>
   setNow(ms: number): void
   setConfig(config: BudgetConfig | undefined): void
+  /** Change what the shell reports; undefined is unknown. */
+  setPresence(next: Presence | undefined): void
   setWindow(ref: string, window: FollowedWindow | undefined): void
   /** Record a usage row: stored, then announced, like the real recorder. */
   emit(row: SpendEvent): void
@@ -75,6 +81,7 @@ export interface Harness {
     spend: Array<{ startMs: number; endMs: number | null }>
     /** How many of those reads were for every cost (rolling windows). */
     rowReads: number
+    requestReads: number
     recover: number
     subscribed: number
     opened: Array<StoredHold>
@@ -102,6 +109,8 @@ export function harness(
     onWarning?: "none" | "throws"
     /** The approvals the service reads: overrides in force, and who is
      *  asked when a rule asks or reaches its limit. */
+    /** What the shell last said about the person (unknown by default). */
+    presence?: Presence
     approvals?: {
       overrides?: BudgetServiceDeps["overrides"]
       onAsk?: (event: LimitEvent) => ApprovalState
@@ -110,6 +119,7 @@ export function harness(
   } = {},
 ): Harness {
   let now = NOON
+  let presence: Presence | undefined = options.presence
   let config: BudgetConfig | undefined = {
     limits,
     ...(options.enabled === undefined ? {} : { enabled: options.enabled }),
@@ -125,6 +135,7 @@ export function harness(
     config: 0,
     spend: [],
     rowReads: 0,
+    requestReads: 0,
     recover: 0,
     subscribed: 0,
     opened: [],
@@ -132,7 +143,7 @@ export function harness(
   }
 
   const store: BudgetStore = {
-    async spend(scope, range) {
+    async spend(scope, range, metric) {
       calls.spend.push(range)
       if (options.spendFails) throw new Error("database is down")
       // Rows recorded before the read are in it; later ones are not.
@@ -143,34 +154,48 @@ export function harness(
             && (range.endMs === null || row.createdAtMs < range.endMs)
             && scopeMatches(scope, row),
         )
-        .reduce((total, row) => total + row.nanoAiu, 0)
+        .reduce((total, row) => total + amountOf(row, metric), 0)
       if (deferred) {
         deferred.started()
         await deferred.gate
       }
       return sum
     },
-    async spendRows(scope, range) {
+    async spendRows(scope, range, metric) {
       calls.spend.push(range)
       calls.rowReads += 1
       if (options.spendFails) throw new Error("database is down")
       const found = rows
         .filter(
           (row) =>
-            row.nanoAiu > 0
+            amountOf(row, metric) > 0
             && row.createdAtMs >= range.startMs
             && (range.endMs === null || row.createdAtMs < range.endMs)
             && scopeMatches(scope, row),
         )
         .map((row) => ({
           createdAtMs: row.createdAtMs,
-          nanoAiu: row.nanoAiu,
+          nanoAiu: amountOf(row, metric),
         }))
       if (deferred) {
         deferred.started()
         await deferred.gate
       }
       return found
+    },
+    requestTimes(scope, range) {
+      calls.requestReads += 1
+      return Promise.resolve(
+        rows
+          .filter(
+            (row) =>
+              row.createdAtMs >= range.startMs
+              && (range.endMs === null || row.createdAtMs < range.endMs)
+              && scopeMatches(scope, row),
+          )
+          .map((row) => row.createdAtMs)
+          .sort((a, b) => a - b),
+      )
     },
     recover() {
       calls.recover += 1
@@ -201,6 +226,7 @@ export function harness(
       return () => listeners.delete(listener)
     },
     ...options.approvals,
+    presence: () => presence,
     onEvent: (logged) => {
       events.push(logged)
     },
@@ -221,6 +247,9 @@ export function harness(
     },
     setConfig: (next) => {
       config = next
+    },
+    setPresence: (next) => {
+      presence = next
     },
     setWindow: (ref, window) => {
       if (window) windows.set(ref, window)

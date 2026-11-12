@@ -4,13 +4,17 @@
  * Imports nothing but types, so the error module can depend on it.
  */
 
+import type { RefusalUnit } from "./metric"
 import type { BudgetScope } from "./schema"
 
 export interface BudgetRefusal {
   limitId: string
   label: string | null
   scope: BudgetScope
-  /** The limit and what counts against it, in nano-AIU. */
+  /** What the figures below are in: nano-AIU (cost), a token measure, or a
+   *  count of requests (`maxRequests`). */
+  unit: RefusalUnit
+  /** The limit and what counts against it, in `unit`. */
   limit: number
   used: number
   held: number

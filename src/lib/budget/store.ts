@@ -8,7 +8,11 @@
  * run.
  */
 
-import { getNanoAiuSpend, getNanoAiuSpendRows } from "~/lib/token-usage/spend"
+import {
+  getNanoAiuSpend,
+  getNanoAiuSpendRows,
+  getRequestTimes,
+} from "~/lib/token-usage/spend"
 import {
   enqueueUsageDbWrite,
   isTokenUsageStorageEnabled,
@@ -22,13 +26,17 @@ const CLOSED_HOLD_RETENTION_MS = 7 * 86_400_000
 
 export function createUsageDbBudgetStore(): BudgetStore {
   return {
-    async spend(scope, range) {
-      const [sum] = await getNanoAiuSpend(scope, [range])
+    async spend(scope, range, metric) {
+      const [sum] = await getNanoAiuSpend(scope, [range], metric)
       return sum
     },
 
-    spendRows(scope, range) {
-      return getNanoAiuSpendRows(scope, range)
+    spendRows(scope, range, metric) {
+      return getNanoAiuSpendRows(scope, range, metric)
+    },
+
+    requestTimes(scope, range) {
+      return getRequestTimes(scope, range)
     },
 
     async recover(nowMs) {
@@ -50,8 +58,9 @@ export function createUsageDbBudgetStore(): BudgetStore {
         db.prepare(
           `INSERT OR REPLACE INTO budget_holds (
             id, created_at_ms, operation, provider, plugin_id, tool_name,
-            client_key, estimate_nano_aiu, model, state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
+            client_key, estimate_nano_aiu, model, est_input_tokens,
+            est_output_tokens, state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
         ).run(
           hold.id,
           hold.createdAtMs,
@@ -62,6 +71,8 @@ export function createUsageDbBudgetStore(): BudgetStore {
           hold.key,
           hold.estimateNanoAiu,
           hold.model ?? null,
+          hold.estimateInputTokens,
+          hold.estimateOutputTokens,
         )
       }, "Failed to record a budget hold")
     },

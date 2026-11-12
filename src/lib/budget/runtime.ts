@@ -14,6 +14,7 @@ import { settingsEventBus } from "~/lib/config/settings-events"
 import { requestContext } from "~/lib/http/request-context"
 import { queueNotice } from "~/lib/plugins/notices"
 import { createCopilotProvider } from "~/lib/plugins/providers/copilot"
+import { currentPresence } from "~/lib/presence"
 import { state } from "~/lib/runtime-state/state"
 import { onTokenUsageEvent } from "~/lib/token-usage"
 import { deriveUsageClient } from "~/lib/token-usage/client"
@@ -65,6 +66,7 @@ function announceWarning(warning: BudgetWarning): void {
   getApprovalCenter().warned({
     limitId: warning.limitId,
     periodKey: String(warning.resetsAtMs),
+    unit: warning.unit,
     used: warning.used,
     limit: warning.limit,
     resetsAtMs: warning.resetsAtMs,
@@ -126,7 +128,8 @@ registerCoreAttentionSource({
 export async function currentBudgetStatus(): Promise<BudgetStatusResponse> {
   await getOverrideRegistry().ready()
   return buildBudgetStatus(getConfig().budget, {
-    held: (scope) => getBudgetService().heldNanoAiu(scope),
+    held: (scope, metric) => getBudgetService().heldNanoAiu(scope, metric),
+    presence: currentPresence(),
     overrides: (limitId) => getOverrideRegistry().active(limitId, Date.now()),
     approval: (limitId) => getApprovalCenter().approval(limitId),
   })
@@ -192,6 +195,9 @@ export function getBudgetService(): BudgetService {
         listener({
           createdAtMs: event.created_at_ms,
           nanoAiu: event.total_nano_aiu,
+          // A cached prompt is still a prompt (`~/lib/budget/metric`).
+          inputTokens: event.input_tokens + event.cache_read_input_tokens,
+          outputTokens: event.output_tokens,
           key: budgetKeyOf(event.client_label, event.client),
           provider:
             event.source === "copilot" ?
@@ -203,6 +209,7 @@ export function getBudgetService(): BudgetService {
       }),
     onWarning: announceWarning,
     onEvent: recordBudgetEvent,
+    presence: () => currentPresence(),
     overrides: {
       ready: () => getOverrideRegistry().ready(),
       active: (limitId, nowMs) => getOverrideRegistry().active(limitId, nowMs),
@@ -264,9 +271,10 @@ export type ChatBudgetOperation = "chat_completions" | "messages" | "responses"
  *  its limits have room, and can go over by what is in flight. */
 export async function admitChat(
   operation: ChatBudgetOperation,
-  model?: string,
+  request: { model?: string; maxTokens?: number | null } = {},
   budget?: BudgetService,
 ): Promise<void> {
+  const { model, maxTokens } = request
   await admitBudget(
     {
       operation,
@@ -274,6 +282,11 @@ export async function admitChat(
       key: currentBudgetKey(),
       ...(model === undefined ? {} : { model }),
       estimateNanoAiu: 0,
+      // The most the reply can be, when the request says: what a token limit
+      // holds. Cost can't be estimated, so a cost limit still gates on spend.
+      ...(typeof maxTokens === "number" && maxTokens > 0 ?
+        { estimateOutputTokens: maxTokens }
+      : {}),
     },
     budget,
   )

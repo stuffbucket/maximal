@@ -5,6 +5,7 @@ import { z } from "zod"
 import {
   BUDGET_HOLDS_MIGRATION,
   BUDGET_HOLDS_MODEL_MIGRATION,
+  BUDGET_HOLDS_TOKENS_MIGRATION,
   BUDGET_OVERRIDES_MIGRATION,
 } from "~/lib/budget/migrations"
 import { BUDGET_EVENTS_MIGRATION } from "~/lib/budget/reports/migrations"
@@ -308,6 +309,7 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
   BUDGET_EVENTS_MIGRATION,
   BUDGET_HOLDS_MODEL_MIGRATION,
   BUDGET_OVERRIDES_MIGRATION,
+  BUDGET_HOLDS_TOKENS_MIGRATION,
 ]
 
 /** Migration step 2's columns: which client sent a request, how long its

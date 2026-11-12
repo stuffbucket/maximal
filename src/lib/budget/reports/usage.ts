@@ -25,6 +25,8 @@ import {
 
 import type { UsageRange } from "./range"
 
+import { EVENT_METRIC_SQL, type SpendMetric } from "../metric"
+
 export interface UsageGroupRow extends TokenUsageTotals {
   /** The group's value; null for rows with none (no plugin, say). */
   key: string | null
@@ -87,11 +89,12 @@ export interface SpendRow {
   nanoAiu: number
 }
 
-/** The scope's rows in `[fromMs, toMs)`, oldest first. */
+/** The scope's rows in `[fromMs, toMs)`, oldest first, each with its amount
+ *  in `metric` (nano-AIU, or tokens for a token limit). */
 export async function getSpendRows(
   scope: SpendScope,
-  fromMs: number,
-  toMs: number,
+  { fromMs, toMs }: { fromMs: number; toMs: number },
+  metric: SpendMetric = "nano_aiu",
 ): Promise<Array<SpendRow>> {
   if (!isTokenUsageStorageEnabled()) return []
   const events = scopeWhere(scope, "events")
@@ -100,14 +103,14 @@ export async function getSpendRows(
   const rows = await readUsageDb((db) =>
     db
       .prepare(
-        `SELECT created_at_ms, total_nano_aiu FROM token_usage_events
+        `SELECT created_at_ms, ${EVENT_METRIC_SQL[metric]} AS amount FROM token_usage_events
          WHERE ${where.join(" AND ")} ORDER BY created_at_ms ASC, id ASC`,
       )
       .all(...values),
   )
   return (rows as Array<Record<string, unknown>>).map((row) => ({
     createdAtMs: Number(row.created_at_ms),
-    nanoAiu: Number(row.total_nano_aiu),
+    nanoAiu: Number(row.amount),
   }))
 }
 

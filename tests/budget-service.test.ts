@@ -306,7 +306,13 @@ describe("warnings", () => {
     const second = await h.service.reserve(intent())
 
     expect(first.ok && first.warnings).toEqual([
-      { limitId: "all", used: 0.6 * AIU, limit: AIU, resetsAtMs: MIDNIGHT },
+      {
+        limitId: "all",
+        used: 0.6 * AIU,
+        limit: AIU,
+        unit: "nano_aiu",
+        resetsAtMs: MIDNIGHT,
+      },
     ])
     expect(second.ok && second.warnings).toHaveLength(1)
     expect(h.warnings).toHaveLength(1)
@@ -466,6 +472,8 @@ describe("holds in the store", () => {
         plugin: "images",
         tool: "generate_image",
         estimateNanoAiu: 0.6 * AIU,
+        estimateInputTokens: 0,
+        estimateOutputTokens: 0,
       }),
     )
     if (!decision.ok) throw new Error("expected admission")
@@ -479,6 +487,8 @@ describe("holds in the store", () => {
         tool: "generate_image",
         key: "claude-code",
         estimateNanoAiu: 0.6 * AIU,
+        estimateInputTokens: 0,
+        estimateOutputTokens: 0,
       },
     ])
 

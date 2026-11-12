@@ -16,6 +16,7 @@ import type { BudgetConfig, BudgetLimitConfig } from "../schema"
 import type { UsageRange } from "./range"
 import type { SpendRow } from "./usage"
 
+import { metricOf } from "../metric"
 import {
   everyDurationMs,
   followedPeriod,
@@ -375,6 +376,7 @@ async function readTimelineData(
 }> {
   const { limit, range } = query
   const scope = resolveScope(limit.scope, query.config?.filters)
+  const metric = metricOf(limit)
   // The first period's earlier rows count toward it: a bounded period is read
   // from its start, a rolling window from one window back, and a lifetime
   // period is summed.
@@ -390,9 +392,13 @@ async function readTimelineData(
     && first !== undefined
     && first.startMs < alignedFromMs
   const [rows, [baselineNanoAiu], refusals] = await Promise.all([
-    getSpendRows(scope, rowsFromMs, range.toMs),
+    getSpendRows(scope, { fromMs: rowsFromMs, toMs: range.toMs }, metric),
     summed ?
-      getNanoAiuSpend(scope, [{ startMs: first.startMs, endMs: alignedFromMs }])
+      getNanoAiuSpend(
+        scope,
+        [{ startMs: first.startMs, endMs: alignedFromMs }],
+        metric,
+      )
     : Promise.resolve([0]),
     getBudgetEvents({
       limitId: limit.id,
@@ -435,7 +441,9 @@ export async function buildLimitTimeline(
     ...data,
   })
 
-  const amount = (nano: number): number => nanoAiuToDisplay(nano, display)
+  // Cost is shown in the display unit; a token limit's figures as they are.
+  const amount = (value: number): number =>
+    limit.unit === "tokens" ? value : nanoAiuToDisplay(value, display)
   const sum = (pick: (b: TimelineBucketMs) => number): number =>
     timeline.buckets.reduce((total, b) => total + pick(b), 0)
   return {

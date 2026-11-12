@@ -55,6 +55,7 @@ describe("refusalMessage", () => {
   const NOW = Date.UTC(2026, 10, 11, 20, 48, 0)
   const base: RefusalWords = {
     name: "Images per day",
+    unit: "nano_aiu",
     limit: 3 * AIU,
     used: 3 * AIU,
     held: 0,

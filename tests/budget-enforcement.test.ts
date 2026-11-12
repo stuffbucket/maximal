@@ -623,10 +623,10 @@ describe("a filter limit under the chat endpoints", () => {
     // Recorded under the model `gpt-image-test`.
     spend(AIU, "messages")
 
-    expect(await failure(admitChat("messages", "gpt-image-2"))).toBeInstanceOf(
-      BudgetExceededError,
-    )
-    await admitChat("messages", "claude-sonnet-4")
+    expect(
+      await failure(admitChat("messages", { model: "gpt-image-2" })),
+    ).toBeInstanceOf(BudgetExceededError)
+    await admitChat("messages", { model: "claude-sonnet-4" })
     // A request that names no model isn't one a model filter selects.
     await admitChat("messages")
   })

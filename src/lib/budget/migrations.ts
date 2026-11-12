@@ -45,3 +45,24 @@ export const BUDGET_OVERRIDES_MIGRATION: Migration = {
     )
   },
 }
+
+/** Token estimates a hold reserved, so an orphaned hold counts against a
+ *  token limit as it does against a cost one. */
+export const BUDGET_HOLDS_TOKENS_MIGRATION: Migration = {
+  name: "add budget_holds token estimates",
+  up: (db) => {
+    const columns = db.prepare("PRAGMA table_info(budget_holds)").all()
+    const has = (name: string) =>
+      columns.some((column) => (column as { name?: unknown }).name === name)
+    if (!has("est_input_tokens")) {
+      db.exec(
+        "ALTER TABLE budget_holds ADD COLUMN est_input_tokens INTEGER NOT NULL DEFAULT 0",
+      )
+    }
+    if (!has("est_output_tokens")) {
+      db.exec(
+        "ALTER TABLE budget_holds ADD COLUMN est_output_tokens INTEGER NOT NULL DEFAULT 0",
+      )
+    }
+  },
+}

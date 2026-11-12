@@ -57,6 +57,14 @@ export function limitToWire(limit: BudgetLimitConfig): BudgetRuleLimit {
     warn_at: limit.warnAt ?? DEFAULT_WARN_AT,
     action: limit.action,
     notify: resolveNotify(limit),
+    // Written only when they differ from the plain cost rule.
+    ...(limit.unit === "tokens" ?
+      { unit: limit.unit, measure: limit.measure ?? ("total" as const) }
+    : {}),
+    ...(limit.maxRequests === undefined ?
+      {}
+    : { max_requests: limit.maxRequests }),
+    ...(limit.when === undefined ? {} : { when: limit.when }),
   }
 }
 
@@ -82,6 +90,12 @@ function limitFromWire(limit: BudgetRuleLimit): BudgetLimitConfig {
     ...(same(limit.notify, DEFAULT_NOTIFY) || limit.notify === undefined ?
       {}
     : { notify: limit.notify }),
+    ...(limit.unit === "tokens" ? { unit: limit.unit } : {}),
+    ...(limit.measure === undefined ? {} : { measure: limit.measure }),
+    ...(limit.max_requests === undefined ?
+      {}
+    : { maxRequests: limit.max_requests }),
+    ...(limit.when === undefined ? {} : { when: limit.when }),
   }
 }
 
@@ -307,6 +321,9 @@ export function planImport(
       (limit): BudgetRuleLimit => ({
         ...limit,
         notify: limit.notify ?? DEFAULT_NOTIFY,
+        ...(limit.unit === "tokens" ?
+          { measure: limit.measure ?? ("total" as const) }
+        : {}),
       }),
     ),
     mode,
