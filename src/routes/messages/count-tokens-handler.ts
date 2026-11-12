@@ -3,20 +3,19 @@ import type { Context } from "hono"
 import consola from "consola"
 
 import {
+  anthropicMessagesConfig,
   getAnthropicApiKey,
   getClaudeTokenMultiplier,
   getConfig,
 } from "~/lib/config/config"
 import { sendRequest } from "~/lib/http/send-request"
 import { reverseId } from "~/lib/models/anthropic-id-rewrite"
+import { resolveAnthropicModelAlias } from "~/lib/models/anthropic-model-aliases"
 import {
   type AnthropicMessagesPayload,
   ANTHROPIC_API_VERSION,
 } from "~/lib/models/anthropic-types"
-import {
-  modelMappingErrorBody,
-  resolveModelMapping,
-} from "~/lib/models/model-mapping"
+import { modelMappingErrorBody } from "~/lib/models/model-mapping"
 import { getTokenCount } from "~/lib/models/tokenizer"
 import { state } from "~/lib/runtime-state/state"
 
@@ -97,11 +96,12 @@ export async function handleCountTokens(c: Context) {
     // Desktop's normalizer) back to Copilot's original dot-form before any
     // model lookup happens.
     anthropicPayload.model = reverseId(anthropicPayload.model)
-    const mapping = resolveModelMapping({
+    const config = getConfig()
+    const mapping = resolveAnthropicModelAlias({
       requestedModel: anthropicPayload.model,
-      rules: getConfig().modelMappings ?? [],
+      rules: config.modelMappings ?? [],
+      config: anthropicMessagesConfig(config),
       models: state.models?.data ?? [],
-      endpoint: null,
     })
     if (mapping.status === "invalid-target") {
       return c.json(modelMappingErrorBody(mapping), 400)

@@ -94,6 +94,14 @@ const McpServerIdSchema = z
 /** Endpoint ids Maximal wrote into a client's own MCP configuration. */
 const OwnedMcpServerIdsSchema = z.array(McpServerIdSchema).max(64)
 
+const AnthropicMessagesConfigSchema = z
+  .object({
+    haikuModel: z.string().trim().min(1).optional(),
+    sonnetModel: z.string().trim().min(1).optional(),
+    autoPermissionModel: z.string().trim().min(1).optional(),
+  })
+  .loose()
+
 const ClaudeCodeConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -181,6 +189,7 @@ export const AppConfigSchema = z
       .record(z.string(), ReasoningEffortSchema)
       .optional(),
     modelMappings: z.array(ModelMappingRuleSchema).optional(),
+    anthropicMessages: AnthropicMessagesConfigSchema.optional(),
     useFunctionApplyPatch: z.boolean().optional(),
     useMessagesApi: z.boolean().optional(),
     anthropicApiKey: z.string().optional(),

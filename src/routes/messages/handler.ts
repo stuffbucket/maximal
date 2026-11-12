@@ -2,7 +2,7 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { getConfig } from "~/lib/config/config"
+import { anthropicMessagesConfig, getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { requestContext, setRequestUsage } from "~/lib/http/request-context"
@@ -10,12 +10,10 @@ import {
   pickCopilotVariantId,
   reverseId,
 } from "~/lib/models/anthropic-id-rewrite"
+import { resolveAnthropicModelAlias } from "~/lib/models/anthropic-model-aliases"
 import { type AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import { COMPACT_REQUEST } from "~/lib/models/compact"
-import {
-  modelMappingErrorBody,
-  resolveModelMapping,
-} from "~/lib/models/model-mapping"
+import { modelMappingErrorBody } from "~/lib/models/model-mapping"
 import { findEndpointModel } from "~/lib/models/models"
 import {
   createHandlerLogger,
@@ -134,11 +132,12 @@ function applyModelMapping(
   c: Context,
   payload: AnthropicMessagesPayload,
 ): Response | null {
-  const mapping = resolveModelMapping({
+  const config = getConfig()
+  const mapping = resolveAnthropicModelAlias({
     requestedModel: reverseId(payload.model),
-    rules: getConfig().modelMappings ?? [],
+    rules: config.modelMappings ?? [],
+    config: anthropicMessagesConfig(config),
     models: state.models?.data ?? [],
-    endpoint: null,
   })
   if (mapping.status === "invalid-target") {
     return c.json(modelMappingErrorBody(mapping), 400)

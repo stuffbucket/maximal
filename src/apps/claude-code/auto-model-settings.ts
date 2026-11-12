@@ -2,7 +2,7 @@ import type { ClaudeAutoModelsState } from "~/lib/config/settings-types"
 import type { ClaudeAutoTierState } from "~/lib/models/claude-auto-model-types"
 import type { ClaudeAutoTier } from "~/lib/models/claude-auto-models"
 
-import { getConfig } from "~/lib/config/config"
+import { anthropicMessagesConfig, getConfig } from "~/lib/config/config"
 import {
   isClaudeCodeClassifierEligible,
   resolveClaudeAutoModels,
@@ -35,9 +35,9 @@ const TIER_KEYS = {
 } as const
 
 const CONFIG_KEYS = {
-  fast: "fastModel",
-  capable: "capableModel",
-  classifier: "classifierModel",
+  fast: "haikuModel",
+  capable: "sonnetModel",
+  classifier: "autoPermissionModel",
 } as const
 
 type OwnedSource = "automatic" | "maximal-override"
@@ -320,8 +320,8 @@ function tierPolicyInput(
   const ownership = ownershipForTier(context, tier)
   const effective = resolveEffectiveOwnership(context, tier, ownership)
   const claimed = claims.has(tier)
-  const appConfig = getConfig().apps?.claudeCode
-  const configured = appConfig?.[CONFIG_KEYS[tier]]
+  const messagesConfig = anthropicMessagesConfig(getConfig())
+  const configured = messagesConfig[CONFIG_KEYS[tier]]
   return {
     configured,
     override: canOwnTier(ownership, claimed) ? configured : undefined,

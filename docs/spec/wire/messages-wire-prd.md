@@ -53,10 +53,15 @@ Headers read:
    (`src/lib/models/anthropic-id-rewrite.ts`) undoes the dash-date
    sentinel the `/models` list advertises (`claude-opus-4-6-20260301` →
    `claude-opus-4.6`; non-matching IDs pass through); configured
-   `modelMappings` are applied (`resolveModelMapping()`; a mapping to an
-   unavailable model returns `400`); then `pickCopilotVariantId()` picks
-   the most specific Copilot variant for `output_config.effort` and the
-   `context-1m-2025-08-07` beta.
+   `modelMappings` are applied first (`resolveModelMapping()`; a mapping to an
+   unavailable model returns `400`). If no rule matched, normalized Haiku and
+   Sonnet family identifiers resolve through the Messages-owned catalog
+   selections, independent of `apps.claudeCode.enabled` and without inspecting
+   client identity. The Auto permission classifier is client-side state, not an
+   inbound alias. Finally `pickCopilotVariantId()` picks the most specific
+   Copilot variant for `output_config.effort` and the
+   `context-1m-2025-08-07` beta. This family-alias step is confined to root
+   Messages routes; OpenAI-compatible and provider-scoped routes do not use it.
 4. **IDE tool sanitization** (`sanitizeIdeTools()`) — drop
    `mcp__ide__executeCode` when `defer_loading` is false; normalize the
    `getDiagnostics` description.
@@ -237,7 +242,8 @@ forwarded verbatim.
 `handleCountTokens()` in `src/routes/messages/count-tokens-handler.ts`:
 
 1. Strip unsupported fields/tools and tool-reference boundaries, reverse
-   the model ID (sentinel → dotted), and apply `modelMappings`.
+   the model ID (sentinel → dotted), apply `modelMappings`, then resolve the
+   same root-Messages Haiku/Sonnet family aliases used by message dispatch.
 2. **If** the model is Claude-family **and** an Anthropic key is
    configured (`anthropicApiKey`, else `ANTHROPIC_API_KEY`) → forward to real Anthropic `POST
    /v1/messages/count_tokens` (`x-api-key`, `anthropic-version:
