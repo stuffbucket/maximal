@@ -1770,6 +1770,29 @@ html[data-os="macos"] .topbar {
   gap: var(--space-1);
 }
 
+/* A model a rule names: a shield-check (the Rules surface's own glyph) that opens those rules. */
+.model-row__rules {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  color: var(--text-muted);
+  border-radius: var(--radius-chip);
+}
+
+.model-row__rules:hover {
+  color: var(--text-strong);
+}
+
+.model-row__rules:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.model-row__rules svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
 .model-row__name {
   display: flex;
   align-items: baseline;
@@ -4083,6 +4106,194 @@ html[data-os="macos"] .topbar {
   flex-direction: column;
   gap: var(--space-1);
   color: var(--text-strong);
+}
+
+/* Rules for one model (from the Models list): a chip that says so, and clears. */
+.budget-block__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.rules-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.rules-filter__chip {
+  gap: var(--space-2);
+  padding-inline-end: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.rules-filter__clear {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-md);
+  height: var(--size-md);
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.rules-filter__clear:hover {
+  color: var(--text-strong);
+  background: var(--surface-card);
+}
+
+.rules-filter__clear:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.rules-filter__clear svg {
+  width: var(--size-xs);
+  height: var(--size-xs);
+}
+
+/* Create rules from sessions: pick sessions, then review the rules drafted from them. */
+.session-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.session-picker__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+  cursor: pointer;
+}
+
+.session-list li:last-child .session-row {
+  border-block-end: 0;
+}
+
+.session-row__box {
+  margin-block-start: var(--space-1);
+}
+
+.session-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.session-row__name {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.session-row__meta {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.session-row__cost {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.session-footer__sum {
+  margin-inline-end: auto;
+}
+
+.draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.draft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.draft:first-child {
+  padding-block-start: 0;
+}
+
+.draft:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.draft__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.draft__amount {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.draft__amount strong {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.draft__line {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+}
+
+.draft__line--muted {
+  color: var(--text-muted);
+}
+
+.draft__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 /* Add / edit a limit: the confirm dialog's shell with a form inside. In a short

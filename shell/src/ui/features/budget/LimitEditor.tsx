@@ -23,12 +23,15 @@ import {
 import { type BudgetFormat, useLocale } from "./hooks";
 import { targetName } from "./labels";
 import { useScopeChoices } from "./useScopeChoices";
+import { type SuggestedRule, draftForm } from "./sessions";
 import { WhatIfPanel } from "./WhatIfPanel";
 
 interface LimitEditorProps {
   open: boolean;
   /** The limit being edited, or null to add one. */
   editing: BudgetLimitStatus | null;
+  /** A rule suggested from sessions to open as a new one, filled in; it keeps its id unless another rule now has it. */
+  suggested?: SuggestedRule | null;
   status: BudgetStatusResponse;
   /** How amounts read, for the what-if preview. */
   format: BudgetFormat;
@@ -47,7 +50,13 @@ function defaultReset(status: BudgetStatusResponse): string {
   return first ? `follow:${first.provider}:${first.id}` : "daily";
 }
 
-function initialForm(editing: BudgetLimitStatus | null, status: BudgetStatusResponse, locale: string): LimitForm {
+function initialForm(
+  editing: BudgetLimitStatus | null,
+  status: BudgetStatusResponse,
+  locale: string,
+  suggested: SuggestedRule | null,
+): LimitForm {
+  if (!editing && suggested) return draftForm(suggested, status.display, locale);
   if (!editing) {
     return {
       label: "",
@@ -108,11 +117,11 @@ export function LimitEditor(props: LimitEditorProps): JSX.Element | null {
   return props.open ? <LimitEditorDialog {...props} /> : null;
 }
 
-function LimitEditorDialog({ editing, status, format, onSave, onClose }: LimitEditorProps): JSX.Element {
+function LimitEditorDialog({ editing, suggested = null, status, format, onSave, onClose }: LimitEditorProps): JSX.Element {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const amountRef = useRef<HTMLInputElement | null>(null);
   const locale = useLocale();
-  const [initial] = useState<LimitForm>(() => initialForm(editing, status, locale));
+  const [initial] = useState<LimitForm>(() => initialForm(editing, status, locale, suggested));
   const [form, setForm] = useState<LimitForm>(initial);
   const [issue, setIssue] = useState<LimitFormIssue | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -181,7 +190,8 @@ function LimitEditorDialog({ editing, status, format, onSave, onClose }: LimitEd
       return;
     }
     const taken = status.budgets.map((limit) => limit.id);
-    const id = editing?.id ?? newLimitId(built.body.scope, built.body.limit_reset, taken);
+    const suggestedId = suggested && !taken.includes(suggested.id) ? suggested.id : null;
+    const id = editing?.id ?? suggestedId ?? newLimitId(built.body.scope, built.body.limit_reset, taken);
     setSaving(true);
     const failed = await onSave(id, built.body);
     setSaving(false);
@@ -244,6 +254,7 @@ function LimitEditorDialog({ editing, status, format, onSave, onClose }: LimitEd
         <h2 className="confirm-dialog__title" id="budget-editor-title">
           {editing ? t("budget-editor-title-edit") : t("budget-editor-title-add")}
         </h2>
+        {suggested && <p className="form__hint">{t("budget-editor-from-sessions")}</p>}
 
         <div className="budget-editor__fields">
           <div className="budget-field">

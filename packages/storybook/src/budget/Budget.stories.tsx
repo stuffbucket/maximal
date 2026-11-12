@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { type ReactNode, useEffect } from "react";
 import { userEvent, within } from "storybook/test";
 
 import { Budget } from "../../../../shell/src/ui/features/budget/Budget";
@@ -357,4 +358,190 @@ export const WhatIfError: Story = {
 export const WhatIfLoading: Story = {
   parameters: { mockApi: { scenario: "budget-no-limits", overrides: { "/settings/api/budget/simulate": "hang" } } },
   play: draftRule("1"),
+};
+
+// ---- Create rules from sessions ------------------------------------------------
+
+const openSessions = async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+  await userEvent.click(await within(canvasElement).findByRole("button", { name: "Create rules from sessions" }));
+};
+
+const pickSessions = (count: number) => async (context: { canvasElement: HTMLElement }) => {
+  await openSessions(context);
+  const boxes = await within(context.canvasElement).findAllByRole("checkbox");
+  for (const box of boxes.slice(0, count)) await userEvent.click(box);
+};
+
+/** The picker: sessions over a range, biggest first, each with what it cost and the models it used. */
+export const SessionsPicker: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: openSessions,
+};
+
+/** Three sessions picked, and a shape for the rules; the button says what it will size from. */
+export const SessionsPicked: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async (context) => {
+    await pickSessions(3)(context);
+    await userEvent.selectOptions(await within(context.canvasElement).findByLabelText("Shape of the rules"), "daily-driver");
+  },
+};
+
+/** The suggestion: each rule with what it would have done to the usage it was sized from, and how it was sized. */
+export const SessionsSuggestion: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async (context) => {
+    await pickSessions(3)(context);
+    await userEvent.click(await within(context.canvasElement).findByRole("button", { name: /^Suggest rules from 3 sessions/ }));
+  },
+};
+
+/** With no sessions picked: all usage in the range. A week of history is short, so no weekly rule. */
+export const SessionsSuggestionFromRange: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async (context) => {
+    await openSessions(context);
+    await userEvent.click(await within(context.canvasElement).findByRole("button", { name: "Suggest rules from all usage in this range" }));
+  },
+};
+
+/** The Team shape: one daily cap for each client key, biggest spender first. */
+export const SessionsSuggestionTeam: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async (context) => {
+    await openSessions(context);
+    const canvas = within(context.canvasElement);
+    await userEvent.selectOptions(await canvas.findByLabelText("Shape of the rules"), "team");
+    await userEvent.click(await canvas.findByRole("button", { name: "Suggest rules from all usage in this range" }));
+  },
+};
+
+/** A heavy-agent rule is rolling, which the editor can't set yet: it can only be added as it is. */
+export const SessionsSuggestionRolling: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: async (context) => {
+    await openSessions(context);
+    const canvas = within(context.canvasElement);
+    await userEvent.selectOptions(await canvas.findByLabelText("Shape of the rules"), "heavy-agent-use");
+    await userEvent.click(await canvas.findByRole("button", { name: "Suggest rules from all usage in this range" }));
+  },
+};
+
+/** One click adds a rule as drafted; its row says Added and stays, so the rest can still be read. */
+export const SessionsAddOne: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: async (context) => {
+    await openSessions(context);
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Suggest rules from all usage in this range" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Add Daily cap" }));
+  },
+};
+
+/** "Open in editor" opens the draft in the editor over the dialog, filled in, with its what-if. */
+export const SessionsOpenInEditor: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: async (context) => {
+    await openSessions(context);
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Suggest rules from all usage in this range" }));
+    await userEvent.click((await canvas.findAllByRole("button", { name: "Open in editor" }))[0]!);
+  },
+};
+
+/** Nothing was spent in what was picked: the note says there is nothing to size a rule to. */
+export const SessionsNothingToSize: Story = {
+  parameters: {
+    mockApi: {
+      scenario: "budget-limits",
+      overrides: {
+        "/settings/api/budget/suggest": {
+          status: 200,
+          body: {
+            range: { from: "2026-11-05T00:00:00.000Z", to: "2026-11-12T00:00:00.000Z", label: "custom" },
+            display: { unit: "usd", credit_usd: 0.01 },
+            persona: null,
+            sessions_considered: 0,
+            requests_considered: 0,
+            nano_aiu_considered: 0,
+            limits: [],
+            notes: ["no_spend"],
+          },
+        },
+      },
+    },
+  },
+  play: async (context) => {
+    await openSessions(context);
+    await userEvent.click(await within(context.canvasElement).findByRole("button", { name: "Suggest rules from all usage in this range" }));
+  },
+};
+
+/** The suggestion can't be made: the picks stay, the dialog says why and offers another try. */
+export const SessionsSuggestError: Story = {
+  parameters: {
+    mockApi: {
+      scenario: "budget-limits",
+      overrides: { "/settings/api/budget/suggest": { status: 500, body: { error: { message: "Usage history is unreadable." } } } },
+    },
+  },
+  play: async (context) => {
+    await pickSessions(2)(context);
+    await userEvent.click(await within(context.canvasElement).findByRole("button", { name: /^Suggest rules from 2 sessions/ }));
+  },
+};
+
+/** Sessions are slow to load. */
+export const SessionsLoading: Story = {
+  parameters: { mockApi: { scenario: "budget-limits", overrides: { "/settings/api/budget/sessions": "hang" } } },
+  play: openSessions,
+};
+
+/** Sessions can't load: an error with a retry. */
+export const SessionsLoadError: Story = {
+  parameters: {
+    mockApi: {
+      scenario: "budget-limits",
+      overrides: { "/settings/api/budget/sessions": { status: 500, body: { error: { message: "Usage history is unreadable." } } } },
+    },
+  },
+  play: openSessions,
+};
+
+/** Nothing has been used yet, so there are no sessions. */
+export const SessionsEmpty: Story = {
+  parameters: { mockApi: { scenario: "budget-empty" } },
+  play: openSessions,
+};
+
+
+// ---- Rules for one model ---------------------------------------------------------
+
+/** Sets the address the Models list's shield links to while a story is on screen, and puts it back. */
+function AtAddress({ hash, children }: { hash: string; children: ReactNode }): JSX.Element {
+  useEffect(() => {
+    window.location.hash = hash;
+    return () => {
+      window.location.hash = "";
+    };
+  }, [hash]);
+  return <>{children}</>;
+}
+
+/** Arriving from a model's shield in the Models list: the rules that apply to it, with a chip that clears. */
+export const RulesForModel: Story = {
+  parameters: { mockApi: { scenario: "budget-filters" } },
+  decorators: [(Story) => <AtAddress hash="#rules/model/claude-haiku-5-5"><Story /></AtAddress>],
+};
+
+/** A model only the rule that covers everything applies to. */
+export const RulesForModelEmbedding: Story = {
+  parameters: { mockApi: { scenario: "budget-filters" } },
+  decorators: [(Story) => <AtAddress hash="#rules/model/text-embedding-3-small"><Story /></AtAddress>],
+};
+
+/** No rule applies to the model at all: it says so and offers to clear the filter. */
+export const RulesForModelNone: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  decorators: [(Story) => <AtAddress hash="#rules/model/text-embedding-3-small"><Story /></AtAddress>],
 };

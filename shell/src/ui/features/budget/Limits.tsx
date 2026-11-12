@@ -14,15 +14,19 @@ import type { Problem } from "../../problems";
 
 import { LimitEditor } from "./LimitEditor";
 import { Meter } from "./Meter";
+import { SessionsDialog } from "./SessionsDialog";
 import { RuleTimeline } from "./RuleTimeline";
 import { Sparkline } from "./Sparkline";
-import { ChevronGlyph, PencilGlyph, PlusGlyph, TrashGlyph, WarningGlyph } from "./glyphs";
-import { describeReset, formatWhen, limitFigures, usedFraction } from "./format";
+import { ChevronGlyph, CrossGlyph, ListChecksGlyph, PencilGlyph, PlusGlyph, TrashGlyph, WarningGlyph } from "./glyphs";
+import { describeReset, formatWhen, limitFigures, newLimitId, usedFraction } from "./format";
 import type { BudgetFormat } from "./hooks";
 import { amountIn, resetText, scopeName } from "./labels";
+import { rulesForModel } from "./modelRules";
 import type { RangeChoice } from "./range";
+import { type SuggestedRule, draftToPut } from "./sessions";
 import { sparkValues } from "./timeline";
 import { useLimitTimeline } from "./useLimitTimeline";
+import { useRulesHash } from "./useRulesHash";
 
 interface LimitsProps {
   status: BudgetStatusResponse | null;
@@ -144,8 +148,12 @@ function LimitRow({ limit, status, format, version, open, onToggle, onEdit, onDe
  * in a dialog, deleting asks first.
  */
 export function Limits({ status, format, version, onSave, onDelete }: LimitsProps): JSX.Element {
-  // `limit: null` is the add form; a limit is the edit form for it.
-  const [editing, setEditing] = useState<{ limit: BudgetLimitStatus | null } | null>(null);
+  // `limit: null` is the add form (opened on a suggested `draft`, if it came from one); a limit is the edit form for it.
+  const [editing, setEditing] = useState<{ limit: BudgetLimitStatus | null; draft?: SuggestedRule } | null>(null);
+  const [fromSessions, setFromSessions] = useState(false);
+  // Suggested rules that are in the rules now, so the suggestion can say "Added".
+  const [added, setAdded] = useState<ReadonlySet<string>>(() => new Set());
+  const { model, clear } = useRulesHash();
   const [deleting, setDeleting] = useState<BudgetLimitStatus | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteProblem, setDeleteProblem] = useState<Problem | null>(null);
@@ -167,12 +175,47 @@ export function Limits({ status, format, version, onSave, onDelete }: LimitsProp
     setDeleting(null);
   };
 
+  const markAdded = (id: string): void => setAdded((current) => new Set(current).add(id));
+  const addDraft = async (rule: SuggestedRule): Promise<Problem | null> => {
+    const taken = status?.budgets.map((limit) => limit.id) ?? [];
+    const id = taken.includes(rule.id) ? newLimitId(rule.scope, rule.limit_reset, taken) : rule.id;
+    const problem = await onSave(id, draftToPut(rule));
+    if (!problem) markAdded(rule.id);
+    return problem;
+  };
+  const saveFromEditor = async (id: string, body: BudgetLimitPutRequest): Promise<Problem | null> => {
+    const problem = await onSave(id, body);
+    if (!problem && editing?.draft) markAdded(editing.draft.id);
+    return problem;
+  };
+
   const add = (
     <Button variant="secondary" onClick={() => setEditing({ limit: null })} disabled={!status}>
       <PlusGlyph />
       {t("budget-add-limit")}
     </Button>
   );
+  const fromSessionsButton = (
+    <Button
+      variant="ghost"
+      onClick={() => {
+        setAdded(new Set());
+        setFromSessions(true);
+      }}
+      disabled={!status}
+    >
+      <ListChecksGlyph />
+      {t("budget-from-sessions")}
+    </Button>
+  );
+  const actions = (
+    <div className="budget-block__actions">
+      {add}
+      {fromSessionsButton}
+    </div>
+  );
+  // Rules for one model, when the Models list sent us here: every rule that applies to it.
+  const shown = status && model ? rulesForModel(model, status) : (status?.budgets ?? []);
 
   return (
     <section className="budget-block" aria-labelledby="budget-limits-title">
@@ -183,19 +226,42 @@ export function Limits({ status, format, version, onSave, onDelete }: LimitsProp
           </h2>
           <p className="section__sub">{t("budget-limits-sub")}</p>
         </div>
-        {status && status.budgets.length > 0 && add}
+        {status && status.budgets.length > 0 && actions}
       </header>
+
+      {model && (
+        <div className="rules-filter" role="status">
+          <span className="chip rules-filter__chip">
+            {t("budget-filter-chip", { model })}
+            <button
+              type="button"
+              className="rules-filter__clear"
+              onClick={clear}
+              aria-label={t("budget-filter-clear")}
+              title={t("budget-filter-clear")}
+            >
+              <CrossGlyph />
+            </button>
+          </span>
+          {status && <span className="form__hint">{t("budget-filter-count", { shown: shown.length, total: status.budgets.length })}</span>}
+        </div>
+      )}
 
       {deleteProblem && <ProblemCallout problem={deleteProblem} />}
 
       {status && format && status.budgets.length === 0 && (
-        <EmptyState title={t("budget-empty-title")} action={add}>
+        <EmptyState title={t("budget-empty-title")} action={actions}>
           <p>{t("budget-empty-body")}</p>
         </EmptyState>
       )}
-      {status && format && status.budgets.length > 0 && (
+      {status && format && model && status.budgets.length > 0 && shown.length === 0 && (
+        <EmptyState title={t("budget-filter-empty-title", { model })} compact>
+          <p>{t("budget-filter-empty-body")}</p>
+        </EmptyState>
+      )}
+      {status && format && shown.length > 0 && (
         <ul className="limits">
-          {status.budgets.map((limit) => (
+          {shown.map((limit) => (
             <LimitRow
               key={limit.id}
               limit={limit}
@@ -218,10 +284,22 @@ export function Limits({ status, format, version, onSave, onDelete }: LimitsProp
         <LimitEditor
           open={editing !== null}
           editing={editing?.limit ?? null}
+          suggested={editing?.draft ?? null}
           status={status}
           format={format}
-          onSave={onSave}
+          onSave={saveFromEditor}
           onClose={() => setEditing(null)}
+        />
+      )}
+      {status && format && (
+        <SessionsDialog
+          open={fromSessions}
+          status={status}
+          format={format}
+          added={added}
+          onAdd={addDraft}
+          onOpenDraft={(draft) => setEditing({ limit: null, draft })}
+          onClose={() => setFromSessions(false)}
         />
       )}
       <ConfirmDialog
