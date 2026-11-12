@@ -103,6 +103,8 @@ function TierControl({ tier, state, models, saving, onChange }: TierControlProps
   const copy = COPY_KEYS[tier];
   const status = statusText(state, models);
   const selectId = `models-auto-${tier}`;
+  const problemId = `${selectId}-problem`;
+  const hasProblem = state.status !== "ready";
   const options = optionsForTier(models, tier);
   const value = selectionValue(state);
   const unavailableId =
@@ -132,6 +134,7 @@ function TierControl({ tier, state, models, saving, onChange }: TierControlProps
           className="select"
           value={value}
           disabled={saving}
+          aria-describedby={hasProblem ? problemId : undefined}
           onChange={(event) => {
             const selected = event.currentTarget.value;
             if (selected !== EXTERNAL_DEFAULT_VALUE) {
@@ -155,6 +158,11 @@ function TierControl({ tier, state, models, saving, onChange }: TierControlProps
           ))}
         </select>
         {status && <p className="panel-status">{status}</p>}
+        {hasProblem && (
+          <div id={problemId}>
+            <TierProblem tier={tier} state={state} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -236,9 +244,6 @@ export function AutoModelControls({
       {!state.applied && (
         <p className="panel-status">{t("models-auto-not-applied")}</p>
       )}
-      <TierProblem tier="fast" state={state.fast} />
-      <TierProblem tier="capable" state={state.capable} />
-      <TierProblem tier="classifier" state={state.classifier} />
     </section>
   );
 }

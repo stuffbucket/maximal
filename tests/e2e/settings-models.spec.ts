@@ -200,9 +200,13 @@ test("shows an unavailable override without substituting it", async ({
   const fast = page.getByLabel("Haiku alias")
   await expect(fast).toHaveValue("gpt-retired")
   await expect(fast.getByText("gpt-retired (unavailable)")).toHaveCount(1)
+  await expect(fast).toHaveAttribute(
+    "aria-describedby",
+    "models-auto-fast-problem",
+  )
   await expect(
-    page.getByText("Your Haiku alias model is no longer available"),
-  ).toBeVisible()
+    fast.locator("..").locator("#models-auto-fast-problem"),
+  ).toContainText("Your Haiku alias model is no longer available")
 })
 
 test("lets Automatic reclaim an unavailable external classifier", async ({
@@ -303,7 +307,21 @@ test("shows the no-match state without choosing an arbitrary model", async ({
   })
 
   await openModels(page)
-  await expect(page.getByLabel("Haiku alias")).toHaveValue("")
+  const problemControls = [
+    [page.getByLabel("Haiku alias"), "models-auto-fast-problem"],
+    [page.getByLabel("Sonnet alias"), "models-auto-capable-problem"],
+    [
+      page.getByLabel("Auto permission checks"),
+      "models-auto-classifier-problem",
+    ],
+  ] as const
+  for (const [control, problemId] of problemControls) {
+    await expect(control).toHaveValue("")
+    await expect(control).toHaveAttribute("aria-describedby", problemId)
+    await expect(control.locator("..").locator(`#${problemId}`)).toContainText(
+      "No compatible model found—choose one",
+    )
+  }
   await expect(
     page.getByText("No compatible model found—choose one"),
   ).toHaveCount(3)
