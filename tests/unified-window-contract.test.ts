@@ -36,8 +36,8 @@ const DASHBOARD_STYLES = readFileSync(
   "utf8",
 )
 
-describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
-  test("uses a single topbar with Settings tabs and a three-surface switcher", () => {
+describe("unified Settings, Dashboard, Sessions, Budget & Appearance contract", () => {
+  test("uses a single topbar with Settings tabs and a four-surface switcher", () => {
     expect(SETTINGS_HTML).toContain(
       '<header class="topbar" data-tauri-drag-region>',
     )
@@ -54,12 +54,15 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     }
 
     expect(SETTINGS_HTML).toContain("topbar__surface-switcher")
-    for (const surface of ["settings", "dashboard", "sessions"]) {
+    for (const surface of ["settings", "dashboard", "sessions", "budget"]) {
       expect(SETTINGS_HTML).toContain(`data-surface-target="${surface}"`)
     }
     expect(SETTINGS_HTML).toContain("data-dashboard-frame")
     expect(SETTINGS_HTML).toContain("data-dashboard-controls")
     expect(SETTINGS_MAIN_TS).toContain('sessions: ["dashboard"]')
+    expect(SETTINGS_MAIN_TS).toContain('budget: ["budget"]')
+    expect(SETTINGS_HTML).toContain('data-section="budget"')
+    expect(SETTINGS_HTML).toContain('id="budget-root"')
     expect(SETTINGS_MAIN_TS).toContain('type: "maximal:surface"')
     expect(SETTINGS_MAIN_TS).toContain('safeInvoke("set_main_surface"')
   })
@@ -104,7 +107,7 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(SHELL_CARGO_TOML).toContain('tauri-plugin-window-state = "2.5"')
     expect(SHELL_LIB_RS).toContain("MAIN_WINDOW_FALLBACK_WIDTH: f64 = 1100.0")
     expect(SHELL_LIB_RS).toContain("MAIN_WINDOW_FALLBACK_HEIGHT: f64 = 720.0")
-    expect(SHELL_LIB_RS).toContain("SETTINGS_SURFACE_MIN_WIDTH: f64 = 736.0")
+    expect(SHELL_LIB_RS).toContain("SETTINGS_SURFACE_MIN_WIDTH: f64 = 772.0")
     expect(SHELL_LIB_RS).toContain("SETTINGS_SURFACE_MAX_WIDTH: f64 = 1100.0")
     expect(SHELL_LIB_RS).not.toContain("MAIN_WINDOW_MAX_WIDTH")
     expect(SHELL_LIB_RS).not.toContain("MAIN_WINDOW_MAX_HEIGHT")
@@ -166,6 +169,10 @@ describe("unified Settings, Dashboard, Sessions & Appearance contract", () => {
     expect(WINDOWS_JUMP_LIST_RS).toContain("AddUserTasks")
     expect(SHELL_LIB_RS).toContain("menu_id::SESSIONS")
     expect(SHELL_LIB_RS).toContain("open_sessions_window")
+    expect(SHELL_LIB_RS).toContain("menu_id::BUDGET")
+    expect(SHELL_LIB_RS).toContain("open_budget_window")
+    expect(SHELL_LIB_RS).toContain("ShellAction::Budget")
+    expect(SHELL_LIB_RS).toContain("fn save_text_file")
     expect(SHELL_LIB_RS).toContain("fn set_main_surface")
     expect(SHELL_LIB_RS).toContain(
       "apply_main_surface_constraints(&window, normalized)",

@@ -138,6 +138,7 @@ mod main_surface {
     pub const SETTINGS: &str = "settings";
     pub const DASHBOARD: &str = "dashboard";
     pub const SESSIONS: &str = "sessions";
+    pub const BUDGET: &str = "budget";
 }
 
 const MAIN_WINDOW_FALLBACK_WIDTH: f64 = 1100.0;
@@ -146,7 +147,7 @@ const MAIN_WINDOW_MIN_WIDTH: f64 = 640.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
 /// Keeps all five Settings tabs ahead of the pinned utilities with the topbar's
 /// reserved end gap. Observability surfaces use the smaller shared minimum.
-const SETTINGS_SURFACE_MIN_WIDTH: f64 = 736.0;
+const SETTINGS_SURFACE_MIN_WIDTH: f64 = 772.0;
 /// Settings has a bounded readable layout. Observability surfaces explicitly
 /// remove this width constraint because their tables and graphs use extra room.
 const SETTINGS_SURFACE_MAX_WIDTH: f64 = 1100.0;
@@ -392,6 +393,7 @@ mod menu_id {
     pub const SETTINGS: &str = "settings";
     pub const DASHBOARD: &str = "dashboard";
     pub const SESSIONS: &str = "sessions";
+    pub const BUDGET: &str = "budget";
     pub const QUIT: &str = "quit";
     pub const SIGN_IN: &str = "sign_in";
     pub const ACCOUNT_INFO: &str = "account_info";
@@ -413,6 +415,7 @@ enum ShellAction {
     Settings,
     Dashboard,
     Sessions,
+    Budget,
     CheckUpdates,
     ShowLogs,
     OpenConfig,
@@ -425,6 +428,7 @@ impl ShellAction {
             "settings" => Some(Self::Settings),
             "dashboard" => Some(Self::Dashboard),
             "sessions" => Some(Self::Sessions),
+            "budget" => Some(Self::Budget),
             "check-updates" => Some(Self::CheckUpdates),
             "show-logs" => Some(Self::ShowLogs),
             "open-config" => Some(Self::OpenConfig),
@@ -440,6 +444,7 @@ impl ShellAction {
             Self::Settings => Some("--maximal-action=settings"),
             Self::Dashboard => Some("--maximal-action=dashboard"),
             Self::Sessions => Some("--maximal-action=sessions"),
+            Self::Budget => Some("--maximal-action=budget"),
             Self::CheckUpdates => Some("--maximal-action=check-updates"),
             Self::ShowLogs => Some("--maximal-action=show-logs"),
             Self::OpenConfig => Some("--maximal-action=open-config"),
@@ -803,6 +808,7 @@ pub fn run() {
             open_settings_at,
             open_dashboard,
             set_main_surface,
+            save_text_file,
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
@@ -824,6 +830,7 @@ pub fn run() {
             open_settings_at,
             open_dashboard,
             set_main_surface,
+            save_text_file,
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
@@ -1807,6 +1814,10 @@ fn install_windows_jump_list(app: &AppHandle) {
             native_i18n::tr(&locale, "native-tray-sessions"),
         ),
         task(
+            ShellAction::Budget,
+            native_i18n::tr(&locale, "native-tray-budget"),
+        ),
+        task(
             ShellAction::Settings,
             native_i18n::tr(&locale, "native-tray-settings"),
         ),
@@ -1910,6 +1921,12 @@ fn build_muda_dock_menu(
         true,
         None,
     );
+    let budget_item = MenuItem::with_id(
+        menu_id::BUDGET,
+        native_i18n::tr(locale, "native-tray-budget"),
+        true,
+        None,
+    );
     let sep1 = PredefinedMenuItem::separator();
 
     let update = app.state::<LatestUpdate>().get();
@@ -1945,7 +1962,13 @@ fn build_muda_dock_menu(
                 menu.append(&sep_upgrade)?;
                 menu.append(up)?;
             }
-            menu.append_items(&[&sep1, &dashboard_item, &sessions_item, &settings_item])?;
+            menu.append_items(&[
+                &sep1,
+                &dashboard_item,
+                &sessions_item,
+                &budget_item,
+                &settings_item,
+            ])?;
         }
         SidecarState::RunningAuthenticated => {
             let info = MenuItem::with_id(
@@ -1959,7 +1982,13 @@ fn build_muda_dock_menu(
                 menu.append(&sep_upgrade)?;
                 menu.append(up)?;
             }
-            menu.append_items(&[&sep1, &dashboard_item, &sessions_item, &settings_item])?;
+            menu.append_items(&[
+                &sep1,
+                &dashboard_item,
+                &sessions_item,
+                &budget_item,
+                &settings_item,
+            ])?;
         }
         SidecarState::Failed | SidecarState::Stopped => {
             let failed = MenuItem::with_id(
@@ -2252,6 +2281,13 @@ fn build_menu(
         true,
         None::<&str>,
     )?;
+    let budget_item = MenuItem::with_id(
+        app,
+        menu_id::BUDGET,
+        native_i18n::tr(locale, "native-tray-budget"),
+        true,
+        None::<&str>,
+    )?;
     let quit_item = MenuItem::with_id(
         app,
         menu_id::QUIT,
@@ -2350,6 +2386,7 @@ fn build_menu(
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&sessions_item);
+            items.push(&budget_item);
             items.push(&settings_item);
             items.push(&sep2);
             items.push(&quit_item);
@@ -2391,6 +2428,7 @@ fn build_menu(
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&sessions_item);
+            items.push(&budget_item);
             items.push(&settings_item);
             items.push(&sep2);
             items.push(&quit_item);
@@ -2448,6 +2486,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::SETTINGS => open_settings_window(app, None),
         menu_id::DASHBOARD => open_dashboard_window(app),
         menu_id::SESSIONS => open_sessions_window(app),
+        menu_id::BUDGET => open_budget_window(app),
         menu_id::SIGN_IN => open_settings_window(app, Some("account")),
         menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
         menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
@@ -2864,6 +2903,7 @@ fn open_settings_window_with_presentation(
     let surface = match section {
         Some(main_surface::DASHBOARD) => main_surface::DASHBOARD,
         Some(main_surface::SESSIONS) => main_surface::SESSIONS,
+        Some(main_surface::BUDGET) => main_surface::BUDGET,
         _ => main_surface::SETTINGS,
     };
     let title = main_surface_title(app, surface);
@@ -3072,6 +3112,7 @@ fn main_surface_title(app: &AppHandle, surface: &str) -> String {
     match surface {
         main_surface::DASHBOARD => native_i18n::tr(&locale, "native-window-dashboard-title"),
         main_surface::SESSIONS => native_i18n::tr(&locale, "native-window-sessions-title"),
+        main_surface::BUDGET => native_i18n::tr(&locale, "native-window-budget-title"),
         _ => settings_title(app),
     }
 }
@@ -3113,6 +3154,13 @@ fn open_dashboard_window(app: &AppHandle) {
 fn open_sessions_window(app: &AppHandle) {
     const _SESSIONS_ROUTE_CONTRACT: &str = "/ui/sessions/";
     open_settings_window(app, Some(main_surface::SESSIONS));
+}
+
+/// Opens (or focuses) the unified window on its Budget surface: a React section of
+/// the Settings bundle, reached at `#budget` (`/ui/budget/` redirects there).
+fn open_budget_window(app: &AppHandle) {
+    const _BUDGET_ROUTE_CONTRACT: &str = "/ui/budget/";
+    open_settings_window(app, Some(main_surface::BUDGET));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3428,6 +3476,7 @@ fn dispatch_shell_action(app: &AppHandle, action: ShellAction) {
         ShellAction::Settings => open_settings_window(app, None),
         ShellAction::Dashboard => open_dashboard_window(app),
         ShellAction::Sessions => open_sessions_window(app),
+        ShellAction::Budget => open_budget_window(app),
         ShellAction::CheckUpdates => check_updates_from_tray(app),
         ShellAction::ShowLogs => do_reveal_logs_dir(app),
         ShellAction::OpenConfig => do_reveal_config_dir(app),
@@ -3480,6 +3529,7 @@ fn set_main_surface(app: AppHandle, surface: String) -> Result<(), String> {
     let normalized = match surface.as_str() {
         main_surface::DASHBOARD => main_surface::DASHBOARD,
         main_surface::SESSIONS => main_surface::SESSIONS,
+        main_surface::BUDGET => main_surface::BUDGET,
         main_surface::SETTINGS => main_surface::SETTINGS,
         _ => return Err("unknown main surface".to_string()),
     };
@@ -3491,6 +3541,46 @@ fn set_main_surface(app: AppHandle, surface: String) -> Result<(), String> {
         apply_main_surface_constraints(&window, normalized).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// Tauri command: ask where to save `contents` (the Budget window's CSV export)
+/// and write it there. `Ok(true)` when saved, `Ok(false)` when the person
+/// cancelled the dialog. Only the file name of `suggested_name` is used.
+#[tauri::command]
+async fn save_text_file(
+    app: AppHandle,
+    suggested_name: String,
+    contents: String,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let path = std::path::Path::new(&suggested_name);
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "invalid file name".to_string())?
+        .to_string();
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_string);
+    // The dialog blocks until the person answers, so keep it off the async workers.
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app.dialog().file().set_file_name(name);
+        if let Some(extension) = extension.as_deref() {
+            dialog = dialog.add_filter(extension.to_uppercase(), &[extension]);
+        }
+        dialog.blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(picked) = picked else {
+        return Ok(false);
+    };
+    let destination = picked.into_path().map_err(|error| error.to_string())?;
+    std::fs::write(destination, contents).map_err(|error| error.to_string())?;
+    Ok(true)
 }
 
 /// Tauri command — reveal the maximal config directory in Finder/Explorer.
@@ -3763,6 +3853,7 @@ mod tests {
             ("settings", ShellAction::Settings),
             ("dashboard", ShellAction::Dashboard),
             ("sessions", ShellAction::Sessions),
+            ("budget", ShellAction::Budget),
             ("check-updates", ShellAction::CheckUpdates),
             ("show-logs", ShellAction::ShowLogs),
             ("open-config", ShellAction::OpenConfig),
@@ -3801,6 +3892,7 @@ mod tests {
             ShellAction::Settings,
             ShellAction::Dashboard,
             ShellAction::Sessions,
+            ShellAction::Budget,
             ShellAction::CheckUpdates,
             ShellAction::ShowLogs,
             ShellAction::OpenConfig,
@@ -3922,14 +4014,18 @@ mod tests {
         assert_eq!(settings.max_height, None);
         assert_eq!(
             settings.min_width,
-            Some(PixelUnit::Logical(LogicalUnit::new(736.0))),
+            Some(PixelUnit::Logical(LogicalUnit::new(772.0))),
         );
         assert_eq!(
             settings.min_height,
             Some(PixelUnit::Logical(LogicalUnit::new(480.0))),
         );
 
-        for surface in [main_surface::DASHBOARD, main_surface::SESSIONS] {
+        for surface in [
+            main_surface::DASHBOARD,
+            main_surface::SESSIONS,
+            main_surface::BUDGET,
+        ] {
             let observability = main_window_constraints(surface);
             assert_eq!(
                 observability.min_width,

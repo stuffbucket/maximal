@@ -7,6 +7,7 @@ export type SettingsSection =
   | "endpoint"
   | "api-clients"
   | "models"
+  | "budget"
   | "logs"
   | "diagnostics";
 
@@ -17,6 +18,7 @@ export const SETTINGS_SECTIONS: Array<SettingsSection> = [
   "endpoint",
   "api-clients",
   "models",
+  "budget",
   "logs",
   "diagnostics",
 ];

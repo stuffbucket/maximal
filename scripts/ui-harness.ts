@@ -51,6 +51,8 @@ import {
   ApiKeysListResponse,
   AppsListResponse,
   AuthStatus,
+  BudgetActivityResponse,
+  BudgetStatusResponse,
   DiagnosticsResponse,
   ModelsListResponse,
   PluginDetailView,
@@ -60,6 +62,7 @@ import {
 } from "../src/lib/config/settings-types"
 import { SessionsResponse } from "../src/lib/token-usage/sessions-schema"
 import { type MockBackend, createMockBackend } from "./ui-harness-api"
+import { createBudgetMock } from "./ui-harness-budget"
 import {
   type ResolvedScenario,
   SCENARIOS,
@@ -100,6 +103,8 @@ function assertFixtures(): void {
       ["plugins/:id", PluginDetailView.array(), (s) => s.connectors],
       ["plugins/attention", PluginsAttentionResponse, (s) => ({ attention: pluginAttentionItems(s.connectors) })],
       ["token-usage/sessions", SessionsResponse, (s) => s.dashboard.sessions()],
+      ["budget", BudgetStatusResponse, (s) => createBudgetMock(s.budget).status()],
+      ["budget/activity", BudgetActivityResponse, (s) => createBudgetMock(s.budget).activity("month", "model")],
     ]
   let failures = 0
   for (const id of Object.keys(SCENARIOS) as Array<ScenarioId>) {
@@ -169,6 +174,20 @@ function broadcastPlugins(): void {
   }
 }
 backend.onPluginsChange(broadcastPlugins)
+
+function broadcastBudget(status: unknown): void {
+  const frame = enc.encode(
+    `event: budget.changed\ndata: ${JSON.stringify(status)}\n\n`,
+  )
+  for (const c of sseClients) {
+    try {
+      c.enqueue(frame)
+    } catch {
+      // client gone; the cancel handler prunes it
+    }
+  }
+}
+backend.onBudgetChange(broadcastBudget)
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -284,6 +303,7 @@ function serve(): ReturnType<typeof Bun.serve> {
             backend = createMockBackend(activeScenario)
             backend.onAuthChange(broadcastAuth)
             backend.onPluginsChange(broadcastPlugins)
+            backend.onBudgetChange(broadcastBudget)
             broadcastAuth()
             broadcastPlugins()
           }

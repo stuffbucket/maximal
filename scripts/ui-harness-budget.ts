@@ -1,0 +1,502 @@
+/**
+ * The mock sidecar's `/settings/api/budget` surface, shared (through
+ * ui-harness-api.ts) by `bun run ui:harness` and Storybook.
+ *
+ * It is a small working budget service over a made-up spend ledger: limits are
+ * created, changed and deleted through the same requests the shell sends,
+ * their spend, state and reset are worked out from the ledger with the real
+ * period and unit math (`src/lib/budget/periods.ts`, `units.ts`), and every
+ * change is announced to listeners so the harness can push `budget.changed`.
+ * Browser-safe like its host: web-standard APIs only.
+ *
+ * A scenario picks a `BudgetSeed`; the ledger is dated relative to "now" so the
+ * window always shows a recent week and a current month.
+ */
+import type {
+  BudgetActivityResponse,
+  BudgetLimitStatus,
+  BudgetStatusResponse,
+  ProviderQuotaWindowStatus,
+} from "../src/lib/config/settings-types"
+
+import { type FollowedWindow, DAY_MS, resolvePeriod, startOfUtcDay, startOfUtcWeek } from "../src/lib/budget/periods"
+import { displayToNanoAiu, nanoAiuToDisplay } from "../src/lib/budget/units"
+import { BudgetLimitPutRequest, BudgetSettingsPatchRequest } from "../src/lib/config/settings-types"
+
+type Scope = BudgetLimitStatus["scope"]
+type LimitReset = BudgetLimitStatus["limit_reset"]
+type Unit = BudgetStatusResponse["display"]["unit"]
+
+/** One stored limit, as `config.json` keeps it. */
+interface StoredLimit {
+  id: string
+  label?: string
+  scope: Scope
+  /** nano-AIU */
+  limit: number
+  limitReset: LimitReset
+  warnAt: number
+  action: "block" | "warn"
+}
+
+/** A limit as a scenario describes it: sized so the current period is `fill` spent. */
+interface LimitSeed {
+  id: string
+  label?: string
+  scope: Scope
+  limitReset: LimitReset
+  warnAt?: number
+  action: "block" | "warn"
+  /** Share of the limit already spent (1.2 means over it). */
+  fill: number
+  /** nano-AIU reserved by calls in progress. */
+  held?: number
+}
+
+export interface BudgetSeed {
+  enabled: boolean
+  unit: Unit
+  /** False reads like a build with no usage database: no spend at all. */
+  storageEnabled: boolean
+  /** False for a first run: the ledger is empty, so nothing has been spent. */
+  spending: boolean
+  limits: ReadonlyArray<LimitSeed>
+  /** Provider windows, dated relative to now. */
+  windows: (nowMs: number) => Array<ProviderQuotaWindowStatus>
+}
+
+// ---- the made-up ledger ---------------------------------------------------
+
+interface LedgerRow {
+  atMs: number
+  model: string
+  plugin: string | null
+  key: string
+  provider: string
+  nanoAiu: number
+  requests: number
+}
+
+/** One kind of traffic and what it costs on an ordinary day (nano-AIU). */
+const TRAFFIC: ReadonlyArray<{
+  model: string
+  plugin: string | null
+  key: string
+  daily: number
+  requests: number
+}> = [
+  { model: "claude-sonnet-5-5", plugin: null, key: "claude-code", daily: 110_000_000_000, requests: 120 },
+  { model: "claude-opus-5", plugin: null, key: "claude-code", daily: 52_000_000_000, requests: 18 },
+  { model: "claude-haiku-5-5", plugin: null, key: "claude-code", daily: 14_000_000_000, requests: 160 },
+  { model: "gpt-6.1-sol", plugin: null, key: "codex", daily: 62_000_000_000, requests: 64 },
+  { model: "gpt-6.1-mini", plugin: null, key: "codex", daily: 9_000_000_000, requests: 90 },
+  { model: "gemini-3.8-flash", plugin: null, key: "claude-desktop", daily: 7_000_000_000, requests: 44 },
+  { model: "gpt-image-2", plugin: "images", key: "claude-code", daily: 18_000_000_000, requests: 30 },
+  { model: "gpt-5.6-luna", plugin: "decisions", key: "claude-code", daily: 2_000_000_000, requests: 40 },
+]
+
+/** A steady 0..1 value for a day and a kind of traffic, so a day always reads the same. */
+function wobble(day: number, index: number): number {
+  const x = Math.sin(day * 12.9898 + index * 78.233) * 43758.5453
+  return x - Math.floor(x)
+}
+
+/** Every day from 35 days ago to today; weekends are quieter. */
+function ledgerFor(nowMs: number): Array<LedgerRow> {
+  const today = Math.floor(nowMs / DAY_MS)
+  const rows: Array<LedgerRow> = []
+  for (let day = today - 35; day <= today; day += 1) {
+    const weekday = new Date(day * DAY_MS).getUTCDay()
+    const weekend = weekday === 0 || weekday === 6 ? 0.4 : 1
+    TRAFFIC.forEach((traffic, index) => {
+      const factor = (0.35 + 0.65 * wobble(day, index)) * weekend
+      rows.push({
+        atMs: day * DAY_MS + 12 * 3_600_000,
+        model: traffic.model,
+        plugin: traffic.plugin,
+        key: traffic.key,
+        provider: "copilot",
+        nanoAiu: Math.round(traffic.daily * factor),
+        requests: Math.max(1, Math.round(traffic.requests * factor)),
+      })
+    })
+  }
+  return rows
+}
+
+function inScope(row: LedgerRow, scope: Scope): boolean {
+  switch (scope.kind) {
+    case "global":
+      return true
+    case "key":
+      return row.key === scope.id
+    case "plugin":
+      return row.plugin === scope.id
+    case "provider":
+      return row.provider === scope.id
+  }
+}
+
+// ---- provider windows ----------------------------------------------------
+
+function monthWindow(nowMs: number, percentRemaining: number): ProviderQuotaWindowStatus {
+  const now = new Date(nowMs)
+  const resetsAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
+  const previous = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  return {
+    provider: "copilot",
+    id: "premium_interactions",
+    label: "Copilot premium allowance",
+    unit: "credits",
+    used: Math.round(1500 * (1 - percentRemaining / 100)),
+    limit: 1500,
+    percent_remaining: percentRemaining,
+    resets_at: new Date(resetsAt).toISOString(),
+    previous_resets_at: new Date(previous).toISOString(),
+    kind: "fixed",
+    duration_ms: null,
+    scope: null,
+    overage: { used: 0, permitted: true },
+    observed_at: new Date(nowMs - 90_000).toISOString(),
+    source: "header",
+  }
+}
+
+function chatWindow(nowMs: number, percentRemaining: number): ProviderQuotaWindowStatus {
+  return {
+    ...monthWindow(nowMs, percentRemaining),
+    id: "chat",
+    label: "Copilot chat",
+    unit: "requests",
+    used: null,
+    limit: null,
+    overage: null,
+  }
+}
+
+// ---- scenario seeds ------------------------------------------------------
+
+const limitsSeed: BudgetSeed["limits"] = [
+  {
+    id: "everything",
+    label: "Monthly cap",
+    scope: { kind: "global" },
+    limitReset: { follow: "copilot:premium_interactions" },
+    action: "warn",
+    fill: 0.46,
+  },
+  {
+    id: "plugin-images-daily",
+    label: "Images per day",
+    scope: { kind: "plugin", id: "images" },
+    limitReset: "daily",
+    action: "block",
+    fill: 0.86,
+    held: 600_000_000,
+  },
+  {
+    id: "key-claude-code-daily",
+    scope: { kind: "key", id: "claude-code" },
+    limitReset: "daily",
+    action: "block",
+    fill: 0.31,
+  },
+  {
+    id: "key-codex-weekly",
+    scope: { kind: "key", id: "codex" },
+    limitReset: "weekly",
+    action: "block",
+    fill: 1.12,
+  },
+]
+
+/** Limits that are fine, nearly spent and spent, with activity and a month's allowance. */
+export const budgetLimitsSeed: BudgetSeed = {
+  enabled: true,
+  unit: "usd",
+  storageEnabled: true,
+  spending: true,
+  limits: limitsSeed,
+  windows: (nowMs) => [monthWindow(nowMs, 62.4), chatWindow(nowMs, 8)],
+}
+
+/** The same limits with enforcement switched off: kept, listed, none refuses. */
+export const budgetOffSeed: BudgetSeed = { ...budgetLimitsSeed, enabled: false }
+
+/** Nothing configured yet, nothing spent: the first-run state. */
+export const budgetEmptySeed: BudgetSeed = {
+  enabled: true,
+  unit: "usd",
+  storageEnabled: true,
+  spending: false,
+  limits: [],
+  windows: () => [],
+}
+
+/** No limits yet, but there is spend and a provider allowance to look at. */
+export const budgetNoLimitsSeed: BudgetSeed = { ...budgetLimitsSeed, limits: [] }
+
+/** Amounts shown in AI credits. */
+export const budgetCreditsSeed: BudgetSeed = { ...budgetLimitsSeed, unit: "credits" }
+
+/** A build with no usage database: every spend reads zero. */
+export const budgetStorageOffSeed: BudgetSeed = { ...budgetLimitsSeed, storageEnabled: false }
+
+// ---- the service ---------------------------------------------------------
+
+const SCOPE_ORDER: Record<Scope["kind"], number> = { global: 0, provider: 1, plugin: 2, key: 3 }
+
+const ACTIVITY_GROUPS = new Set(["model", "plugin", "key", "provider", "day"])
+const ACTIVITY_PERIODS = new Set(["day", "week", "month"])
+const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
+
+const json = (body: unknown, status = 200): Response =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+
+const validationError = (message: string, details?: unknown): Response =>
+  json({ error: { message, type: "validation_error", ...(details === undefined ? {} : { details }) } }, 400)
+
+export interface BudgetMock {
+  /** Answers `/settings/api/budget*`; null for any other path. */
+  handle: (req: Request) => Promise<Response | null>
+  /** The current status (what `budget.changed` carries). */
+  status: () => BudgetStatusResponse
+  /** Spend since the start of a period, grouped (what `/activity` answers). */
+  activity: (period: string, group: string) => BudgetActivityResponse
+  /** Called after every change a request makes. Returns an unsubscribe. */
+  onChange: (listener: (status: BudgetStatusResponse) => void) => () => void
+}
+
+export function createBudgetMock(seed: BudgetSeed): BudgetMock {
+  const startedAt = Date.now()
+  const ledger = seed.storageEnabled && seed.spending ? ledgerFor(startedAt) : []
+  const windows = seed.windows(startedAt)
+  const state = { enabled: seed.enabled, unit: seed.unit, creditUsd: 0.01 }
+  const listeners = new Set<(status: BudgetStatusResponse) => void>()
+  const held = new Map<string, number>()
+
+  const followable = (ref: string): FollowedWindow | undefined => {
+    const found = windows.find((window) => `${window.provider}:${window.id}` === ref)
+    if (!found) return undefined
+    return {
+      ...(found.resets_at ? { resetsAt: found.resets_at } : {}),
+      ...(found.previous_resets_at ? { previousResetsAt: found.previous_resets_at } : {}),
+      ...(found.kind ? { kind: found.kind } : {}),
+      ...(found.duration_ms ? { durationMs: found.duration_ms } : {}),
+    }
+  }
+
+  const spend = (scope: Scope, startMs: number, endMs: number | null): number =>
+    ledger
+      .filter((row) => inScope(row, scope) && row.atMs >= startMs && (endMs === null || row.atMs < endMs))
+      .reduce((sum, row) => sum + row.nanoAiu, 0)
+
+  // Size each seeded limit so the current period reads as `fill` spent, in
+  // steps that look like amounts a person would type.
+  const limits: Array<StoredLimit> = seed.limits.map((entry) => {
+    const period = resolvePeriod(entry.limitReset, startedAt, followable)
+    const usage = spend(entry.scope, period.startMs, period.endMs)
+    const raw = usage > 0 ? usage / entry.fill : 50_000_000_000
+    const step = raw >= 500_000_000_000 ? 50_000_000_000 : raw >= 100_000_000_000 ? 5_000_000_000 : 1_000_000_000
+    const rounded = entry.fill >= 1 ? Math.floor(raw / step) * step : Math.ceil(raw / step) * step
+    if (entry.held) held.set(entry.id, entry.held)
+    return {
+      id: entry.id,
+      ...(entry.label ? { label: entry.label } : {}),
+      scope: entry.scope,
+      limit: Math.max(step, rounded),
+      limitReset: entry.limitReset,
+      warnAt: entry.warnAt ?? 0.8,
+      action: entry.action,
+    }
+  })
+
+  const display = (): { unit: Unit; creditUsd: number } => ({ unit: state.unit, creditUsd: state.creditUsd })
+
+  function limitStatus(entry: StoredLimit, nowMs: number): BudgetLimitStatus {
+    const shown = display()
+    const period = resolvePeriod(entry.limitReset, nowMs, followable)
+    const usage = spend(entry.scope, period.startMs, period.endMs)
+    const remaining = Math.max(0, entry.limit - usage)
+    const dayStart = startOfUtcDay(nowMs)
+    return {
+      id: entry.id,
+      label: entry.label ?? null,
+      scope: entry.scope,
+      action: entry.action,
+      warn_at: entry.warnAt,
+      limit: entry.limit,
+      limit_reset: entry.limitReset,
+      limit_remaining: remaining,
+      usage,
+      held: held.get(entry.id) ?? 0,
+      usage_daily: spend(entry.scope, dayStart, dayStart + DAY_MS),
+      usage_weekly: spend(entry.scope, startOfUtcWeek(nowMs), null),
+      period_start: new Date(period.startMs).toISOString(),
+      resets_at: period.endMs === null ? null : new Date(period.endMs).toISOString(),
+      reset_basis: period.basis,
+      reset_estimated: period.estimated,
+      state: usage >= entry.limit ? "exhausted" : usage >= entry.limit * entry.warnAt ? "warning" : "ok",
+      display: {
+        limit: nanoAiuToDisplay(entry.limit, shown),
+        usage: nanoAiuToDisplay(usage, shown),
+        limit_remaining: nanoAiuToDisplay(remaining, shown),
+      },
+    }
+  }
+
+  function status(): BudgetStatusResponse {
+    const nowMs = Date.now()
+    const budgets = [...limits]
+      .sort((a, b) => SCOPE_ORDER[a.scope.kind] - SCOPE_ORDER[b.scope.kind] || a.id.localeCompare(b.id))
+      .map((entry) => limitStatus(entry, nowMs))
+    const blocking = budgets.filter((budget) => budget.action === "block")
+    const spent = blocking.find((budget) => budget.state === "exhausted")
+    const tightest = blocking.reduce<BudgetLimitStatus | undefined>(
+      (best, budget) => (!best || budget.limit_remaining < best.limit_remaining ? budget : best),
+      undefined,
+    )
+    return {
+      enabled: state.enabled,
+      display: { unit: state.unit, credit_usd: state.creditUsd },
+      storage_enabled: seed.storageEnabled,
+      budgets,
+      effective_budget: (spent ?? tightest)?.id ?? null,
+      provider_windows: windows,
+    }
+  }
+
+  const emit = (): void => {
+    const current = status()
+    for (const listener of listeners) listener(current)
+  }
+
+  function activity(period: string, group: string): BudgetActivityResponse {
+    const nowMs = Date.now()
+    const now = new Date(nowMs)
+    const startMs =
+      period === "day" ? startOfUtcDay(nowMs)
+      : period === "week" ? startOfUtcWeek(nowMs)
+      : Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    const keyOf = (row: LedgerRow): string | null =>
+      group === "model" ? row.model
+      : group === "plugin" ? row.plugin
+      : group === "key" ? row.key
+      : group === "provider" ? row.provider
+      : new Date(row.atMs).toISOString().slice(0, 10)
+    const grouped = new Map<string | null, { nano: number; requests: number }>()
+    for (const row of ledger) {
+      if (row.atMs < startMs || row.nanoAiu <= 0) continue
+      const key = keyOf(row)
+      const sum = grouped.get(key) ?? { nano: 0, requests: 0 }
+      grouped.set(key, { nano: sum.nano + row.nanoAiu, requests: sum.requests + row.requests })
+    }
+    const shown = display()
+    const rows = [...grouped.entries()]
+      .sort(([keyA, a], [keyB, b]) =>
+        group === "day" ?
+          String(keyA).localeCompare(String(keyB))
+        : b.nano - a.nano || String(keyA).localeCompare(String(keyB)),
+      )
+      .map(([key, sum]) => ({
+        key,
+        nano_aiu: sum.nano,
+        requests: sum.requests,
+        amount: nanoAiuToDisplay(sum.nano, shown),
+      }))
+    return {
+      period: period as BudgetActivityResponse["period"],
+      group: group as BudgetActivityResponse["group"],
+      period_start: new Date(startMs).toISOString(),
+      display: { unit: state.unit, credit_usd: state.creditUsd },
+      rows,
+    }
+  }
+
+  const csvCell = (value: string): string => (/[",\n\r]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value)
+
+  async function handle(req: Request): Promise<Response | null> {
+    const url = new URL(req.url)
+    const path = url.pathname
+    if (path !== "/settings/api/budget" && !path.startsWith("/settings/api/budget/")) return null
+    const method = req.method
+
+    if (path === "/settings/api/budget" && method === "GET") return json(status())
+
+    if (path === "/settings/api/budget" && method === "PATCH") {
+      const body = BudgetSettingsPatchRequest.safeParse(await req.json().catch(() => null))
+      if (!body.success) return validationError("Invalid budget settings", body.error.issues)
+      if (body.data.enabled !== undefined) state.enabled = body.data.enabled
+      if (body.data.display_unit !== undefined) state.unit = body.data.display_unit
+      emit()
+      return json(status())
+    }
+
+    const limitPath = /^\/settings\/api\/budget\/limits\/([^/]+)$/.exec(path)
+    if (limitPath && method === "PUT") {
+      const id = decodeURIComponent(limitPath[1] ?? "")
+      if (!ID_PATTERN.test(id) || id.length > 64) {
+        return validationError("Limit id must be lowercase letters and digits, separated by '.', '_' or '-'")
+      }
+      const body = BudgetLimitPutRequest.safeParse(await req.json().catch(() => null))
+      if (!body.success) return validationError("Invalid budget limit", body.error.issues)
+      const request = body.data
+      const entry: StoredLimit = {
+        id,
+        ...(request.label === undefined ? {} : { label: request.label }),
+        scope: request.scope,
+        limit: request.limit ?? displayToNanoAiu(request.amount ?? 0, display()),
+        limitReset: request.limit_reset,
+        warnAt: request.warn_at ?? 0.8,
+        action: request.action,
+      }
+      const index = limits.findIndex((existing) => existing.id === id)
+      if (index === -1) limits.push(entry)
+      else limits[index] = entry
+      emit()
+      return json(status())
+    }
+    if (limitPath && method === "DELETE") {
+      const index = limits.findIndex((existing) => existing.id === decodeURIComponent(limitPath[1] ?? ""))
+      if (index === -1) return json({ error: { message: "Budget limit not found", type: "not_found" } }, 404)
+      limits.splice(index, 1)
+      emit()
+      return json(status())
+    }
+
+    if ((path === "/settings/api/budget/activity" || path === "/settings/api/budget/activity.csv") && method === "GET") {
+      const period = url.searchParams.get("period") ?? "day"
+      const group = url.searchParams.get("group") ?? "model"
+      if (!ACTIVITY_PERIODS.has(period) || !ACTIVITY_GROUPS.has(group)) {
+        return validationError("period must be day, week or month; group must be model, plugin, key, provider or day")
+      }
+      const result = activity(period, group)
+      if (path.endsWith(".csv")) {
+        const lines = [`${result.group},nano_aiu,requests,amount_${result.display.unit}`]
+        for (const row of result.rows) {
+          lines.push([csvCell(row.key ?? ""), row.nano_aiu, row.requests, row.amount].join(","))
+        }
+        return new Response(`${lines.join("\n")}\n`, {
+          status: 200,
+          headers: {
+            "content-type": "text/csv; charset=utf-8",
+            "content-disposition": `attachment; filename="maximal-budget-${result.group}-${result.period}.csv"`,
+          },
+        })
+      }
+      return json(result)
+    }
+
+    return json({ error: { message: `harness: unhandled ${method} ${path}` } }, 404)
+  }
+
+  return {
+    handle,
+    status,
+    activity,
+    onChange(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+}

@@ -29,6 +29,10 @@ import type {
   ApiKeyEntry,
   ApiKeysListResponse,
   AuthStatus,
+  BudgetActivityResponse,
+  BudgetLimitPutRequest,
+  BudgetSettingsPatchRequest,
+  BudgetStatusResponse,
   ClaudeAutoModelsUpdateRequest,
   ClaudeCodeInstallStatus,
   DiagnosticsResponse,
@@ -357,6 +361,34 @@ type Endpoint =
       path: `/settings/api/plugins/${string}/actions/${string}`
     }
 
+  | {
+      kind: "budget-status"
+      method: "GET"
+      path: "/settings/api/budget"
+    }
+  | {
+      kind: "budget-settings"
+      method: "PATCH"
+      path: "/settings/api/budget"
+      body: BudgetSettingsPatchRequest
+    }
+  | {
+      kind: "budget-limit-put"
+      method: "PUT"
+      path: `/settings/api/budget/limits/${string}`
+      body: BudgetLimitPutRequest
+    }
+  | {
+      kind: "budget-limit-delete"
+      method: "DELETE"
+      path: `/settings/api/budget/limits/${string}`
+    }
+  | {
+      kind: "budget-activity"
+      method: "GET"
+      path: `/settings/api/budget/activity?${string}`
+    }
+
 type EndpointKind = Endpoint["kind"]
 
 interface ResponseFor {
@@ -392,6 +424,11 @@ interface ResponseFor {
   "models-list": ModelsListResponse
   "models-refresh": ModelsListResponse
   "models-auto-update": ModelsListResponse
+  "budget-status": BudgetStatusResponse
+  "budget-settings": BudgetStatusResponse
+  "budget-limit-put": BudgetStatusResponse
+  "budget-limit-delete": BudgetStatusResponse
+  "budget-activity": BudgetActivityResponse
 }
 
 interface ApiOptions {
@@ -555,6 +592,63 @@ export async function subscribePluginEvents(handlers: {
   source.addEventListener("plugins.changed", () => handlers.onChanged())
 
   return { close: () => source.close() }
+}
+
+/**
+ * Subscribe to `budget.changed` on the same stream: a limit, the on/off switch
+ * or the display unit changed, or a limit crossed its warning. The frame
+ * carries the whole status (the same payload as GET /settings/api/budget), so
+ * the listener needs no refetch. `onOpen` fires on every (re)connect so the
+ * caller can resync what it missed while the stream was down.
+ */
+export async function subscribeBudgetEvents(handlers: {
+  onChanged: (status: BudgetStatusResponse) => void
+  onOpen?: () => void
+  onError?: () => void
+}): Promise<EventSubscription> {
+  const apiKey = await resolveApiKey()
+  const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
+  const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
+
+  source.addEventListener("open", () => handlers.onOpen?.())
+  source.addEventListener("error", () => handlers.onError?.())
+  source.addEventListener("budget.changed", (event) => {
+    const message = event as MessageEvent<string>
+    try {
+      handlers.onChanged(JSON.parse(message.data) as BudgetStatusResponse)
+    } catch {
+      // Malformed frame: drop it; the next event or reconnect resyncs.
+    }
+  })
+
+  return { close: () => source.close() }
+}
+
+/**
+ * The activity as CSV text. Not `apiCall`: the reply isn't JSON, and the
+ * file is saved as it came (`activity.csv` shares the activity query).
+ */
+export async function fetchBudgetCsv(
+  query: string,
+): Promise<ApiResult<string>> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  try {
+    const apiKey = await resolveApiKey()
+    const res = await fetch(`${baseUrl()}/settings/api/budget/activity.csv?${query}`, {
+      headers: apiKey ? { "x-api-key": apiKey } : {},
+      signal: controller.signal,
+    })
+    const text = await res.text().catch(() => "")
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: text || `HTTP ${res.status}` }
+    }
+    return { ok: true, data: text }
+  } catch (err) {
+    return { ok: false, status: 0, error: err instanceof Error ? err.message : "Unknown error" }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export function listPlugins(): Promise<ApiResult<PluginsListResponse>> {

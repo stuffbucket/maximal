@@ -16,6 +16,7 @@
  */
 import type { AuthStatus, PluginDetailView } from "../src/lib/config/settings-types"
 
+import { type BudgetMock, createBudgetMock } from "./ui-harness-budget"
 import {
   ClaudeAutoModelsUpdateRequest,
   PluginToolPermissionsRequest,
@@ -48,6 +49,9 @@ export interface MockBackend {
   /** Called whenever a plugin's lifecycle, status, tools or settings change
    *  (the SSE `plugins.changed` frame). Returns an unsubscribe. */
   onPluginsChange: (listener: () => void) => () => void
+  /** Called whenever a request changes the budget (the SSE `budget.changed`
+   *  frame carries the status). Returns an unsubscribe. */
+  onBudgetChange: BudgetMock["onChange"]
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -84,6 +88,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     models: ResolvedScenario["models"]
     connectors: Array<PluginDetailView>
   }
+  const budget = createBudgetMock(fixture.budget)
   const pluginListeners = new Set<() => void>()
   const pluginsChanged = (): void => {
     for (const l of pluginListeners) l()
@@ -236,6 +241,10 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
         range: fixture.dashboard.tokenUsage.range,
       })
     }
+
+    // --- budget: limits, activity and the on/off + unit switches ---
+    const budgetReply = await budget.handle(req)
+    if (budgetReply) return budgetReply
 
     // --- reads ---
     if (path === "/settings/api/diagnostics") return json(fixture.diagnostics)
@@ -498,5 +507,6 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       pluginListeners.add(listener)
       return () => pluginListeners.delete(listener)
     },
+    onBudgetChange: budget.onChange,
   }
 }

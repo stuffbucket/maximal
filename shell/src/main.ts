@@ -27,6 +27,7 @@ import type {
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
+import { mountBudget } from "./ui/islands/budget-island";
 import { mountModels } from "./ui/islands/models-island";
 import { mountConnectors } from "./ui/islands/connectors-island";
 import { mountQuitDialog } from "./ui/islands/quit-dialog-island";
@@ -40,6 +41,7 @@ type SectionId =
   | "system"
   | "dashboard"
   | "sessions"
+  | "budget"
   | "apps"
   | "connectors"
   | "endpoint"
@@ -55,7 +57,8 @@ type TopTabId =
   | "appearance"
   | "system"
   | "dashboard"
-  | "sessions";
+  | "sessions"
+  | "budget";
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
@@ -65,6 +68,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "system",
   "dashboard",
   "sessions",
+  "budget",
   "apps",
   "connectors",
   "endpoint",
@@ -82,6 +86,7 @@ const TAB_SECTIONS: Record<TopTabId, ReadonlyArray<string>> = {
   system: ["diagnostics", "logs"],
   dashboard: ["dashboard"],
   sessions: ["dashboard"],
+  budget: ["budget"],
 };
 
 const LAST_TAB_STORAGE_KEY = "maximal.lastTab";
@@ -116,6 +121,8 @@ function tabForSection(id: SectionId): TopTabId {
       return "dashboard";
     case "sessions":
       return "sessions";
+    case "budget":
+      return "budget";
   }
 }
 
@@ -132,7 +139,7 @@ function getStoredTab(key: string): SectionId | null {
 function persistTabSelection(tab: TopTabId): void {
   try {
     window.localStorage.setItem(LAST_TAB_STORAGE_KEY, tab);
-    if (tab !== "dashboard" && tab !== "sessions") {
+    if (tab !== "dashboard" && tab !== "sessions" && tab !== "budget") {
       window.localStorage.setItem(LAST_SETTINGS_TAB_STORAGE_KEY, tab);
     }
   } catch {
@@ -150,16 +157,17 @@ function hasAccountProblem(
   );
 }
 
-type Surface = "settings" | "dashboard" | "sessions";
+type Surface = "settings" | "dashboard" | "sessions" | "budget";
 
 function surfaceForTab(tab: TopTabId): Surface {
-  if (tab === "dashboard" || tab === "sessions") return tab;
+  if (tab === "dashboard" || tab === "sessions" || tab === "budget") return tab;
   return "settings";
 }
 
 function surfaceTitle(surface: Surface): string {
   if (surface === "dashboard") return t("dashboard-title");
   if (surface === "sessions") return t("native-window-sessions-title");
+  if (surface === "budget") return t("native-window-budget-title");
   return t("native-window-settings-title");
 }
 
@@ -173,6 +181,7 @@ function updateSurfaceModeButtons(surface: Surface): void {
       shortcut: isMac ? "⌘D" : "Ctrl+D",
     }),
     sessions: t("nav-switch-to-sessions"),
+    budget: t("nav-switch-to-budget"),
   };
   for (const button of document.querySelectorAll<HTMLButtonElement>(
     "[data-surface-target]",
@@ -197,7 +206,7 @@ function showSection(id: SectionId, options: { persist?: boolean } = {}): void {
   const tab = tabForSection(id);
   const visibleSections = new Set(TAB_SECTIONS[tab]);
   const surface = surfaceForTab(tab);
-  const isObservability = surface !== "settings";
+  const isObservability = surface === "dashboard" || surface === "sessions";
 
   if (options.persist !== false) {
     persistTabSelection(tab);
@@ -224,10 +233,14 @@ function showSection(id: SectionId, options: { persist?: boolean } = {}): void {
   const dashControls = document.querySelector<HTMLElement>(
     "[data-dashboard-controls]",
   );
-  if (settingsNav) settingsNav.hidden = isObservability;
+  if (settingsNav) settingsNav.hidden = surface !== "settings";
   if (dashControls) dashControls.hidden = surface !== "dashboard";
   updateSurfaceModeButtons(surface);
   void safeInvoke("set_main_surface", { surface });
+  // What was spent while another surface was up is current on arrival.
+  if (surface === "budget") {
+    window.dispatchEvent(new CustomEvent("maximal:budget-refresh"));
+  }
 
   for (const sec of document.querySelectorAll<HTMLElement>("[data-section]")) {
     const secId = sec.dataset.section ?? "";
@@ -432,7 +445,11 @@ function wireNav(): void {
 
   window.addEventListener("maximal:open-settings", () => {
     const currentTab = tabForSection(readHashSection());
-    if (currentTab === "dashboard" || currentTab === "sessions") {
+    if (
+      currentTab === "dashboard" ||
+      currentTab === "sessions" ||
+      currentTab === "budget"
+    ) {
       const target: SectionId = hasAccountProblem()
         ? "account"
         : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
@@ -527,6 +544,8 @@ function repaintDynamicI18n(): void {
     { type: "maximal:set-locale" },
     window.location.origin,
   );
+  // React islands read t() at render; tell them the language changed.
+  window.dispatchEvent(new CustomEvent("maximal:locale-changed"));
   if (currentAuthStatus) renderAccount(currentAuthStatus);
   if (lastDiagnostics) renderDiagnostics(lastDiagnostics);
   if (lastUpdateStatus) renderUpdateStatus(lastUpdateStatus);
@@ -2651,6 +2670,7 @@ window.addEventListener("DOMContentLoaded", () => {
   mountConnectors();
   mountQuitDialog();
   mountModels();
+  mountBudget();
   wireNav();
   syncFromHash({ persist: hadExplicitHash });
   void loadDiagnostics();
