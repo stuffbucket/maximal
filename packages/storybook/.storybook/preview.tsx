@@ -68,6 +68,7 @@ const preview: Preview = {
           "Components",
           "Settings",
           "Windows",
+          ["Dashboard", "Sessions", "Settings"],
         ],
       },
     },
