@@ -4,35 +4,50 @@
  * counted because the call they reserved for may have been billed.
  */
 
+import { globToSqlite } from "~/lib/budget/glob"
 import { KEY_SQL, PROVIDER_SQL } from "~/lib/token-usage/aggregate"
 import {
   isTokenUsageStorageEnabled,
   readUsageDb,
 } from "~/lib/token-usage/store"
 
+/** What a filter's members are matched against. */
+export type MemberField = "model" | "key" | "plugin"
+
 /** The rows a budget scope covers. A key is the API key's label, else the
  *  client recognised from the user agent, else `unidentified`; a provider is
- *  `copilot` or the configured provider's name. */
+ *  `copilot` or the configured provider's name; `members` rows whose model,
+ *  key or plugin matches any of the globs. */
 export type SpendScope =
   | { kind: "global" }
   | { kind: "key" | "plugin" | "provider"; id: string }
+  | { kind: "members"; field: MemberField; members: ReadonlyArray<string> }
 
 /** A scope as a `WHERE` fragment over `token_usage_events`, one `?` for the
  *  scope's id. */
-export const SCOPE_SQL: Record<
-  Exclude<SpendScope["kind"], "global">,
-  string
-> = {
+export const SCOPE_SQL: Record<"key" | "plugin" | "provider", string> = {
   key: `${KEY_SQL} = ?`,
   plugin: "plugin_id = ?",
   provider: `(${PROVIDER_SQL}) = ?`,
 }
 
 /** The same scopes over `budget_holds`' columns. */
-const HOLD_SCOPE_SQL: Record<Exclude<SpendScope["kind"], "global">, string> = {
+const HOLD_SCOPE_SQL: Record<"key" | "plugin" | "provider", string> = {
   key: "client_key = ?",
   plugin: "plugin_id = ?",
   provider: "provider = ?",
+}
+
+const MEMBER_COLUMN: Record<MemberField, string> = {
+  model: "model",
+  key: KEY_SQL,
+  plugin: "plugin_id",
+}
+
+const HOLD_MEMBER_COLUMN: Record<MemberField, string> = {
+  model: "model",
+  key: "client_key",
+  plugin: "plugin_id",
 }
 
 function readSpend(row: unknown, index: number): number {
@@ -49,12 +64,26 @@ export interface SpendRange {
   endMs: number | null
 }
 
-/** The WHERE clauses that pick a scope's rows, from the SQL for its kind. */
-function scopeWhere(
+/** The WHERE clauses that pick a scope's rows, over the usage rows
+ *  (`events`) or the holds. A filter with no members selects nothing. */
+export function scopeWhere(
   scope: SpendScope,
-  sql: Record<Exclude<SpendScope["kind"], "global">, string>,
+  table: "events" | "holds",
 ): { clauses: Array<string>; values: Array<string | number> } {
   if (scope.kind === "global") return { clauses: [], values: [] }
+  if (scope.kind === "members") {
+    if (scope.members.length === 0) return { clauses: ["0"], values: [] }
+    const column = (table === "events" ? MEMBER_COLUMN : HOLD_MEMBER_COLUMN)[
+      scope.field
+    ]
+    return {
+      clauses: [
+        `(${scope.members.map(() => `${column} GLOB ?`).join(" OR ")})`,
+      ],
+      values: scope.members.map((member) => globToSqlite(member)),
+    }
+  }
+  const sql = table === "events" ? SCOPE_SQL : HOLD_SCOPE_SQL
   return { clauses: [sql[scope.kind]], values: [scope.id] }
 }
 
@@ -76,14 +105,14 @@ export async function getNanoAiuSpend(
     range.endMs ?? Number.MAX_SAFE_INTEGER,
   ])
   const earliest = Math.min(...ranges.map((range) => range.startMs))
-  const events = scopeWhere(scope, SCOPE_SQL)
+  const events = scopeWhere(scope, "events")
   const where = ["created_at_ms >= ?", ...events.clauses]
   const whereValues = [earliest, ...events.values]
   const holdSums = ranges.map(
     (_, index) =>
       `COALESCE(SUM(CASE WHEN created_at_ms >= ? AND created_at_ms < ? THEN estimate_nano_aiu ELSE 0 END), 0) AS spend_${index}`,
   )
-  const holds = scopeWhere(scope, HOLD_SCOPE_SQL)
+  const holds = scopeWhere(scope, "holds")
   const holdWhere = [
     "state = 'orphaned'",
     "created_at_ms >= ?",
@@ -122,8 +151,8 @@ export async function getNanoAiuSpendRows(
 ): Promise<Array<SpendRow>> {
   if (!isTokenUsageStorageEnabled()) return []
   const end = range.endMs ?? Number.MAX_SAFE_INTEGER
-  const events = scopeWhere(scope, SCOPE_SQL)
-  const holds = scopeWhere(scope, HOLD_SCOPE_SQL)
+  const events = scopeWhere(scope, "events")
+  const holds = scopeWhere(scope, "holds")
   const eventWhere = [
     "created_at_ms >= ?",
     "created_at_ms < ?",

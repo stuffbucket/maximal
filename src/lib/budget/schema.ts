@@ -11,27 +11,55 @@
 
 import { z } from "zod"
 
+const SLUG = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
+
 /** A limit's stable, user-visible slug (`images-daily`). */
-export const BudgetLimitId = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u)
+export const BudgetLimitId = z.string().min(1).max(64).regex(SLUG)
 
 /** What a limit applies to. `global` matches every billed request; `key`
  *  matches one client key (the API key's label, or for a request with no
  *  key the client Maximal recognised, else `unidentified`); `plugin` a
  *  plugin or built-in capability (`images`); `provider` everything one
- *  provider bills (`copilot`). */
+ *  provider bills (`copilot`); `filter` whatever a named filter selects
+ *  (`id` is the filter's id). */
 export const BudgetScope = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("global") }),
   z.object({
     kind: z.enum(["key", "plugin", "provider"]),
     id: z.string().trim().min(1).max(128),
   }),
+  z.object({
+    kind: z.literal("filter"),
+    id: z.string().trim().min(1).max(128),
+  }),
 ])
 export type BudgetScope = z.infer<typeof BudgetScope>
 export type BudgetScopeKind = BudgetScope["kind"]
+
+/** A reusable filter's stable, user-visible slug (`claude-models`). */
+export const BudgetFilterId = z.string().min(1).max(64).regex(SLUG)
+
+/** What a filter's members are matched against: the model a request names,
+ *  the client key (as for a `key` scope), or the plugin or capability. */
+export const BudgetFilterKind = z.enum(["models", "clients", "plugins"])
+export type BudgetFilterKind = z.infer<typeof BudgetFilterKind>
+
+/** An exact name, or a glob: `*` matches any run of characters (none
+ *  included) and `?` exactly one, so `claude-*` selects every model whose id
+ *  starts `claude-`. Matching is case-sensitive. */
+export const BudgetFilterMember = z.string().trim().min(1).max(128)
+
+/** A named set of models, clients or plugins that a limit's scope can
+ *  select (`{ kind: "filter", id }`). */
+export const BudgetFilterSchema = z
+  .object({
+    id: BudgetFilterId,
+    name: z.string().trim().min(1).max(128),
+    kind: BudgetFilterKind,
+    members: z.array(BudgetFilterMember).min(1).max(256),
+  })
+  .loose()
+export type BudgetFilterConfig = z.infer<typeof BudgetFilterSchema>
 
 /** `<provider>:<window id>`, e.g. `copilot:premium_interactions`. */
 export const ProviderWindowRef = z
@@ -109,9 +137,22 @@ export const BudgetConfigSchema = z
       .loose()
       .optional(),
     limits: z.array(BudgetLimitConfigSchema).max(256).optional(),
+    /** Named sets a limit's `filter` scope selects. */
+    filters: z.array(BudgetFilterSchema).max(128).optional(),
   })
   .loose()
   .superRefine((budget, ctx) => {
+    const filterIds = new Set<string>()
+    for (const [index, filter] of (budget.filters ?? []).entries()) {
+      if (filterIds.has(filter.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate budget filter id '${filter.id}'`,
+          path: ["filters", index, "id"],
+        })
+      }
+      filterIds.add(filter.id)
+    }
     const seen = new Set<string>()
     for (const [index, limit] of (budget.limits ?? []).entries()) {
       if (seen.has(limit.id)) {

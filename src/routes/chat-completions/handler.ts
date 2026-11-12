@@ -44,10 +44,10 @@ const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
-  await admitChat("chat_completions")
 
   let payload = await c.req.json<ChatCompletionsPayload>()
   payload.model = reverseId(payload.model)
+  await admitChat("chat_completions", payload.model)
   const mapping = resolveModelMapping({
     requestedModel: payload.model,
     rules: getConfig().modelMappings ?? [],

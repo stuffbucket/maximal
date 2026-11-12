@@ -90,6 +90,7 @@ export function harness(
   options: {
     spendFails?: boolean
     enabled?: boolean
+    filters?: BudgetConfig["filters"]
     /** `none`: no `onWarning` dependency; `throws`: a handler that fails. */
     onWarning?: "none" | "throws"
   } = {},
@@ -98,6 +99,7 @@ export function harness(
   let config: BudgetConfig | undefined = {
     limits,
     ...(options.enabled === undefined ? {} : { enabled: options.enabled }),
+    ...(options.filters === undefined ? {} : { filters: options.filters }),
   }
   const windows = new Map<string, FollowedWindow>()
   const rows: Array<SpendEvent> = []

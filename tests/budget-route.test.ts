@@ -92,6 +92,7 @@ describe("GET /settings/api/budget", () => {
       budgets: [],
       effective_budget: null,
       provider_windows: [],
+      filters: [],
     })
   })
 

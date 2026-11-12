@@ -50,8 +50,8 @@ export function createUsageDbBudgetStore(): BudgetStore {
         db.prepare(
           `INSERT OR REPLACE INTO budget_holds (
             id, created_at_ms, operation, provider, plugin_id, tool_name,
-            client_key, estimate_nano_aiu, state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
+            client_key, estimate_nano_aiu, model, state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
         ).run(
           hold.id,
           hold.createdAtMs,
@@ -61,6 +61,7 @@ export function createUsageDbBudgetStore(): BudgetStore {
           hold.tool ?? null,
           hold.key,
           hold.estimateNanoAiu,
+          hold.model ?? null,
         )
       }, "Failed to record a budget hold")
     },

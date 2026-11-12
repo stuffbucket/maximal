@@ -24,6 +24,7 @@ import {
   type FollowedWindow,
 } from "../periods"
 import { DEFAULT_WARN_AT, type BudgetLimitReset } from "../schema"
+import { resolveScope } from "../scope"
 import { nanoAiuToDisplay, resolveBudgetDisplay } from "../units"
 import { bucketStart, nextBucketStart, type BucketSize } from "./buckets"
 import { getBudgetEvents } from "./events"
@@ -373,6 +374,7 @@ async function readTimelineData(
   refusals: Array<{ atMs: number; estimateNanoAiu: number }>
 }> {
   const { limit, range } = query
+  const scope = resolveScope(limit.scope, query.config?.filters)
   // The first period's earlier rows count toward it: a bounded period is read
   // from its start, a rolling window from one window back, and a lifetime
   // period is summed.
@@ -388,11 +390,9 @@ async function readTimelineData(
     && first !== undefined
     && first.startMs < alignedFromMs
   const [rows, [baselineNanoAiu], refusals] = await Promise.all([
-    getSpendRows(limit.scope, rowsFromMs, range.toMs),
+    getSpendRows(scope, rowsFromMs, range.toMs),
     summed ?
-      getNanoAiuSpend(limit.scope, [
-        { startMs: first.startMs, endMs: alignedFromMs },
-      ])
+      getNanoAiuSpend(scope, [{ startMs: first.startMs, endMs: alignedFromMs }])
     : Promise.resolve([0]),
     getBudgetEvents({
       limitId: limit.id,

@@ -10,6 +10,15 @@
  * - `DELETE /limits/:id` — remove a limit.
  * - `PATCH /` — `enabled` (enforcement on or off) and `display_unit`
  *   (`BudgetSettingsPatchRequest`).
+ * - `GET /filters` — the named filters (`BudgetFiltersResponse`);
+ *   `PUT /filters/:id` creates or replaces one (`BudgetFilterPutRequest`),
+ *   `DELETE /filters/:id` removes it, a 409 `filter_in_use` while a rule's
+ *   scope selects it.
+ * - `GET /rules/export` — the rules document (`BudgetRulesDocument`, version
+ *   1); `POST /rules/import` — `{ rules, mode, dryRun }`
+ *   (`BudgetRulesImportRequest`) answers what would change or changed
+ *   (`BudgetRulesImportResponse`); a document that doesn't validate is a 400
+ *   listing every problem.
  * - `GET /presets` — reset presets and persona presets
  *   (`BudgetPresetsResponse`): suggestions the UI turns into draft rules,
  *   never applied here.
@@ -52,19 +61,28 @@ import {
 import { parseUsageRange } from "~/lib/budget/reports/range"
 import { buildLimitTimeline } from "~/lib/budget/reports/timeline"
 import { getFirstUsageMs } from "~/lib/budget/reports/usage"
+import { exportRules, planImport } from "~/lib/budget/rules"
 import { currentBudgetStatus, emitBudgetChanged } from "~/lib/budget/runtime"
 import {
+  BudgetFilterId,
   BudgetLimitId,
   DEFAULT_WARN_AT,
   NanoAiuAmount,
+  type BudgetFilterConfig,
   type BudgetLimitConfig,
 } from "~/lib/budget/schema"
+import { filterStatuses } from "~/lib/budget/status"
 import { displayToNanoAiu, resolveBudgetDisplay } from "~/lib/budget/units"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import {
   BudgetActivityResponse,
+  BudgetFilterPutRequest,
+  BudgetFiltersResponse,
   BudgetLimitPutRequest,
   BudgetPresetsResponse,
+  BudgetRulesDocument,
+  BudgetRulesImportRequest,
+  BudgetRulesImportResponse,
   BudgetSettingsPatchRequest,
   BudgetStatusResponse,
   BudgetTimelineResponse,
@@ -158,6 +176,16 @@ budgetRoutes.put("/limits/:id", async (c) => {
       return validationError(c, "Limit amount is out of range")
     }
 
+    const { scope } = request
+    if (
+      scope.kind === "filter"
+      && !(config.budget?.filters ?? []).some(
+        (filter) => filter.id === scope.id,
+      )
+    ) {
+      return validationError(c, `Unknown filter '${scope.id}'; create it first`)
+    }
+
     const entry: BudgetLimitConfig = {
       id: id.data,
       ...(request.label === undefined ? {} : { label: request.label }),
@@ -186,6 +214,153 @@ budgetRoutes.delete("/limits/:id", async (c) => {
     if (next.length === limits.length) return notFound(c)
     writeConfig(withLimits(config, next))
     return await respondChanged(c)
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+budgetRoutes.get("/filters", (c) => {
+  try {
+    return respondValidated(
+      c,
+      { schema: BudgetFiltersResponse, label: "Budget filters" },
+      { filters: filterStatuses(getConfig().budget) },
+    )
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+budgetRoutes.put("/filters/:id", async (c) => {
+  try {
+    const id = BudgetFilterId.safeParse(c.req.param("id"))
+    if (!id.success) {
+      return validationError(
+        c,
+        "Filter id must be lowercase letters and digits, separated by '.', '_' or '-'",
+      )
+    }
+    const body = BudgetFilterPutRequest.safeParse(
+      await c.req.json().catch(() => null),
+    )
+    if (!body.success) {
+      return validationError(c, "Invalid budget filter", body.error.issues)
+    }
+    const config = getConfig()
+    const entry: BudgetFilterConfig = {
+      id: id.data,
+      name: body.data.name,
+      kind: body.data.kind,
+      members: [...new Set(body.data.members)],
+    }
+    const filters = [...(config.budget?.filters ?? [])]
+    const index = filters.findIndex((filter) => filter.id === id.data)
+    if (index === -1) filters.push(entry)
+    else filters[index] = entry
+    writeConfig({ ...config, budget: { ...config.budget, filters } })
+    return await respondChanged(c)
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+budgetRoutes.delete("/filters/:id", async (c) => {
+  try {
+    const config = getConfig()
+    const filters = config.budget?.filters ?? []
+    const id = c.req.param("id")
+    if (!filters.some((filter) => filter.id === id)) {
+      return c.json(
+        { error: { message: "Budget filter not found", type: "not_found" } },
+        404,
+      )
+    }
+    const usedBy = (config.budget?.limits ?? [])
+      .filter((limit) => limit.scope.kind === "filter" && limit.scope.id === id)
+      .map((limit) => limit.id)
+    if (usedBy.length > 0) {
+      return c.json(
+        {
+          error: {
+            message: `Filter '${id}' is used by ${usedBy.length === 1 ? "rule" : "rules"} ${usedBy.join(", ")}. Change or delete ${usedBy.length === 1 ? "it" : "them"} first.`,
+            type: "filter_in_use",
+            details: { used_by: usedBy },
+          },
+        },
+        409,
+      )
+    }
+    writeConfig({
+      ...config,
+      budget: {
+        ...config.budget,
+        filters: filters.filter((filter) => filter.id !== id),
+      },
+    })
+    return await respondChanged(c)
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+budgetRoutes.get("/rules/export", (c) => {
+  try {
+    return respondValidated(
+      c,
+      { schema: BudgetRulesDocument, label: "Budget rules" },
+      exportRules(getConfig().budget),
+    )
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+budgetRoutes.post("/rules/import", async (c) => {
+  try {
+    const request = BudgetRulesImportRequest.safeParse(
+      await c.req.json().catch(() => null),
+    )
+    if (!request.success) {
+      return validationError(
+        c,
+        "Give rules, mode (merge or replace) and dryRun (true or false)",
+        request.error.issues,
+      )
+    }
+    const { rules, mode, dryRun, collisions } = request.data
+    const config = getConfig()
+    const plan = planImport(config.budget, {
+      rules,
+      mode,
+      ...(collisions === undefined ? {} : { collisions }),
+    })
+    if (!plan.ok) {
+      return validationError(
+        c,
+        `The rules can't be imported: ${plan.problems.length === 1 ? "1 problem" : `${plan.problems.length} problems`}`,
+        plan.problems,
+      )
+    }
+    if (!dryRun) {
+      writeConfig({
+        ...config,
+        budget: {
+          ...config.budget,
+          limits: plan.next.limits,
+          filters: plan.next.filters,
+          ...(plan.next.display === undefined ?
+            {}
+          : { display: { ...config.budget?.display, ...plan.next.display } }),
+        },
+      })
+    }
+    const response = respondValidated(
+      c,
+      { schema: BudgetRulesImportResponse, label: "Budget rules import" },
+      { mode, dry_run: dryRun, applied: !dryRun, ...plan.diff },
+    )
+    if (!dryRun) emitBudgetChanged()
+    return response
   } catch (error) {
     return forwardError(c, error)
   }

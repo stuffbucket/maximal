@@ -224,13 +224,13 @@ describe("the refusal wording for a rolling window", () => {
   test("says how long spend counts and when the oldest ages out", () => {
     const message = refusalMessage({ ...words, resetsAtMs: NOON + 90 * 60_000 })
     expect(message).toBe(
-      'Maximal rule "Agents" is used up: $0.01 of $0.01 used. Spend counts for 5 h. The oldest ages out 2026-11-11T13:30:00.000Z (in 1 h 30 min). Raise or remove it in Maximal → Rules.',
+      'Maximal rule "Agents" blocked this request: it is used up ($0.01 of $0.01 used). Spend counts for 5 h. The oldest ages out 2026-11-11T13:30:00.000Z (in 1 h 30 min). Raise or remove it in Maximal → Rules.',
     )
   })
 
   test("with nothing to age out, only says how long spend counts", () => {
     expect(refusalMessage({ ...words, resetsAtMs: null })).toBe(
-      'Maximal rule "Agents" is used up: $0.01 of $0.01 used. Spend counts for 5 h. Raise or remove it in Maximal → Rules.',
+      'Maximal rule "Agents" blocked this request: it is used up ($0.01 of $0.01 used). Spend counts for 5 h. Raise or remove it in Maximal → Rules.',
     )
   })
 

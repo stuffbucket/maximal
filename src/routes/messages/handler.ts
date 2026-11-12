@@ -278,9 +278,9 @@ function respondIfWarmup(
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
-  await admitChat("messages")
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  await admitChat("messages", anthropicPayload.model)
   stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 

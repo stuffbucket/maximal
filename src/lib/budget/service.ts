@@ -28,7 +28,7 @@ import { randomUUID } from "node:crypto"
 
 import type { BudgetRefusal } from "./errors"
 import type { BudgetPeriod, FollowedWindow } from "./periods"
-import type { BudgetOperation, BudgetSubject } from "./scope"
+import type { BudgetOperation, BudgetSubject, ResolvedScope } from "./scope"
 
 import { resolvePeriod, rollingPeriodEnd } from "./periods"
 import {
@@ -38,7 +38,7 @@ import {
   type BudgetScope,
   type BudgetScopeKind,
 } from "./schema"
-import { scopeMatches } from "./scope"
+import { resolveScope, scopeMatches } from "./scope"
 import { resolveBudgetDisplay } from "./units"
 import { refusalMessage } from "./wording"
 
@@ -103,6 +103,7 @@ export interface StoredHold {
   provider?: string
   plugin?: string
   tool?: string
+  model?: string
   key: string
   estimateNanoAiu: number
 }
@@ -110,7 +111,7 @@ export interface StoredHold {
 export interface BudgetStore {
   /** Nano-AIU the scope's usage rows (and orphaned holds) spent in the range. */
   spend(
-    scope: BudgetScope,
+    scope: ResolvedScope,
     range: { startMs: number; endMs: number | null },
   ): Promise<number>
   /** At start: holds a previous run left open become `orphaned`, and old
@@ -119,7 +120,7 @@ export interface BudgetStore {
   /** Every cost the scope's usage rows (and orphaned holds) incurred in the
    *  range, for a rolling window that counts each as it ages. */
   spendRows(
-    scope: BudgetScope,
+    scope: ResolvedScope,
     range: { startMs: number; endMs: number | null },
   ): Promise<ReadonlyArray<{ createdAtMs: number; nanoAiu: number }>>
   openHold(hold: StoredHold): void
@@ -173,13 +174,14 @@ const SCOPE_ORDER: Record<BudgetScopeKind, number> = {
   global: 0,
   provider: 1,
   plugin: 2,
-  key: 3,
+  filter: 3,
+  key: 4,
 }
 
 interface LedgerEntry {
   /** Scope and period this entry counts; a change reloads it. */
   key: string
-  scope: BudgetScope
+  scope: ResolvedScope
   period: BudgetPeriod
   committed: number
   ready: boolean
@@ -215,13 +217,17 @@ function inPeriod(period: BudgetPeriod, ms: number): boolean {
   return ms >= period.startMs && (period.endMs === null || ms < period.endMs)
 }
 
-function scopeKey(scope: BudgetScope): string {
-  return scope.kind === "global" ? "global" : `${scope.kind}:${scope.id}`
+function scopeKey(scope: ResolvedScope): string {
+  if (scope.kind === "global") return "global"
+  if (scope.kind === "members") {
+    return `${scope.field}=${JSON.stringify(scope.members)}`
+  }
+  return `${scope.kind}:${scope.id}`
 }
 
 /** What a ledger entry counts: its scope and period. A rolling window's
  *  period moves with the clock, so only its length identifies it. */
-function entryKeyOf(scope: BudgetScope, period: BudgetPeriod): string {
+function entryKeyOf(scope: ResolvedScope, period: BudgetPeriod): string {
   if (period.rollingMs !== undefined) {
     return `${scopeKey(scope)}|rolling:${period.rollingMs}`
   }
@@ -353,20 +359,22 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     const ids = new Set(limits.map((limit) => limit.id))
     for (const id of entries.keys()) if (!ids.has(id)) entries.delete(id)
 
+    const filters = deps.config()?.filters
     const active: Array<ActiveLimit> = []
     for (const limit of limits) {
-      if (!scopeMatches(limit.scope, subject)) continue
+      const scope = resolveScope(limit.scope, filters)
+      if (!scopeMatches(scope, subject)) continue
       const period = resolvePeriod(limit.limitReset, nowMs, (ref) =>
         deps.windows.lookup(ref),
       )
-      const key = entryKeyOf(limit.scope, period)
+      const key = entryKeyOf(scope, period)
       let entry = entries.get(limit.id)
       if (entry?.key === key) {
         if (period.rollingMs !== undefined) advance(entry, period)
       } else {
         entry = {
           key,
-          scope: limit.scope,
+          scope,
           period,
           committed: 0,
           ready: false,
@@ -400,7 +408,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     }
   }
 
-  function heldFor(scope: BudgetScope): number {
+  function heldFor(scope: ResolvedScope): number {
     let total = 0
     for (const hold of holds.values()) {
       if (scopeMatches(scope, hold.subject)) total += hold.estimateNanoAiu
@@ -413,7 +421,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     estimate: number,
   ): BudgetRefusal | undefined {
     const used = entry.committed
-    const held = heldFor(limit.scope)
+    const held = heldFor(entry.scope)
     const total = used + held
     if (total < limit.limit && total + estimate <= limit.limit) return undefined
     const inFlight = used < limit.limit && used + estimate <= limit.limit
@@ -454,7 +462,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     { limit, entry }: ActiveLimit,
     estimate: number,
   ): BudgetWarning | undefined {
-    const total = entry.committed + heldFor(limit.scope) + estimate
+    const total = entry.committed + heldFor(entry.scope) + estimate
     const threshold = limit.limit * (limit.warnAt ?? DEFAULT_WARN_AT)
     if (total < threshold) return undefined
     return {
@@ -544,6 +552,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
       key: intent.key,
       ...(intent.plugin === undefined ? {} : { plugin: intent.plugin }),
       ...(intent.provider === undefined ? {} : { provider: intent.provider }),
+      ...(intent.model === undefined ? {} : { model: intent.model }),
     }
     holds.set(id, { subject, estimateNanoAiu: estimate })
     // Only a hold that reserves something is worth writing ahead.
@@ -608,7 +617,8 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
       return { ok: true, warnings }
     },
 
-    heldNanoAiu: heldFor,
+    heldNanoAiu: (scope) =>
+      heldFor(resolveScope(scope, deps.config()?.filters)),
 
     stop() {
       unsubscribe?.()

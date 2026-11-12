@@ -10,6 +10,19 @@
 
 import type { Migration } from "~/lib/platform/sqlite"
 
+/** The model a hold's call named, so a filter of models can count an
+ *  orphaned hold. */
+export const BUDGET_HOLDS_MODEL_MIGRATION: Migration = {
+  name: "add budget_holds.model",
+  up: (db) => {
+    const columns = db.prepare("PRAGMA table_info(budget_holds)").all()
+    const has = columns.some(
+      (column) => (column as { name?: unknown }).name === "model",
+    )
+    if (!has) db.exec("ALTER TABLE budget_holds ADD COLUMN model TEXT")
+  },
+}
+
 export const BUDGET_HOLDS_MIGRATION: Migration = {
   name: "add budget_holds",
   up: (db) => {
