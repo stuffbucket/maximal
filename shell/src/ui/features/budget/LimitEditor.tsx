@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type MouseEvent, useEffect, useRef, useState } from "react";
 
 import { t } from "../../../i18n";
 import type { BudgetLimitPutRequest, BudgetLimitStatus, BudgetStatusResponse } from "../../../../../src/lib/config/settings-types";
@@ -12,12 +12,14 @@ import {
   type LimitFormIssue,
   amountText,
   buildPutRequest,
+  currencyAffix,
   followedWindow,
   newLimitId,
   providerChoices,
   resetChoice,
   warnPercentText,
 } from "./format";
+import { useLocale } from "./hooks";
 import { targetName } from "./labels";
 import { useScopeChoices } from "./useScopeChoices";
 
@@ -41,7 +43,7 @@ function defaultReset(status: BudgetStatusResponse): string {
   return first ? `follow:${first.provider}:${first.id}` : "daily";
 }
 
-function initialForm(editing: BudgetLimitStatus | null, status: BudgetStatusResponse): LimitForm {
+function initialForm(editing: BudgetLimitStatus | null, status: BudgetStatusResponse, locale: string): LimitForm {
   if (!editing) {
     return {
       label: "",
@@ -57,7 +59,7 @@ function initialForm(editing: BudgetLimitStatus | null, status: BudgetStatusResp
     label: editing.label ?? "",
     scopeKind: editing.scope.kind,
     scopeId: editing.scope.kind === "global" ? "" : editing.scope.id,
-    amount: amountText(editing.display.limit),
+    amount: amountText(editing.display.limit, locale),
     reset: resetChoice(editing.limit_reset),
     warnPercent: warnPercentText(editing.warn_at),
     action: editing.action,
@@ -65,16 +67,35 @@ function initialForm(editing: BudgetLimitStatus | null, status: BudgetStatusResp
 }
 
 const ISSUE_TEXT: Record<LimitFormIssue, string> = {
-  amount: "budget-error-amount",
+  amount: "budget-error-amount-format",
+  "amount-zero": "budget-error-amount",
   warn: "budget-error-warn",
   target: "budget-error-target",
 };
 
+const FORM_FIELDS: ReadonlyArray<keyof LimitForm> = ["label", "scopeKind", "scopeId", "amount", "reset", "warnPercent", "action"];
+
+function sameForm(a: LimitForm, b: LimitForm): boolean {
+  return FORM_FIELDS.every((field) => a[field] === b[field]);
+}
+
+/** Whether a point is outside the dialog's box: on the backdrop, not in its padding. */
+function isOutside(rect: DOMRect, x: number, y: number): boolean {
+  return x < rect.left || x > rect.right || y < rect.top || y > rect.bottom;
+}
+
 /**
- * Add or edit one limit, in a native dialog (top layer, focus trap and Esc for
- * free, like ConfirmDialog). The amount is typed in the unit the window shows;
- * the server converts and stores it. A change saves when the form is sent, and
- * the new status comes back through the same path as every other change.
+ * Add or edit one limit, in a native dialog (top layer and focus trap for
+ * free, like ConfirmDialog). The amount is typed in the unit the window shows
+ * (a dollar or credit amount typed with its unit is converted); the server
+ * converts and stores it. A change saves when the form is sent, and the new
+ * status comes back through the same path as every other change.
+ *
+ * Typed edits are never thrown away by accident: while the form differs from
+ * what it opened with, a click on the backdrop and Escape do nothing, and the
+ * Cancel button is the one way out (it says what it does). An untouched form
+ * closes on either. A validation problem only marks the field and keeps the
+ * dialog, and every value, open.
  */
 export function LimitEditor(props: LimitEditorProps): JSX.Element | null {
   // Mounted only while open, so every opening starts from a fresh form for its
@@ -86,11 +107,17 @@ export function LimitEditor(props: LimitEditorProps): JSX.Element | null {
 function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProps): JSX.Element {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const amountRef = useRef<HTMLInputElement | null>(null);
-  const [form, setForm] = useState<LimitForm>(() => initialForm(editing, status));
+  const locale = useLocale();
+  const [initial] = useState<LimitForm>(() => initialForm(editing, status, locale));
+  const [form, setForm] = useState<LimitForm>(initial);
   const [issue, setIssue] = useState<LimitFormIssue | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saving, setSaving] = useState(false);
   const choices = useScopeChoices();
+  const dirty = !sameForm(form, initial);
+  // Where a press began, so a drag that starts in a field and ends on the
+  // backdrop (a text selection) isn't taken for a click on the backdrop.
+  const pressedOutside = useRef(false);
 
   useEffect(() => {
     const el = dialogRef.current;
@@ -103,6 +130,11 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
     amountRef.current?.focus();
   }, []);
 
+  // A problem moves focus to the field it names, so the fix is one keystroke away.
+  useEffect(() => {
+    if (issue) dialogRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [issue]);
+
   const update = (patch: Partial<LimitForm>): void => {
     setForm((current) => ({ ...current, ...patch }));
     setIssue(null);
@@ -114,6 +146,7 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
     provider: providerChoices(status.provider_windows),
   };
   const kind = form.scopeKind;
+  const amountIssue = issue === "amount" || issue === "amount-zero";
   // The limit's own target stays listed even if nothing reports it any more.
   const options =
     kind === "global" ? [] : targets[kind].includes(form.scopeId) || form.scopeId === "" ? targets[kind] : [form.scopeId, ...targets[kind]];
@@ -133,7 +166,7 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
-    const built = buildPutRequest(form);
+    const built = buildPutRequest(form, status.display, locale);
     if (!built.ok) {
       setIssue(built.issue);
       return;
@@ -148,6 +181,24 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
   };
 
   const unitName = status.display.unit === "usd" ? t("budget-unit-usd") : t("budget-unit-credits");
+  const affix =
+    status.display.unit === "usd" ?
+      currencyAffix(locale)
+    : { symbol: t("budget-amount-unit-credits"), position: "suffix" as const };
+
+  const closeIfUntouched = (): void => {
+    if (!saving && !dirty) onClose();
+  };
+  const onBackdropPress = (event: MouseEvent<HTMLDialogElement>): void => {
+    const el = dialogRef.current;
+    pressedOutside.current = !!el && isOutside(el.getBoundingClientRect(), event.clientX, event.clientY);
+  };
+  const onBackdropClick = (event: MouseEvent<HTMLDialogElement>): void => {
+    const el = dialogRef.current;
+    const outside = !!el && isOutside(el.getBoundingClientRect(), event.clientX, event.clientY);
+    if (outside && pressedOutside.current) closeIfUntouched();
+    pressedOutside.current = false;
+  };
 
   return (
     <dialog
@@ -155,12 +206,27 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
       className="confirm-dialog budget-editor"
       aria-labelledby="budget-editor-title"
       onCancel={(event) => {
+        // Escape. Handled here so a form with edits in it stays open.
         event.preventDefault();
-        if (!saving) onClose();
+        closeIfUntouched();
       }}
-      onClick={(event) => {
-        if (event.target === dialogRef.current && !saving) onClose();
+      onClose={() => {
+        // Closed without a cancel event (a second Escape in some browsers): put
+        // back a form with edits in it; let an untouched one go.
+        const el = dialogRef.current;
+        if (!el || el.open) return;
+        if (dirty || saving) {
+          try {
+            el.showModal();
+          } catch {
+            /* already open */
+          }
+        } else {
+          onClose();
+        }
       }}
+      onMouseDown={onBackdropPress}
+      onClick={onBackdropClick}
     >
       <form className="confirm-dialog__panel" onSubmit={(event) => void submit(event)} noValidate>
         <h2 className="confirm-dialog__title" id="budget-editor-title">
@@ -221,21 +287,33 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
           <div className="budget-editor__pair">
             <div className="budget-field">
               <label htmlFor="budget-field-amount">{t("budget-field-amount")}</label>
-              <input
-                id="budget-field-amount"
-                ref={amountRef}
-                className="input"
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                value={form.amount}
-                aria-invalid={issue === "amount"}
-                aria-describedby="budget-field-amount-hint"
-                onChange={(event) => update({ amount: event.target.value })}
-              />
+              <div className="input-adorn" data-invalid={amountIssue}>
+                {affix.position === "prefix" && (
+                  <span className="input-adorn__text" aria-hidden="true">
+                    {affix.symbol}
+                  </span>
+                )}
+                <input
+                  id="budget-field-amount"
+                  ref={amountRef}
+                  className="input-adorn__field"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={form.amount}
+                  aria-invalid={amountIssue}
+                  aria-describedby="budget-field-amount-hint"
+                  onChange={(event) => update({ amount: event.target.value })}
+                />
+                {affix.position === "suffix" && (
+                  <span className="input-adorn__text" aria-hidden="true">
+                    {affix.symbol}
+                  </span>
+                )}
+              </div>
               <p className="form__hint" id="budget-field-amount-hint">
-                {issue === "amount" ?
-                  <span className="budget-field__error">{t(ISSUE_TEXT.amount)}</span>
+                {issue === "amount" || issue === "amount-zero" ?
+                  <span className="budget-field__error">{t(ISSUE_TEXT[issue], { unit: status.display.unit })}</span>
                 : t("budget-field-amount-hint", { unit: unitName })}
               </p>
             </div>

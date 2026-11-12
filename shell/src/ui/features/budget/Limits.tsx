@@ -135,7 +135,7 @@ export function Limits({ status, format, onSave, onDelete }: LimitsProps): JSX.E
     <section className="budget-block" aria-labelledby="budget-limits-title">
       <header className="budget-block__head">
         <div className="section__head">
-          <h2 className="budget-block__title" id="budget-limits-title">
+          <h2 className="section__title" id="budget-limits-title">
             {t("budget-limits-title")}
           </h2>
           <p className="section__sub">{t("budget-limits-sub")}</p>

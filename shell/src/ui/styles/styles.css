@@ -3524,8 +3524,9 @@ html[data-os="macos"] .topbar {
 }
 
 /* ---- Budget (features/budget) ----
-   The Budget surface: Overview, Limits and Activity as typographic sections
-   in one column (no card grid). The first heading is the one Fraunces moment
+   The Budget surface: a one-line summary, then Limits, Activity and Settings
+   as typographic sections in one column (no card grid). The first heading
+   (Limits) is the one Fraunces moment
    (.section__title); the others step down to Commissioner like the stacked
    Settings sections. Limits are hairline-divided rows, not cards. The meter
    is the Dashboard's quota meter: the fill is the state, the track a pale
@@ -3534,6 +3535,26 @@ html[data-os="macos"] .topbar {
   display: flex;
   flex-direction: column;
   gap: var(--space-7);
+}
+
+/* The one-line state at the top (Enforcing · 2 limits · $12.40 of $100 today),
+   with whatever needs attention under it. */
+.budget-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.budget-status {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.budget-status--paused {
+  color: var(--text-muted);
 }
 
 .budget-block {
@@ -3815,6 +3836,49 @@ html[data-os="macos"] .topbar {
 .input[aria-invalid="true"],
 .select[aria-invalid="true"] {
   border-color: var(--status-error);
+}
+
+/* A field with its unit inside it ($ before the number, "credits" after): the
+   wrapper wears the input's box, the bare input fills it, so the unit never
+   needs typing and never overlaps the text. */
+.input-adorn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  padding: 0 var(--space-3);
+  min-height: var(--size-xl);
+}
+
+.input-adorn:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.input-adorn[data-invalid="true"] {
+  border-color: var(--status-error);
+}
+
+.input-adorn__text {
+  flex: none;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.input-adorn__field {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  color: var(--text-strong);
+  border: 0;
+  outline: 0;
+  padding: var(--space-2) 0;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
 }
 
 /* Activity */

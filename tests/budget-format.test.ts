@@ -22,7 +22,9 @@ import {
   keyChoices,
   newLimitId,
   nanoToDisplay,
+  currencyAffix,
   parseAmount,
+  parseAmountDetailed,
   parseWarnPercent,
   pluginChoices,
   providerChoices,
@@ -154,6 +156,13 @@ describe("amounts", () => {
     expect(amountText(0.30000000000000004)).toBe("0.3")
     expect(amountText(12)).toBe("12")
     expect(amountText(0.006)).toBe("0.006")
+  })
+
+  test("the amount field starts in the locale's decimal mark, ungrouped, so it reads back the same", () => {
+    expect(amountText(2.125, "de")).toBe("2,125")
+    expect(amountText(1234.5, "en")).toBe("1234.5")
+    expect(parseAmount(amountText(2.125, "de"), USD, "de")).toBe(2.125)
+    expect(parseAmount(amountText(1234.5, "de"), USD, "de")).toBe(1234.5)
   })
 })
 
@@ -306,6 +315,9 @@ describe("what stops requests", () => {
   })
 })
 
+const USD = { unit: "usd", credit_usd: 0.01 } as const
+const CREDITS = { unit: "credits", credit_usd: 0.01 } as const
+
 describe("the limit editor", () => {
   test("a form becomes the request the API takes, with the amount in the display unit", () => {
     const built = buildPutRequest(
@@ -353,7 +365,7 @@ describe("the limit editor", () => {
     })
     expect(buildPutRequest(form({ amount: "0" }))).toEqual({
       ok: false,
-      issue: "amount",
+      issue: "amount-zero",
     })
     expect(buildPutRequest(form({ amount: "abc" }))).toEqual({
       ok: false,
@@ -372,7 +384,148 @@ describe("the limit editor", () => {
       issue: "target",
     })
   })
+})
 
+describe("the amount field", () => {
+  test("a currency sign or code on either end is ignored", () => {
+    for (const text of [
+      "$100",
+      "$ 100",
+      "100$",
+      "100 $",
+      "  $100  ",
+      "USD 100",
+      "100 usd",
+      "100USD",
+      "US$100",
+      "100 Usd",
+    ]) {
+      expect(parseAmount(text, USD)).toBe(100)
+    }
+    for (const text of ["€100", "100 EUR", "£100", "¥100", "₹100", "100 eur"]) {
+      expect(parseAmount(text, USD)).toBe(100)
+    }
+  })
+
+  test("credit words are accepted in any case, and the unit sits where it is typed", () => {
+    for (const text of [
+      "100 credits",
+      "100 Credits",
+      "100 credit",
+      "100 AIU",
+      "100aiu",
+      "100 cr",
+      "100CR",
+      "credits 100",
+      "AIU 100",
+      "  100   credits  ",
+    ]) {
+      expect(parseAmount(text, CREDITS)).toBe(100)
+    }
+  })
+
+  test("a unit that differs from the display unit is converted at credit_usd", () => {
+    expect(parseAmount("$5", CREDITS)).toBeCloseTo(500, 8)
+    expect(parseAmount("2.5 USD", CREDITS)).toBeCloseTo(250, 8)
+    expect(parseAmount("100 credits", USD)).toBeCloseTo(1, 8)
+    expect(
+      parseAmount("250 AIU", { unit: "usd", credit_usd: 0.02 }),
+    ).toBeCloseTo(5, 8)
+    // The same unit is not converted.
+    expect(parseAmount("$5", USD)).toBe(5)
+    expect(parseAmount("5 credits", CREDITS)).toBe(5)
+    // A bare number is in the display unit.
+    expect(parseAmount("5", CREDITS)).toBe(5)
+  })
+
+  test("two different units are not guessed at", () => {
+    expect(parseAmountDetailed("$100 credits", USD)).toEqual({
+      ok: false,
+      reason: "format",
+    })
+    expect(parseAmount("$100 USD", USD)).toBe(100)
+  })
+
+  test("thousands separators follow the locale", () => {
+    expect(parseAmount("1,000.50", USD, "en")).toBe(1000.5)
+    expect(parseAmount("$1,000.50", USD, "en")).toBe(1000.5)
+    expect(parseAmount("1.000,50", USD, "de")).toBe(1000.5)
+    expect(parseAmount("1.000,50 €", USD, "de")).toBe(1000.5)
+    expect(parseAmount("1,000", USD, "en")).toBe(1000)
+    expect(parseAmount("1.000", USD, "de")).toBe(1000)
+    expect(parseAmount("1,000,000", USD, "en")).toBe(1_000_000)
+    expect(parseAmount("1.000.000", USD, "de")).toBe(1_000_000)
+    expect(parseAmount("1 000,50", USD, "fr")).toBe(1000.5)
+    expect(parseAmount("1\u202f000,50", USD, "fr")).toBe(1000.5)
+    expect(parseAmount("1'000.50", USD, "en")).toBe(1000.5)
+    // Both marks present: the last is the decimal point, whatever the locale.
+    expect(parseAmount("1,000.50", USD, "de")).toBe(1000.5)
+    expect(parseAmount("1.000,50", USD, "en")).toBe(1000.5)
+  })
+
+  test("a lone comma or point that is not a group of three is a decimal mark", () => {
+    expect(parseAmount("2,5", USD, "en")).toBe(2.5)
+    expect(parseAmount("2,50", USD, "en")).toBe(2.5)
+    expect(parseAmount("0,500", USD, "en")).toBe(0.5)
+    expect(parseAmount("2.5", USD, "de")).toBe(2.5)
+    expect(parseAmount("2,5", USD, "de")).toBe(2.5)
+    expect(parseAmount("2,500", USD, "de")).toBe(2.5)
+    expect(parseAmount(".5", USD, "en")).toBe(0.5)
+    expect(parseAmount("5.", USD, "en")).toBe(5)
+  })
+
+  test("what is not an amount says so, and zero is told apart", () => {
+    for (const text of [
+      "",
+      "   ",
+      "$",
+      "credits",
+      "abc",
+      "$abc",
+      "1,2,3",
+      "1.2.3",
+      "1e3",
+      "-5",
+      "$-5",
+      "12 34 56x",
+      "NaN",
+      "Infinity",
+    ]) {
+      expect(parseAmountDetailed(text, USD, "en")).toEqual({
+        ok: false,
+        reason: "format",
+      })
+      expect(parseAmount(text, USD, "en")).toBeNull()
+    }
+    for (const text of ["0", "$0", "0.00", "0 credits"]) {
+      expect(parseAmountDetailed(text, USD, "en")).toEqual({
+        ok: false,
+        reason: "zero",
+      })
+    }
+  })
+
+  test("the editor builds the request from a typed unit, in the display unit", () => {
+    const built = buildPutRequest(form({ amount: "$100" }), CREDITS)
+    expect(built.ok).toBe(true)
+    if (!built.ok) return
+    expect(built.body.amount).toBeCloseTo(10_000, 6)
+    const german = buildPutRequest(form({ amount: "1.000,50 $" }), USD, "de")
+    expect(german.ok && german.body.amount).toBe(1000.5)
+    expect(buildPutRequest(form({ amount: "$ abc" }), USD)).toEqual({
+      ok: false,
+      issue: "amount",
+    })
+  })
+
+  test("the dollar sign sits on the side the locale writes it", () => {
+    expect(currencyAffix("en")).toEqual({ symbol: "$", position: "prefix" })
+    expect(currencyAffix("de").position).toBe("suffix")
+    expect(currencyAffix("not-a-locale-").position).toBe("prefix")
+  })
+})
+
+describe("the limit editor's other inputs", () => {
   test("amounts and percentages are read the way people type them", () => {
     expect(parseAmount("12.50")).toBe(12.5)
     expect(parseAmount(" 0,25 ")).toBe(0.25)
@@ -518,6 +671,8 @@ describe("activity", () => {
 
   test("the activity and CSV endpoints share a query, and the export names its file", () => {
     expect(activityQuery("week", "model")).toBe("period=week&group=model")
-    expect(csvFileName("month", "key")).toBe("maximal-budget-key-month.csv")
+    expect(csvFileName("month", "key")).toBe(
+      "maximal-activity-month-by-key.csv",
+    )
   })
 })

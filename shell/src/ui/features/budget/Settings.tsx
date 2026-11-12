@@ -1,34 +1,19 @@
 import { useState } from "react";
 
 import { t } from "../../../i18n";
-import type {
-  BudgetLimitStatus,
-  BudgetStatusResponse,
-  ProviderQuotaWindowStatus,
-} from "../../../../../src/lib/config/settings-types";
-import { Callout } from "../../components/Callout";
+import type { BudgetStatusResponse, ProviderQuotaWindowStatus } from "../../../../../src/lib/config/settings-types";
 import { ProblemCallout } from "../../components/ProblemCallout";
 import { Switch } from "../../components/Switch";
 import type { Problem } from "../../problems";
 
-import {
-  blockingLimit,
-  describeReset,
-  formatRelative,
-  formatWhen,
-  windowTone,
-  windowUsedFraction,
-} from "./format";
+import { formatRelative, formatWhen, windowTone, windowUsedFraction } from "./format";
 import { type BudgetFormat } from "./hooks";
-import { providerName, scopeName } from "./labels";
+import { providerName } from "./labels";
 import { Meter } from "./Meter";
 
-interface OverviewProps {
+interface SettingsProps {
   status: BudgetStatusResponse | null;
-  /** The status failed to load. */
-  problem: Problem | null;
   format: BudgetFormat | null;
-  onRetry: () => void;
   onSetEnabled: (enabled: boolean) => Promise<Problem | null>;
   onSetUnit: (unit: BudgetStatusResponse["display"]["unit"]) => Promise<Problem | null>;
 }
@@ -83,22 +68,14 @@ function WindowRow({ window, format }: { window: ProviderQuotaWindowStatus; form
   );
 }
 
-/** The sentence under a spent limit's callout: when it opens up again. */
-function blockedBody(limit: BudgetLimitStatus, status: BudgetStatusResponse, format: BudgetFormat): string {
-  const reset = describeReset(limit, status.provider_windows);
-  if (reset.kind === "never") return t("budget-blocked-never");
-  return t("budget-blocked-until", {
-    date: formatWhen(reset.resetsAtMs, format.now, format.locale),
-    relative: formatRelative(reset.resetsAtMs, format.now, format.locale),
-  });
-}
-
 /**
- * Overview: whether limits are enforced, the unit amounts are shown in, and
+ * Settings: whether limits are enforced, the unit amounts are shown in, and
  * what each provider says about its own allowance and when it resets. The
  * provider's figures are context (they lag); limits count what Maximal records.
+ * It comes after the limits and the activity people open the window for; the
+ * summary at the top keeps the switch's state in view meanwhile.
  */
-export function Overview({ status, problem, format, onRetry, onSetEnabled, onSetUnit }: OverviewProps): JSX.Element {
+export function Settings({ status, format, onSetEnabled, onSetUnit }: SettingsProps): JSX.Element | null {
   const [saveProblem, setSaveProblem] = useState<Problem | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -108,73 +85,58 @@ export function Overview({ status, problem, format, onRetry, onSetEnabled, onSet
     setSaving(false);
   };
 
-  const blocked = status && format ? blockingLimit(status) : undefined;
-  const windows = status?.provider_windows ?? [];
+  if (!status) return null;
+  const windows = status.provider_windows;
 
   return (
-    <section className="budget-block" aria-labelledby="budget-overview-title">
+    <section className="budget-block" aria-labelledby="budget-settings-title">
       <header className="section__head">
-        <h2 className="section__title" id="budget-overview-title">
-          {t("budget-overview-title")}
+        <h2 className="budget-block__title" id="budget-settings-title">
+          {t("budget-settings-title")}
         </h2>
-        <p className="section__sub">{t("budget-overview-sub")}</p>
+        <p className="section__sub">{t("budget-settings-sub")}</p>
       </header>
 
-      {problem && <ProblemCallout problem={problem} onRetry={onRetry} onRestarted={onRetry} />}
       {saveProblem && <ProblemCallout problem={saveProblem} />}
-      {status && format && blocked && (
-        <Callout tone="notice" title={t("budget-blocked-title", { name: blocked.label ?? scopeName(blocked.scope) })}>
-          {blockedBody(blocked, status, format)}
-        </Callout>
-      )}
-      {status && !status.storage_enabled && (
-        <Callout tone="notice" title={t("budget-storage-off-title")}>
-          {t("budget-storage-off-body")}
-        </Callout>
-      )}
 
-      {status && (
-        <div className="form">
-          <div className="form__row">
-            <div className="form__label">
-              <label htmlFor="budget-enforce">{t("budget-enforce-label")}</label>
-              <p className="form__hint">{t("budget-enforce-hint")}</p>
-            </div>
-            <div className="form__control">
-              <Switch
-                id="budget-enforce"
-                checked={status.enabled}
-                disabled={saving}
-                label={t("budget-enforce-label")}
-                hideLabel
-                onCheckedChange={(next) => void run(() => onSetEnabled(next))}
-              />
-            </div>
+      <div className="form">
+        <div className="form__row">
+          <div className="form__label">
+            <label htmlFor="budget-enforce">{t("budget-enforce-label")}</label>
+            <p className="form__hint">{t("budget-enforce-hint")}</p>
           </div>
-          <div className="form__row">
-            <div className="form__label">
-              <label htmlFor="budget-unit">{t("budget-unit-label")}</label>
-              <p className="form__hint">{t("budget-unit-hint")}</p>
-            </div>
-            <div className="form__control">
-              <select
-                id="budget-unit"
-                className="select"
-                value={status.display.unit}
-                disabled={saving}
-                onChange={(event) =>
-                  void run(() => onSetUnit(event.target.value === "credits" ? "credits" : "usd"))
-                }
-              >
-                <option value="usd">{t("budget-unit-usd")}</option>
-                <option value="credits">{t("budget-unit-credits")}</option>
-              </select>
-            </div>
+          <div className="form__control">
+            <Switch
+              id="budget-enforce"
+              checked={status.enabled}
+              disabled={saving}
+              label={t("budget-enforce-label")}
+              hideLabel
+              onCheckedChange={(next) => void run(() => onSetEnabled(next))}
+            />
           </div>
         </div>
-      )}
+        <div className="form__row">
+          <div className="form__label">
+            <label htmlFor="budget-unit">{t("budget-unit-label")}</label>
+            <p className="form__hint">{t("budget-unit-hint")}</p>
+          </div>
+          <div className="form__control">
+            <select
+              id="budget-unit"
+              className="select"
+              value={status.display.unit}
+              disabled={saving}
+              onChange={(event) => void run(() => onSetUnit(event.target.value === "credits" ? "credits" : "usd"))}
+            >
+              <option value="usd">{t("budget-unit-usd")}</option>
+              <option value="credits">{t("budget-unit-credits")}</option>
+            </select>
+          </div>
+        </div>
+      </div>
 
-      {status && format && (
+      {format && (
         <div className="subsection">
           <h3 className="subsection__title">{t("budget-windows-title")}</h3>
           <p className="form__hint">{t("budget-windows-hint")}</p>
@@ -193,7 +155,6 @@ export function Overview({ status, problem, format, onRetry, onSetEnabled, onSet
           }
         </div>
       )}
-      {!status && !problem && <p className="panel-status">{t("budget-loading")}</p>}
     </section>
   );
 }

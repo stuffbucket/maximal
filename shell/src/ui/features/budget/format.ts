@@ -258,10 +258,131 @@ export function resetFromChoice(choice: string): LimitReset {
   return choice === "weekly" || choice === "never" ? choice : "daily";
 }
 
-/** What the person typed in the amount field: a number above zero, or null. */
-export function parseAmount(text: string): number | null {
-  const value = Number(text.trim().replace(",", "."));
-  return Number.isFinite(value) && value > 0 ? value : null;
+/** What the person typed in the amount field, and how it was read. */
+export type AmountParse =
+  | { ok: true; /** In the display unit. */ value: number }
+  | { ok: false; reason: "format" | "zero" };
+
+/** A currency sign or code, or a credit word, at either end of the amount. */
+const UNIT_TOKEN = "(?:us\\$|[$€£¥₹₩₽₺₫฿₪₴₦₱]|usd|eur|gbp|jpy|cad|aud|chf|cny|inr|credits|credit|aiu|cr)";
+const LEADING_UNIT = new RegExp(`^${UNIT_TOKEN}\\s*`, "iu");
+const TRAILING_UNIT = new RegExp(`\\s*${UNIT_TOKEN}$`, "iu");
+const CREDIT_WORDS = new Set(["credits", "credit", "aiu", "cr"]);
+
+/** The unit a token names: AI credits, or money (which Maximal counts in dollars). */
+function unitOfToken(token: string): DisplayUnit {
+  return CREDIT_WORDS.has(token.trim().toLowerCase()) ? "credits" : "usd";
+}
+
+/** The locale's digit-group separator (a comma in en, a point in de). */
+function groupSeparator(locale: string): string {
+  try {
+    const group = new Intl.NumberFormat(locale).formatToParts(1234567.5).find((part) => part.type === "group");
+    return group?.value ?? ",";
+  } catch {
+    return ","; // an unknown locale reads like en
+  }
+}
+
+/**
+ * Plain digits with a "." decimal point from what was typed, or null. When
+ * "," and "." both appear the last one is the decimal point. When only one
+ * does, it is a thousands mark only if the locale groups with it and every
+ * group is three digits ("1,000" is a thousand in en and 1.0 in de, while
+ * "1,5" is one and a half anywhere); otherwise it is the decimal point.
+ */
+function normalizeNumber(raw: string, locale: string): string | null {
+  const text = raw.replace(/[\s  '’]/gu, "");
+  if (!/^[\d.,]+$/u.test(text)) return null;
+  const lastDot = text.lastIndexOf(".");
+  const lastComma = text.lastIndexOf(",");
+  let integer: string;
+  let fraction = "";
+  if (lastDot !== -1 && lastComma !== -1) {
+    const at = Math.max(lastDot, lastComma);
+    const groupMark = lastDot > lastComma ? "," : ".";
+    integer = text.slice(0, at).split(groupMark).join("");
+    fraction = text.slice(at + 1);
+  } else if (lastDot === -1 && lastComma === -1) {
+    integer = text;
+  } else {
+    const mark = lastDot === -1 ? "," : ".";
+    const parts = text.split(mark);
+    const head = parts[0] ?? "";
+    const grouped = head !== "" && head !== "0" && parts.slice(1).every((part) => part.length === 3);
+    if (parts.length > 2) {
+      if (!grouped) return null;
+      integer = parts.join("");
+    } else if (mark === groupSeparator(locale) && grouped && head.length <= 3) {
+      integer = parts.join("");
+    } else {
+      integer = head;
+      fraction = parts[1] ?? "";
+    }
+  }
+  if (integer === "" && fraction === "") return null;
+  const number = `${integer === "" ? "0" : integer}${fraction === "" ? "" : `.${fraction}`}`;
+  return /^\d+(?:\.\d+)?$/u.test(number) ? number : null;
+}
+
+/** What amounts read in when no status has arrived to say. */
+const DEFAULT_AMOUNT_DISPLAY: DisplayInfo = { unit: "usd", credit_usd: 0.01 };
+
+/**
+ * What the person typed in the amount field, in the display unit. Forgiving:
+ * a leading or trailing currency sign or code ("$100", "100 USD", "€5"), or a
+ * credit word ("100 credits", "5 AIU", "2 cr"), in any case; spaces; and the
+ * locale's thousands separators ("1,000.50" in en, "1.000,50" in de). A unit
+ * that isn't the display unit is converted at `credit_usd`, so the limit means
+ * what was typed. Every currency counts as dollars: Maximal has no other rate.
+ */
+export function parseAmountDetailed(
+  text: string,
+  display: DisplayInfo = DEFAULT_AMOUNT_DISPLAY,
+  locale = "en",
+): AmountParse {
+  let rest = text.trim();
+  const units: Array<DisplayUnit> = [];
+  const leading = LEADING_UNIT.exec(rest);
+  if (leading) {
+    units.push(unitOfToken(leading[0]));
+    rest = rest.slice(leading[0].length);
+  }
+  const trailing = TRAILING_UNIT.exec(rest);
+  if (trailing) {
+    units.push(unitOfToken(trailing[0]));
+    rest = rest.slice(0, rest.length - trailing[0].length);
+  }
+  // "$100 credits" names two units; there is no telling which one was meant.
+  if (units.length === 2 && units[0] !== units[1]) return { ok: false, reason: "format" };
+  const normalized = normalizeNumber(rest, locale);
+  if (normalized === null) return { ok: false, reason: "format" };
+  const typed = Number(normalized);
+  if (!Number.isFinite(typed)) return { ok: false, reason: "format" };
+  if (typed <= 0) return { ok: false, reason: "zero" };
+  const unit = units[0] ?? display.unit;
+  const rate = display.credit_usd > 0 ? display.credit_usd : DEFAULT_AMOUNT_DISPLAY.credit_usd;
+  const value = unit === display.unit ? typed : unit === "credits" ? typed * rate : typed / rate;
+  return Number.isFinite(value) && value > 0 ? { ok: true, value } : { ok: false, reason: "zero" };
+}
+
+/** The amount typed, in the display unit, or null when it isn't an amount above zero. */
+export function parseAmount(text: string, display?: DisplayInfo, locale?: string): number | null {
+  const parsed = parseAmountDetailed(text, display, locale);
+  return parsed.ok ? parsed.value : null;
+}
+
+/** The dollar sign and which side of the number the locale writes it. */
+export function currencyAffix(locale: string): { symbol: string; position: "prefix" | "suffix" } {
+  try {
+    const parts = new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).formatToParts(1);
+    const at = parts.findIndex((part) => part.type === "currency");
+    const integerAt = parts.findIndex((part) => part.type === "integer");
+    if (at !== -1) return { symbol: parts[at]?.value ?? "$", position: at < integerAt ? "prefix" : "suffix" };
+  } catch {
+    /* an unknown locale reads like en */
+  }
+  return { symbol: "$", position: "prefix" };
 }
 
 /** The warning percentage the person typed (1 to 100) as the API's 0..1 fraction, or null. */
@@ -287,7 +408,7 @@ export interface LimitForm {
   action: BudgetLimitPutRequest["action"];
 }
 
-export type LimitFormIssue = "amount" | "warn" | "target";
+export type LimitFormIssue = "amount" | "amount-zero" | "warn" | "target";
 
 /**
  * The request for a form, or the first problem with it. The amount is sent in
@@ -295,9 +416,12 @@ export type LimitFormIssue = "amount" | "warn" | "target";
  */
 export function buildPutRequest(
   form: LimitForm,
+  display?: DisplayInfo,
+  locale?: string,
 ): { ok: true; body: BudgetLimitPutRequest } | { ok: false; issue: LimitFormIssue } {
-  const amount = parseAmount(form.amount);
-  if (amount === null) return { ok: false, issue: "amount" };
+  const parsed = parseAmountDetailed(form.amount, display, locale);
+  if (!parsed.ok) return { ok: false, issue: parsed.reason === "zero" ? "amount-zero" : "amount" };
+  const amount = parsed.value;
   const warnAt = parseWarnPercent(form.warnPercent);
   if (warnAt === null) return { ok: false, issue: "warn" };
   const targetId = form.scopeId.trim();
@@ -316,10 +440,18 @@ export function buildPutRequest(
   };
 }
 
-/** The amount field's starting text for an existing limit, in the display unit. */
-export function amountText(value: number): string {
+/**
+ * The amount field's starting text for an existing limit, in the display unit
+ * and the locale's decimal mark (so it reads back the same), without grouping.
+ */
+export function amountText(value: number, locale = "en"): string {
   // Trim float noise (0.30000000000000004) without losing real digits.
-  return String(Number(value.toPrecision(10)));
+  const trimmed = Number(value.toPrecision(10));
+  try {
+    return new Intl.NumberFormat(locale, { useGrouping: false, maximumFractionDigits: 10 }).format(trimmed);
+  } catch {
+    return String(trimmed);
+  }
 }
 
 // ── Activity ────────────────────────────────────────────────────────────
@@ -380,7 +512,7 @@ export function activityQuery(period: ActivityPeriod, group: ActivityGroup): str
   return new URLSearchParams({ period, group }).toString();
 }
 
-/** A file name for the exported activity: `maximal-budget-model-week.csv`. */
+/** A file name for the exported statement, naming its period and grouping: `maximal-activity-week-by-model.csv`. */
 export function csvFileName(period: ActivityPeriod, group: ActivityGroup): string {
-  return `maximal-budget-${group}-${period}.csv`;
+  return `maximal-activity-${period}-by-${group}.csv`;
 }
