@@ -54,6 +54,7 @@ import {
   DiagnosticsResponse,
   ModelsListResponse,
   PluginDetailView,
+  PluginsAttentionResponse,
   PluginsListResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
@@ -65,6 +66,7 @@ import {
   type ScenarioId,
   defaultScenarioId,
   listItem,
+  pluginAttentionItems,
   resolveScenario,
 } from "./ui-harness-fixtures"
 
@@ -96,6 +98,7 @@ function assertFixtures(): void {
       ["models", ModelsListResponse, (s) => s.models],
       ["plugins", PluginsListResponse, (s) => ({ plugins: s.connectors.map(listItem) })],
       ["plugins/:id", PluginDetailView.array(), (s) => s.connectors],
+      ["plugins/attention", PluginsAttentionResponse, (s) => ({ attention: pluginAttentionItems(s.connectors) })],
       ["token-usage/sessions", SessionsResponse, (s) => s.dashboard.sessions()],
     ]
   let failures = 0
