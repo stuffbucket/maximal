@@ -144,6 +144,8 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
     key: choices.keys,
     plugin: choices.plugins,
     provider: providerChoices(status.provider_windows),
+    // The editor doesn't offer filters yet.
+    filter: [],
   };
   const kind = form.scopeKind;
   const amountIssue = issue === "amount" || issue === "amount-zero";

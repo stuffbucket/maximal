@@ -37,6 +37,9 @@ export function scopeName(scope: BudgetScope): string {
       return t("budget-scope-plugin", { name: capabilityName(scope.id) });
     case "provider":
       return t("budget-scope-provider", { name: providerName(scope.id) });
+    case "filter":
+      // A filter is named by its id until the editor can offer them.
+      return scope.id;
   }
 }
 
