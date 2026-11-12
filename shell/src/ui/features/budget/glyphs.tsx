@@ -70,3 +70,12 @@ export function DownloadGlyph(): JSX.Element {
     </Glyph>
   );
 }
+
+export function ChevronGlyph(): JSX.Element {
+  // lucide: chevron-down
+  return (
+    <Glyph>
+      <path d="m6 9 6 6 6-6" />
+    </Glyph>
+  );
+}

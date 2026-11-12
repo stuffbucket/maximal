@@ -15,19 +15,23 @@ import {
   currencyAffix,
   followedWindow,
   newLimitId,
+  parseAmount,
   providerChoices,
   resetChoice,
   warnPercentText,
 } from "./format";
-import { useLocale } from "./hooks";
+import { type BudgetFormat, useLocale } from "./hooks";
 import { targetName } from "./labels";
 import { useScopeChoices } from "./useScopeChoices";
+import { WhatIfPanel } from "./WhatIfPanel";
 
 interface LimitEditorProps {
   open: boolean;
   /** The limit being edited, or null to add one. */
   editing: BudgetLimitStatus | null;
   status: BudgetStatusResponse;
+  /** How amounts read, for the what-if preview. */
+  format: BudgetFormat;
   /** Saves the limit; resolves to why it didn't, or null when it did. */
   onSave: (id: string, body: BudgetLimitPutRequest) => Promise<Problem | null>;
   onClose: () => void;
@@ -104,7 +108,7 @@ export function LimitEditor(props: LimitEditorProps): JSX.Element | null {
   return props.open ? <LimitEditorDialog {...props} /> : null;
 }
 
-function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProps): JSX.Element {
+function LimitEditorDialog({ editing, status, format, onSave, onClose }: LimitEditorProps): JSX.Element {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const amountRef = useRef<HTMLInputElement | null>(null);
   const locale = useLocale();
@@ -149,6 +153,9 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
   };
   const kind = form.scopeKind;
   const amountIssue = issue === "amount" || issue === "amount-zero";
+  // The rule as it would be saved right now, for the what-if preview; null while the form isn't one.
+  const built = buildPutRequest(form, status.display, locale);
+  const draft = built.ok ? built.body : null;
   // The limit's own target stays listed even if nothing reports it any more.
   const options =
     kind === "global" ? [] : targets[kind].includes(form.scopeId) || form.scopeId === "" ? targets[kind] : [form.scopeId, ...targets[kind]];
@@ -191,14 +198,17 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
   const closeIfUntouched = (): void => {
     if (!saving && !dirty) onClose();
   };
-  const onBackdropPress = (event: MouseEvent<HTMLDialogElement>): void => {
+  // A press on the backdrop has the dialog itself as its target; one on a field or button inside it
+  // never counts, whatever its coordinates (a synthetic or assistive click carries none).
+  const isBackdrop = (event: MouseEvent<HTMLDialogElement>): boolean => {
     const el = dialogRef.current;
-    pressedOutside.current = !!el && isOutside(el.getBoundingClientRect(), event.clientX, event.clientY);
+    return !!el && event.target === el && isOutside(el.getBoundingClientRect(), event.clientX, event.clientY);
+  };
+  const onBackdropPress = (event: MouseEvent<HTMLDialogElement>): void => {
+    pressedOutside.current = isBackdrop(event);
   };
   const onBackdropClick = (event: MouseEvent<HTMLDialogElement>): void => {
-    const el = dialogRef.current;
-    const outside = !!el && isOutside(el.getBoundingClientRect(), event.clientX, event.clientY);
-    if (outside && pressedOutside.current) closeIfUntouched();
+    if (isBackdrop(event) && pressedOutside.current) closeIfUntouched();
     pressedOutside.current = false;
   };
 
@@ -373,6 +383,18 @@ function LimitEditorDialog({ editing, status, onSave, onClose }: LimitEditorProp
               <option value="warn">{t("budget-action-warn")}</option>
             </select>
           </div>
+
+          <WhatIfPanel
+            draft={draft}
+            unavailable={editing?.unit === "tokens"}
+            simplified={editing !== null && (editing.when !== null || editing.max_requests !== null)}
+            format={format}
+            currentAmount={parseAmount(form.amount, status.display, locale)}
+            onUseAmount={(amount) => {
+              update({ amount: amountText(amount, locale) });
+              amountRef.current?.focus();
+            }}
+          />
         </div>
 
         {problem && (

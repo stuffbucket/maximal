@@ -227,6 +227,29 @@ no heading repeats it.
   threshold, `--status-error` once spent; the track is a pale step of the same
   color. No rule exists until someone adds it, so the empty state is an
   `EmptyState` with "Add a rule"; there are never per-model rows.
+- **How a rule is performing.** Each row carries a sparkline (`.spark`, the last
+  seven days' spend, one line in `--series-1`, no axes) in a quiet button
+  (`.limit__perf`, `aria-expanded`, a chevron beside it) that opens the rule's
+  history inline under its row, as a disclosure rather than a panel or a second
+  page: depth on demand, the list keeps its place. Any number of rows may be
+  open. The detail (`.rule-detail`) is a range picker (default 30 days, the same
+  `RangePicker` Activity uses), four totals in the Dashboard's totals style (spent,
+  requests, periods crossed, requests refused with what they would have cost), the
+  timeline, a three-item legend with counts, and a table of the periods (newest
+  first, five rows, "Show all"; an estimated period wears an "est." chip). The
+  timeline (`.timeline`) places everything on one time axis: spend counted in each
+  period climbing toward the limit (`--series-1` line and pale area, starting over
+  where a period resets, which is also a dotted `--border-strong` line), the limit
+  as a solid `--status-error` line and the warning as a dashed `--status-warning`
+  line, each labelled at the right edge ("Limit $40.50", "Warns at $32.40"), and
+  under it the spend per bucket as columns on their own scale. Markers sit on the
+  line they belong to and differ by shape as well as hue: a triangle warned, a dot
+  reached the limit, a cross is a refused request (one per bucket, its count and
+  cost in the tooltip). The plot is an image to a screen reader with the figures in
+  its label; the legend and the periods table carry them in text. It follows the
+  same states as Activity: the previous figures stay while the next range loads, a
+  failed load drops them and shows a retry, a range with nothing counted is a
+  compact `EmptyState`.
 - **Add or edit a rule.** A native `<dialog>` in `.confirm-dialog`'s shell
   (`.budget-editor`): name, what it applies to (everything, one client key, one
   plugin, one provider, listing only what exists), amount in the display unit,
@@ -244,7 +267,20 @@ no heading repeats it.
   dialog. **Edits are never discarded by accident:** while the form differs from
   what it opened with, a click on the backdrop (or in the dialog's padding) and
   Escape do nothing, and Cancel is the explicit way out. An untouched form closes
-  on either. Deleting asks in a `ConfirmDialog`.
+  on either. Under the fields sits a **What if** panel (`.whatif`, a hairline above it, in the
+  dialog's scroll area): a range picker (7 days, 30 days, 90 days, All time; 30 days
+  to start) and the rule as typed, replayed over recorded usage once typing has
+  paused (`POST .../simulate`, nothing is applied). It lists when the rule would
+  have warned and reached its limit, the requests it would have refused and what
+  they cost (a rule that only warns says so), the most spent in one period (one
+  window, for a rolling rule), the requests it covers and the periods that hit the
+  limit, then "Suggested: $X" (the amount that would have kept about nine in ten
+  periods under the limit, rounded up to what it reads as) with a "Use $X" button
+  that puts it in the amount field and nothing else. It never changes what was
+  typed, the name is not part of the question (typing it asks for nothing), a form
+  that isn't a rule yet shows what it needs, a replay that fails shows an error
+  with a retry and leaves Save as it was, and the previous answer stays up
+  (labelled "Updating…") while the next one loads. Deleting asks in a `ConfirmDialog`.
 - **Activity.** What was used, over any range, laid out like the Dashboard. A
   range picker (`.range-seg`, a segmented row: 24 hours, 7 days, 30 days, 90 days,
   All time, Custom; the chosen option steps forward onto the card surface, as in

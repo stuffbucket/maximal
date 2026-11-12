@@ -27,7 +27,7 @@ export function Budget(): JSX.Element {
   return (
     <div className="budget">
       <Summary status={budget.status} problem={budget.problem} format={ready} onRetry={() => void budget.refresh()} />
-      <Limits status={budget.status} format={ready} onSave={budget.saveLimit} onDelete={budget.deleteLimit} />
+      <Limits status={budget.status} format={ready} version={budget.version} onSave={budget.saveLimit} onDelete={budget.deleteLimit} />
       <Activity format={ready} version={budget.version} />
       <Settings status={budget.status} format={ready} onSetEnabled={budget.setEnabled} onSetUnit={budget.setUnit} />
     </div>

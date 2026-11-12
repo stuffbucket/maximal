@@ -30,6 +30,9 @@ import type {
   ApiKeysListResponse,
   AuthStatus,
   BudgetActivityResponse,
+  BudgetSimulateRequest,
+  BudgetSimulateResponse,
+  BudgetTimelineResponse,
   BudgetLimitPutRequest,
   BudgetSettingsPatchRequest,
   BudgetStatusResponse,
@@ -388,6 +391,17 @@ type Endpoint =
       method: "GET"
       path: `/settings/api/budget/activity?${string}`
     }
+  | {
+      kind: "budget-timeline"
+      method: "GET"
+      path: `/settings/api/budget/limits/${string}/timeline?${string}`
+    }
+  | {
+      kind: "budget-simulate"
+      method: "POST"
+      path: "/settings/api/budget/simulate"
+      body: BudgetSimulateRequest
+    }
 
 type EndpointKind = Endpoint["kind"]
 
@@ -429,6 +443,8 @@ interface ResponseFor {
   "budget-limit-put": BudgetStatusResponse
   "budget-limit-delete": BudgetStatusResponse
   "budget-activity": BudgetActivityResponse
+  "budget-timeline": BudgetTimelineResponse
+  "budget-simulate": BudgetSimulateResponse
 }
 
 interface ApiOptions {

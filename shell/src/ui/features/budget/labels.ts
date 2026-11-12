@@ -69,6 +69,17 @@ export function segmentName(group: ActivityGroup, key: string | null, other: boo
   }
 }
 
+/**
+ * Writes an amount in the unit a rule counts in: money in the display unit for
+ * a rule that caps cost, a count of tokens for one that caps tokens (its
+ * figures are never converted). `value` is nano-AIU or tokens to match.
+ */
+export function amountIn(unit: "cost" | "tokens", format: BudgetFormat): (value: number) => string {
+  return unit === "tokens" ?
+      (value) => t("budget-tokens-amount", { n: value })
+    : (value) => format.nanoMoney(value);
+}
+
 /** When a limit resets, as a sentence: "Resets in 3 hours", "Never resets". */
 export function resetText(reset: ResetDescription, format: BudgetFormat): string {
   if (reset.kind === "never") return t("budget-reset-never");

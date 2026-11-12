@@ -22,7 +22,8 @@ import type {
 import { type FollowedWindow, DAY_MS, HOUR_MS, resolvePeriod, startOfUtcDay, startOfUtcWeek } from "../src/lib/budget/periods"
 import { parseUsageRange } from "../src/lib/budget/reports/range"
 import { displayToNanoAiu, nanoAiuToDisplay } from "../src/lib/budget/units"
-import { BudgetLimitPutRequest, BudgetSettingsPatchRequest } from "../src/lib/config/settings-types"
+import { BudgetLimitPutRequest, BudgetSettingsPatchRequest, BudgetSimulateRequest } from "../src/lib/config/settings-types"
+import { type ReportContext, type ReportLimit, buildTimeline, rowInScope, simulate } from "./ui-harness-budget-reports"
 
 type Scope = BudgetLimitStatus["scope"]
 type LimitReset = BudgetLimitStatus["limit_reset"]
@@ -260,21 +261,7 @@ function ledgerFor(nowMs: number): Array<LedgerRow> {
   return rows
 }
 
-function inScope(row: LedgerRow, scope: Scope): boolean {
-  switch (scope.kind) {
-    case "global":
-      return true
-    case "key":
-      return row.key === scope.id
-    case "plugin":
-      return row.plugin === scope.id
-    case "provider":
-      return row.provider === scope.id
-    case "filter":
-      // The harness has no filters, so a filter selects nothing.
-      return false
-  }
-}
+const inScope = (row: LedgerRow, scope: Scope): boolean => rowInScope(row, scope, [])
 
 // ---- provider windows ----------------------------------------------------
 
@@ -407,6 +394,8 @@ export interface BudgetMock {
   status: () => BudgetStatusResponse
   /** Spend since the start of a period, grouped (what `/activity` answers). */
   activity: (period: string, group: string) => BudgetActivityResponse
+  /** The ledger and clock the reports read, for tests that check them against the real ones. */
+  reports: () => ReportContext
   /** Called after every change a request makes. Returns an unsubscribe. */
   onChange: (listener: (status: BudgetStatusResponse) => void) => () => void
 }
@@ -621,6 +610,24 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
     return result
   }
 
+  const reportContext = (): ReportContext => ({
+    rows: ledger,
+    filters: [],
+    nowMs: Date.now(),
+    findWindow: followable,
+    display: display(),
+  })
+
+  const reportLimit = (entry: StoredLimit): ReportLimit => ({
+    id: entry.id,
+    ...(entry.label ? { label: entry.label } : {}),
+    scope: entry.scope,
+    limit: entry.limit,
+    limitReset: entry.limitReset,
+    warnAt: entry.warnAt,
+    action: entry.action,
+  })
+
   const csvCell = (value: string): string => (/[",\n\r]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value)
 
   async function handle(req: Request): Promise<Response | null> {
@@ -638,6 +645,36 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
       if (body.data.display_unit !== undefined) state.unit = body.data.display_unit
       emit()
       return json(status())
+    }
+
+    const timelinePath = /^\/settings\/api\/budget\/limits\/([^/]+)\/timeline$/.exec(path)
+    if (timelinePath && method === "GET") {
+      const entry = limits.find((existing) => existing.id === decodeURIComponent(timelinePath[1] ?? ""))
+      if (!entry) return json({ error: { message: "Budget limit not found", type: "not_found" } }, 404)
+      const params = url.searchParams
+      const result = buildTimeline(reportContext(), reportLimit(entry), {
+        range: params.get("range") ?? undefined,
+        from: params.get("from") ?? undefined,
+        to: params.get("to") ?? undefined,
+        bucket: params.get("bucket") ?? undefined,
+      })
+      return "status" in result ? validationError(result.message) : json(result)
+    }
+
+    if (path === "/settings/api/budget/simulate" && method === "POST") {
+      const body = BudgetSimulateRequest.safeParse(await req.json().catch(() => null))
+      if (!body.success) return validationError("Invalid simulation request", body.error.issues)
+      const drafts: Array<ReportLimit> = body.data.limits.map((entry, index) => ({
+        id: entry.id ?? `draft-${index + 1}`,
+        ...(entry.label === undefined ? {} : { label: entry.label }),
+        scope: entry.scope,
+        limit: entry.limit ?? displayToNanoAiu(entry.amount ?? 0, display()),
+        limitReset: entry.limit_reset,
+        warnAt: entry.warn_at ?? 0.8,
+        action: entry.action,
+      }))
+      const result = simulate(reportContext(), body.data, drafts)
+      return "status" in result ? validationError(result.message) : json(result)
     }
 
     const limitPath = /^\/settings\/api\/budget\/limits\/([^/]+)$/.exec(path)
@@ -712,6 +749,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
     handle,
     status,
     activity,
+    reports: reportContext,
     onChange(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
