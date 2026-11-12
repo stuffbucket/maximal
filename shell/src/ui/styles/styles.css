@@ -3773,6 +3773,318 @@ html[data-os="macos"] .topbar {
   color: var(--status-error);
 }
 
+/* A rule's performance: a sparkline that opens the history under its row. */
+.limit__perf {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-xl);
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-muted);
+  background: transparent;
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+}
+
+.limit__perf:hover {
+  color: var(--text-strong);
+  background: var(--surface-control);
+}
+
+.limit__perf:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.limit__perf > svg:not(.spark) {
+  width: var(--size-sm);
+  height: var(--size-sm);
+  transition: transform 150ms ease-out;
+}
+
+.limit__perf[aria-expanded="true"] > svg:not(.spark) {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .limit__perf > svg:not(.spark) {
+    transition: none;
+  }
+}
+
+.spark {
+  width: calc(var(--size-2xl) * 2);
+  height: var(--size-md);
+  overflow: visible;
+}
+
+.spark__base {
+  stroke: var(--border-subtle);
+  stroke-width: var(--border-width-hairline);
+  vector-effect: non-scaling-stroke;
+}
+
+.spark__line {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: var(--border-width-thick);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The history under a rule's row: range, totals, the timeline, the periods. */
+.rule-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-block: var(--space-3) var(--space-2);
+}
+
+.rule-detail__worth {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-base);
+  color: var(--text-muted);
+}
+
+.rule-detail__estimated {
+  margin-inline-start: var(--space-2);
+}
+
+.rule-detail__periods {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Spend in each period climbing toward the limit, placed by time, with the
+   spend per bucket under it on its own scale. The lines differ by dash as well
+   as hue: the limit is solid, the warning dashed, a period's reset dotted. */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.timeline__plot {
+  position: relative;
+  height: calc(var(--size-2xl) * 4);
+  margin-block-start: var(--space-5);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.timeline__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.timeline__line {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: var(--border-width-thick);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.timeline__area {
+  fill: color-mix(in srgb, var(--series-1) 16%, transparent);
+  stroke: none;
+}
+
+.timeline__limit,
+.timeline__warn,
+.timeline__boundary {
+  fill: none;
+  stroke-width: var(--border-width-hairline);
+  vector-effect: non-scaling-stroke;
+}
+
+.timeline__limit {
+  stroke: var(--status-error);
+}
+
+.timeline__warn {
+  stroke: var(--status-warning);
+  stroke-dasharray: var(--space-2) var(--space-1);
+}
+
+.timeline__boundary {
+  stroke: var(--border-strong);
+  stroke-dasharray: var(--border-width-thick) var(--space-1);
+}
+
+.timeline__tag {
+  position: absolute;
+  inset-inline-end: 0;
+  padding-inline: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-base-color);
+  background: color-mix(in srgb, var(--surface-base) 85%, transparent);
+  border-radius: var(--radius-chip);
+}
+
+.timeline__tag--limit {
+  transform: translateY(-100%);
+}
+
+.timeline__tag--warn {
+  transform: translateY(var(--border-width-thick));
+}
+
+.timeline__marker {
+  position: absolute;
+  display: flex;
+  width: var(--size-sm);
+  height: var(--size-sm);
+  transform: translate(-50%, -50%);
+}
+
+.marker {
+  flex: none;
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.marker--warned {
+  fill: var(--status-warning);
+}
+
+.marker--crossed {
+  fill: var(--status-error);
+}
+
+.marker--refused {
+  fill: none;
+  stroke: var(--status-error);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.timeline__columns {
+  position: relative;
+  height: calc(var(--size-xl) * 1.5);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.timeline__column {
+  position: absolute;
+  inset-block: 0;
+  display: flex;
+  align-items: flex-end;
+  padding-inline: calc(var(--border-width-hairline) / 2);
+}
+
+.timeline__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.timeline__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.timeline__legend strong {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "What if": the rule being typed, replayed over past usage, inside the editor. */
+.whatif {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.whatif__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.whatif__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+}
+
+.whatif__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.whatif__none {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+}
+
+.whatif__facts {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.whatif__facts > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.whatif__facts dt {
+  color: var(--text-muted);
+}
+
+.whatif__facts dd {
+  margin: 0;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.whatif__when {
+  color: var(--text-muted);
+}
+
+.whatif__suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.whatif__suggested {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-strong);
+}
+
 /* Add / edit a limit: the confirm dialog's shell with a form inside. In a short
    window the fields scroll and the title and buttons stay in reach. */
 .budget-editor {

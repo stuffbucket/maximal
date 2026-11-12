@@ -330,3 +330,214 @@ test("the amount field carries its unit", async ({ page }) => {
   const dialog = await openAddDialog(page)
   await expect(dialog.locator(".input-adorn__text")).toHaveText("$")
 })
+
+// How each rule performs: a sparkline on the row opens its history.
+test("every rule row has a sparkline that opens its history", async ({
+  page,
+}) => {
+  await expect(page.locator(".limit__perf")).toHaveCount(4)
+  await expect(page.locator(".limit__perf .spark")).toHaveCount(4)
+  const button = page.locator(".limit__perf").first()
+  await expect(button).toHaveAttribute("aria-expanded", "false")
+  await button.focus()
+  await page.keyboard.press("Enter")
+  await expect(button).toHaveAttribute("aria-expanded", "true")
+  const detail = page.getByRole("region", { name: /How .* is performing/ })
+  await expect(detail).toBeVisible()
+  for (const label of [
+    "Spent",
+    "Requests",
+    "Periods crossed",
+    "Requests refused",
+  ]) {
+    await expect(detail.locator(".budget-totals__parts")).toContainText(label)
+  }
+  await expect(detail.locator(".timeline__plot")).toBeVisible()
+  await expect(detail.locator(".timeline__limit")).toHaveCount(1)
+  await expect(detail.locator(".timeline__warn")).toHaveCount(1)
+  await expect(detail.locator(".timeline__legend li")).toHaveCount(3)
+  await expect(detail.locator(".rule-detail__periods table")).toBeVisible()
+  // It opens in place and closes again.
+  await page.keyboard.press("Enter")
+  await expect(detail).toBeHidden()
+})
+
+test("a spent rule marks where it warned, reached its limit and refused", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: /^Show how Client codex is performing/ })
+    .click()
+  const detail = page.getByRole("region", {
+    name: "How Client codex is performing",
+  })
+  await expect(
+    detail.locator(".timeline__marker .marker--warned").first(),
+  ).toBeVisible()
+  await expect(
+    detail.locator(".timeline__marker .marker--crossed").first(),
+  ).toBeVisible()
+  await expect(
+    detail.locator(".timeline__marker .marker--refused").first(),
+  ).toBeVisible()
+  await expect(detail.locator(".timeline__tag--limit")).toContainText(
+    "Limit $1.80",
+  )
+  const refused =
+    (await detail
+      .locator(".timeline__legend li")
+      .nth(2)
+      .locator("strong")
+      .textContent()) ?? ""
+  expect(Number(refused.replaceAll(",", ""))).toBeGreaterThan(0)
+  // The same figure is the totals' "Requests refused".
+  await expect(detail.locator(".budget-totals__parts")).toContainText(refused)
+})
+
+test("the history's range picker refetches, and the history fits a 640px window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 480 })
+  await page
+    .getByRole("button", { name: /^Show how Client codex is performing/ })
+    .click()
+  const detail = page.getByRole("region", {
+    name: "How Client codex is performing",
+  })
+  await expect(detail.locator(".timeline__plot")).toBeVisible()
+  await detail.getByRole("button", { name: "7 days" }).click()
+  await expect(detail.getByRole("button", { name: "7 days" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(
+    detail.locator(".timeline__columns .timeline__column").first(),
+  ).toBeVisible()
+  const overflow = await page.evaluate<boolean>(
+    `(() => { const pane = document.getElementById("pane"); return pane.scrollWidth > pane.clientWidth })()`,
+  )
+  expect(overflow).toBe(false)
+  await detail.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: "test-results/rules-history-640x480.png" })
+})
+
+test("a failed history load says so with a retry, and leaves the rule alone", async ({
+  page,
+}) => {
+  await page.route("**/limits/key-codex-weekly/timeline?*", (route) =>
+    route.fulfill({ status: 500, body: '{"error":{"message":"boom"}}' }),
+  )
+  await page
+    .getByRole("button", { name: /^Show how Client codex is performing/ })
+    .click()
+  const detail = page.getByRole("region", {
+    name: "How Client codex is performing",
+  })
+  await expect(detail.locator(".callout")).toBeVisible()
+  await expect(detail.locator(".timeline__plot")).toBeHidden()
+  await expect(page.locator(".limit").nth(3)).toContainText("$2.02 of $1.80")
+})
+
+// What if: the rule being typed, replayed over past usage.
+async function openAddWithDraft(page: Page, amount: string) {
+  await page.setViewportSize({ width: 900, height: 900 })
+  await page.locator(".budget-block__head .btn").first().click()
+  const dialog = page.locator("dialog.budget-editor[open]")
+  await expect(dialog).toBeVisible()
+  await dialog.locator("#budget-field-scope").selectOption("key")
+  await dialog.locator("#budget-field-target").selectOption("codex")
+  await dialog.locator("#budget-field-amount").fill(amount)
+  return dialog
+}
+
+test("what if says what a typed rule would have done, after a pause", async ({
+  page,
+}) => {
+  const dialog = await openAddWithDraft(page, "1")
+  const panel = dialog.locator(".whatif")
+  await expect(panel).toContainText("What if")
+  await expect(panel.locator(".whatif__facts")).toContainText(
+    "Would have warned",
+  )
+  await expect(panel.locator(".whatif__facts")).toContainText(
+    "Requests refused",
+  )
+  await expect(panel.locator(".whatif__facts")).toContainText(
+    /\d+ requests? \(\$/,
+  )
+  await expect(panel.locator(".whatif__suggested strong")).toContainText(
+    "Suggested: $",
+  )
+  // A loose cap would never have tripped.
+  await dialog.locator("#budget-field-amount").fill("500")
+  await expect(panel.locator(".whatif__facts dd").nth(1)).toHaveText("Never")
+  await expect(panel.locator(".whatif__facts dd").nth(2)).toHaveText("None")
+})
+
+test("what if is quiet until the form is a rule, and never touches what was typed", async ({
+  page,
+}) => {
+  const dialog = await openAddWithDraft(page, "")
+  const panel = dialog.locator(".whatif")
+  await expect(panel).toContainText("Enter an amount")
+  await dialog.getByLabel("Name").fill("Codex cap")
+  await dialog.locator("#budget-field-amount").fill("lots")
+  await expect(panel).toContainText("Enter an amount")
+  await expect(dialog.locator("#budget-field-amount")).toHaveValue("lots")
+  await expect(dialog.getByLabel("Name")).toHaveValue("Codex cap")
+  // Changing its range keeps the form as it was.
+  await panel.getByRole("button", { name: "90 days" }).click()
+  await expect(dialog.getByLabel("Name")).toHaveValue("Codex cap")
+  await expect(dialog.locator("#budget-field-amount")).toHaveValue("lots")
+})
+
+test("using the suggestion fills the amount and keeps every other field", async ({
+  page,
+}) => {
+  const dialog = await openAddWithDraft(page, "1")
+  await dialog.getByLabel("Name").fill("Codex cap")
+  const suggested = dialog.locator(".whatif__suggested strong")
+  await expect(suggested).toContainText("Suggested: $")
+  const text = ((await suggested.textContent()) ?? "").replace(
+    "Suggested: $",
+    "",
+  )
+  await dialog.getByRole("button", { name: /^Use \$/ }).click()
+  await expect(dialog.locator("#budget-field-amount")).toHaveValue(text)
+  await expect(dialog.getByLabel("Name")).toHaveValue("Codex cap")
+  await expect(dialog.locator("#budget-field-target")).toHaveValue("codex")
+  // The amount now is the suggestion, so there is nothing left to apply.
+  await expect(dialog.getByRole("button", { name: /^Use \$/ })).toBeDisabled()
+  await expect(dialog).toBeVisible()
+})
+
+test("a failed replay leaves the form usable and offers another try", async ({
+  page,
+}) => {
+  await page.route("**/settings/api/budget/simulate", (route) =>
+    route.fulfill({ status: 500, body: '{"error":{"message":"boom"}}' }),
+  )
+  const dialog = await openAddWithDraft(page, "1")
+  await expect(dialog.locator(".whatif .callout")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Save rule" })).toBeEnabled()
+  await expect(dialog.locator("#budget-field-amount")).toHaveValue("1")
+})
+
+test("the editor with what if still fits a short window and keeps Save reachable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 480 })
+  await page.locator(".budget-block__head .btn").first().click()
+  const dialog = page.locator("dialog.budget-editor[open]")
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toHaveCSS("opacity", "1")
+  const box = await dialog.boundingBox()
+  expect(box).not.toBeNull()
+  if (!box) return
+  expect(box.y + box.height).toBeLessThanOrEqual(480)
+  await expect(
+    dialog.getByRole("button", { name: "Save rule" }),
+  ).toBeInViewport()
+  await dialog.locator(".whatif").scrollIntoViewIfNeeded()
+  await page.screenshot({ path: "test-results/rules-whatif-640x480.png" })
+})

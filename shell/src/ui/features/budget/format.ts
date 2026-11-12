@@ -39,7 +39,7 @@ export function nanoToDisplay(nanoAiu: number, display: DisplayInfo): number {
  * Decimal places that keep two significant digits of a small amount ($0.006
  * must not read $0.01), never fewer than two and never more than six.
  */
-function fractionDigits(value: number): number {
+export function fractionDigits(value: number): number {
   const magnitude = Math.abs(value);
   if (magnitude === 0 || magnitude >= 1) return 2;
   return Math.min(6, Math.max(2, Math.ceil(-Math.log10(magnitude)) + 1));
@@ -129,6 +129,24 @@ export function formatDayKey(key: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" }).format(
     Date.UTC(year, month - 1, day),
   );
+}
+
+/**
+ * A moment from the API in UTC, like everything it counts: "Nov 10" for a
+ * midnight (the start of a day, week or month period), "Nov 10, 2:05 PM" for
+ * any other, so a period that starts mid-day shows when. `withTime` always
+ * shows the time, for a moment something happened.
+ */
+export function formatInstant(iso: string, locale: string, withTime = false): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return iso;
+  const midnight = !withTime && ms % DAY_MS === 0;
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    ...(midnight ? {} : { hour: "numeric", minute: "2-digit" }),
+    timeZone: "UTC",
+  }).format(ms);
 }
 
 /** An hour key (`2026-11-11T14:00:00Z`, UTC, as the API groups hours) as "Nov 11, 2 PM". */

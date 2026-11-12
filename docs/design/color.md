@@ -116,5 +116,9 @@ label beside it says what:
   gives the first five parts `--series-1` to `--series-5` and folds the rest into
   a neutral `--border-strong` "Other"; every part is named by the swatch on its
   table row, so identity never rests on color. Day and hour columns are one series
-  (`--series-1`). The totals strip is text ink at three sizes, no hue. Text stays text ink.
+  (`--series-1`). The totals strip is text ink at three sizes, no hue. A rule's timeline draws spend in
+  `--series-1`, the limit as a solid `--status-error` line, the warning as a dashed
+  `--status-warning` line and a period's reset as a dotted `--border-strong` line;
+  its markers are a triangle (warned), a dot (limit reached) and a cross (request
+  refused), so the three never rest on color alone. Text stays text ink.
 - **Status colors are for state only**, never to tell categories apart.

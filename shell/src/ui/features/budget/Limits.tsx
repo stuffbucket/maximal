@@ -14,14 +14,21 @@ import type { Problem } from "../../problems";
 
 import { LimitEditor } from "./LimitEditor";
 import { Meter } from "./Meter";
-import { PencilGlyph, PlusGlyph, TrashGlyph, WarningGlyph } from "./glyphs";
+import { RuleTimeline } from "./RuleTimeline";
+import { Sparkline } from "./Sparkline";
+import { ChevronGlyph, PencilGlyph, PlusGlyph, TrashGlyph, WarningGlyph } from "./glyphs";
 import { describeReset, formatWhen, limitFigures, usedFraction } from "./format";
 import type { BudgetFormat } from "./hooks";
-import { resetText, scopeName } from "./labels";
+import { amountIn, resetText, scopeName } from "./labels";
+import type { RangeChoice } from "./range";
+import { sparkValues } from "./timeline";
+import { useLimitTimeline } from "./useLimitTimeline";
 
 interface LimitsProps {
   status: BudgetStatusResponse | null;
   format: BudgetFormat | null;
+  /** Moves whenever the budget changes, so each rule's history refetches with it. */
+  version: number;
   onSave: (id: string, body: BudgetLimitPutRequest) => Promise<Problem | null>;
   onDelete: (id: string) => Promise<Problem | null>;
 }
@@ -30,10 +37,17 @@ function limitName(limit: BudgetLimitStatus): string {
   return limit.label ?? scopeName(limit.scope);
 }
 
+/** The row's sparkline looks at the last week, a day to a point. */
+const SPARK_RANGE: RangeChoice = { range: "7d", from: "", to: "" };
+
 interface LimitRowProps {
   limit: BudgetLimitStatus;
   status: BudgetStatusResponse;
   format: BudgetFormat;
+  version: number;
+  /** Whether the rule's history is open under the row. */
+  open: boolean;
+  onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -43,9 +57,13 @@ interface LimitRowProps {
  * when it resets. The scope shows as a chip only when the limit has a name of
  * its own; otherwise the scope is the name.
  */
-function LimitRow({ limit, status, format, onEdit, onDelete }: LimitRowProps): JSX.Element {
+function LimitRow({ limit, status, format, version, open, onToggle, onEdit, onDelete }: LimitRowProps): JSX.Element {
   const figures = limitFigures(limit, format.display);
   const name = limitName(limit);
+  const { timeline } = useLimitTimeline(limit.id, SPARK_RANGE, version);
+  const detailId = `limit-detail-${limit.id}`;
+  const perfLabel = t(open ? "budget-perf-hide" : "budget-perf-show", { name });
+  const sparkLabel = timeline ? t("budget-spark-label", { total: amountIn(limit.unit, format)(timeline.totals.nano_aiu) }) : "";
   const amounts = t("budget-limit-amounts", { usage: format.money(figures.usage), limit: format.money(figures.limit) });
   const reset = describeReset(limit, status.provider_windows);
   const when = reset.kind === "never" ? undefined : formatWhen(reset.resetsAtMs, format.now, format.locale);
@@ -58,6 +76,18 @@ function LimitRow({ limit, status, format, onEdit, onDelete }: LimitRowProps): J
           {limit.action === "warn" && <span className="chip">{t("budget-tag-warn-only")}</span>}
         </div>
         <div className="limit__actions">
+          <button
+            type="button"
+            className="limit__perf"
+            aria-expanded={open}
+            aria-controls={detailId}
+            aria-label={sparkLabel ? `${perfLabel}. ${sparkLabel}` : perfLabel}
+            title={perfLabel}
+            onClick={onToggle}
+          >
+            {timeline && <Sparkline values={sparkValues(timeline)} label={sparkLabel} />}
+            <ChevronGlyph />
+          </button>
           <Button
             variant="ghost"
             className="btn--icon"
@@ -98,6 +128,11 @@ function LimitRow({ limit, status, format, onEdit, onDelete }: LimitRowProps): J
           {resetText(reset, format)}
         </span>
       </p>
+      {open && (
+        <div id={detailId}>
+          <RuleTimeline id={limit.id} name={name} unit={limit.unit} format={format} version={version} />
+        </div>
+      )}
     </li>
   );
 }
@@ -108,12 +143,20 @@ function LimitRow({ limit, status, format, onEdit, onDelete }: LimitRowProps): J
  * someone adds a limit; there are no per-model rows. Adding and editing happen
  * in a dialog, deleting asks first.
  */
-export function Limits({ status, format, onSave, onDelete }: LimitsProps): JSX.Element {
+export function Limits({ status, format, version, onSave, onDelete }: LimitsProps): JSX.Element {
   // `limit: null` is the add form; a limit is the edit form for it.
   const [editing, setEditing] = useState<{ limit: BudgetLimitStatus | null } | null>(null);
   const [deleting, setDeleting] = useState<BudgetLimitStatus | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteProblem, setDeleteProblem] = useState<Problem | null>(null);
+  // Which rules have their history open; any number may be.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (id: string): void =>
+    setOpened((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
   const confirmDelete = async (): Promise<void> => {
     if (!deleting) return;
@@ -158,6 +201,9 @@ export function Limits({ status, format, onSave, onDelete }: LimitsProps): JSX.E
               limit={limit}
               status={status}
               format={format}
+              version={version}
+              open={opened.has(limit.id)}
+              onToggle={() => toggle(limit.id)}
               onEdit={() => setEditing({ limit })}
               onDelete={() => {
                 setDeleteProblem(null);
@@ -168,11 +214,12 @@ export function Limits({ status, format, onSave, onDelete }: LimitsProps): JSX.E
         </ul>
       )}
 
-      {status && (
+      {status && format && (
         <LimitEditor
           open={editing !== null}
           editing={editing?.limit ?? null}
           status={status}
+          format={format}
           onSave={onSave}
           onClose={() => setEditing(null)}
         />

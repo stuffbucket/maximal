@@ -207,3 +207,154 @@ export const AmountProblem: Story = {
     await userEvent.click(await canvas.findByRole("button", { name: "Save rule" }));
   },
 };
+
+// ---- How each rule performs ------------------------------------------------
+
+const openHistory = (name: string) => async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+  await userEvent.click(await within(canvasElement).findByRole("button", { name: new RegExp(`^Show how ${name} is performing`) }));
+};
+
+const timelinePath = (id: string) => `/settings/api/budget/limits/${id}/timeline`;
+
+/** A rule that is fine: spend climbing toward the limit, the warning line, where the period resets. Each row also has a sparkline. */
+export const RuleHistory: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: openHistory("Monthly cap"),
+};
+
+/** A spent rule: it warned, reached its limit and refused requests in every period, marked on the limit line. */
+export const RuleHistorySpent: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  play: openHistory("Client codex"),
+};
+
+/** The same history in a narrow window. */
+export const RuleHistoryNarrow: Story = {
+  parameters: { mockApi: { scenario: "budget-limits" } },
+  decorators: [(Story) => <div className="sb-pane" style={{ maxWidth: 640 }}><Story /></div>],
+  play: openHistory("Client codex"),
+};
+
+/** The history takes a while: the row shows it is loading. */
+export const RuleHistoryLoading: Story = {
+  parameters: { mockApi: { scenario: "budget-limits", overrides: { [timelinePath("key-codex-weekly")]: "hang" } } },
+  play: openHistory("Client codex"),
+};
+
+/** The history can't load: an error with a retry, and the rest of the window stays usable. */
+export const RuleHistoryError: Story = {
+  parameters: {
+    mockApi: {
+      scenario: "budget-limits",
+      overrides: { [timelinePath("key-codex-weekly")]: { status: 500, body: { error: { message: "History is unreadable." } } } },
+    },
+  },
+  play: openHistory("Client codex"),
+};
+
+/** Nothing matched the rule in the range. */
+export const RuleHistoryEmpty: Story = {
+  parameters: {
+    mockApi: {
+      scenario: "budget-limits",
+      overrides: {
+        [timelinePath("key-codex-weekly")]: {
+          status: 200,
+          body: {
+            limit: {
+              id: "key-codex-weekly",
+              label: null,
+              scope: { kind: "key", id: "codex" },
+              action: "block",
+              limit_reset: "weekly",
+              warn_at: 0.8,
+              limit: 1_800_000_000,
+              warn_line: 1_440_000_000,
+              display: { limit: 1.8, warn_line: 1.44 },
+            },
+            display: { unit: "usd", credit_usd: 0.01 },
+            range: { from: "2026-10-13T00:00:00.000Z", to: "2026-11-12T00:00:00.000Z", label: "30d", bucket: "day" },
+            buckets: [],
+            periods: [],
+            markers: [],
+            totals: { nano_aiu: 0, requests: 0, refused: 0, refused_estimate_nano_aiu: 0, periods_crossed: 0 },
+          },
+        },
+      },
+    },
+  },
+  play: openHistory("Client codex"),
+};
+
+// ---- What if, in the editor --------------------------------------------------
+
+const draftRule = (amount: string, target = "codex") => async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+  const canvas = within(canvasElement);
+  await userEvent.click(await canvas.findByRole("button", { name: "Add a rule" }));
+  await userEvent.selectOptions(await canvas.findByLabelText("Applies to"), "key");
+  await userEvent.selectOptions(await canvas.findByLabelText("Client key"), target);
+  await userEvent.type(await canvas.findByLabelText("Amount"), amount);
+};
+
+/** The preview with nothing typed yet: it says what it needs. */
+export const WhatIfWaiting: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(await within(canvasElement).findByRole("button", { name: "Add a rule" }));
+  },
+};
+
+/** A tight cap replayed over 30 days: when it would have warned and tripped, the requests it would have refused, and a suggestion. */
+export const WhatIfTightCap: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: draftRule("1"),
+};
+
+/** A cap well above anything spent: it never warns or trips, and the suggestion is what would have fit. */
+export const WhatIfLooseCap: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: draftRule("500"),
+};
+
+/** A rule that only warns refuses nothing, and says so. */
+export const WhatIfWarnOnly: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: async (context) => {
+    await draftRule("1")(context);
+    await userEvent.selectOptions(await within(context.canvasElement).findByLabelText("When it’s reached"), "warn");
+  },
+};
+
+/** One click puts the suggested amount in the field; everything else typed stays. */
+export const WhatIfUseSuggestion: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: async (context) => {
+    const canvas = within(context.canvasElement);
+    await draftRule("1")(context);
+    await userEvent.type(await canvas.findByLabelText("Name"), "Codex cap");
+    await userEvent.click(await canvas.findByRole("button", { name: /^Use / }));
+  },
+};
+
+/** A client key nothing has used: there is nothing to replay. */
+export const WhatIfNothingToReplay: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits" } },
+  play: draftRule("5", "claude-desktop"),
+};
+
+/** The replay can't run: the form stays as typed and the preview says why, with a retry. */
+export const WhatIfError: Story = {
+  parameters: {
+    mockApi: {
+      scenario: "budget-no-limits",
+      overrides: { "/settings/api/budget/simulate": { status: 500, body: { error: { message: "Usage history is unreadable." } } } },
+    },
+  },
+  play: draftRule("1"),
+};
+
+/** A slow replay: the preview shows it is working. */
+export const WhatIfLoading: Story = {
+  parameters: { mockApi: { scenario: "budget-no-limits", overrides: { "/settings/api/budget/simulate": "hang" } } },
+  play: draftRule("1"),
+};
