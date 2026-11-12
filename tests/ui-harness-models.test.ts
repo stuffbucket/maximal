@@ -2,6 +2,8 @@ import { expect, test } from "bun:test"
 
 import { createMockBackend } from "../scripts/ui-harness-api"
 import { resolveScenario } from "../scripts/ui-harness-fixtures"
+import { modelTypeLabel } from "../shell/src/ui/features/models/model-type-label"
+import { ModelsListResponse } from "../src/lib/config/settings-types"
 
 test("the healthy harness derives every model count from the same catalog", () => {
   const scenario = resolveScenario("signed-in")
@@ -19,6 +21,44 @@ test("the healthy harness derives every model count from the same catalog", () =
   expect(Date.now() - Date.parse(scenario.models.loaded_at ?? "")).toBeLessThan(
     5 * 60 * 1000,
   )
+})
+
+test("the signed-in fixture covers every current catalog model type", () => {
+  const parsed = ModelsListResponse.parse(resolveScenario("signed-in").models)
+  expect([...new Set(parsed.models.map((model) => model.type))]).toEqual([
+    "chat",
+    "decisions",
+    "embeddings",
+    "image",
+  ])
+  const ids = parsed.models.map((model) => model.id)
+  for (const id of [
+    "gpt-6-luna-decisions",
+    "microsoft-decision-1",
+    "gpt-image-2.5-flare",
+  ]) {
+    expect(ids).toContain(id)
+  }
+  for (const capability of [
+    "vision",
+    "tool_calls",
+    "streaming",
+    "reasoning",
+  ] as const) {
+    expect(parsed.models.some((model) => model.capabilities[capability])).toBe(
+      true,
+    )
+    expect(parsed.models.some((model) => !model.capabilities[capability])).toBe(
+      true,
+    )
+  }
+})
+
+test("model type labels stay readable for provider additions", () => {
+  expect(modelTypeLabel("decisions")).toBe("Decision models")
+  expect(modelTypeLabel("image")).toBe("Image models")
+  expect(modelTypeLabel("future_model_kind")).toBe("Future model kind")
+  expect(modelTypeLabel(" ")).toBe("Other models")
 })
 
 test("the harness rejects model choices production rejects", async () => {
