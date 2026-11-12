@@ -762,44 +762,80 @@ html[data-embedded="true"] .lang-picker {
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
-.usage-signed-out {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-3);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
+/* Signed-out quotas use the same semantic callout and primary-action classes as
+   Settings. This bundle stays independent of React; the classes share only the
+   generated design tokens and markup contract. */
+.usage-prerequisite {
+  flex: 1 1 100%;
+  min-width: 0;
 }
-.usage-signed-out > svg {
-  width: var(--size-md);
-  height: var(--size-md);
-  color: var(--text-muted);
+.usage-prerequisite[hidden],
+.usage-panel[hidden] {
+  display: none;
 }
-.usage-signed-out__content {
+.callout {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
 }
-.usage-signed-out__content strong {
-  color: var(--text-strong);
+.callout__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--text-base) * var(--leading-lg));
+  color: var(--text-muted);
 }
-.usage-signed-out__content p {
+.callout__icon svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+.callout__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.callout__title {
   margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
 }
-.usage-signed-out__action {
+.callout__action {
+  flex: 0 0 auto;
+  align-self: center;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
   min-height: var(--size-xl);
-  padding: var(--space-1) var(--space-3);
-  border: var(--border-width-hairline) solid var(--accent);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--text-strong);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+}
+.btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.btn--primary {
   background: var(--accent);
   color: var(--accent-fg);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-lg);
 }
-.usage-signed-out__action:hover {
-  background: color-mix(in srgb, var(--accent) 85%, var(--text-strong));
-  border-color: color-mix(in srgb, var(--accent) 85%, var(--text-strong));
+.btn--sm {
+  min-height: var(--size-lg);
+  padding: var(--space-1) var(--space-3);
 }
 .usage-panel__meta {
   display: flex;

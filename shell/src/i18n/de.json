@@ -476,9 +476,8 @@
   "dashboard-empty-summary": "Für den ausgewählten Zeitraum wurde keine Tokennutzung aufgezeichnet.",
   "dashboard-empty-events": "Keine Detailzeilen zur Tokennutzung für den ausgewählten Zeitraum.",
 
-  "account-setup-required-title": "Kontoeinrichtung erforderlich",
-  "account-setup-required-body": "Anmeldung und Kontoeinrichtung werden in den Einstellungen verwaltet.",
   "account-setup-required-action": "Kontoeinstellungen öffnen",
+  "dashboard-usage-signed-out": "Melde dich an, um die Nutzungskontingente abzurufen.",
   "dashboard-usage-waiting": "Warten auf Nutzungsdaten von GitHub…",
   "dashboard-usage-reconnecting": "Aktualisiert {ago} · Verbindung zu GitHub wird wiederhergestellt",
   "dashboard-error-summary": "Zusammenfassung der Tokennutzung fehlgeschlagen",

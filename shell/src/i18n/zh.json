@@ -476,9 +476,8 @@
   "dashboard-empty-summary": "所选周期内未记录令牌用量。",
   "dashboard-empty-events": "所选周期内没有令牌用量详情行。",
 
-  "account-setup-required-title": "需要设置账户",
-  "account-setup-required-body": "登录和账户设置在“设置”中进行。",
   "account-setup-required-action": "打开“账户”设置",
+  "dashboard-usage-signed-out": "登录以获取使用配额。",
   "dashboard-usage-waiting": "正在等待 GitHub 的使用情况…",
   "dashboard-usage-reconnecting": "{ago}更新 · 正在重新连接 GitHub",
   "dashboard-error-summary": "令牌用量摘要失败",

@@ -476,9 +476,8 @@
   "dashboard-empty-summary": "No token usage recorded for the selected period.",
   "dashboard-empty-events": "No token usage detail rows for the selected period.",
 
-  "account-setup-required-title": "Account setup required",
-  "account-setup-required-body": "Sign-in and account setup are handled in Settings.",
   "account-setup-required-action": "Open Account settings",
+  "dashboard-usage-signed-out": "Sign-in to retrieve usage quotas.",
   "dashboard-usage-waiting": "Waiting for GitHub usage…",
   "dashboard-usage-reconnecting": "Updated {ago} · reconnecting to GitHub",
   "dashboard-error-summary": "Token usage summary failed",

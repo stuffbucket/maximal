@@ -42,6 +42,8 @@ type Story = StoryObj<Args>;
 
 /** Quotas (one metered, two unlimited) + a day of mixed-model traffic, 3 pages of events. */
 export const BusyDay: Story = {};
+/** Authentication is required before the Usage Quotas card can show metrics. */
+export const SignedOut: Story = { args: { scenario: "signed-out" } };
 /** No quota data and no requests yet. */
 export const Empty: Story = { args: { scenario: "fresh-install" } };
 /** Meter colors mean something: one quota running low (78%), one nearly out (95%). */

@@ -476,9 +476,8 @@
   "dashboard-empty-summary": "Nessun utilizzo di token registrato per il periodo selezionato.",
   "dashboard-empty-events": "Nessuna riga di dettaglio sull’utilizzo dei token per il periodo selezionato.",
 
-  "account-setup-required-title": "Configurazione dell’account necessaria",
-  "account-setup-required-body": "L’accesso e la configurazione dell’account si gestiscono in Impostazioni.",
   "account-setup-required-action": "Apri le impostazioni dell’account",
+  "dashboard-usage-signed-out": "Accedi per recuperare le quote di utilizzo.",
   "dashboard-usage-waiting": "In attesa dei dati di utilizzo di GitHub…",
   "dashboard-usage-reconnecting": "Aggiornato {ago} · riconnessione a GitHub",
   "dashboard-error-summary": "Riepilogo dell’utilizzo dei token non riuscito",

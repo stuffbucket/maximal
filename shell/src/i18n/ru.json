@@ -476,9 +476,8 @@
   "dashboard-empty-summary": "За выбранный период использование токенов не зафиксировано.",
   "dashboard-empty-events": "Нет строк деталей использования токенов за выбранный период.",
 
-  "account-setup-required-title": "Требуется настройка учётной записи",
-  "account-setup-required-body": "Вход и настройка учётной записи выполняются в Настройках.",
   "account-setup-required-action": "Открыть настройки учётной записи",
+  "dashboard-usage-signed-out": "Войдите, чтобы получить данные о квотах использования.",
   "dashboard-usage-waiting": "Ожидание данных об использовании от GitHub…",
   "dashboard-usage-reconnecting": "Обновлено {ago} · переподключение к GitHub",
   "dashboard-error-summary": "Не удалось получить сводку использования токенов",
