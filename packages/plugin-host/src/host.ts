@@ -736,16 +736,32 @@ class PluginHost implements PluginGateway {
 
   async #reconcileNow(settings: PluginSettings | undefined): Promise<void> {
     if (this.#disposed) return
-    await Promise.all(
-      [...this.#records.values()].map(async (record) => {
-        const entry = settingsEntry(settings, record.id)
-        const enabled = entry?.enabled === true
-        const enabledChanged = record.enabled !== enabled
-        record.enabled = enabled
-        await this.#load(record)
-        await this.#converge(record, enabledChanged)
-      }),
+    const records = [...this.#records.values()]
+    const changes = records.map((record) => {
+      const enabled = settingsEntry(settings, record.id)?.enabled === true
+      const enabledChanged = record.enabled !== enabled
+      record.enabled = enabled
+      return enabledChanged
+    })
+    // Read in parallel, but converge in record order: what plugins register
+    // (operations, providers, server tools) must not depend on I/O timing.
+    const loads = await Promise.allSettled(
+      records.map((record) => this.#load(record)),
     )
+    let failure: { error: unknown } | undefined
+    for (const [index, record] of records.entries()) {
+      const load = loads[index]
+      if (load.status === "rejected") {
+        failure ??= { error: load.reason }
+        continue
+      }
+      try {
+        await this.#converge(record, changes[index])
+      } catch (error) {
+        failure ??= { error }
+      }
+    }
+    if (failure) throw failure.error
   }
 
   /** Start/stop/reload the plugin to match `enabled` and its settings. */
