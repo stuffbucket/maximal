@@ -39,11 +39,11 @@ const ATTENTION_NAME = "Rules"
 export const ALLOW_MORE_FRACTION = 0.25
 export const ALLOW_HOUR_MS = 3_600_000
 
-export type ApprovalChoice = "more" | "hour" | "keep"
+export type ApprovalChoice = "more" | "hour" | "keep" | "reset" | "resume"
 export type ApprovalState = "pending" | "declined"
 
 export interface BudgetNotice {
-  code: "rule-ask" | "rule-limit" | "rule-warning"
+  code: "rule-ask" | "rule-limit" | "rule-paused" | "rule-warning"
   /** English text; the shell words the notification from it. */
   message: string
   params: Record<string, string>
@@ -65,7 +65,10 @@ export interface LimitEvent {
 
 export type ApprovalResult =
   | { ok: true }
-  | { ok: false; reason: "unknown-limit" | "nothing-asked" }
+  | {
+      ok: false
+      reason: "unknown-limit" | "nothing-asked" | "nothing-paused"
+    }
 
 export interface ApprovalCenter {
   /** A call was refused by an `ask` rule: asks once per period. Says
@@ -75,6 +78,10 @@ export interface ApprovalCenter {
   reached(event: LimitEvent): void
   /** A rule crossed its warning threshold. */
   warned(event: LimitEvent): void
+  /** A pause rule just held a request (so `heldCount` is above zero). */
+  paused(event: LimitEvent): void
+  /** Held requests came or went: a rule with none left has nothing to say. */
+  heldChanged(): void
   /** What the rule is waiting on, if anything. */
   approval(limitId: string): ApprovalState | null
   /** Apply a decision. `amountNano` overrides the default for `more`. */
@@ -97,6 +104,14 @@ export interface ApprovalCenterDeps {
   notice: (notice: BudgetNotice) => void
   /** Something a status shows changed. */
   changed: () => void
+  /** Requests a pause rule is holding at a limit now. */
+  heldCount?: (limitId: string) => number
+  /** Make the held requests at a limit look at the budget again. */
+  wake?: (limitId: string) => void
+  /** Let the held requests through whatever the budget says; how many. */
+  resumeHeld?: (limitId: string) => number
+  /** Fail the held requests; how many. */
+  cancelHeld?: (limitId: string) => number
   /** When extra room granted to `limit` now stops: see `overrideExpiry`. */
   expiryFor: (limit: BudgetLimitConfig) => number | null
 }
@@ -116,7 +131,7 @@ export function defaultExtraNanoAiu(limit: number): number {
   return Math.max(1, Math.round(limit * ALLOW_MORE_FRACTION))
 }
 
-type EntryKind = "ask" | "limit" | "warn"
+type EntryKind = "ask" | "limit" | "pause" | "warn"
 
 interface Entry {
   kind: EntryKind
@@ -196,6 +211,10 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
     if (kind === "limit") {
       return `Rule "${label}" reached its limit: ${figures}. Requests are refused until it resets or is raised.`
     }
+    if (kind === "pause") {
+      const n = deps.heldCount?.(event.limitId) ?? 1
+      return `Paused ${n} ${n === 1 ? "request" : "requests"}: rule "${label}" reached its limit (${figures}). Resume, allow more or cancel them from the Maximal menu or Rules.`
+    }
     const percent = Math.round((event.used / Math.max(1, event.limit)) * 100)
     return `Rule "${label}" is at ${percent}% of its limit: ${figures}.`
   }
@@ -203,6 +222,7 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
   const CODES = {
     ask: "rule-ask",
     limit: "rule-limit",
+    pause: "rule-paused",
     warn: "rule-warning",
   } as const
 
@@ -253,40 +273,95 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
     if (!limit) return { ok: false, reason: "unknown-limit" }
     const asked = liveEntry("ask", limitId)
     const nowMs = clock()
-    if (choice === "keep") {
-      if (!asked) return { ok: false, reason: "nothing-asked" }
-      declined.set(limitId, {
-        periodKey: asked.periodKey,
-        untilMs: asked.expiresAtMs,
-      })
-    } else if (choice === "more") {
-      deps.overrides.add({
-        limitId,
-        kind: "extra",
-        extraNanoAiu: amountNano ?? defaultExtraNanoAiu(limit.limit),
-        createdAtMs: nowMs,
-        expiresAtMs: deps.expiryFor(limit),
-      })
-      declined.delete(limitId)
-    } else {
-      deps.overrides.add({
-        limitId,
-        kind: "unlimited",
-        extraNanoAiu: 0,
-        createdAtMs: nowMs,
-        expiresAtMs: nowMs + ALLOW_HOUR_MS,
-      })
-      declined.delete(limitId)
+    switch (choice) {
+      case "keep": {
+        if (!asked) return { ok: false, reason: "nothing-asked" }
+        declined.set(limitId, {
+          periodKey: asked.periodKey,
+          untilMs: asked.expiresAtMs,
+        })
+
+        break
+      }
+      case "more": {
+        deps.overrides.add({
+          limitId,
+          kind: "extra",
+          extraNanoAiu: amountNano ?? defaultExtraNanoAiu(limit.limit),
+          createdAtMs: nowMs,
+          expiresAtMs: deps.expiryFor(limit),
+        })
+        declined.delete(limitId)
+
+        break
+      }
+      case "resume": {
+        if ((deps.heldCount?.(limitId) ?? 0) === 0) {
+          return { ok: false, reason: "nothing-paused" }
+        }
+        deps.resumeHeld?.(limitId)
+
+        break
+      }
+      default: {
+        // An hour, or until the period resets when it has an end.
+        const reset = choice === "reset" ? deps.expiryFor(limit) : null
+        deps.overrides.add({
+          limitId,
+          kind: "unlimited",
+          extraNanoAiu: 0,
+          createdAtMs: nowMs,
+          expiresAtMs: reset ?? nowMs + ALLOW_HOUR_MS,
+        })
+        declined.delete(limitId)
+      }
     }
     entries.delete(entryId("ask", limitId))
+    if (choice !== "keep" && choice !== "resume") deps.wake?.(limitId)
     deps.changed()
     return { ok: true }
+  }
+
+  /** "Allow $X more", unless the limit is a request cap: more room is in
+   *  the limit's unit, so it can't lift one. */
+  function moreActions(
+    entry: Entry,
+    id: string,
+  ): PluginAttentionItem["actions"] {
+    if (entry.event.unit === "requests") return []
+    return [
+      {
+        id: `allow-more.${id}`,
+        label: `Allow ${money(entry.offeredNanoAiu, entry.offeredUnit)} more: ${entry.label}`,
+        ...(entry.kind === "ask" ? { kind: "primary" as const } : {}),
+      },
+    ]
   }
 
   function attentionItem(entry: Entry): PluginAttentionItem {
     const { kind, limitId, label } = entry
     const id = entryId(kind, limitId)
     const base = { plugin: ATTENTION_SOURCE_ID, name: ATTENTION_NAME }
+    if (kind === "pause") {
+      return {
+        ...base,
+        summary: messageFor(entry),
+        actions: [
+          {
+            id: `resume-once.${id}`,
+            label: `Resume once: ${label}`,
+            kind: "primary",
+          },
+          ...moreActions(entry, id),
+          { id: `resume-reset.${id}`, label: `Resume until reset: ${label}` },
+          {
+            id: `cancel.${id}`,
+            label: `Cancel paused requests: ${label}`,
+            kind: "destructive",
+          },
+        ],
+      }
+    }
     if (kind !== "ask") {
       return {
         ...base,
@@ -294,22 +369,11 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
         actions: [{ id: `dismiss.${id}`, label: `Dismiss: ${label}` }],
       }
     }
-    // More room is in the limit's unit, so it can't lift a request cap.
-    const more: PluginAttentionItem["actions"] =
-      entry.event.unit === "requests" ?
-        []
-      : [
-          {
-            id: `allow-more.${id}`,
-            label: `Allow ${money(entry.offeredNanoAiu, entry.offeredUnit)} more: ${label}`,
-            kind: "primary",
-          },
-        ]
     return {
       ...base,
       summary: messageFor(entry),
       actions: [
-        ...more,
+        ...moreActions(entry, id),
         { id: `allow-hour.${id}`, label: `Allow for 1 hour: ${label}` },
         {
           id: `keep-blocked.${id}`,
@@ -317,6 +381,48 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
           kind: "secondary",
         },
       ],
+    }
+  }
+
+  /** An answer to a request for more room. */
+  function runAsk(verb: string, entry: Entry): boolean {
+    const { limitId } = entry
+    switch (verb) {
+      case "allow-more": {
+        if (entry.event.unit === "requests") return false
+        return approve(limitId, "more").ok
+      }
+      case "allow-hour": {
+        return approve(limitId, "hour").ok
+      }
+      case "keep-blocked": {
+        return approve(limitId, "keep").ok
+      }
+      default: {
+        return false
+      }
+    }
+  }
+
+  /** An answer to requests a pause rule is holding. */
+  function runPause(verb: string, entry: Entry): boolean {
+    const { limitId } = entry
+    switch (verb) {
+      case "resume-once": {
+        return approve(limitId, "resume").ok
+      }
+      case "resume-reset": {
+        return approve(limitId, "reset").ok
+      }
+      case "cancel": {
+        return (deps.cancelHeld?.(limitId) ?? 0) > 0
+      }
+      case "allow-more": {
+        return entry.event.unit !== "requests" && approve(limitId, "more").ok
+      }
+      default: {
+        return false
+      }
     }
   }
 
@@ -332,6 +438,20 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
     warned: (event) => {
       note("warn", event)
     },
+    paused: (event) => {
+      note("pause", event)
+    },
+    heldChanged() {
+      for (const entry of entries.values()) {
+        if (
+          entry.kind === "pause"
+          && (deps.heldCount?.(entry.limitId) ?? 0) === 0
+        ) {
+          entries.delete(entryId("pause", entry.limitId))
+        }
+      }
+      deps.changed()
+    },
     approval(limitId) {
       if (liveEntry("ask", limitId)) return "pending"
       const choice = declined.get(limitId)
@@ -346,7 +466,10 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
     items() {
       const items: Array<PluginAttentionItem> = []
       for (const entry of entries.values()) {
-        if (!live(entry)) {
+        // A pause entry is only worth showing while something is held.
+        const nothingHeld =
+          entry.kind === "pause" && (deps.heldCount?.(entry.limitId) ?? 0) === 0
+        if (!live(entry) || nothingHeld) {
           entries.delete(entryId(entry.kind, entry.limitId))
           continue
         }
@@ -365,22 +488,11 @@ export function createApprovalCenter(deps: ApprovalCenterDeps): ApprovalCenter {
         deps.changed()
         return true
       }
-      if (kind !== "ask" || !liveEntry("ask", limitId)) return false
-      switch (verb) {
-        case "allow-more": {
-          if (liveEntry("ask", limitId)?.event.unit === "requests") return false
-          return approve(limitId, "more").ok
-        }
-        case "allow-hour": {
-          return approve(limitId, "hour").ok
-        }
-        case "keep-blocked": {
-          return approve(limitId, "keep").ok
-        }
-        default: {
-          return false
-        }
-      }
+      const entry = liveEntry(kind, limitId)
+      if (!entry) return false
+      if (kind === "pause") return runPause(verb, entry)
+      if (kind !== "ask") return false
+      return runAsk(verb, entry)
     },
   }
 }

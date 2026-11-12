@@ -29,6 +29,7 @@ import {
 import { BudgetExceededError } from "./errors"
 import { createUsageDbOverrideStorage } from "./override-store"
 import { createOverrideRegistry, type OverrideRegistry } from "./overrides"
+import { DEFAULT_MAX_HELD, createPauseGate, type PauseGate } from "./pause"
 import { resolvePeriod } from "./periods"
 import {
   findProviderWindow,
@@ -44,6 +45,7 @@ import { recordBudgetEvent } from "./reports/events"
 import { budgetKeyOf } from "./scope"
 import {
   createBudgetService,
+  type BudgetCheck,
   type BudgetHold,
   type BudgetIntent,
   type BudgetService,
@@ -54,6 +56,8 @@ import { createUsageDbBudgetStore } from "./store"
 
 /** A rule crossed its warning threshold: log it, and tell the person where
  *  the rule's `notify.warn` says. */
+const DEFAULT_MAX_WAIT_SECONDS = 600
+
 function announceWarning(warning: BudgetWarning): void {
   const percent = Math.round((warning.used / Math.max(1, warning.limit)) * 100)
   consola.warn(
@@ -75,9 +79,52 @@ function announceWarning(warning: BudgetWarning): void {
 }
 
 let service: BudgetService | undefined
+let gate: PauseGate | undefined
+let stopWakingGate: (() => void) | undefined
 let overrides: OverrideRegistry | undefined
 let center: ApprovalCenter | undefined
 let refresher: AllowanceRefresher | undefined
+
+/** How `pause` rules hold requests (`budget.pause`). */
+export function pauseSettings(): { maxWaitMs: number; maxHeld: number } {
+  const pause = getConfig().budget?.pause
+  return {
+    maxWaitMs: (pause?.maxWaitSeconds ?? DEFAULT_MAX_WAIT_SECONDS) * 1000,
+    maxHeld: pause?.maxHeld ?? DEFAULT_MAX_HELD,
+  }
+}
+
+/** Whether any rule pauses, so a request is worth looking at. */
+export function hasPauseRules(): boolean {
+  const budget = getConfig().budget
+  if (budget?.enabled === false) return false
+  return (budget?.limits ?? []).some((limit) => limit.action === "pause")
+}
+
+/** The requests held at pause rules. A change to the budget (a limit raised,
+ *  an approval) wakes them to look again. */
+export function getPauseGate(): PauseGate {
+  if (!gate) {
+    gate = createPauseGate({
+      maxHeld: () => pauseSettings().maxHeld,
+      onChange: () => {
+        getApprovalCenter().heldChanged()
+      },
+    })
+    const woken = gate
+    stopWakingGate = settingsEventBus.subscribe("budget.changed", () => {
+      woken.recheck()
+    })
+  }
+  return gate
+}
+
+/** Let the request being served through the budget gate, because a person
+ *  resumed it. */
+export function markBudgetCleared(): void {
+  const store = requestContext.getStore()
+  if (store) store.budgetCleared = true
+}
 
 /** What approvals granted, kept across restarts. */
 export function getOverrideRegistry(): OverrideRegistry {
@@ -103,6 +150,10 @@ export function getApprovalCenter(): ApprovalCenter {
       })
     },
     changed: emitBudgetChanged,
+    heldCount: (limitId) => getPauseGate().heldCount(limitId),
+    wake: (limitId) => getPauseGate().recheck(limitId),
+    resumeHeld: (limitId) => getPauseGate().resume(limitId),
+    cancelHeld: (limitId) => getPauseGate().cancel(limitId),
     expiryFor: (limit) => {
       const nowMs = Date.now()
       return overrideExpiry(
@@ -132,6 +183,7 @@ export async function currentBudgetStatus(): Promise<BudgetStatusResponse> {
     presence: currentPresence(),
     overrides: (limitId) => getOverrideRegistry().active(limitId, Date.now()),
     approval: (limitId) => getApprovalCenter().approval(limitId),
+    paused: (limitId) => getPauseGate().heldCount(limitId),
   })
 }
 
@@ -227,6 +279,9 @@ export function getBudgetService(): BudgetService {
 export function __resetBudgetServiceForTests(): void {
   service?.stop()
   service = undefined
+  stopWakingGate?.()
+  stopWakingGate = undefined
+  gate = undefined
   overrides = undefined
   center = undefined
   refresher = undefined
@@ -258,6 +313,8 @@ export async function admitBudget(
   intent: BudgetIntent,
   budget: BudgetService = getBudgetService(),
 ): Promise<void> {
+  // A person let this request through a rule that was holding it.
+  if (requestContext.getStore()?.budgetCleared) return
   const decision = await budget.check(intent)
   if (!decision.ok) throw new BudgetExceededError(decision.refusal)
 }
@@ -271,23 +328,42 @@ export type ChatBudgetOperation = "chat_completions" | "messages" | "responses"
  *  its limits have room, and can go over by what is in flight. */
 export async function admitChat(
   operation: ChatBudgetOperation,
-  request: { model?: string; maxTokens?: number | null } = {},
+  request: ChatBudgetRequest = {},
   budget?: BudgetService,
 ): Promise<void> {
-  const { model, maxTokens } = request
-  await admitBudget(
-    {
-      operation,
-      provider: COPILOT_PROVIDER_ID,
-      key: currentBudgetKey(),
-      ...(model === undefined ? {} : { model }),
-      estimateNanoAiu: 0,
-      // The most the reply can be, when the request says: what a token limit
-      // holds. Cost can't be estimated, so a cost limit still gates on spend.
-      ...(typeof maxTokens === "number" && maxTokens > 0 ?
-        { estimateOutputTokens: maxTokens }
-      : {}),
-    },
-    budget,
-  )
+  await admitBudget(chatIntent(operation, request), budget)
+}
+
+/** What a chat request tells the budget before it runs. */
+export interface ChatBudgetRequest {
+  model?: string
+  maxTokens?: number | null
+}
+
+function chatIntent(
+  operation: ChatBudgetOperation,
+  { model, maxTokens }: ChatBudgetRequest,
+): BudgetIntent {
+  return {
+    operation,
+    provider: COPILOT_PROVIDER_ID,
+    key: currentBudgetKey(),
+    ...(model === undefined ? {} : { model }),
+    estimateNanoAiu: 0,
+    // The most the reply can be, when the request says: what a token limit
+    // holds. Cost can't be estimated, so a cost limit still gates on spend.
+    ...(typeof maxTokens === "number" && maxTokens > 0 ?
+      { estimateOutputTokens: maxTokens }
+    : {}),
+  }
+}
+
+/** The budget's answer for a chat request, without throwing: a pause rule's
+ *  refusal says it may be held (`refusal.pause`). */
+export function checkChat(
+  operation: ChatBudgetOperation,
+  request: ChatBudgetRequest = {},
+  budget: BudgetService = getBudgetService(),
+): Promise<BudgetCheck> {
+  return budget.check(chatIntent(operation, request))
 }

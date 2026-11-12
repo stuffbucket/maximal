@@ -220,7 +220,7 @@ describe("validation", () => {
       ["limits.0.limit", { ...base, limit: 1.5 }],
       ["limits.0.limit", { ...base, limit: -1 }],
       ["limits.0.id", { ...base, id: "Bad Id" }],
-      ["limits.0.action", { ...base, action: "pause" }],
+      ["limits.0.action", { ...base, action: "halt" }],
       ["limits.0.warn_at", { ...base, warn_at: 2 }],
       [
         "limits.0.limit_reset",
@@ -826,7 +826,7 @@ describe("the schema's ask action and routing", () => {
 
   test("refuses another action or channel", () => {
     expect(
-      BudgetConfigSchema.safeParse({ limits: [{ ...base, action: "pause" }] })
+      BudgetConfigSchema.safeParse({ limits: [{ ...base, action: "halt" }] })
         .success,
     ).toBe(false)
     expect(

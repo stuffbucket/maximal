@@ -241,8 +241,10 @@ client (via Hono `streamSSE`), regardless of upstream shape:
 | `content_block_stop` | per block end | `index` |
 | `message_delta` | final | `delta.stop_reason`, `usage.output_tokens` |
 | `message_stop` | stream end | — |
-| `ping` | keepalive | — |
+| `ping` | keepalive; also sent every 10 s from the moment the response starts while a budget `pause` rule holds the request, ahead of `message_start` | — |
 | `error` | failure | `error.{type,message}` via `emitStreamError` |
+
+A request held by a budget `pause` rule starts its response at once (status 200, `text/event-stream`) with only `ping` events until it is let through; then the stream above follows unchanged. If it is cancelled or its wait runs out, the stream ends with an `error` event carrying the 402's `billing_error` envelope (the status can no longer change). On `/chat/completions` and `/responses` the keepalive is the SSE comment line `: paused`, and the failure a `data:` line with the `insufficient_quota` envelope.
 
 Upstream→Anthropic delta mapping: Chat Completions
 `delta.content`/`reasoning_text`/`tool_calls.arguments` →

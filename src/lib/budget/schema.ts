@@ -97,8 +97,10 @@ export type BudgetLimitReset = z.infer<typeof BudgetLimitReset>
 
 /** What reaching a limit does: `block` refuses; `warn` never refuses; `ask`
  *  refuses and asks the person to allow more (a notice and an attention
- *  entry), recording what they allow as a temporary override. */
-export const BudgetLimitAction = z.enum(["block", "warn", "ask"])
+ *  entry), recording what they allow as a temporary override; `pause` holds
+ *  the requests it covers, instead of refusing them, until the limit is
+ *  cleared or someone resumes or cancels them. */
+export const BudgetLimitAction = z.enum(["block", "warn", "ask", "pause"])
 export type BudgetLimitAction = z.infer<typeof BudgetLimitAction>
 
 /** What a limit's amount is in: cost (nano-AIU, today's) or tokens. */
@@ -205,6 +207,16 @@ export const BudgetConfigSchema = z
     limits: z.array(BudgetLimitConfigSchema).max(256).optional(),
     /** Named sets a limit's `filter` scope selects. */
     filters: z.array(BudgetFilterSchema).max(128).optional(),
+    /** How `pause` rules hold requests. */
+    pause: z
+      .object({
+        /** Longest a request is held before it fails with the 402; default
+         *  600 (ten minutes). */
+        maxWaitSeconds: z.number().int().min(1).max(3600).optional(),
+        /** Most requests held at once; default 50. */
+        maxHeld: z.number().int().min(1).max(1000).optional(),
+      })
+      .optional(),
   })
   .loose()
   .superRefine((budget, ctx) => {

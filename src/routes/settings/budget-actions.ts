@@ -7,6 +7,11 @@
  *   extra room for the rest of the period, `hour` stops enforcing the rule
  *   for an hour, `keep` leaves it blocked and stops asking until the period
  *   turns over (409 `nothing_asked` when the rule hasn't asked).
+ * - Choices `reset` (stop enforcing the rule until its period resets) and
+ *   `resume` (let the requests a `pause` rule is holding through once, the
+ *   limit unchanged; 409 `nothing_paused` when it holds none) also go through
+ *   `approve`; `DELETE /limits/:id/paused` fails the held requests with the
+ *   usual 402.
  * - `DELETE /overrides/:id` — end an approval early.
  * - `POST /providers/:provider/refresh` — read the provider's allowance now
  *   and reply with the new status; at most one per provider in 30 s (429
@@ -24,6 +29,7 @@ import { ATTENTION_SOURCE_ID } from "~/lib/budget/approvals"
 import {
   getApprovalCenter,
   getOverrideRegistry,
+  getPauseGate,
   refreshProviderAllowance,
 } from "~/lib/budget/runtime"
 import { BudgetLimitId, NanoAiuAmount } from "~/lib/budget/schema"
@@ -81,9 +87,40 @@ budgetActionRoutes.post("/limits/:id/approve", async (c) => {
           message: "Budget limit not found",
         })
       }
+      if (result.reason === "nothing-paused") {
+        return errorBody(c, 409, {
+          type: "nothing_paused",
+          message: `Rule '${id.data}' isn't holding any requests`,
+        })
+      }
       return errorBody(c, 409, {
         type: "nothing_asked",
         message: `Rule '${id.data}' has no request waiting to keep blocked`,
+      })
+    }
+    return await respondChanged(c)
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+budgetActionRoutes.delete("/limits/:id/paused", async (c) => {
+  try {
+    const id = BudgetLimitId.safeParse(c.req.param("id"))
+    if (!id.success) return validationError(c, "Not a rule id")
+    const known = (getConfig().budget?.limits ?? []).some(
+      (limit) => limit.id === id.data,
+    )
+    if (!known) {
+      return errorBody(c, 404, {
+        type: "not_found",
+        message: "Budget limit not found",
+      })
+    }
+    if (getPauseGate().cancel(id.data) === 0) {
+      return errorBody(c, 409, {
+        type: "nothing_paused",
+        message: `Rule '${id.data}' isn't holding any requests`,
       })
     }
     return await respondChanged(c)

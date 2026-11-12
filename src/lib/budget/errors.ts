@@ -27,6 +27,9 @@ export interface BudgetRefusal {
   /** Refused only because requests in progress hold the room: it comes
    *  back by itself in moments, not at the reset. */
   inFlight: boolean
+  /** True when every limit that refused only pauses: the caller may hold the
+   *  request until the limit clears instead of failing it. */
+  pause?: boolean
   /** For a rule that asks: `pending` while a request for more room waits for
    *  the person, `declined` once they said to keep it blocked this period. */
   approval?: "pending" | "declined"

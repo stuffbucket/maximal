@@ -610,6 +610,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
   ): { refusal?: BudgetRefusal; warnings: Array<BudgetWarning> } {
     const estimates = estimatesOf(intent)
     const refusals: Array<BudgetRefusal> = []
+    const pausing: Array<boolean> = []
     const warnings: Array<BudgetWarning> = []
     for (const item of active) {
       // A limit that applies only while the person is away sits out the rest.
@@ -624,7 +625,12 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
           requestsRefusal(item),
         ].filter((refusal) => refusal !== undefined)
         if (found.length > 0) {
-          for (const refusal of found) refusals.push(refused(item, refusal))
+          for (const refusal of found) {
+            refusals.push(refused(item, refusal))
+            // Only a real limit can be waited out; calls in flight clear
+            // by themselves and are retried.
+            pausing.push(item.limit.action === "pause" && !refusal.inFlight)
+          }
           logEvent("refused", item, intent)
           continue
         }
@@ -633,7 +639,16 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
       const warning = warningFor(item, estimates, cap)
       if (warning) warnings.push(warning)
     }
-    return { refusal: decisive(refusals), warnings }
+    const refusal = decisive(refusals)
+    return {
+      ...(refusal === undefined ?
+        {}
+      : {
+          refusal:
+            pausing.every(Boolean) ? { ...refusal, pause: true } : refusal,
+        }),
+      warnings,
+    }
   }
 
   /** Tell the person a limit refused a call, and for an `ask` limit add
@@ -665,8 +680,9 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
             : refusal.message,
         }
       }
+      // A pause rule tells the person when it holds a request, not here.
       const key = `${limit.id}@${entry.key}`
-      if (!reached.has(key)) {
+      if (limit.action !== "pause" && !reached.has(key)) {
         reached.add(key)
         deps.onLimitReached?.(event)
       }
