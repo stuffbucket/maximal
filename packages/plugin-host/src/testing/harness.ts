@@ -28,6 +28,7 @@ import { PLUGIN_SETTINGS_FILE } from "@stuffbucket/maximal-plugin-sdk"
 import {
   createFileStorage,
   errorMessage,
+  type PluginServiceFactory,
   type PluginStorageBackend,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
@@ -119,6 +120,8 @@ export interface LifecycleHarnessOptions {
   logger?: PluginLogger
   /** Shared normaliser (e.g. with aliases for fake origins). */
   normalizer?: Normalizer
+  /** App-provided services, as `createPluginHost({ services: { extra } })`. */
+  extraServices?: ReadonlyArray<PluginServiceFactory>
 }
 
 export interface PluginContributions {
@@ -579,6 +582,7 @@ class Harness implements LifecycleHarness {
         storageRoot: this.storageRoot,
         storage: recordingStorage(this.#files, record, this.#expectedSettings),
         host: recordingHost(options, record, this.opened),
+        extra: options.extraServices,
       },
     })
     const internals = pluginHostInternals(this.gateway)

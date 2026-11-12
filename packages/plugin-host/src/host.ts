@@ -17,7 +17,6 @@ import type {
 
 import { Context } from "@deepseek-ai/cordis"
 import {
-  PLUGIN_SERVICE_NAMES,
   PLUGIN_SETTINGS_FILE,
   type HostServices,
   type PluginManifest,
@@ -57,6 +56,7 @@ import {
   writePluginSettings,
   type LoadedPluginSettings,
   type PluginSettingsDocument,
+  type PluginServiceFactory,
   type PluginStorageBackend,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
 import path from "node:path"
@@ -76,6 +76,12 @@ export interface PluginHostOptions {
     storageRoot: string
     /** Override the filesystem storage backend (tests). */
     storage?: PluginStorageBackend
+    /**
+     * App-provided services beyond `tools`, `surface`, `storage` and `host`.
+     * Each factory builds a cordis `Service` on the root; its name becomes an
+     * allowed entry in plugins' `inject`.
+     */
+    extra?: ReadonlyArray<PluginServiceFactory>
   }
 }
 
@@ -222,7 +228,6 @@ class PluginHost implements PluginGateway {
   #disposing: Promise<void> | undefined
 
   constructor(options: PluginHostOptions) {
-    const plugins = validatePluginList(options.plugins, PLUGIN_SERVICE_NAMES)
     this.#host = options.services.host
     this.#runtime = new PluginRuntime({
       onChange: (event) => {
@@ -245,10 +250,12 @@ class PluginHost implements PluginGateway {
     this.#storage =
       options.services.storage
       ?? createFileStorage(options.services.storageRoot)
-    installPluginServices(this.#root, this.#runtime, {
+    const available = installPluginServices(this.#root, this.#runtime, {
       host: options.services.host,
       storage: this.#storage,
+      extra: options.services.extra,
     })
+    const plugins = validatePluginList(options.plugins, available)
     for (const module of plugins) {
       this.#records.set(module.name, {
         id: module.name,

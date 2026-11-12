@@ -26,7 +26,7 @@ export const Config = z.object({ endpoint: z.url().default("https://example.test
 export type Config = z.output<typeof Config>
 export const manifest = {
   id: "example",                              // must equal `name`
-  kind: "connector",                          // or "extension"
+  kind: "connector",                          // or "extension" or "model"
   displayName: "Example",
   description: "What it does.",
   settingsVersion: 1,

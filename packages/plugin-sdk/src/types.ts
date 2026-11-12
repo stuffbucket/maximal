@@ -18,7 +18,7 @@ export const ACTION_ID_PATTERN = /^[a-z0-9][\w.-]{0,63}$/i
 /** Storage file name: a single path segment, no leading dot. */
 export const STORAGE_NAME_PATTERN = /^[a-z0-9][\w.-]{0,127}$/i
 
-/** Names of the services the plugin host provides on `ctx`. */
+/** Names of the built-in services the plugin host always provides on `ctx`. */
 export const PLUGIN_SERVICE_NAMES = [
   "tools",
   "surface",
@@ -27,11 +27,26 @@ export const PLUGIN_SERVICE_NAMES = [
 ] as const
 export type PluginServiceName = (typeof PLUGIN_SERVICE_NAMES)[number]
 
+/**
+ * Services the host application provides on `ctx` besides the built-in ones
+ * (`PluginHostOptions.services.extra`). Empty here: the module that defines a
+ * service merges it in with
+ * `declare module "@stuffbucket/maximal-plugin-sdk" { interface AppServices { name: Type } }`,
+ * and a plugin that lists the name in `inject` then sees it typed on `ctx`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- declaration-merging hook
+export interface AppServices {}
+
 /** Reserved storage name of the host-owned per-plugin settings file. */
 export const PLUGIN_SETTINGS_FILE = "settings.json"
 
-/** Kinds of plugin. A `connector` exposes tools to MCP clients and gets host-managed tool permissions. */
-export const PLUGIN_KINDS = ["connector", "extension"] as const
+/**
+ * Kinds of plugin. A `connector` exposes tools to MCP clients and gets
+ * host-managed tool permissions. An `extension` has no MCP endpoint and is not
+ * listed in Settings. A `model` has no MCP endpoint either, but is listed in
+ * Settings with its enable toggle and config form.
+ */
+export const PLUGIN_KINDS = ["connector", "extension", "model"] as const
 export type PluginKind = (typeof PLUGIN_KINDS)[number]
 
 /** How a connector authenticates to its upstream. Public identifiers only — never secrets. */
