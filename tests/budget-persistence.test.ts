@@ -23,6 +23,7 @@ import { openSqliteDatabase } from "~/lib/platform/sqlite"
 import {
   closeUsageStore,
   onTokenUsageEvent,
+  prepareTokenUsageEvent,
   recordTokenUsageEvent,
 } from "~/lib/token-usage"
 import { getNanoAiuSpend } from "~/lib/token-usage/spend"
@@ -47,10 +48,10 @@ let dbPath = ""
 let running: Array<BudgetService> = []
 
 /** A service wired like the app's, on the real store, with a fixed clock. */
-function startService(): BudgetService {
+function startService(budget: BudgetConfig = config): BudgetService {
   const service = createBudgetService({
     clock: () => NOON,
-    config: () => config,
+    config: () => budget,
     store: createUsageDbBudgetStore(),
     windows: {
       lookup: (ref) => findProviderWindow(ref),
@@ -90,6 +91,23 @@ function spendRow(nanoAiu: number): void {
     input_tokens: 1,
     total_nano_aiu: nanoAiu,
   })
+}
+
+function preparedSpendRow(input: {
+  nanoAiu?: number
+  inputTokens?: number
+  outputTokens?: number
+}) {
+  const event = prepareTokenUsageEvent({
+    endpoint: "images",
+    model: "gpt-image-test",
+    source: "copilot",
+    input_tokens: input.inputTokens,
+    output_tokens: input.outputTokens,
+    total_nano_aiu: input.nanoAiu,
+  })
+  if (!event) throw new Error("expected a usage event")
+  return event
 }
 
 const intent = (estimateNanoAiu: number) => ({
@@ -147,25 +165,136 @@ describe("across a restart", () => {
     expect(next.refusal.inFlight).toBe(false)
   })
 
-  test("a call that finished before the restart isn't counted twice", async () => {
+  test("atomic settlement is counted once after a restart", async () => {
     const before = startService()
     const decision = await before.reserve(intent(0.6 * AIU))
     if (!decision.ok) throw new Error("expected admission")
-    spendRow(0.5 * AIU)
-    decision.hold.commit({ nanoAiu: 0.5 * AIU })
+    await decision.hold.settle([preparedSpendRow({ nanoAiu: 0.5 * AIU })], {
+      nanoAiu: 0.5 * AIU,
+    })
 
     await restart()
     const after = startService()
-    const next = await after.check(intent(0.4 * AIU))
+    const next = await after.check(intent(0.5 * AIU))
 
     expect(next.ok).toBe(true)
+  })
+
+  test("a failed settlement rolls back usage and leaves the hold recoverable", async () => {
+    const before = startService()
+    const decision = await before.reserve(intent(0.6 * AIU))
+    if (!decision.ok) throw new Error("expected admission")
+    const invalid = {
+      ...preparedSpendRow({ nanoAiu: 0.5 * AIU }),
+      model: null as never,
+    }
+
+    expect(
+      decision.hold.settle([invalid], { nanoAiu: 0.5 * AIU }),
+    ).rejects.toThrow()
+    expect(before.heldNanoAiu({ kind: "global" })).toBe(0.6 * AIU)
+
+    await restart()
+    const after = startService()
+    await after.check(intent(0))
+    const [sum] = await getNanoAiuSpend({ kind: "global" }, [
+      { startMs: 0, endMs: null },
+    ])
+    expect(sum).toBe(0.6 * AIU)
+  })
+
+  test("observed tokens replace the orphan's token estimate", async () => {
+    const tokenBudget: BudgetConfig = {
+      limits: [
+        {
+          id: "output",
+          scope: { kind: "global" },
+          unit: "tokens",
+          measure: "output",
+          limit: 1_000,
+          limitReset: "never",
+          action: "block",
+        },
+      ],
+    }
+    const before = startService(tokenBudget)
+    const decision = await before.reserve({
+      ...intent(0.6 * AIU),
+      estimateOutputTokens: 100,
+    })
+    if (!decision.ok) throw new Error("expected admission")
+    await decision.hold.unreconcile(
+      "stream-interrupted",
+      [preparedSpendRow({ outputTokens: 20 })],
+      { observedTokens: { input: false, output: true } },
+    )
+
+    await restart()
+    const after = startService(tokenBudget)
+    const next = await after.check({
+      ...intent(0),
+      estimateOutputTokens: 980,
+    })
+
+    expect(next.ok).toBe(true)
+  })
+
+  test("partial usage only replaces the observed token estimate", async () => {
+    const tokenBudget: BudgetConfig = {
+      limits: [
+        {
+          id: "input",
+          scope: { kind: "global" },
+          unit: "tokens",
+          measure: "input",
+          limit: 1_000,
+          limitReset: "never",
+          action: "block",
+        },
+        {
+          id: "output",
+          scope: { kind: "global" },
+          unit: "tokens",
+          measure: "output",
+          limit: 1_000,
+          limitReset: "never",
+          action: "block",
+        },
+      ],
+    }
+    const before = startService(tokenBudget)
+    const decision = await before.reserve({
+      ...intent(0),
+      estimateInputTokens: 100,
+      estimateOutputTokens: 100,
+    })
+    if (!decision.ok) throw new Error("expected admission")
+    await decision.hold.unreconcile(
+      "stream-interrupted",
+      [preparedSpendRow({ inputTokens: 20 })],
+      { observedTokens: { input: true, output: false } },
+    )
+
+    await restart()
+    const after = startService(tokenBudget)
+    const inputCheck = await after.check({
+      ...intent(0),
+      estimateInputTokens: 900,
+    })
+    const outputCheck = await after.check({
+      ...intent(0),
+      estimateOutputTokens: 901,
+    })
+
+    expect(inputCheck.ok).toBe(true)
+    expect(outputCheck.ok).toBe(false)
   })
 
   test("a released hold leaves no trace", async () => {
     const before = startService()
     const decision = await before.reserve(intent(0.9 * AIU))
     if (!decision.ok) throw new Error("expected admission")
-    decision.hold.release("upstream-error")
+    await decision.hold.release("upstream-error")
 
     await restart()
     const after = startService()

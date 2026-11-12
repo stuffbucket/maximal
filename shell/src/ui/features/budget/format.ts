@@ -3,9 +3,9 @@
  * the i18n catalog so it can be tested on its own (tests/budget-format.test.ts).
  * Components pass the locale in and wrap these results in catalog strings.
  *
- * Amounts arrive already in the display unit (`display.limit`, `amount`); only
- * the figures the API gives in nano-AIU (`held`) are converted here, with the
- * same arithmetic as `src/lib/budget/units.ts`.
+ * Amounts arrive already in the rule's display unit (`display.limit`,
+ * `amount`). Cost holds arrive in nano-AIU and are converted here; token holds
+ * are already counts.
  */
 
 import { type RangeChoice, rangeFileLabel, rangeParams } from "./range";
@@ -212,16 +212,19 @@ export function describeReset(
   return { kind: "at", resetsAtMs, estimated: limit.reset_estimated };
 }
 
-/** A limit's `usage` as the whole it is measured against: the held spend counts as used room. */
+/** A limit's conservative usage, with confirmed and uncertain parts kept
+ * separate for display. */
 export function limitFigures(
   limit: BudgetLimitStatus,
   display: DisplayInfo,
-): { usage: number; limit: number; remaining: number; held: number } {
+): { usage: number; confirmed: number; unreconciled: number; limit: number; remaining: number; held: number } {
   return {
     usage: limit.display.usage,
+    confirmed: Math.max(0, limit.display.usage - limit.display.unreconciled),
+    unreconciled: limit.display.unreconciled,
     limit: limit.display.limit,
     remaining: limit.display.limit_remaining,
-    held: nanoToDisplay(limit.held, display),
+    held: limit.unit === "tokens" ? limit.held : nanoToDisplay(limit.held, display),
   };
 }
 

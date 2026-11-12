@@ -92,54 +92,82 @@ export function scopeWhere(
   return { clauses: [sql[scope.kind]], values: [scope.id] }
 }
 
-/** What the scope's rows spent in each range, in one query (nano-AIU, or the
- *  tokens of `metric`); zeros when storage is off. */
-export async function getNanoAiuSpend(
+/** Total spend and the unreconciled subset in each range. */
+export interface SpendBreakdown {
+  usage: Array<number>
+  unreconciled: Array<number>
+}
+
+/** What the scope's rows spent in each range, with unreconciled hold estimates
+ *  returned separately. Both arrays are zeros when storage is off. */
+export async function getSpendBreakdown(
   scope: SpendScope,
   ranges: ReadonlyArray<SpendRange>,
   metric: SpendMetric = "nano_aiu",
-): Promise<Array<number>> {
-  if (ranges.length === 0) return []
-  if (!isTokenUsageStorageEnabled()) return ranges.map(() => 0)
+): Promise<SpendBreakdown> {
+  if (ranges.length === 0) return { usage: [], unreconciled: [] }
+  if (!isTokenUsageStorageEnabled()) {
+    const zeros = ranges.map(() => 0)
+    return { usage: zeros, unreconciled: [...zeros] }
+  }
 
-  const sums = ranges.map(
-    (_, index) =>
-      `COALESCE(SUM(CASE WHEN created_at_ms >= ? AND created_at_ms < ? THEN ${EVENT_METRIC_SQL[metric]} ELSE 0 END), 0) AS spend_${index}`,
-  )
+  const sums = (expression: string): Array<string> =>
+    ranges.map(
+      (_, index) =>
+        `COALESCE(SUM(CASE WHEN created_at_ms >= ? AND created_at_ms < ? THEN ${expression} ELSE 0 END), 0) AS spend_${index}`,
+    )
   const rangeValues = ranges.flatMap((range) => [
     range.startMs,
     range.endMs ?? Number.MAX_SAFE_INTEGER,
   ])
   const earliest = Math.min(...ranges.map((range) => range.startMs))
   const events = scopeWhere(scope, "events")
-  const where = ["created_at_ms >= ?", ...events.clauses]
-  const whereValues = [earliest, ...events.values]
-  const holdSums = ranges.map(
-    (_, index) =>
-      `COALESCE(SUM(CASE WHEN created_at_ms >= ? AND created_at_ms < ? THEN ${HOLD_METRIC_SQL[metric]} ELSE 0 END), 0) AS spend_${index}`,
-  )
   const holds = scopeWhere(scope, "holds")
+  const eventWhere = ["created_at_ms >= ?", ...events.clauses]
   const holdWhere = [
     "state = 'orphaned'",
     "created_at_ms >= ?",
     ...holds.clauses,
   ]
-  const holdWhereValues = [earliest, ...holds.values]
-  const [row, orphanRow] = await readUsageDb((db) => [
+  const [eventRow, holdRow] = await readUsageDb((db) => [
     db
       .prepare(
-        `SELECT ${sums.join(", ")} FROM token_usage_events WHERE ${where.join(" AND ")}`,
+        `SELECT ${sums(EVENT_METRIC_SQL[metric]).join(", ")} FROM token_usage_events WHERE ${eventWhere.join(" AND ")}`,
       )
-      .get(...rangeValues, ...whereValues),
+      .get(...rangeValues, earliest, ...events.values),
     db
       .prepare(
-        `SELECT ${holdSums.join(", ")} FROM budget_holds WHERE ${holdWhere.join(" AND ")}`,
+        `SELECT ${sums(HOLD_METRIC_SQL[metric]).join(", ")} FROM budget_holds WHERE ${holdWhere.join(" AND ")}`,
       )
-      .get(...rangeValues, ...holdWhereValues),
+      .get(...rangeValues, earliest, ...holds.values),
   ])
-  return ranges.map(
-    (_, index) => readSpend(row, index) + readSpend(orphanRow, index),
-  )
+  const unreconciled = ranges.map((_, index) => readSpend(holdRow, index))
+  return {
+    usage: ranges.map(
+      (_, index) => readSpend(eventRow, index) + unreconciled[index],
+    ),
+    unreconciled,
+  }
+}
+
+/** What the scope's rows spent in each range, in one database read (nano-AIU,
+ *  or the tokens of `metric`); zeros when storage is off. */
+export async function getNanoAiuSpend(
+  scope: SpendScope,
+  ranges: ReadonlyArray<SpendRange>,
+  metric: SpendMetric = "nano_aiu",
+): Promise<Array<number>> {
+  return (await getSpendBreakdown(scope, ranges, metric)).usage
+}
+
+/** The unreconciled subset of spend: estimates retained for dispatched calls
+ * whose final provider charge was not established. */
+export async function getUnreconciledSpend(
+  scope: SpendScope,
+  ranges: ReadonlyArray<SpendRange>,
+  metric: SpendMetric = "nano_aiu",
+): Promise<Array<number>> {
+  return (await getSpendBreakdown(scope, ranges, metric)).unreconciled
 }
 
 /** One cost the scope incurred at an instant, in the unit asked for

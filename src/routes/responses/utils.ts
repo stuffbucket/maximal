@@ -5,7 +5,37 @@ import type {
 } from "~/services/copilot/create-responses"
 
 import { isResponsesApiContextManagementModel } from "~/lib/config/config"
+import { asRecord, readNestedUsage } from "~/lib/http/untrusted-frame"
+import {
+  normalizeResponsesUsage,
+  type UsageTokens,
+  withCopilotCost,
+} from "~/lib/token-usage"
 import { responsesInitiator } from "~/services/copilot/agent-initiator"
+
+const TERMINAL_RESPONSE_EVENTS = new Set([
+  "response.completed",
+  "response.failed",
+  "response.incomplete",
+])
+
+export function isResponsesTerminalEvent(event: unknown): boolean {
+  return TERMINAL_RESPONSE_EVENTS.has(String(asRecord(event)?.type))
+}
+
+/** Usage carried by a terminal Responses stream event, including Copilot's
+ * authoritative cost; undefined for every non-terminal event. */
+export function usageFromResponsesTerminalEvent(
+  event: unknown,
+): UsageTokens | undefined {
+  const parsed = asRecord(event)
+  if (!isResponsesTerminalEvent(parsed)) return undefined
+  const response = asRecord(parsed?.response)
+  return withCopilotCost(
+    normalizeResponsesUsage(readNestedUsage(event, "response")),
+    asRecord(response?.copilot_usage),
+  )
+}
 
 export const getResponsesRequestOptions = (
   payload: ResponsesPayload,

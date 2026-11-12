@@ -7,6 +7,7 @@
 import consola from "consola"
 
 import type { BudgetStatusResponse } from "~/lib/config/settings-types"
+import type { PersistedTokenUsageEvent } from "~/lib/token-usage/store"
 
 import { registerCoreAttentionSource } from "~/lib/attention"
 import { getConfig } from "~/lib/config/config"
@@ -16,8 +17,14 @@ import { queueNotice } from "~/lib/plugins/notices"
 import { createCopilotProvider } from "~/lib/plugins/providers/copilot"
 import { currentPresence } from "~/lib/presence"
 import { state } from "~/lib/runtime-state/state"
-import { onTokenUsageEvent } from "~/lib/token-usage"
+import {
+  onTokenUsageEvent,
+  publishPersistedTokenUsageEvents,
+  recordPreparedTokenUsageEvents,
+  type UsageTokens,
+} from "~/lib/token-usage"
 import { deriveUsageClient } from "~/lib/token-usage/client"
+import { defaultTokenPriceRates } from "~/services/copilot/get-models"
 import { COPILOT_PROVIDER_ID } from "~/services/copilot/upstream-request"
 
 import {
@@ -49,6 +56,7 @@ import {
   type BudgetHold,
   type BudgetIntent,
   type BudgetService,
+  type ObservedBudgetTokens,
   type BudgetWarning,
 } from "./service"
 import { buildBudgetStatus } from "./status"
@@ -307,6 +315,106 @@ export async function reserveBudget(
   return decision.hold
 }
 
+/** Persist authoritative usage and close its hold without a crash window. */
+export async function settleBudgetUsage(
+  hold: BudgetHold,
+  events: ReadonlyArray<PersistedTokenUsageEvent>,
+  actualNanoAiu?: number,
+): Promise<void> {
+  if (hold.persisted) {
+    try {
+      await hold.settle(events, { nanoAiu: actualNanoAiu }, () => {
+        publishPersistedTokenUsageEvents(events)
+      })
+    } catch (error) {
+      await hold.unreconcile("settlement-failed").catch(() => undefined)
+      throw error
+    }
+  } else {
+    await hold.commit({ nanoAiu: actualNanoAiu })
+    recordPreparedTokenUsageEvents(events)
+  }
+}
+
+/** Persist any observed tokens while retaining the provisional cost as
+ * unreconciled. */
+export async function unreconcileBudgetUsage(
+  hold: BudgetHold,
+  events: ReadonlyArray<PersistedTokenUsageEvent>,
+  input: {
+    reason: "stream-interrupted" | "usage-missing" | "settlement-failed"
+    observedTokens?: ObservedBudgetTokens
+  },
+): Promise<void> {
+  if (hold.persisted) {
+    await hold.unreconcile(input.reason, events, {
+      afterPersist: () => {
+        publishPersistedTokenUsageEvents(events)
+      },
+      ...(input.observedTokens === undefined ?
+        {}
+      : { observedTokens: input.observedTokens }),
+    })
+  } else {
+    await hold.commit()
+    recordPreparedTokenUsageEvents(events)
+  }
+}
+
+export type BudgetUsagePreparer = (
+  usage: UsageTokens,
+) => PersistedTokenUsageEvent | null
+
+export interface BudgetUsageFinish {
+  usage: UsageTokens
+  missingReason?: "usage-missing" | "stream-interrupted"
+  observedTokens?: ObservedBudgetTokens
+}
+
+function observedTokensIn(usage: UsageTokens): ObservedBudgetTokens {
+  return {
+    input:
+      typeof usage.input_tokens === "number"
+      || typeof usage.cache_creation_input_tokens === "number"
+      || typeof usage.cache_read_input_tokens === "number",
+    output: typeof usage.output_tokens === "number",
+  }
+}
+
+/** Prepare observed chat usage, then either settle its authoritative bill or
+ * keep the provisional estimate as unreconciled. */
+export async function finishBudgetUsage(
+  hold: BudgetHold,
+  prepare: BudgetUsagePreparer,
+  input: BudgetUsageFinish,
+): Promise<void> {
+  const { usage, missingReason = "usage-missing" } = input
+  const event = prepare(usage)
+  const events = event ? [event] : []
+  await (typeof usage.total_nano_aiu === "number" ?
+    settleBudgetUsage(hold, events, usage.total_nano_aiu)
+  : unreconcileBudgetUsage(hold, events, {
+      reason: missingReason,
+      observedTokens: input.observedTokens ?? observedTokensIn(usage),
+    }))
+}
+
+/** Bind a chat request's hold and usage preparer to its terminal usage. */
+export function createBudgetUsageFinisher(
+  hold: BudgetHold,
+  prepare: BudgetUsagePreparer,
+): (
+  usage: UsageTokens,
+  missingReason?: "usage-missing" | "stream-interrupted",
+) => Promise<void> {
+  return (usage, missingReason) =>
+    finishBudgetUsage(
+      hold,
+      prepare,
+      missingReason === undefined ? { usage } : { usage, missingReason },
+    )
+}
+
 /** Throw `BudgetExceededError` when a limit is already spent; holds nothing.
  *  For calls whose cost can't be estimated. */
 export async function admitBudget(
@@ -319,14 +427,42 @@ export async function admitBudget(
   if (!decision.ok) throw new BudgetExceededError(decision.refusal)
 }
 
-/** The chat endpoints Copilot serves, which a limit gates on spend already
- *  recorded (their cost can't be estimated up front). */
+/** The chat endpoints Copilot serves. */
 export type ChatBudgetOperation = "chat_completions" | "messages" | "responses"
 
-/** Refuse a chat request while a limit that covers it is spent
- *  (`BudgetExceededError`). Nothing is held: the request is admitted while
- *  its limits have room, and can go over by what is in flight. */
+const NANO_AIU_PER_MILLIONTH_CREDIT = 1_000
+
+/** A conservative provisional cost for the reply ceiling advertised by the
+ * request. Catalog prices are AI credits per million tokens; storage is
+ * nano-AIU. Prompt and cache costs remain unknown until final usage arrives. */
+export function estimateChatNanoAiu(
+  model: string | undefined,
+  maxTokens: number | null | undefined,
+): number {
+  if (!model || typeof maxTokens !== "number" || maxTokens <= 0) return 0
+  const selected = state.models?.data.find((entry) => entry.id === model)
+  if (!selected) return 0
+  const prices = defaultTokenPriceRates(selected)
+  const outputPrice = prices?.output_price ?? prices?.output ?? 0
+  if (!Number.isFinite(outputPrice) || outputPrice <= 0) return 0
+  return Math.ceil(maxTokens * outputPrice * NANO_AIU_PER_MILLIONTH_CREDIT)
+}
+
+/** Reserve a provisional chat estimate or throw `BudgetExceededError`. */
 export async function admitChat(
+  operation: ChatBudgetOperation,
+  request: ChatBudgetRequest = {},
+  budget: BudgetService = getBudgetService(),
+): Promise<BudgetHold> {
+  const intent = chatIntent(operation, request)
+  if (requestContext.getStore()?.budgetCleared) {
+    return budget.reserveCleared(intent)
+  }
+  return reserveBudget(intent, budget)
+}
+
+/** Gate a multi-turn chat flow that cannot yet close one hold atomically. */
+export async function gateChat(
   operation: ChatBudgetOperation,
   request: ChatBudgetRequest = {},
   budget?: BudgetService,
@@ -349,9 +485,9 @@ function chatIntent(
     provider: COPILOT_PROVIDER_ID,
     key: currentBudgetKey(),
     ...(model === undefined ? {} : { model }),
-    estimateNanoAiu: 0,
+    estimateNanoAiu: estimateChatNanoAiu(model, maxTokens),
     // The most the reply can be, when the request says: what a token limit
-    // holds. Cost can't be estimated, so a cost limit still gates on spend.
+    // holds. The cost estimate uses the same reply ceiling when priced.
     ...(typeof maxTokens === "number" && maxTokens > 0 ?
       { estimateOutputTokens: maxTokens }
     : {}),

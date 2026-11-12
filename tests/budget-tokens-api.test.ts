@@ -315,7 +315,8 @@ async function respond(
   const handler = new Hono()
     .onError(proxyErrorHandler(wire))
     .post("/", async (c) => {
-      await admitChat("messages", { maxTokens })
+      const hold = await admitChat("messages", { maxTokens })
+      await hold.release("aborted")
       return c.json({ ok: true })
     })
   return handler.request("/", { method: "POST" })

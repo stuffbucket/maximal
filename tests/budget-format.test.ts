@@ -18,6 +18,7 @@ import {
   formatDayKey,
   formatRelative,
   keyChoices,
+  limitFigures,
   newLimitId,
   nanoToDisplay,
   currencyAffix,
@@ -59,8 +60,11 @@ function limit(overrides: Partial<BudgetLimitStatus> = {}): BudgetLimitStatus {
     limit_remaining: 600_000_000,
     usage: 2_400_000_000,
     held: 0,
+    unreconciled: 0,
     usage_daily: 2_400_000_000,
     usage_weekly: 2_400_000_000,
+    unreconciled_daily: 0,
+    unreconciled_weekly: 0,
     period_start: new Date(NOW - 12 * HOUR).toISOString(),
     resets_at: new Date(NOW + 12 * HOUR).toISOString(),
     reset_basis: "fixed",
@@ -73,6 +77,7 @@ function limit(overrides: Partial<BudgetLimitStatus> = {}): BudgetLimitStatus {
       limit: 0.03,
       effective_limit: 0.03,
       usage: 0.024,
+      unreconciled: 0,
       limit_remaining: 0.006,
     },
     ...overrides,
@@ -188,6 +193,51 @@ describe("meters", () => {
     expect(usedFraction(0, 0)).toBe(0)
     expect(usedFraction(1, 0)).toBe(1)
     expect(usedFraction(-1, 3)).toBe(0)
+  })
+
+  test("limit figures separate confirmed and unreconciled spend", () => {
+    expect(
+      limitFigures(
+        limit({
+          held: 300_000_000,
+          display: {
+            limit: 0.03,
+            effective_limit: 0.03,
+            usage: 0.024,
+            unreconciled: 0.006,
+            limit_remaining: 0.006,
+          },
+        }),
+        { unit: "usd", credit_usd: 0.01 },
+      ),
+    ).toEqual({
+      usage: 0.024,
+      confirmed: 0.024 - 0.006,
+      unreconciled: 0.006,
+      limit: 0.03,
+      remaining: 0.006,
+      held: 0.003,
+    })
+  })
+
+  test("token holds stay token counts", () => {
+    expect(
+      limitFigures(
+        limit({
+          unit: "tokens",
+          measure: "output",
+          held: 300,
+          display: {
+            limit: 1_000,
+            effective_limit: 1_000,
+            usage: 250,
+            unreconciled: 100,
+            limit_remaining: 750,
+          },
+        }),
+        { unit: "usd", credit_usd: 0.01 },
+      ).held,
+    ).toBe(300)
   })
 
   test("a provider window reads its own percentage first, then its counters", () => {

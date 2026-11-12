@@ -1,8 +1,9 @@
 /**
  * Budget around one operation dispatch: hold the call's estimate against
- * every limit that covers it, dispatch, hand the result (with the estimate
- * standing in for a cost the provider didn't report) to `record`, then
- * commit the hold; release it when the dispatch fails.
+ * every limit that covers it, dispatch, prepare the provider's observed usage,
+ * then settle usage and the hold atomically when cost is authoritative. A
+ * missing cost or failure after dispatch starts leaves the
+ * estimate unreconciled rather than assuming the provider billed nothing.
  *
  * Shared by the pass-through routes and by anything else that dispatches an
  * operation on a caller's behalf (a server tool's origin is
@@ -16,8 +17,15 @@ import type {
   OperationResult,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import type { PersistedTokenUsageEvent } from "~/lib/token-usage/store"
+
 import { estimateOperationNanoAiu } from "./estimate"
-import { currentBudgetKey, reserveBudget } from "./runtime"
+import {
+  currentBudgetKey,
+  reserveBudget,
+  settleBudgetUsage,
+  unreconcileBudgetUsage,
+} from "./runtime"
 import { type BudgetService } from "./service"
 
 /** The built-in capability whose usage rows (`plugin_id`) an operation counts
@@ -32,8 +40,8 @@ export const OPERATION_PLUGINS = {
 export interface BudgetedDispatchOptions {
   /** The provider the operation resolved to. */
   provider: string
-  /** Books the result's usage; runs before the hold is committed. */
-  record: (result: OperationResult) => void
+  /** Prepare the result's usage for atomic settlement. */
+  record: (result: OperationResult) => PersistedTokenUsageEvent | null
   /** Defaults to the app's service. */
   budget?: BudgetService
 }
@@ -74,15 +82,34 @@ export async function dispatchWithBudget(
     },
     options.budget,
   )
+  if (request.signal.aborted) {
+    await hold.release("aborted")
+    throw request.signal.reason ?? new Error("Request aborted")
+  }
+
+  let result: OperationResult
   try {
-    const result = await operations.dispatch(request)
-    const booked = bookedResult(result, hold)
-    options.record(booked)
-    hold.commit({ nanoAiu: result.cost?.amount })
-    return booked
+    result = await operations.dispatch(request)
   } catch (error) {
-    // The provider refused the call or it was abandoned: nothing was billed.
-    hold.release(request.signal.aborted ? "aborted" : "upstream-error")
+    // Dispatch began, so a disconnect or provider failure without usage is
+    // ambiguous. Keep the estimate rather than silently treating it as free.
+    await hold.unreconcile("usage-missing")
     throw error
   }
+
+  const booked = bookedResult(result, hold)
+  const event = options.record(result)
+  const events = event ? [event] : []
+  await (result.cost?.amount === undefined ?
+    unreconcileBudgetUsage(hold, events, {
+      reason: "usage-missing",
+      observedTokens: {
+        input:
+          typeof result.usage.input_tokens === "number"
+          || typeof result.usage.cache_read_input_tokens === "number",
+        output: typeof result.usage.output_tokens === "number",
+      },
+    })
+  : settleBudgetUsage(hold, events, result.cost.amount))
+  return booked
 }

@@ -220,9 +220,12 @@ no heading repeats it.
   in the server's order (widest scope first, so a row never jumps as spend
   changes). A row is the name (with a `.chip` for its scope when it has a name of
   its own, and a "Warn only" chip), edit and delete as ghost icon buttons, a
-  meter, then the figures: ".40 of .00", the state (icon and word, for
-  nearly spent and spent), what is left, what is held by calls in progress, and
-  when it resets. The meter (`.budget-meter`) is the Dashboard's quota meter: the
+  meter, then the figures: confirmed spend ("$12.40 of $100"), the state (icon
+  and word, for nearly spent and spent), what is left, what is held by calls in
+  progress, any conservative amount awaiting reconciliation, and when it resets.
+  Every figure uses the rule's unit, so token rules show token counts rather than
+  currency. The meter and amount left include unreconciled spend, so they remain conservative
+  even though the primary figure separates it. The meter (`.budget-meter`) is the Dashboard's quota meter: the
   fill is `--accent` while fine, `--status-warning` from the rule's own warn
   threshold, `--status-error` once spent; the track is a pale step of the same
   color. No rule exists until someone adds it, so the empty state is an

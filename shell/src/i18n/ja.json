@@ -535,6 +535,7 @@
   "budget-limit-amounts": "{usage} / {limit}",
   "budget-limit-left": "残り {amount}",
   "budget-limit-held": "{amount} 処理中",
+  "budget-limit-unreconciled": "{amount} 照合待ち",
   "budget-state-warning": "残りわずか",
   "budget-state-exhausted": "使い切り",
   "budget-reset-never": "リセットなし",

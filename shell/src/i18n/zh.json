@@ -535,6 +535,7 @@
   "budget-limit-amounts": "{usage} / {limit}",
   "budget-limit-left": "剩余 {amount}",
   "budget-limit-held": "{amount} 处理中",
+  "budget-limit-unreconciled": "{amount} 待核对",
   "budget-state-warning": "即将用尽",
   "budget-state-exhausted": "已用尽",
   "budget-reset-never": "永不重置",

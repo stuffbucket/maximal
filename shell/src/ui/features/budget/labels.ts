@@ -81,6 +81,11 @@ export function amountIn(unit: "cost" | "tokens", format: BudgetFormat): (value:
     : (value) => format.nanoMoney(value);
 }
 
+/** A figure the status API has already put in the rule's display unit. */
+export function displayAmountIn(unit: "cost" | "tokens", format: BudgetFormat): (value: number) => string {
+  return unit === "tokens" ? amountIn("tokens", format) : format.money;
+}
+
 /** What a session is called in the picker: its key's label or client, or what its requests have in common when they carried no session id. */
 export function sessionName(session: { attributed: boolean; client: string; client_label: string | null }): string {
   const who = session.client_label ?? session.client;

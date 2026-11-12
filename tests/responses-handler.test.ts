@@ -102,6 +102,39 @@ afterEach(async () => {
 })
 
 describe("responses handler token usage", () => {
+  test("emits an error when a native stream ends without a terminal event", async () => {
+    createResponses.mockImplementation(() =>
+      Promise.resolve(
+        streamChunks([
+          {
+            data: JSON.stringify({
+              type: "response.created",
+              response: {
+                id: "resp_early",
+                model: "gpt-test",
+                object: "response",
+                status: "in_progress",
+                output: [],
+              },
+            }),
+            event: "response.created",
+          },
+        ]),
+      ),
+    )
+    const response = await createApp().request("/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: "hello", model: "gpt-test", stream: true }),
+    })
+
+    const text = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(text).toContain("event: error")
+    expect(text).toContain("Responses stream ended without a terminal event")
+  })
+
   test("records usage from failed streaming responses with the client's prompt_cache_key as session", async () => {
     createResponses.mockImplementation(() =>
       Promise.resolve(

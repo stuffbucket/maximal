@@ -8,6 +8,9 @@ import { describe, expect, spyOn, test } from "bun:test"
 import consola from "consola"
 
 import type { BudgetConfig } from "~/lib/budget/schema"
+import type { BudgetHold } from "~/lib/budget/service"
+
+import { settleBudgetUsage } from "~/lib/budget/runtime"
 
 import {
   AIU,
@@ -24,6 +27,32 @@ function quietWarn() {
   const silent = Object.assign(() => {}, { raw: () => {} })
   return spyOn(consola, "warn").mockImplementation(silent)
 }
+
+describe("usage settlement", () => {
+  test("a persistence failure leaves the hold unreconciled", async () => {
+    const failure = new Error("database rejected usage")
+    let orphanReason = ""
+    const hold: BudgetHold = {
+      id: "hold-1",
+      estimateNanoAiu: AIU,
+      persisted: true,
+      settle: () => Promise.reject(failure),
+      commit: () => Promise.resolve(),
+      release: () => Promise.resolve(),
+      unreconcile: (reason) => {
+        orphanReason = reason
+        return Promise.resolve()
+      },
+    }
+
+    const caught = await settleBudgetUsage(hold, [], AIU).catch(
+      (error: unknown) => error,
+    )
+
+    expect(caught).toBe(failure)
+    expect(orphanReason).toBe("settlement-failed")
+  })
+})
 
 describe("a service with nothing to enforce", () => {
   test("never starts, reads or subscribes when no limit is enforced", async () => {
@@ -515,13 +544,13 @@ describe("the fields a stored hold carries", () => {
     }
 
     const bare = await open()
-    bare.commit()
+    await bare.commit()
     const empty = await open()
-    empty.commit({})
+    await empty.commit({})
     const billed = await open()
-    billed.commit({ nanoAiu: AIU / 20 })
+    await billed.commit({ nanoAiu: AIU / 20 })
     const free = await open()
-    free.commit({ nanoAiu: 0 })
+    await free.commit({ nanoAiu: 0 })
 
     expect(h.calls.closed).toStrictEqual([
       { id: bare.id, state: "committed", closedAtMs: NOON },

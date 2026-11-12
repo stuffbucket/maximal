@@ -2,7 +2,7 @@ import type { Context } from "hono"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { admitChat } from "~/lib/budget/runtime"
+import { admitChat, gateChat } from "~/lib/budget/runtime"
 import { anthropicMessagesConfig, getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
@@ -281,10 +281,6 @@ export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-  await admitChat("messages", {
-    model: anthropicPayload.model,
-    maxTokens: anthropicPayload.max_tokens,
-  })
   stripUnsupportedTopLevelAnthropicFields(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
@@ -371,7 +367,15 @@ export async function handleCompletion(c: Context) {
     viaWebTools: loop.active && loop.transport !== "messages",
   })
 
+  const budgetRequest = {
+    model: anthropicPayload.model,
+    maxTokens: anthropicPayload.max_tokens,
+  }
   if (loop.active) {
+    // One server-tool request may make several upstream calls. Until that loop
+    // can settle one durable hold against all turns atomically, gate it without
+    // reserving a hold that no single turn owns.
+    await gateChat("messages", budgetRequest)
     return await handleViaServerToolLoop(loop, {
       c,
       payload: anthropicPayload,
@@ -381,9 +385,11 @@ export async function handleCompletion(c: Context) {
     })
   }
 
+  const hold = await admitChat("messages", budgetRequest)
   if (shouldUseMessagesApi(selectedModel)) {
     return await handleWithMessagesApi(c, anthropicPayload, {
       anthropicBetaHeader: anthropicBeta,
+      hold,
       subagentMarker,
       selectedModel,
       requestId,
@@ -395,6 +401,7 @@ export async function handleCompletion(c: Context) {
 
   if (shouldUseResponsesApi(selectedModel)) {
     return await handleWithResponsesApi(c, anthropicPayload, {
+      hold,
       subagentMarker,
       selectedModel,
       requestId,
@@ -405,6 +412,7 @@ export async function handleCompletion(c: Context) {
   }
 
   return await handleWithChatCompletions(c, anthropicPayload, {
+    hold,
     subagentMarker,
     requestId,
     sessionId,

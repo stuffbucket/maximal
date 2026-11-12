@@ -12,6 +12,7 @@ import {
   createResponses,
   isUnsupportedPromptCacheRetention,
 } from "../src/services/copilot/create-responses"
+import { noopBudgetHold } from "./helpers/budget-hold"
 
 // Covers the Copilot/OpenAI-Responses-specific `prompt_cache_retention`
 // enablement: config-gated injection on both the translated Messages->Responses
@@ -133,6 +134,7 @@ describe("prompt_cache_retention injection — translated Messages->Responses", 
 
     const c = { json: (v: unknown) => v } as never
     await handleWithResponsesApi(c, anthropicPayload(), {
+      hold: noopBudgetHold(),
       logger: { debug() {}, warn() {} } as never,
       requestId: "req-1",
       sessionId: "sess-1",
@@ -149,6 +151,7 @@ describe("prompt_cache_retention injection — translated Messages->Responses", 
 
     const c = { json: (v: unknown) => v } as never
     await handleWithResponsesApi(c, anthropicPayload(), {
+      hold: noopBudgetHold(),
       logger: { debug() {}, warn() {} } as never,
       requestId: "req-1",
       sessionId: "sess-1",

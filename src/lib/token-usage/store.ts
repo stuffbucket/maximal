@@ -397,10 +397,10 @@ export function resolveTotalTokens(input: UsageTokens): number {
   )
 }
 
-async function writeTokenUsageEvent(
+export function insertTokenUsageEvent(
+  db: SqliteDatabase,
   event: PersistedTokenUsageEvent,
-): Promise<void> {
-  const db = await getDb()
+): void {
   db.prepare(
     `
       INSERT INTO token_usage_events (
@@ -465,15 +465,26 @@ async function writeTokenUsageEvent(
 }
 
 export function enqueueTokenUsageWrite(event: PersistedTokenUsageEvent): void {
-  if (!isTokenUsageStorageEnabled()) {
-    return
-  }
-
-  writeQueue = writeQueue
-    .then(() => writeTokenUsageEvent(event))
-    .catch((error: unknown) => {
+  void queueUsageDbWrite((db) => insertTokenUsageEvent(db, event)).catch(
+    (error: unknown) => {
       consola.warn("Failed to record token usage", error)
-    })
+    },
+  )
+}
+
+/** Queue a database write and report its own failure to the caller. The shared
+ * queue always recovers, so one failed write cannot poison later accounting. */
+export function queueUsageDbWrite<T>(
+  write: (db: SqliteDatabase) => T,
+): Promise<T | undefined> {
+  if (!isTokenUsageStorageEnabled()) return Promise.resolve(undefined)
+
+  const result = writeQueue.then(async () => write(await getDb()))
+  writeQueue = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
 }
 
 async function flushTokenUsageEvents(): Promise<void> {
@@ -728,12 +739,9 @@ export function enqueueUsageDbWrite(
   write: (db: SqliteDatabase) => void,
   failureMessage: string,
 ): void {
-  if (!isTokenUsageStorageEnabled()) return
-  writeQueue = writeQueue
-    .then(async () => write(await getDb()))
-    .catch((error: unknown) => {
-      consola.warn(failureMessage, error)
-    })
+  void queueUsageDbWrite(write).catch((error: unknown) => {
+    consola.warn(failureMessage, error)
+  })
 }
 
 const SessionRowSchema = z.object({

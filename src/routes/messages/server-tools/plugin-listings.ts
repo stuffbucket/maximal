@@ -11,14 +11,22 @@ import type {
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import type { BudgetRefusal } from "~/lib/budget/errors"
-import type { BudgetHold, BudgetService } from "~/lib/budget/service"
+import type {
+  BudgetHold,
+  BudgetService,
+  ObservedBudgetTokens,
+} from "~/lib/budget/service"
 import type { AnthropicToolUseBlock } from "~/lib/models/anthropic-types"
 
-import { bookedResult } from "~/lib/budget/dispatch"
 import { BudgetExceededError } from "~/lib/budget/errors"
 import { estimateOperationNanoAiu } from "~/lib/budget/estimate"
-import { currentBudgetKey, reserveBudget } from "~/lib/budget/runtime"
-import { recordOperationUsage } from "~/routes/passthrough"
+import {
+  currentBudgetKey,
+  reserveBudget,
+  settleBudgetUsage,
+  unreconcileBudgetUsage,
+} from "~/lib/budget/runtime"
+import { prepareOperationUsage } from "~/routes/passthrough"
 
 import type { ServerToolListing, ServerToolRun } from "./types"
 
@@ -85,8 +93,6 @@ function refusalResult(refusal: BudgetRefusal): ToolResult {
   }
 }
 
-type ReleaseReason = Parameters<BudgetHold["release"]>[0]
-
 /** The tool's estimate for this input; a tool that throws has none. */
 function estimateOf(
   view: ServerToolView,
@@ -96,6 +102,62 @@ function estimateOf(
     return view.estimate?.(input)
   } catch {
     return undefined
+  }
+}
+
+class ToolSpendLedger {
+  readonly events: Array<
+    NonNullable<ReturnType<typeof prepareOperationUsage>>
+  > = []
+  readonly observedTokens: ObservedBudgetTokens = {
+    input: false,
+    output: false,
+  }
+  reported = false
+  completeBill = true
+  billedNanoAiu = 0
+  private readonly pluginId: string
+
+  constructor(pluginId: string) {
+    this.pluginId = pluginId
+  }
+
+  report(spend: ServerToolSpend): void {
+    this.reported = true
+    const event = prepareOperationUsage(
+      {
+        operation: spend.operation,
+        model: spend.model,
+        provider: spend.provider,
+        pluginId: this.pluginId,
+      },
+      spend.result,
+    )
+    if (event) this.events.push(event)
+    this.observedTokens.input ||=
+      typeof spend.result.usage.input_tokens === "number"
+      || typeof spend.result.usage.cache_read_input_tokens === "number"
+    this.observedTokens.output ||=
+      typeof spend.result.usage.output_tokens === "number"
+    if (spend.result.cost?.amount === undefined) this.completeBill = false
+    else this.billedNanoAiu += spend.result.cost.amount
+  }
+
+  async close(
+    hold: BudgetHold,
+    failed: boolean,
+    aborted = false,
+  ): Promise<void> {
+    if (this.reported && this.completeBill) {
+      await settleBudgetUsage(hold, this.events, this.billedNanoAiu)
+    } else if (!failed || this.reported || hold.persisted) {
+      await unreconcileBudgetUsage(hold, this.events, {
+        reason: "usage-missing",
+        observedTokens: this.observedTokens,
+      })
+    } else {
+      await hold.release(aborted ? "aborted" : "upstream-error")
+    }
   }
 }
 
@@ -147,38 +209,21 @@ function listingFor(
           content: [{ type: "text", text: failureText(error) }],
         })
       }
-      // What the tool reports it spent: recorded as usage (so the limits
-      // count it) and booked against the hold.
+      // What the tool reports it spent is prepared now and persisted as one
+      // transaction with the hold when the tool finishes.
       const held = hold
-      let billedNanoAiu: number | undefined
-      const reportSpend = (spend: ServerToolSpend): void => {
-        const booked = bookedResult(spend.result, held)
-        recordOperationUsage(
-          {
-            operation: spend.operation,
-            model: spend.model,
-            provider: spend.provider,
-          },
-          booked,
-        )
-        billedNanoAiu = (billedNanoAiu ?? 0) + (booked.cost?.amount ?? 0)
-      }
-      // A call that reported spend was billed even if it then failed.
-      const close = (failed: boolean, reason: ReleaseReason): void => {
-        if (failed && billedNanoAiu === undefined) held.release(reason)
-        else held.commit({ nanoAiu: billedNanoAiu })
-      }
+      const spend = new ToolSpendLedger(view.pluginId)
       try {
         const result = await gateway.callServerTool(
           view.pluginId,
           view.name,
           toolUse.input,
-          { ...call, reportSpend },
+          { ...call, reportSpend: (reported) => spend.report(reported) },
         )
-        close(result.isError === true, "upstream-error")
+        await spend.close(held, result.isError === true)
         return runFrom(toolUse.id, result)
       } catch (error) {
-        close(true, call.signal.aborted ? "aborted" : "upstream-error")
+        await spend.close(held, true, call.signal.aborted)
         // The plugin stopped between the plan and the call. The model gets
         // the failure and carries on without the tool.
         return runFrom(toolUse.id, {

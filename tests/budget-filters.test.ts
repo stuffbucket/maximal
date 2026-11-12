@@ -357,7 +357,7 @@ describe("filters over the usage database", () => {
   test("spend rows and orphaned holds follow the filter", async () => {
     seed()
     const store = createUsageDbBudgetStore()
-    store.openHold({
+    await store.openHold({
       id: "crashed",
       createdAtMs: NOON - 500,
       operation: "messages",
@@ -368,7 +368,7 @@ describe("filters over the usage database", () => {
       estimateInputTokens: 0,
       estimateOutputTokens: 0,
     })
-    store.openHold({
+    await store.openHold({
       id: "other",
       createdAtMs: NOON - 400,
       operation: "messages",

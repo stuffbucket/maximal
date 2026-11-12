@@ -94,6 +94,8 @@ export interface Harness {
   }
   /** Hold every store read until `releaseSpend()`. */
   deferSpend(): { started: Promise<void>; release(): void }
+  /** Hold durable hold insertion until `release()`. */
+  deferOpenHold(): { started: Promise<void>; release(): void }
 }
 
 // The harness is one closure over the fake store, clock and listeners;
@@ -103,6 +105,7 @@ export function harness(
   limits: Array<Limit>,
   options: {
     spendFails?: boolean
+    openFails?: boolean
     enabled?: boolean
     filters?: BudgetConfig["filters"]
     /** `none`: no `onWarning` dependency; `throws`: a handler that fails. */
@@ -131,6 +134,7 @@ export function harness(
   const warnings: Array<BudgetWarning> = []
   const events: Array<BudgetEvent> = []
   let deferred: { started(): void; gate: Promise<void> } | undefined
+  let deferredOpen: { started(): void; gate: Promise<void> } | undefined
   const calls: Harness["calls"] = {
     config: 0,
     spend: [],
@@ -201,11 +205,21 @@ export function harness(
       calls.recover += 1
       return Promise.resolve()
     },
-    openHold(hold) {
+    async openHold(hold) {
       calls.opened.push(hold)
+      if (deferredOpen) {
+        deferredOpen.started()
+        await deferredOpen.gate
+      }
+      if (options.openFails) throw new Error("hold database is down")
     },
     closeHold(close) {
       calls.closed.push(close)
+      return Promise.resolve()
+    },
+    settleHold(_events, close) {
+      calls.closed.push(close)
+      return Promise.resolve()
     },
   }
 
@@ -240,6 +254,26 @@ export function harness(
       }),
   })
 
+  const defer = (
+    assign: (value: typeof deferred) => void,
+  ): { started: Promise<undefined>; release(): void } => {
+    const gate = Promise.withResolvers<undefined>()
+    const started = Promise.withResolvers<undefined>()
+    assign({
+      started: () => {
+        started.resolve(undefined)
+      },
+      gate: gate.promise,
+    })
+    return {
+      started: started.promise,
+      release: () => {
+        assign(undefined)
+        gate.resolve(undefined)
+      },
+    }
+  }
+
   return {
     service,
     setNow: (ms) => {
@@ -264,22 +298,13 @@ export function harness(
     events,
     listening: () => listeners.size,
     calls,
-    deferSpend: () => {
-      const gate = Promise.withResolvers<undefined>()
-      const started = Promise.withResolvers<undefined>()
-      deferred = {
-        started: () => {
-          started.resolve(undefined)
-        },
-        gate: gate.promise,
-      }
-      return {
-        started: started.promise,
-        release: () => {
-          deferred = undefined
-          gate.resolve(undefined)
-        },
-      }
-    },
+    deferSpend: () =>
+      defer((value) => {
+        deferred = value
+      }),
+    deferOpenHold: () =>
+      defer((value) => {
+        deferredOpen = value
+      }),
   }
 }

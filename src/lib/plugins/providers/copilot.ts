@@ -12,7 +12,6 @@ import type {
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import type { sendRequest } from "~/lib/http/send-request"
-import type { Model } from "~/services/copilot/get-models"
 
 import { copilotWindowsFromUsage } from "~/lib/budget/copilot-windows"
 import { listProviderWindows } from "~/lib/budget/provider-windows"
@@ -23,6 +22,10 @@ import {
   subscribeModelCatalogChanged,
 } from "~/lib/runtime-state/state"
 import { extractCopilotCost } from "~/lib/token-usage"
+import {
+  defaultTokenPriceRates,
+  type Model,
+} from "~/services/copilot/get-models"
 import { postCopilotJson } from "~/services/copilot/post-copilot-json"
 import { COPILOT_PROVIDER_ID } from "~/services/copilot/upstream-request"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
@@ -35,22 +38,8 @@ export interface CopilotProviderDeps {
   getUsage?: () => Promise<unknown>
 }
 
-/** Numeric rates of a model's default price tier (or its flat rates). */
-function priceRates(model: Model): Record<string, number> | undefined {
-  const prices = model.billing?.token_prices
-  if (!prices) return undefined
-  const tier = typeof prices.default === "object" ? prices.default : prices
-  const rates: Record<string, number> = {}
-  for (const [name, value] of Object.entries(tier)) {
-    if (typeof value === "number" && name !== "max_prompt_tokens") {
-      rates[name] = value
-    }
-  }
-  return Object.keys(rates).length > 0 ? rates : undefined
-}
-
 function modelInfo(model: Model): ProviderModelInfo {
-  const prices = priceRates(model)
+  const prices = defaultTokenPriceRates(model)
   return {
     id: model.id,
     type: model.capabilities.type,

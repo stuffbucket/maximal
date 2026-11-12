@@ -553,11 +553,11 @@ describe("rolling spend in the usage database", () => {
 
   test("orphaned holds are costs too, open and released ones are not", async () => {
     const store = createUsageDbBudgetStore()
-    store.openHold(heldFor("crashed", NOON - 2_000))
-    store.openHold(heldFor("done", NOON - 1_000))
-    store.closeHold({ id: "done", state: "released", closedAtMs: NOON })
+    await store.openHold(heldFor("crashed", NOON - 2_000))
+    await store.openHold(heldFor("done", NOON - 1_000))
+    await store.closeHold({ id: "done", state: "released", closedAtMs: NOON })
     await store.recover(NOON)
-    store.openHold(heldFor("open", NOON - 500))
+    await store.openHold(heldFor("open", NOON - 500))
 
     const rows = await store.spendRows(
       { kind: "key", id: "laptop" },

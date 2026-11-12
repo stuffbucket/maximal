@@ -59,7 +59,55 @@ describe("reserve", () => {
     if (!decision.ok) return
     expect(decision.hold.estimateNanoAiu).toBe(0.6 * AIU)
     expect(h.service.heldNanoAiu({ kind: "global" })).toBe(0.6 * AIU)
-    decision.hold.commit({ nanoAiu: 0.5 * AIU })
+    await decision.hold.commit({ nanoAiu: 0.5 * AIU })
+    expect(h.service.heldNanoAiu({ kind: "global" })).toBe(0)
+  })
+
+  test("waits for durable insertion while the pending hold protects the room", async () => {
+    const h = harness([limit({ id: "all" })])
+    const insertion = h.deferOpenHold()
+    let completed = false
+
+    const firstPromise = h.service
+      .reserve(intent({ estimateNanoAiu: 0.6 * AIU }))
+      .then((decision) => {
+        completed = true
+        return decision
+      })
+    await insertion.started
+
+    expect(completed).toBe(false)
+    expect(h.service.heldNanoAiu({ kind: "global" })).toBe(0.6 * AIU)
+    const second = await h.service.reserve(
+      intent({ estimateNanoAiu: 0.5 * AIU }),
+    )
+    expect(second.ok).toBe(false)
+
+    insertion.release()
+    expect((await firstPromise).ok).toBe(true)
+  })
+
+  test("an unreconciled hold keeps counting after it stops being in progress", async () => {
+    const h = harness([limit({ id: "all" })])
+    const decision = await h.service.reserve(
+      intent({ estimateNanoAiu: 0.6 * AIU }),
+    )
+    if (!decision.ok) throw new Error("expected admission")
+
+    await decision.hold.unreconcile("usage-missing")
+
+    expect(h.service.heldNanoAiu({ kind: "global" })).toBe(0)
+    const next = await h.service.check(intent({ estimateNanoAiu: 0.5 * AIU }))
+    expect(next.ok).toBe(false)
+    if (!next.ok) expect(next.refusal.used).toBe(0.6 * AIU)
+  })
+
+  test("removes a pending hold when durable insertion fails", () => {
+    const h = harness([limit({ id: "all" })], { openFails: true })
+
+    expect(
+      h.service.reserve(intent({ estimateNanoAiu: 0.6 * AIU })),
+    ).rejects.toThrow("hold database is down")
     expect(h.service.heldNanoAiu({ kind: "global" })).toBe(0)
   })
 
@@ -143,7 +191,7 @@ describe("reserve", () => {
     )
     if (!first.ok) throw new Error("expected the first call to be admitted")
 
-    first.hold.release("upstream-error")
+    await first.hold.release("upstream-error")
     const second = await h.service.reserve(
       intent({ estimateNanoAiu: 0.6 * AIU }),
     )
@@ -152,7 +200,7 @@ describe("reserve", () => {
 
     // The call finished and was billed 0.7: the usage row is what counts now.
     h.emit(event({ nanoAiu: 0.7 * AIU }))
-    second.hold.commit({ nanoAiu: 0.7 * AIU })
+    await second.hold.commit({ nanoAiu: 0.7 * AIU })
     const third = await h.service.reserve(
       intent({ estimateNanoAiu: 0.6 * AIU }),
     )
@@ -170,9 +218,9 @@ describe("reserve", () => {
     )
     if (!decision.ok) throw new Error("expected admission")
 
-    decision.hold.commit({ nanoAiu: 0.5 * AIU })
-    decision.hold.commit({ nanoAiu: 0.9 * AIU })
-    decision.hold.release("aborted")
+    await decision.hold.commit({ nanoAiu: 0.5 * AIU })
+    await decision.hold.commit({ nanoAiu: 0.9 * AIU })
+    await decision.hold.release("aborted")
 
     expect(h.calls.closed).toEqual([
       {
@@ -492,7 +540,7 @@ describe("holds in the store", () => {
       },
     ])
 
-    decision.hold.release("upstream-error")
+    await decision.hold.release("upstream-error")
     expect(h.calls.closed).toStrictEqual([
       { id: decision.hold.id, state: "released", closedAtMs: NOON },
     ])
@@ -502,7 +550,7 @@ describe("holds in the store", () => {
     const h = harness([limit({ id: "all" })])
 
     const decision = await h.service.reserve(intent())
-    if (decision.ok) decision.hold.commit()
+    if (decision.ok) await decision.hold.commit()
 
     expect(h.calls.opened).toHaveLength(0)
     expect(h.calls.closed).toHaveLength(0)

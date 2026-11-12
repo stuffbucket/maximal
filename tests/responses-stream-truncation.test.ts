@@ -6,6 +6,8 @@ import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import { state } from "~/lib/runtime-state/state"
 import { handleWithResponsesApi } from "~/routes/messages/api-flows"
 
+import { noopBudgetHold } from "./helpers/budget-hold"
+
 // A Responses stream that closes before `response.completed` is an upstream
 // drop, so the client should retry it: the terminal event must be a typed
 // `overloaded_error`, not a generic `api_error`. Uses a locally-swapped global
@@ -75,6 +77,7 @@ test("a Responses stream that ends early emits a retryable overloaded_error", as
   const app = new Hono()
   app.post("/", (c) =>
     handleWithResponsesApi(c, payload, {
+      hold: noopBudgetHold(),
       logger: { debug() {}, warn() {}, error() {} } as never,
       requestId: "req-1",
       sessionId: "sess-1",

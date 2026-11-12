@@ -3,10 +3,15 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
+import type { BudgetHold, ObservedBudgetTokens } from "~/lib/budget/service"
 import type { CompactType } from "~/lib/models/compact"
 import type { SubagentMarker } from "~/lib/runtime-state/subagent"
 import type { Model } from "~/services/copilot/get-models"
 
+import {
+  type BudgetUsagePreparer,
+  finishBudgetUsage,
+} from "~/lib/budget/runtime"
 import { getPromptCacheRetention } from "~/lib/config/config"
 import { setRequestUsage } from "~/lib/http/request-context"
 import {
@@ -21,11 +26,11 @@ import {
 import { debugJson, debugJsonTail, debugLazy } from "~/lib/platform/logger"
 import { parseUserIdMetadata } from "~/lib/platform/utils"
 import {
-  createCopilotTokenUsageRecorder,
   mergeAnthropicUsage,
   normalizeAnthropicUsage,
   normalizeOpenAIUsage,
   normalizeResponsesUsage,
+  prepareCopilotTokenUsageEvent,
   resolveTokenUsageSessionId,
   type TokenUsageEndpoint,
   type UsageTokens,
@@ -45,14 +50,19 @@ import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
   getResponsesRequestOptions,
+  usageFromResponsesTerminalEvent,
 } from "~/routes/responses/utils"
 import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
 import { createChatCompletions } from "~/services/copilot/create-chat-completions"
-import { createMessages } from "~/services/copilot/create-messages"
+import {
+  createMessages,
+  type MessagesStream,
+} from "~/services/copilot/create-messages"
 import {
   createResponses,
   type ResponsesPayload,
   type ResponsesResult,
+  type ResponsesStream,
 } from "~/services/copilot/create-responses"
 
 import {
@@ -73,11 +83,15 @@ export interface FlowBaseOptions {
   keepAliveIntervalMs?: number
 }
 
-interface ResponsesFlowOptions extends FlowBaseOptions {
+interface HeldFlowOptions extends FlowBaseOptions {
+  hold: BudgetHold
+}
+
+interface ResponsesFlowOptions extends HeldFlowOptions {
   selectedModel?: Model
 }
 
-interface MessagesFlowOptions extends FlowBaseOptions {
+interface MessagesFlowOptions extends HeldFlowOptions {
   anthropicBetaHeader?: string
   selectedModel?: Model
 }
@@ -85,7 +99,7 @@ interface MessagesFlowOptions extends FlowBaseOptions {
 export const handleWithChatCompletions = async (
   c: Context,
   anthropicPayload: AnthropicMessagesPayload,
-  options: FlowBaseOptions,
+  options: HeldFlowOptions,
 ) => {
   const { logger, subagentMarker, requestId, sessionId, compactType } = options
   const openAIPayload = translateToOpenAI(anthropicPayload)
@@ -94,7 +108,7 @@ export const handleWithChatCompletions = async (
     cacheTtlS: responsesCacheTtlSeconds(undefined),
     cacheTtlRequested: false,
   })
-  const recordUsage = createCopilotUsageRecorder({
+  const recordUsage = createBudgetUsagePreparer({
     endpoint: "chat_completions",
     fallbackSessionId: sessionId,
     model: openAIPayload.model,
@@ -102,21 +116,27 @@ export const handleWithChatCompletions = async (
   })
   debugJson(logger, "Translated OpenAI request payload:", openAIPayload)
 
-  const response = await createChatCompletions(openAIPayload, {
-    subagentMarker,
-    requestId,
-    sessionId,
-    compactType,
-  })
+  let response: Awaited<ReturnType<typeof createChatCompletions>>
+  try {
+    response = await createChatCompletions(openAIPayload, {
+      subagentMarker,
+      requestId,
+      sessionId,
+      compactType,
+    })
+  } catch (error) {
+    await options.hold.unreconcile("usage-missing")
+    throw error
+  }
 
   if (isNonStreaming(response)) {
     debugJson(logger, "Non-streaming response from Copilot:", response)
-    recordUsage(
-      withCopilotCost(
+    await finishBudgetUsage(options.hold, recordUsage, {
+      usage: withCopilotCost(
         normalizeOpenAIUsage(response.usage),
         response.copilot_usage,
       ),
-    )
+    })
     const anthropicResponse = translateToAnthropic(response)
     debugJson(logger, "Translated Anthropic response:", anthropicResponse)
     return c.json(anthropicResponse)
@@ -148,7 +168,10 @@ export const handleWithChatCompletions = async (
         const chunk: unknown = JSON.parse(rawEvent.data)
         const chunkUsage = readUsage(chunk)
         if (chunkUsage) {
-          usage = normalizeOpenAIUsage(chunkUsage)
+          usage = withCopilotCost(
+            normalizeOpenAIUsage(chunkUsage),
+            asRecord(asRecord(chunk)?.copilot_usage),
+          )
         }
         const events = translateChunkToAnthropicEvents(chunk, streamState)
 
@@ -164,11 +187,96 @@ export const handleWithChatCompletions = async (
     } catch (error) {
       keepAlive.stop()
       await emitStreamError(stream, logger, { error, flow: "chat_completions" })
+      await finishBudgetUsage(options.hold, recordUsage, {
+        usage,
+        missingReason: "stream-interrupted",
+      })
+      return
     } finally {
       keepAlive.stop()
     }
 
-    recordUsage(usage)
+    await finishBudgetUsage(options.hold, recordUsage, { usage })
+  })
+}
+
+function streamResponsesApi(
+  c: Context,
+  response: ResponsesStream,
+  input: {
+    logger: ConsolaInstance
+    keepAliveIntervalMs?: number
+    hold: BudgetHold
+    recordUsage: BudgetUsagePreparer
+  },
+): Response {
+  const { logger, keepAliveIntervalMs, hold, recordUsage } = input
+  logger.debug("Streaming response from Copilot (Responses API)")
+  return streamSSE(c, async (stream) => {
+    const keepAlive = createStreamKeepAlive(stream, keepAliveIntervalMs)
+    const streamState = createResponsesStreamState()
+    let usage: UsageTokens = {}
+
+    try {
+      for await (const chunk of response) {
+        if (chunk.event === "ping") {
+          await keepAlive.writeSSE({ event: "ping", data: '{"type":"ping"}' })
+          continue
+        }
+        const data = chunk.data
+        if (!data) continue
+
+        debugLazy(logger, () => ["Responses raw stream event:", data])
+        const responseEvent: unknown = JSON.parse(data)
+        const terminalUsage = usageFromResponsesTerminalEvent(responseEvent)
+        if (terminalUsage) usage = terminalUsage
+
+        for (const event of translateResponsesStreamEvent(
+          responseEvent,
+          streamState,
+        )) {
+          const eventData = JSON.stringify(event)
+          debugLazy(logger, () => ["Translated Anthropic event:", eventData])
+          await keepAlive.writeSSE({ event: event.type, data: eventData })
+        }
+
+        if (streamState.messageCompleted) {
+          logger.debug("Message completed, ending stream")
+          break
+        }
+      }
+    } catch (error) {
+      keepAlive.stop()
+      await emitStreamError(stream, logger, { error, flow: "responses" })
+      await finishBudgetUsage(hold, recordUsage, {
+        usage,
+        missingReason: "stream-interrupted",
+      })
+      return
+    } finally {
+      keepAlive.stop()
+    }
+
+    if (!streamState.messageCompleted) {
+      logger.warn(
+        "Responses stream ended without completion; sending error event",
+      )
+      const errorEvent = buildErrorEvent(
+        "Responses stream ended without completion",
+        "overloaded_error",
+      )
+      await stream.writeSSE({
+        event: errorEvent.type,
+        data: JSON.stringify(errorEvent),
+      })
+      await finishBudgetUsage(hold, recordUsage, {
+        usage,
+        missingReason: "stream-interrupted",
+      })
+      return
+    }
+
+    await finishBudgetUsage(hold, recordUsage, { usage })
   })
 }
 
@@ -182,7 +290,7 @@ export const handleWithResponsesApi = async (
 
   const responsesPayload =
     translateAnthropicMessagesToResponsesPayload(anthropicPayload)
-  const recordUsage = createCopilotUsageRecorder({
+  const recordUsage = createBudgetUsagePreparer({
     endpoint: "responses",
     fallbackSessionId: requestOptions.sessionId,
     model: responsesPayload.model,
@@ -201,85 +309,30 @@ export const handleWithResponsesApi = async (
   debugJson(logger, "Translated Responses payload:", responsesPayload)
 
   const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
-  const response = await createResponses(responsesPayload, {
-    vision,
-    initiator,
-    ...requestOptions,
-  })
+  let response: Awaited<ReturnType<typeof createResponses>>
+  try {
+    response = await createResponses(responsesPayload, {
+      vision,
+      initiator,
+      ...requestOptions,
+    })
+  } catch (error) {
+    await options.hold.unreconcile("usage-missing")
+    throw error
+  }
 
   if (responsesPayload.stream && isAsyncIterable(response)) {
-    logger.debug("Streaming response from Copilot (Responses API)")
-    return streamSSE(c, async (stream) => {
-      const keepAlive = createStreamKeepAlive(stream, keepAliveIntervalMs)
-      const streamState = createResponsesStreamState()
-      let usage: UsageTokens = {}
-
-      try {
-        for await (const chunk of response) {
-          if (chunk.event === "ping") {
-            await keepAlive.writeSSE({ event: "ping", data: '{"type":"ping"}' })
-            continue
-          }
-          const data = chunk.data
-          if (!data) continue
-
-          debugLazy(logger, () => ["Responses raw stream event:", data])
-          const responseEvent: unknown = JSON.parse(data)
-          const responseEventType = asRecord(responseEvent)?.type
-          if (
-            responseEventType === "response.completed"
-            || responseEventType === "response.failed"
-            || responseEventType === "response.incomplete"
-          ) {
-            usage = normalizeResponsesUsage(
-              readNestedUsage(responseEvent, "response"),
-            )
-          }
-
-          for (const event of translateResponsesStreamEvent(
-            responseEvent,
-            streamState,
-          )) {
-            const eventData = JSON.stringify(event)
-            debugLazy(logger, () => ["Translated Anthropic event:", eventData])
-            await keepAlive.writeSSE({ event: event.type, data: eventData })
-          }
-
-          if (streamState.messageCompleted) {
-            logger.debug("Message completed, ending stream")
-            break
-          }
-        }
-      } catch (error) {
-        keepAlive.stop()
-        await emitStreamError(stream, logger, { error, flow: "responses" })
-        recordUsage(usage)
-        return
-      } finally {
-        keepAlive.stop()
-      }
-
-      if (!streamState.messageCompleted) {
-        logger.warn(
-          "Responses stream ended without completion; sending error event",
-        )
-        // The upstream closed early — retryable, like a mid-stream drop.
-        const errorEvent = buildErrorEvent(
-          "Responses stream ended without completion",
-          "overloaded_error",
-        )
-        await stream.writeSSE({
-          event: errorEvent.type,
-          data: JSON.stringify(errorEvent),
-        })
-      }
-
-      recordUsage(usage)
+    return streamResponsesApi(c, response, {
+      logger,
+      keepAliveIntervalMs,
+      hold: options.hold,
+      recordUsage,
     })
   }
 
-  return finishNonStreamingResponses(c, response as ResponsesResult, {
+  return await finishNonStreamingResponses(c, response as ResponsesResult, {
     logger,
+    hold: options.hold,
     recordUsage,
   })
 }
@@ -304,25 +357,125 @@ function applyPromptCacheRetention(payload: ResponsesPayload): void {
 /** Non-streaming /responses tail: log, translate to Anthropic, record
  *  usage+cost, respond. Extracted to keep handleWithResponsesApi under the
  *  per-function line cap. */
-function finishNonStreamingResponses(
+async function finishNonStreamingResponses(
   c: Context,
   result: ResponsesResult,
-  deps: { logger: ConsolaInstance; recordUsage: (usage: UsageTokens) => void },
-) {
-  const { logger, recordUsage } = deps
+  deps: {
+    logger: ConsolaInstance
+    hold: BudgetHold
+    recordUsage: (
+      usage: UsageTokens,
+    ) => ReturnType<typeof prepareCopilotTokenUsageEvent>
+  },
+): Promise<Response> {
+  const { logger, hold, recordUsage } = deps
   debugJsonTail(logger, "Non-streaming Responses result:", {
     value: result,
     tailLength: 400,
   })
   const anthropicResponse = translateResponsesResultToAnthropic(result)
-  recordUsage(
-    withCopilotCost(
+  await finishBudgetUsage(hold, recordUsage, {
+    usage: withCopilotCost(
       normalizeResponsesUsage(result.usage),
       result.copilot_usage,
     ),
-  )
+  })
   debugJson(logger, "Translated Anthropic response:", anthropicResponse)
   return c.json(anthropicResponse)
+}
+
+function hasObservedInputTokens(
+  usage: Record<string, unknown> | null | undefined,
+): boolean {
+  return (
+    typeof usage?.input_tokens === "number"
+    || typeof usage?.cache_creation_input_tokens === "number"
+    || typeof usage?.cache_read_input_tokens === "number"
+  )
+}
+
+function collectMessagesUsage(
+  current: UsageTokens,
+  event: Record<string, unknown> | null,
+  input: { eventType: string | undefined; observed: ObservedBudgetTokens },
+): UsageTokens {
+  const { eventType, observed } = input
+  let usage = current
+  if (eventType === "message_start") {
+    const messageUsage = asRecord(asRecord(event?.message)?.usage)
+    observed.input ||= hasObservedInputTokens(messageUsage)
+    usage = mergeAnthropicUsage(
+      usage,
+      normalizeAnthropicUsage(readNestedUsage(event, "message")),
+    )
+  } else if (eventType === "message_delta") {
+    const deltaUsage = asRecord(event?.usage)
+    observed.input ||= hasObservedInputTokens(deltaUsage)
+    observed.output ||= typeof deltaUsage?.output_tokens === "number"
+    usage = mergeAnthropicUsage(
+      usage,
+      normalizeAnthropicUsage(readUsage(event)),
+    )
+  }
+  const copilotUsage =
+    asRecord(event?.copilot_usage)
+    ?? asRecord(asRecord(event?.message)?.copilot_usage)
+  return copilotUsage ? withCopilotCost(usage, copilotUsage) : usage
+}
+
+function streamMessagesApi(
+  c: Context,
+  response: MessagesStream,
+  input: {
+    logger: ConsolaInstance
+    keepAliveIntervalMs?: number
+    hold: BudgetHold
+    recordUsage: BudgetUsagePreparer
+  },
+): Response {
+  const { logger, keepAliveIntervalMs, hold, recordUsage } = input
+  logger.debug("Streaming response from Copilot (Messages API)")
+  return streamSSE(c, async (stream) => {
+    const keepAlive = createStreamKeepAlive(stream, keepAliveIntervalMs)
+    let usage: UsageTokens = {}
+    const observedTokens: ObservedBudgetTokens = { input: false, output: false }
+
+    try {
+      for await (const event of response) {
+        const eventName = event.event
+        const data = event.data ?? ""
+        if (data === "[DONE]") break
+        if (!data) continue
+
+        debugLazy(logger, () => ["Messages raw stream event:", data])
+        const parsedEvent = parseAnthropicStreamEvent(data)
+        const parsedEventType =
+          typeof parsedEvent?.type === "string" ? parsedEvent.type : undefined
+        const resolvedEventName = eventName ?? parsedEventType
+        usage = collectMessagesUsage(usage, parsedEvent, {
+          eventType: parsedEventType,
+          observed: observedTokens,
+        })
+        await keepAlive.writeSSE(
+          { event: resolvedEventName, data },
+          { isMessageStart: parsedEventType === "message_start" },
+        )
+      }
+    } catch (error) {
+      keepAlive.stop()
+      await emitStreamError(stream, logger, { error, flow: "messages" })
+      await finishBudgetUsage(hold, recordUsage, {
+        usage,
+        missingReason: "stream-interrupted",
+        observedTokens,
+      })
+      return
+    } finally {
+      keepAlive.stop()
+    }
+
+    await finishBudgetUsage(hold, recordUsage, { usage, observedTokens })
+  })
 }
 
 export const handleWithMessagesApi = async (
@@ -341,7 +494,7 @@ export const handleWithMessagesApi = async (
   } = options
 
   prepareMessagesApiPayload(anthropicPayload, selectedModel)
-  const recordUsage = createCopilotUsageRecorder({
+  const recordUsage = createBudgetUsagePreparer({
     endpoint: "messages",
     fallbackSessionId: sessionId,
     model: anthropicPayload.model,
@@ -350,64 +503,25 @@ export const handleWithMessagesApi = async (
 
   debugJson(logger, "Translated Messages payload:", anthropicPayload)
 
-  const response = await createMessages(anthropicPayload, anthropicBetaHeader, {
-    subagentMarker,
-    requestId,
-    sessionId,
-    compactType,
-  })
+  let response: Awaited<ReturnType<typeof createMessages>>
+  try {
+    response = await createMessages(anthropicPayload, anthropicBetaHeader, {
+      subagentMarker,
+      requestId,
+      sessionId,
+      compactType,
+    })
+  } catch (error) {
+    await options.hold.unreconcile("usage-missing")
+    throw error
+  }
 
   if (isAsyncIterable(response)) {
-    logger.debug("Streaming response from Copilot (Messages API)")
-    return streamSSE(c, async (stream) => {
-      const keepAlive = createStreamKeepAlive(
-        stream,
-        options.keepAliveIntervalMs,
-      )
-      let usage: UsageTokens = {}
-
-      try {
-        for await (const event of response) {
-          const eventName = event.event
-          const data = event.data ?? ""
-          if (data === "[DONE]") {
-            break
-          }
-          if (!data) {
-            continue
-          }
-          debugLazy(logger, () => ["Messages raw stream event:", data])
-          const parsedEvent = parseAnthropicStreamEvent(data)
-          const parsedEventType =
-            typeof parsedEvent?.type === "string" ? parsedEvent.type : undefined
-          const resolvedEventName = eventName ?? parsedEventType
-          if (parsedEventType === "message_start") {
-            usage = mergeAnthropicUsage(
-              usage,
-              normalizeAnthropicUsage(readNestedUsage(parsedEvent, "message")),
-            )
-          } else if (parsedEventType === "message_delta") {
-            usage = mergeAnthropicUsage(
-              usage,
-              normalizeAnthropicUsage(readUsage(parsedEvent)),
-            )
-          }
-          await keepAlive.writeSSE(
-            {
-              event: resolvedEventName,
-              data,
-            },
-            { isMessageStart: parsedEventType === "message_start" },
-          )
-        }
-      } catch (error) {
-        keepAlive.stop()
-        await emitStreamError(stream, logger, { error, flow: "messages" })
-      } finally {
-        keepAlive.stop()
-      }
-
-      recordUsage(usage)
+    return streamMessagesApi(c, response, {
+      logger,
+      keepAliveIntervalMs: options.keepAliveIntervalMs,
+      hold: options.hold,
+      recordUsage,
     })
   }
 
@@ -415,12 +529,12 @@ export const handleWithMessagesApi = async (
     value: response,
     tailLength: 400,
   })
-  recordUsage(
-    withCopilotCost(
+  await finishBudgetUsage(options.hold, recordUsage, {
+    usage: withCopilotCost(
       normalizeAnthropicUsage(response.usage),
       response.copilot_usage,
     ),
-  )
+  })
   return c.json(response)
 }
 
@@ -432,20 +546,24 @@ export const resolveMessagesUsageSessionId = (
 ): string =>
   resolveTokenUsageSessionId(getMetadataSessionId(payload), fallbackSessionId)
 
-const createCopilotUsageRecorder = (options: {
+const createBudgetUsagePreparer = (options: {
   endpoint: TokenUsageEndpoint
   fallbackSessionId?: string
   model: string
   payload: AnthropicMessagesPayload
-}): ((usage: UsageTokens) => void) =>
-  createCopilotTokenUsageRecorder({
+}): ((
+  usage: UsageTokens,
+) => ReturnType<typeof prepareCopilotTokenUsageEvent>) => {
+  const recorderOptions = {
     endpoint: options.endpoint,
     model: options.model,
     sessionId: resolveMessagesUsageSessionId(
       options.payload,
       options.fallbackSessionId,
     ),
-  })
+  }
+  return (usage) => prepareCopilotTokenUsageEvent(recorderOptions, usage)
+}
 
 const getMetadataSessionId = (
   payload: AnthropicMessagesPayload,
