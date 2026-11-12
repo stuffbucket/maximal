@@ -441,7 +441,7 @@ describe("token usage migrations", () => {
       user_version: number
     }
     db.close?.()
-    expect(version.user_version).toBe(4)
+    expect(version.user_version).toBe(5)
     expect(oldRow.request_started_at_ms).toBeNull()
   })
 

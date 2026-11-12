@@ -217,6 +217,15 @@ export async function listProviderWindows(): Promise<
     .map(([, window]) => window)
 }
 
+/** The window loaded so far for `ref` (`provider:id`), or undefined. Sync, for
+ *  callers on a request path; `listProviderWindows()` first makes sure the
+ *  persisted windows are loaded. */
+export function findProviderWindow(
+  ref: string,
+): ObservedProviderWindow | undefined {
+  return windows.get(ref)
+}
+
 /** Forget the in-memory windows so the next read reloads them. */
 export function __resetProviderWindowsForTests(): void {
   windows.clear()

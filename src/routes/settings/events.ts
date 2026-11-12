@@ -58,6 +58,16 @@ eventsRoutes.get("/", (c) =>
       },
     )
 
+    const unsubscribeBudget = settingsEventBus.subscribe(
+      "budget.changed",
+      (budget) => {
+        void stream.writeSSE({
+          event: "budget.changed",
+          data: JSON.stringify(budget),
+        })
+      },
+    )
+
     // Held until the stream ends; also released if a snapshot write throws
     // (client gone), so a failed connect doesn't leak the subscriptions.
     const heartbeat = setInterval(() => {
@@ -69,6 +79,7 @@ eventsRoutes.get("/", (c) =>
       clearInterval(heartbeat)
       unsubscribeAuth()
       unsubscribePlugins()
+      unsubscribeBudget()
     }
 
     try {

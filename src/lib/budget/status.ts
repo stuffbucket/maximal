@@ -32,6 +32,7 @@ import {
   DEFAULT_WARN_AT,
   type BudgetConfig,
   type BudgetLimitConfig,
+  type BudgetScope,
   type BudgetScopeKind,
 } from "./schema"
 import {
@@ -65,12 +66,13 @@ function limitState(
 interface StatusContext {
   nowMs: number
   display: BudgetDisplay
+  held: (scope: BudgetScope) => number
 }
 
 async function limitStatus(
   limit: BudgetLimitConfig,
   period: BudgetPeriod,
-  { nowMs, display }: StatusContext,
+  { nowMs, display, held }: StatusContext,
 ): Promise<BudgetLimitStatus> {
   const [usage, usageDaily, usageWeekly] = await getNanoAiuSpend(limit.scope, [
     period,
@@ -89,6 +91,7 @@ async function limitStatus(
     limit_reset: limit.limitReset,
     limit_remaining: remaining,
     usage,
+    held: held(limit.scope),
     usage_daily: usageDaily,
     usage_weekly: usageWeekly,
     period_start: iso(period.startMs),
@@ -160,6 +163,8 @@ export interface BudgetStatusOptions {
   nowMs?: number
   /** Defaults to the windows observed so far. */
   windows?: ReadonlyArray<ObservedProviderWindow>
+  /** Nano-AIU calls in progress hold for a scope; none by default. */
+  held?: (scope: BudgetScope) => number
 }
 
 export async function buildBudgetStatus(
@@ -182,11 +187,12 @@ export async function buildBudgetStatus(
       limitStatus(
         limit,
         resolvePeriod(limit.limitReset, nowMs, (ref) => byRef.get(ref)),
-        { nowMs, display },
+        { nowMs, display, held: options.held ?? (() => 0) },
       ),
     ),
   )
   return {
+    enabled: budget?.enabled !== false,
     display: { unit: display.unit, credit_usd: display.creditUsd },
     storage_enabled: isTokenUsageStorageEnabled(),
     budgets,

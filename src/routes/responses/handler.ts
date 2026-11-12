@@ -5,6 +5,7 @@ import { streamSSE } from "hono/streaming"
 import type { Model } from "~/services/copilot/get-models"
 
 import { cachedCodexModelCatalog } from "~/apps/codex/models-catalog"
+import { admitChat } from "~/lib/budget/runtime"
 import {
   getConfig,
   getPromptCacheRetention,
@@ -80,6 +81,7 @@ const RESPONSES_ENDPOINT = "/responses"
 // eslint-disable-next-line complexity, max-lines-per-function
 export const handleResponses = async (c: Context) => {
   await checkRateLimit(state)
+  await admitChat("responses")
 
   const payload = await c.req.json<ResponsesPayload>()
   payload.model = reverseId(payload.model)

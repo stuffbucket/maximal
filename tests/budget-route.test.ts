@@ -18,8 +18,15 @@ import { Hono } from "hono"
 
 import { createAuthMiddleware } from "~/lib/auth/request-auth"
 import { __resetProviderWindowsForTests } from "~/lib/budget/provider-windows"
+import {
+  __resetBudgetServiceForTests,
+  getBudgetService,
+} from "~/lib/budget/runtime"
 import { getConfig, writeConfig } from "~/lib/config/config"
-import { BudgetStatusResponse } from "~/lib/config/settings-types"
+import {
+  BudgetActivityResponse,
+  BudgetStatusResponse,
+} from "~/lib/config/settings-types"
 import { closeUsageStore, recordTokenUsageEvent } from "~/lib/token-usage"
 import { settingsApiRoutes } from "~/routes/settings/api"
 import { budgetRoutes } from "~/routes/settings/budget"
@@ -59,10 +66,12 @@ beforeEach(async () => {
   process.env[DB_PATH_ENV] = ":memory:"
   await closeUsageStore()
   __resetProviderWindowsForTests()
+  __resetBudgetServiceForTests()
   writeConfig({})
 })
 
 afterEach(async () => {
+  __resetBudgetServiceForTests()
   await closeUsageStore()
   __resetProviderWindowsForTests()
   Reflect.deleteProperty(process.env, DB_PATH_ENV)
@@ -77,6 +86,7 @@ describe("GET /settings/api/budget", () => {
     const response = await buildApp().request("/budget")
     expect(response.status).toBe(200)
     expect(await status(response)).toEqual({
+      enabled: true,
       display: { unit: "usd", credit_usd: 0.01 },
       storage_enabled: true,
       budgets: [],
@@ -243,5 +253,172 @@ describe("DELETE /settings/api/budget/limits/:id", () => {
       method: "DELETE",
     })
     expect(response.status).toBe(404)
+  })
+})
+
+describe("what calls in progress hold", () => {
+  test("shows on the limit's status until the call settles", async () => {
+    const app = buildApp()
+    await put(app, "images-daily", images)
+    const decision = await getBudgetService().reserve({
+      operation: "images.generations",
+      key: "unidentified",
+      provider: "copilot",
+      plugin: "images",
+      estimateNanoAiu: 0.6 * AIU,
+    })
+    if (!decision.ok) throw new Error("expected admission")
+
+    const during = await status(await app.request("/budget"))
+    decision.hold.commit()
+    const after = await status(await app.request("/budget"))
+
+    expect(during.budgets[0].held).toBe(0.6 * AIU)
+    expect(after.budgets[0].held).toBe(0)
+  })
+})
+
+async function patch(app: Hono, body: unknown): Promise<Response> {
+  return app.request("/budget", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  })
+}
+
+describe("PATCH /settings/api/budget", () => {
+  test("switches enforcement off and on, keeping the limits", async () => {
+    const app = buildApp()
+    await put(app, "images-daily", images)
+
+    const off = await status(await patch(app, { enabled: false }))
+    expect(off.enabled).toBe(false)
+    expect(off.budgets).toHaveLength(1)
+    expect(getConfig().budget?.enabled).toBe(false)
+
+    const on = await status(await patch(app, { enabled: true }))
+    expect(on.enabled).toBe(true)
+  })
+
+  test("changes the display unit and nothing else", async () => {
+    const app = buildApp()
+    await put(app, "images-daily", images)
+
+    const body = await status(await patch(app, { display_unit: "credits" }))
+
+    expect(body.display.unit).toBe("credits")
+    expect(body.budgets[0].limit).toBe(30 * AIU)
+    expect(body.budgets[0].display.limit).toBe(30)
+    expect(getConfig().budget?.limits).toHaveLength(1)
+  })
+
+  test("rejects an empty or unknown body without touching config", async () => {
+    const app = buildApp()
+    expect((await patch(app, {})).status).toBe(400)
+    expect((await patch(app, { enabled: "yes" })).status).toBe(400)
+    expect((await patch(app, { limits: [] })).status).toBe(400)
+    expect(getConfig().budget).toBeUndefined()
+  })
+})
+
+function record(
+  model: string,
+  nanoAiu: number,
+  extra: { endpoint?: "images" | "messages" } = {},
+): void {
+  recordTokenUsageEvent({
+    endpoint: extra.endpoint ?? "messages",
+    model,
+    input_tokens: 1,
+    source: "copilot",
+    total_nano_aiu: nanoAiu,
+  })
+}
+
+describe("GET /settings/api/budget/activity", () => {
+  test("groups spend by model, biggest first, leaving out what spent nothing", async () => {
+    const app = buildApp()
+    record("gpt-small", AIU)
+    record("gpt-big", 2 * AIU)
+    record("gpt-big", AIU)
+    record("gpt-free", 0)
+
+    const response = await app.request(
+      "/budget/activity?period=day&group=model",
+    )
+
+    expect(response.status).toBe(200)
+    const body = BudgetActivityResponse.parse(await response.json())
+    expect(body.period).toBe("day")
+    expect(body.group).toBe("model")
+    expect(body.display).toEqual({ unit: "usd", credit_usd: 0.01 })
+    expect(body.rows).toEqual([
+      { key: "gpt-big", nano_aiu: 3 * AIU, requests: 2, amount: 0.03 },
+      { key: "gpt-small", nano_aiu: AIU, requests: 1, amount: 0.01 },
+    ])
+  })
+
+  test("groups by plugin, key, provider and day", async () => {
+    const app = buildApp()
+    record("gpt-image-test", AIU, { endpoint: "images" })
+    record("gpt-chat", 2 * AIU)
+
+    const get = async (group: string) =>
+      BudgetActivityResponse.parse(
+        await (await app.request(`/budget/activity?group=${group}`)).json(),
+      ).rows
+
+    expect(await get("plugin")).toEqual([
+      { key: null, nano_aiu: 2 * AIU, requests: 1, amount: 0.02 },
+      { key: "images", nano_aiu: AIU, requests: 1, amount: 0.01 },
+    ])
+    expect((await get("key")).map((row) => row.key)).toEqual(["unidentified"])
+    expect((await get("provider")).map((row) => row.key)).toEqual(["copilot"])
+    const [today] = await get("day")
+    expect(today.key).toBe(new Date().toISOString().slice(0, 10))
+    expect(today.nano_aiu).toBe(3 * AIU)
+  })
+
+  test("a week and a month cover today's rows; the period starts at 00:00 UTC", async () => {
+    const app = buildApp()
+    record("gpt-big", AIU)
+
+    for (const period of ["week", "month"]) {
+      const body = BudgetActivityResponse.parse(
+        await (await app.request(`/budget/activity?period=${period}`)).json(),
+      )
+      expect(body.rows).toHaveLength(1)
+      expect(body.period_start).toMatch(/T00:00:00\.000Z$/u)
+    }
+  })
+
+  test("rejects an unknown period or group", async () => {
+    const app = buildApp()
+    expect((await app.request("/budget/activity?period=year")).status).toBe(400)
+    expect((await app.request("/budget/activity?group=color")).status).toBe(400)
+  })
+
+  test("the CSV has the same rows, in the display unit, with commas quoted", async () => {
+    const app = buildApp()
+    record("gpt, big", 2 * AIU)
+    record("gpt-small", AIU)
+
+    const response = await app.request(
+      "/budget/activity.csv?period=day&group=model",
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("text/csv")
+    expect(response.headers.get("content-disposition")).toContain(
+      "maximal-budget-model-day.csv",
+    )
+    expect(await response.text()).toBe(
+      [
+        "model,nano_aiu,requests,amount_usd",
+        `"gpt, big",${2 * AIU},1,0.02`,
+        `gpt-small,${AIU},1,0.01`,
+        "",
+      ].join("\n"),
+    )
   })
 })

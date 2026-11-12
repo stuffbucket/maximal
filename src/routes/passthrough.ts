@@ -11,6 +11,9 @@ import {
   type OperationResult,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import type { BudgetService } from "~/lib/budget/service"
+
+import { dispatchWithBudget } from "~/lib/budget/dispatch"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { requestContext } from "~/lib/http/request-context"
@@ -79,33 +82,48 @@ export interface OperationCall {
 /**
  * Serve one pass-through request: the model must resolve (else
  * `OperationUnavailableError`, a 404 on the OpenAI wire), then the request is
- * admitted, dispatched, and its usage recorded. Returns the JSON to relay.
+ * admitted, dispatched under a budget hold (a `BudgetExceededError`, a 402,
+ * when a limit is spent), and its usage recorded. Returns the JSON to relay.
  */
 export async function runOperation(
   operations: OperationDispatch,
   call: OperationCall,
+  budget?: BudgetService,
 ): Promise<Record<string, unknown>> {
   const model = requestedModel(call.model)
   const target = operations.resolve(call.operation, model)
   if (!target) throw new OperationUnavailableError(call.operation, model)
   await admitUpstreamRequest()
   const store = requestContext.getStore()
-  const result = await operations.dispatch({
-    operation: call.operation,
-    model,
-    body: call.body,
-    signal: call.signal,
-    origin: {
-      kind: "http",
-      client: deriveUsageClient(
-        store?.usage.apiKeyLabel,
-        store?.userAgent ?? "",
-      ),
+  const { json } = await dispatchWithBudget(
+    operations,
+    {
+      operation: call.operation,
+      model,
+      body: call.body,
+      signal: call.signal,
+      origin: {
+        kind: "http",
+        client: deriveUsageClient(
+          store?.usage.apiKeyLabel,
+          store?.userAgent ?? "",
+        ),
+      },
     },
-  })
-  recordOperationUsage(
-    { operation: call.operation, model, provider: target.binding.provider },
-    result,
+    {
+      provider: target.binding.provider,
+      budget,
+      record: (result) => {
+        recordOperationUsage(
+          {
+            operation: call.operation,
+            model,
+            provider: target.binding.provider,
+          },
+          result,
+        )
+      },
+    },
   )
-  return result.json
+  return json
 }

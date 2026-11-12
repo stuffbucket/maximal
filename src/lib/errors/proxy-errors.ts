@@ -32,6 +32,7 @@ import consola from "consola"
 import { HTTPException } from "hono/http-exception"
 
 import { markAuthDegraded } from "~/lib/auth/auth-controller"
+import { BudgetExceededError, type BudgetRefusal } from "~/lib/budget/errors"
 import {
   anthropicErrorBody,
   anthropicErrorType,
@@ -96,6 +97,92 @@ const OPERATION_PATHS: Readonly<Record<string, string>> = {
   "images.edits": "/v1/images/edits",
 }
 
+const NANO_AIU_PER_CREDIT = 1_000_000_000
+const DAY_MS = 86_400_000
+const IN_FLIGHT_RETRY_SECONDS = 5
+
+const credits = (nano: number): number => nano / NANO_AIU_PER_CREDIT
+
+/** A limit's figures as OpenRouter words them (`limit_usd`, `spend_usd`),
+ *  plus AI credits, which GitHub bills, and the raw nano-AIU. */
+function budgetMetadata(refusal: BudgetRefusal): Record<string, unknown> {
+  const usd = (nano: number) => credits(nano) * refusal.creditUsd
+  return {
+    limit_source:
+      refusal.inFlight ? "maximal_in_flight_budget" : "maximal_limit",
+    scope: refusal.scope.kind,
+    ...(refusal.scope.kind === "global" ? {} : { scope_id: refusal.scope.id }),
+    limit_id: refusal.limitId,
+    limit_usd: usd(refusal.limit),
+    spend_usd: usd(refusal.used),
+    limit_credits: credits(refusal.limit),
+    spend_credits: credits(refusal.used),
+    limit_nano_aiu: refusal.limit,
+    spend_nano_aiu: refusal.used,
+    requested_nano_aiu: refusal.requested,
+    resets_at:
+      refusal.resetsAtMs === null ?
+        null
+      : new Date(refusal.resetsAtMs).toISOString(),
+    remedy_hint: "Raise or remove it in Maximal → Budget.",
+  }
+}
+
+/** The Anthropic envelope has no metadata slot, so the same facts ride in
+ *  headers. */
+function budgetHeaders(refusal: BudgetRefusal): Record<string, string> {
+  return {
+    "x-maximal-budget-limit-id": refusal.limitId,
+    "x-maximal-budget-scope": refusal.scope.kind,
+    "x-maximal-budget-limit": String(refusal.limit),
+    "x-maximal-budget-used": String(refusal.used),
+    ...(refusal.resetsAtMs === null ?
+      {}
+    : {
+        "x-maximal-budget-resets-at": new Date(
+          refusal.resetsAtMs,
+        ).toISOString(),
+      }),
+  }
+}
+
+/** Seconds a client may wait for the room: moments when only calls in
+ *  progress hold it, else the time to the reset, when that is within a day. */
+function budgetRetryAfter(
+  refusal: BudgetRefusal,
+  nowMs: number,
+): string | undefined {
+  if (refusal.inFlight) return String(IN_FLIGHT_RETRY_SECONDS)
+  if (refusal.resetsAtMs === null) return undefined
+  const wait = refusal.resetsAtMs - nowMs
+  return wait > 0 && wait <= DAY_MS ? String(Math.ceil(wait / 1000)) : undefined
+}
+
+/** A spent budget: 402, which Anthropic types `billing_error` and OpenAI
+ *  clients read as `insufficient_quota`. Not retried, unless only calls in
+ *  progress hold the room. */
+function budgetReply(
+  { refusal }: BudgetExceededError,
+  wire: ProxyWire,
+): ProxyErrorReply {
+  const retryAfter = budgetRetryAfter(refusal, Date.now())
+  return {
+    status: 402,
+    type: "billing_error",
+    message: refusal.message,
+    ...(refusal.inFlight ? {} : { retry: "never" as const }),
+    headers: {
+      ...(retryAfter === undefined ? {} : { "retry-after": retryAfter }),
+      ...(wire === "anthropic" ? budgetHeaders(refusal) : {}),
+    },
+    openai: {
+      type: "insufficient_quota",
+      code: "budget_exceeded",
+      extra: { metadata: budgetMetadata(refusal) },
+    },
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -131,6 +218,7 @@ function baseReply(event: ProxyErrorEvent): ProxyErrorReply {
       },
     }
   }
+  if (error instanceof BudgetExceededError) return budgetReply(error, wire)
   if (isOperationUnavailableError(error)) {
     // Nothing serves the model for this operation (its plugin is off, or the
     // id is unknown or ambiguous). 404 says "not served here", which Copilot's

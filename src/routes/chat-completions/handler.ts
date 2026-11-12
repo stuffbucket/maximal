@@ -2,6 +2,7 @@ import type { Context } from "hono"
 
 import { streamSSE, type SSEMessage } from "hono/streaming"
 
+import { admitChat } from "~/lib/budget/runtime"
 import { getConfig } from "~/lib/config/config"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
@@ -43,6 +44,7 @@ const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
+  await admitChat("chat_completions")
 
   let payload = await c.req.json<ChatCompletionsPayload>()
   payload.model = reverseId(payload.model)

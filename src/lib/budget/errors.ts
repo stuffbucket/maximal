@@ -1,0 +1,40 @@
+/**
+ * The refusal a spent limit produces, and the error that carries it to the
+ * routes. `proxyErrorHandler` renders it (`~/lib/errors/proxy-errors`).
+ * Imports nothing but types, so the error module can depend on it.
+ */
+
+import type { BudgetScope } from "./schema"
+
+export interface BudgetRefusal {
+  limitId: string
+  label: string | null
+  scope: BudgetScope
+  /** The limit and what counts against it, in nano-AIU. */
+  limit: number
+  used: number
+  held: number
+  /** This request's estimate; 0 for a call that can't be estimated. */
+  requested: number
+  /** When the period ends; null for a limit that never resets. */
+  resetsAtMs: number | null
+  /** The period's end is Maximal's guess, not the provider's. */
+  resetEstimated: boolean
+  /** Refused only because requests in progress hold the room: it comes
+   *  back by itself in moments, not at the reset. */
+  inFlight: boolean
+  /** One plain sentence for the person and for the model. */
+  message: string
+  /** USD per AI credit, for the figures a body reports in dollars. */
+  creditUsd: number
+}
+
+export class BudgetExceededError extends Error {
+  readonly refusal: BudgetRefusal
+
+  constructor(refusal: BudgetRefusal) {
+    super(refusal.message)
+    this.name = "BudgetExceededError"
+    this.refusal = refusal
+  }
+}
