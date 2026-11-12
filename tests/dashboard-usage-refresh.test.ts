@@ -14,6 +14,8 @@ interface Data {
   login: string
 }
 
+type Reply = Data | Error | ((signal: AbortSignal) => Promise<Data>)
+
 const signedOutError = Object.assign(new Error("401"), {
   status: 401,
   code: "not_authenticated",
@@ -27,17 +29,18 @@ const timeoutError = new Error(
 function harness(options: { active?: boolean } = {}) {
   let clock = 1_000_000
   let active = options.active ?? true
-  const replies: Array<Data | Error> = []
+  const replies: Array<Reply> = []
   let fetches = 0
   let renders = 0
   const timers = new Map<number, { at: number; run: () => void }>()
   let nextTimer = 1
 
   const refresher = createUsageRefresher<Data>({
-    fetchUsage: () => {
+    fetchUsage: (signal) => {
       fetches += 1
       const reply = replies.shift()
       if (reply === undefined) throw new Error("no reply queued")
+      if (typeof reply === "function") return reply(signal)
       return reply instanceof Error ?
           Promise.reject(reply)
         : Promise.resolve(reply)
@@ -62,7 +65,7 @@ function harness(options: { active?: boolean } = {}) {
 
   return {
     refresher,
-    reply: (...next: Array<Data | Error>) => replies.push(...next),
+    reply: (...next: Array<Reply>) => replies.push(...next),
     get fetches() {
       return fetches
     },
@@ -156,6 +159,20 @@ describe("usageRefreshDue", () => {
     expect(
       usageRefreshDue("traffic", unavailable, { ...context, now: 29_999 }),
     ).toBe(false)
+  })
+
+  test("an auth transition always bypasses the navigation throttle", () => {
+    expect(
+      usageRefreshDue(
+        "auth-changed",
+        { status: "signed-out" },
+        {
+          now: 1,
+          lastAttemptAt: 1,
+          periodEnded: false,
+        },
+      ),
+    ).toBe(true)
   })
 
   test("the retry timer only fetches while the quotas are unavailable", () => {
@@ -339,6 +356,60 @@ describe("createUsageRefresher", () => {
     expect(usage.status).toBe("ready")
     if (usage.status !== "ready") throw new Error("unreachable")
     expect(usage.snapshot.data).toEqual({ login: "new" })
+  })
+
+  test("an auth transition clears signed-out state and revalidates immediately", async () => {
+    const h = harness()
+    h.reply(signedOutError)
+    await h.refresher.request("load")
+    expect(h.refresher.usage).toEqual({ status: "signed-out" })
+
+    // No 15-second navigation delay: auth is an authoritative invalidation.
+    await h.advance(1)
+    h.reply({ login: "new" })
+    const refreshing = h.refresher.request("auth-changed")
+    expect(h.fetches).toBe(2)
+    expect(h.refresher.usage).toEqual({
+      status: "unavailable",
+      snapshot: null,
+    })
+
+    await refreshing
+    expect(h.refresher.usage).toMatchObject({
+      status: "ready",
+      snapshot: { data: { login: "new" } },
+    })
+  })
+
+  test("an auth transition supersedes an obsolete in-flight read", async () => {
+    const h = harness()
+    h.reply({ login: "old" })
+    await h.refresher.request("load")
+    await h.advance(15_000)
+
+    const obsoleteRequest: { signal?: AbortSignal } = {}
+    const obsoleteReply = Promise.withResolvers<Data>()
+    h.reply((signal) => {
+      obsoleteRequest.signal = signal
+      return obsoleteReply.promise
+    })
+    const obsolete = h.refresher.request("shown")
+
+    h.reply({ login: "new" })
+    const current = h.refresher.request("auth-changed")
+    expect(obsoleteRequest.signal?.aborted).toBe(true)
+    expect(h.refresher.usage).toEqual({
+      status: "unavailable",
+      snapshot: null,
+    })
+    await current
+
+    obsoleteReply.resolve({ login: "obsolete" })
+    await obsolete
+    expect(h.refresher.usage).toMatchObject({
+      status: "ready",
+      snapshot: { data: { login: "new" } },
+    })
   })
 
   test("concurrent triggers share one request", async () => {
