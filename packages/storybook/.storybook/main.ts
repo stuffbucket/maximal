@@ -12,7 +12,7 @@ const REPO = resolve(PKG, "../..");
 
 const config: StorybookConfig = {
   framework: "@storybook/react-vite",
-  stories: ["../src/**/*.stories.@(ts|tsx)"],
+  stories: ["../src/**/*.mdx", "../src/**/*.stories.@(ts|tsx)"],
   addons: ["@storybook/addon-docs", "@storybook/addon-a11y"],
   staticDirs: [
     // Self-hosted fonts, same files the Settings window serves.

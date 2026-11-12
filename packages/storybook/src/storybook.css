@@ -1,6 +1,16 @@
 /* Storybook chrome only — not product UI. Product styles come from
    shell/src/ui/styles/styles.css, imported unchanged in preview.tsx. */
 
+/* The product shell intentionally pins its webview and delegates scrolling to
+   its content pane. A Storybook preview has no such pane, so restore document
+   scrolling for tall stories and docs pages. */
+html,
+body {
+  height: auto;
+  min-height: 100%;
+  overflow: auto;
+}
+
 :root {
   /* Default inner sizes of the Tauri windows (shell/src-tauri/src/lib.rs),
      so window stories render at the size users actually see. */
