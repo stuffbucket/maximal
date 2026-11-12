@@ -6,7 +6,7 @@ root `mise.toml`) so Storybook's dependencies never touch the root Bun tree.
 
 ```sh
 bun run storybook:install   # once (or after the lockfile changes)
-bun run storybook           # dev server on :6006, restages on save
+bun run storybook           # dev server on :6006, rebuilds and refreshes on save
 bun run storybook:build     # static build → packages/storybook/storybook-static
 bun run storybook:check     # fixtures vs. API schemas + stories vs. component props
 ```
