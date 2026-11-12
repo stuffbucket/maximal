@@ -26,6 +26,7 @@ runPluginConformance(images, {
       },
       { model: "other", provider: "copilot", upstreamModel: "other" },
     ],
+    generateImage: false,
   },
   leakProbes: [
     () =>
@@ -33,5 +34,7 @@ runPluginConformance(images, {
         []
       : [`${fake.listenerCount} catalog listener(s) still subscribed`],
   ],
-  harness: { extraServices: capabilityServices(fake) },
+  harness: {
+    extraServices: capabilityServices(fake),
+  },
 })

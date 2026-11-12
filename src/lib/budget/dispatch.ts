@@ -38,6 +38,23 @@ export interface BudgetedDispatchOptions {
   budget?: BudgetService
 }
 
+/**
+ * The result as it is booked: a reply that reports no cost is booked at the
+ * hold's estimate (there is none when no limit covers the call).
+ */
+export function bookedResult<T extends Pick<OperationResult, "usage" | "cost">>(
+  result: T,
+  hold: { readonly estimateNanoAiu: number },
+): T {
+  if (result.cost?.amount !== undefined || hold.estimateNanoAiu <= 0) {
+    return result
+  }
+  return {
+    ...result,
+    cost: { unit: "nano_aiu", amount: hold.estimateNanoAiu, estimated: true },
+  }
+}
+
 export async function dispatchWithBudget(
   operations: OperationDispatch,
   request: Omit<OperationRequest, "binding">,
@@ -58,22 +75,9 @@ export async function dispatchWithBudget(
   )
   try {
     const result = await operations.dispatch(request)
-    const billed = result.cost?.amount
-    // A reply that reports no cost is booked at the estimate (there is none
-    // when no limit covers the call).
-    const booked: OperationResult =
-      billed === undefined && hold.estimateNanoAiu > 0 ?
-        {
-          ...result,
-          cost: {
-            unit: "nano_aiu",
-            amount: hold.estimateNanoAiu,
-            estimated: true,
-          },
-        }
-      : result
+    const booked = bookedResult(result, hold)
     options.record(booked)
-    hold.commit({ nanoAiu: billed })
+    hold.commit({ nanoAiu: result.cost?.amount })
     return booked
   } catch (error) {
     // The provider refused the call or it was abandoned: nothing was billed.

@@ -57,7 +57,7 @@ export interface ServedOperation {
  */
 export function recordOperationUsage(
   { operation, model, provider }: ServedOperation,
-  result: OperationResult,
+  result: Pick<OperationResult, "usage" | "cost">,
 ): void {
   createTokenUsageRecorder({
     endpoint: USAGE_ENDPOINTS[operation],

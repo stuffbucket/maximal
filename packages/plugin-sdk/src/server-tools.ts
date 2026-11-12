@@ -7,6 +7,7 @@
  * (`PluginGateway.serverTools` / `callServerTool`). Runtime-free: only types
  * and constants, so the cordis-free gateway seam can import it.
  */
+import type { ModelOperation, OperationResult } from "./operations"
 import type { JsonSchemaObject, PluginDisposer, ToolResult } from "./types"
 
 /** Server tool name as the model sees it. The host prefixes nothing. */
@@ -47,6 +48,33 @@ export interface ServerToolBudget {
   readonly tool: string
 }
 
+/**
+ * What a call to a billed tool would ask of a model operation: the operation
+ * and the request body the app core estimates its cost from (the same
+ * estimate the HTTP route for that operation holds), so a tool never carries
+ * a price list of its own.
+ */
+export interface ServerToolEstimate {
+  operation: ModelOperation
+  /** The provider that would bill it, so provider-scoped limits cover the hold. */
+  provider?: string
+  body: Record<string, unknown> | FormData
+}
+
+/**
+ * What a billed call actually spent, as the tool's own model operation
+ * answered it. The app core records it as usage under the operation's
+ * endpoint and plugin, as it does for the same call over HTTP.
+ */
+export interface ServerToolSpend {
+  operation: ModelOperation
+  /** The model as the plugin's binding names it. */
+  model: string
+  /** The provider that answered. */
+  provider: string
+  result: Pick<OperationResult, "usage" | "cost">
+}
+
 /** What a server tool's `execute` is told about the request it runs for. */
 export interface ServerToolCall {
   /** Aborts when the client goes away or the plugin is stopped. */
@@ -64,6 +92,13 @@ export interface ServerToolCall {
    * result, so `execute` is never called for a refused call.
    */
   budget?: ServerToolBudget
+  /**
+   * Set by the app core. A tool that ran a billed model operation reports
+   * what it spent here, once per operation, before it returns: that records
+   * the usage and books the cost against the hold taken for the call. A tool
+   * that is free, or whose provider reported nothing, never calls it.
+   */
+  reportSpend?: (spend: ServerToolSpend) => void
 }
 
 export interface ServerToolDefinition {
@@ -76,6 +111,14 @@ export interface ServerToolDefinition {
   offer: ServerToolOffer
   /** For `offer: "always"`: the clients it is offered to. Default `["claude-code"]`. */
   clients?: ReadonlyArray<string>
+  /**
+   * For a billed tool: the model operation this call would make and the body
+   * it would send, or `undefined` when the input is not valid (the call is
+   * then admitted without an estimate and `execute` refuses it). The app core
+   * holds that operation's estimate against the budget limits before
+   * `execute` runs; without this method a call holds nothing.
+   */
+  estimate?(input: Record<string, unknown>): ServerToolEstimate | undefined
   execute(
     input: Record<string, unknown>,
     call: ServerToolCall,
@@ -102,6 +145,8 @@ export interface ServerToolView {
   offer: ServerToolOffer
   /** Clients an `always` tool is offered to. */
   clients: ReadonlyArray<string>
+  /** The tool's own `estimate`, when it is a billed tool. */
+  estimate?: (input: Record<string, unknown>) => ServerToolEstimate | undefined
 }
 
 declare module "./types" {

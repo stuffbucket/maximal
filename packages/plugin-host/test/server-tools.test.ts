@@ -186,6 +186,10 @@ describe("ctx.serverTools", () => {
       ],
       ["an empty client list", serverTool("alpha", { clients: [] })],
       ["no execute", { ...serverTool("alpha"), execute: undefined }],
+      [
+        "an estimate that is not a function",
+        { ...serverTool("alpha"), estimate: 3 },
+      ],
     ]
     const seen: Array<string> = []
     const plugin = provider("amp", (ctx) => {
@@ -363,3 +367,58 @@ runPluginConformance(
   }),
   { harness: { extraServices: [serverToolsService] } },
 )
+
+describe("a billed server tool", () => {
+  test("a billed tool's estimate reaches the listing, and a call can report its spend", async () => {
+    const reported: Array<unknown> = []
+    const plugin = provider("amp", (ctx) => {
+      ctx.serverTools.register(
+        serverTool("alpha", {
+          estimate: (input) =>
+            typeof input.q === "string" ?
+              {
+                operation: "images.generations",
+                provider: "copilot",
+                body: { n: 2 },
+              }
+            : undefined,
+          execute: (_input, received) => {
+            received.reportSpend?.({
+              operation: "images.generations",
+              model: "m",
+              provider: "copilot",
+              result: { usage: {} },
+            })
+            return Promise.resolve({ content: [{ type: "text", text: "ok" }] })
+          },
+        }),
+      )
+      ctx.serverTools.register(serverTool("beta"))
+    })
+    const gateway = hostWith([plugin])
+    try {
+      await gateway.reconcile({ amp: { enabled: true } })
+      const [alpha, beta] = gateway.serverTools()
+      expect(alpha.estimate?.({ q: "x" })).toEqual({
+        operation: "images.generations",
+        provider: "copilot",
+        body: { n: 2 },
+      })
+      expect(alpha.estimate?.({})).toBeUndefined()
+      // A free tool declares none.
+      expect(beta.estimate).toBeUndefined()
+      await gateway.callServerTool(
+        "amp",
+        "alpha",
+        {},
+        {
+          ...call(),
+          reportSpend: (spend) => reported.push(spend),
+        },
+      )
+      expect(reported).toHaveLength(1)
+    } finally {
+      await gateway.dispose()
+    }
+  })
+})
