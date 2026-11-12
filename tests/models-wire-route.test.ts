@@ -20,6 +20,7 @@ import {
 import { Hono } from "hono"
 
 import { getConfig, writeConfig } from "~/lib/config/config"
+import { setPluginGateway } from "~/lib/plugins/gateway"
 import { setModels } from "~/lib/runtime-state/state"
 import { modelRoutes } from "~/routes/models/route"
 import { normalizeModel, type Model } from "~/services/copilot/get-models"
@@ -83,6 +84,9 @@ interface Entry {
 }
 
 beforeEach(() => {
+  // No plugin gateway: a gateway another test file left running would filter
+  // the operation models (`served-models.ts`).
+  setPluginGateway(undefined)
   writeConfig({
     modelMappings: [
       {

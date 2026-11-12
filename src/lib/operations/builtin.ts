@@ -1,7 +1,7 @@
 /**
- * The core's built-in operation handlers: today's Copilot bindings for the
- * pass-through routes (`/v1/images/*`, `/v1/decisions`, `/v1/systemone`), as an
- * `OperationDispatch` the routes use when no plugin serves them.
+ * The core's built-in operation handlers: Copilot's image endpoints
+ * (`/v1/images/*`), as an `OperationDispatch` the image routes use until a
+ * plugin serves them. (Decisions and SystemOne moved into capability plugins.)
  *
  * Each handler relays the body to the Copilot endpoint of the same path and
  * returns its JSON unchanged, with usage normalized the way the routes
@@ -13,18 +13,15 @@
  * factories instead of a process-wide `mock.module`.
  */
 
-import type {
-  ModelOperation,
-  OperationDispatch,
-  OperationRequest,
-  OperationResult,
+import {
+  type ModelOperation,
+  type OperationDispatch,
+  type OperationRequest,
+  OperationUnavailableError,
+  type OperationResult,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { extractCopilotCost, normalizeResponsesUsage } from "~/lib/token-usage"
-import {
-  createDecisions as defaultCreateDecisions,
-  createSystemOne as defaultCreateSystemOne,
-} from "~/services/copilot/create-decisions"
 import {
   createImageEdit as defaultCreateImageEdit,
   createImageGeneration as defaultCreateImageGeneration,
@@ -38,8 +35,6 @@ export const BUILTIN_PLUGIN_ID = "core"
 export interface BuiltinOperationDeps {
   createImageGeneration: typeof defaultCreateImageGeneration
   createImageEdit: typeof defaultCreateImageEdit
-  createDecisions: typeof defaultCreateDecisions
-  createSystemOne: typeof defaultCreateSystemOne
 }
 
 type Handler = (request: OperationRequest) => Promise<OperationResult>
@@ -80,7 +75,7 @@ function imagesResult(result: ImagesResult): OperationResult {
 
 function builtinHandlers(
   deps: BuiltinOperationDeps,
-): Record<ModelOperation, Handler> {
+): Partial<Record<ModelOperation, Handler>> {
   return {
     "images.generations": async ({ body, signal }) =>
       imagesResult(
@@ -88,24 +83,6 @@ function builtinHandlers(
       ),
     "images.edits": async ({ body, signal }) =>
       imagesResult(await deps.createImageEdit(body, { signal })),
-    decisions: async ({ body, signal }) => {
-      const result = await deps.createDecisions(jsonBody(body), {
-        signal,
-      })
-      return { json: result, usage: responsesUsage(result.usage) }
-    },
-    systemone: async ({ body, signal }) => {
-      const result = await deps.createSystemOne(jsonBody(body), {
-        signal,
-      })
-      return {
-        json: result,
-        usage: {
-          input_tokens: result.usage?.input_tokens,
-          output_tokens: result.usage?.output_tokens,
-        },
-      }
-    },
   }
 }
 
@@ -117,9 +94,10 @@ const bind = (model: string) => ({
 const noUnsubscribe = (): void => {}
 
 /**
- * A dispatch whose handlers call Copilot directly. It resolves every model to
- * the `copilot` provider under the name the client sent; `servedModels` is
- * empty because the built-ins serve whatever the catalog does.
+ * A dispatch whose handlers call Copilot directly. For the operations it has
+ * (images) it resolves every model to the `copilot` provider under the name
+ * the client sent; `servedModels` is empty because the built-ins serve
+ * whatever the catalog does.
  */
 export function createBuiltinOperationDispatch(
   deps: Partial<BuiltinOperationDeps> = {},
@@ -127,17 +105,22 @@ export function createBuiltinOperationDispatch(
   const handlers = builtinHandlers({
     createImageGeneration: defaultCreateImageGeneration,
     createImageEdit: defaultCreateImageEdit,
-    createDecisions: defaultCreateDecisions,
-    createSystemOne: defaultCreateSystemOne,
     ...deps,
   })
   return {
-    resolve: (_operation, model) => ({
-      pluginId: BUILTIN_PLUGIN_ID,
-      binding: bind(model),
-    }),
-    dispatch: (request) =>
-      handlers[request.operation]({ ...request, binding: bind(request.model) }),
+    resolve: (operation, model) =>
+      handlers[operation] ?
+        { pluginId: BUILTIN_PLUGIN_ID, binding: bind(model) }
+      : undefined,
+    dispatch: (request) => {
+      const handler = handlers[request.operation]
+      if (!handler) {
+        return Promise.reject(
+          new OperationUnavailableError(request.operation, request.model),
+        )
+      }
+      return handler({ ...request, binding: bind(request.model) })
+    },
     servedModels: () => [],
     subscribe: () => noUnsubscribe,
   }

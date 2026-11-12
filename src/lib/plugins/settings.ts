@@ -94,15 +94,62 @@ export function migrateLegacyWorkIq(config: AppConfig): AppConfig | undefined {
   }
 }
 
-/** Run the migration against `config.json` once, at boot. Never throws. */
+/**
+ * Plugins that replaced routes Maximal always served (the decisions and
+ * SystemOne pass-through routes). A plugin's own entry is absent for every
+ * existing user, and absent means off, so without this their `/v1/decisions`
+ * and `/v1/systemone` would start answering 404 on upgrade.
+ */
+export const DEFAULT_ON_PLUGINS: ReadonlyArray<string> = [
+  "decisions",
+  "systemone",
+]
+
+/**
+ * Turn on each default-on plugin that has no `enabled` choice yet. Runs on
+ * every boot but only ever writes the missing key, so a plugin the user
+ * turned off stays off. Returns undefined when there is nothing to change.
+ */
+export function migrateDefaultOnPlugins(
+  config: AppConfig,
+): AppConfig | undefined {
+  const missing = DEFAULT_ON_PLUGINS.filter(
+    (id) => pluginEntry(config, id)?.enabled === undefined,
+  )
+  if (missing.length === 0) return undefined
+  return {
+    ...config,
+    plugins: {
+      ...config.plugins,
+      ...Object.fromEntries(
+        missing.map((id) => [
+          id,
+          { ...pluginEntry(config, id), enabled: true },
+        ]),
+      ),
+    },
+  }
+}
+
+/** Run the migrations against `config.json`, at boot. Never throws. */
 export function migratePluginSettings(): void {
   try {
     const migrated = migrateLegacyWorkIq(getConfig())
-    if (!migrated) return
-    writeConfig(migrated)
-    consola.info("Moved Work IQ's settings from the MCP broker to plugins")
+    if (migrated) {
+      writeConfig(migrated)
+      consola.info("Moved Work IQ's settings from the MCP broker to plugins")
+    }
   } catch (error) {
     consola.warn("Could not migrate Work IQ's settings", error)
+  }
+  try {
+    const defaults = migrateDefaultOnPlugins(getConfig())
+    if (defaults) {
+      writeConfig(defaults)
+      consola.info("Turned on the plugins that serve the decisions routes")
+    }
+  } catch (error) {
+    consola.warn("Could not turn on the default plugins", error)
   }
 }
 

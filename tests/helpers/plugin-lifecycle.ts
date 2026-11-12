@@ -22,6 +22,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { PATHS } from "~/lib/platform/paths"
+import { DEFAULT_ON_PLUGINS } from "~/lib/plugins/settings"
 
 import type { FakeClaudeCli } from "./fake-claude-cli"
 
@@ -385,11 +386,23 @@ export function readText(file: string): string | undefined {
   }
 }
 
-/** `config.json` → `plugins`. */
+/**
+ * `config.json` → `plugins`, without the entries the boot migration writes for
+ * the default-on plugins (`DEFAULT_ON_PLUGINS`): this walk is about the
+ * plugin under test, and those are covered by `plugins-default-on.test.ts`.
+ */
 export function configPlugins(): unknown {
   const text = readText(PATHS.CONFIG_PATH)
   if (text === undefined) return "(absent)"
-  return (JSON.parse(text) as { plugins?: unknown }).plugins ?? "(none)"
+  const plugins = (JSON.parse(text) as { plugins?: Record<string, unknown> })
+    .plugins
+  if (plugins === undefined) return "(none)"
+  const rest = Object.fromEntries(
+    Object.entries(plugins).filter(([id]) => !DEFAULT_ON_PLUGINS.includes(id)),
+  )
+  return Object.keys(rest).length === 0 && Object.keys(plugins).length > 0 ?
+      "(none)"
+    : rest
 }
 
 export function settingsFile(run: Run): string {

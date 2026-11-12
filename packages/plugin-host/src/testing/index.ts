@@ -7,6 +7,14 @@
  */
 export { type ConformanceOptions, runPluginConformance } from "./conformance"
 export {
+  capabilityServices,
+  catalogModel,
+  createFakeUpstream,
+  type FakeUpstream,
+  type FakeUpstreamCall,
+  type FakeUpstreamOptions,
+} from "./fake-provider"
+export {
   createLifecycleHarness,
   type FiberStateName,
   formatEntry,
@@ -21,3 +29,4 @@ export {
 } from "./harness"
 export { type HandleTracker, type LiveHandle, trackHandles } from "./leaks"
 export { findSecrets, Normalizer, type NormalizerOptions } from "./normalize"
+export { rejection } from "./rejection"
