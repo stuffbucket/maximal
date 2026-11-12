@@ -36,7 +36,10 @@ export function ClientMenu({
   const chosenNames = clients
     .filter((client) => selected.has(client.id))
     .map((client) => CLIENT_NAMES[client.id]);
-  const summary = chosenNames.length > 0 ? chosenNames.join(", ") : t("connectors-connect-title");
+  const summary =
+    chosenNames.length > 0
+      ? chosenNames.join(", ")
+      : t("connectors-client-legend", { connector });
 
   const openAt = (index: number): void => {
     setActive(index);

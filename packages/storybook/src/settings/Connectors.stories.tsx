@@ -74,6 +74,8 @@ export const PageConfigErrorSaved = page({ scenario: "connectors-detail-config-e
   await canvas.findByText(/Invalid URL/);
 });
 export const PageClaudeCodeOff = page({ scenario: "connectors-claude-code-off" });
+/** No app selected: the trigger says what it controls instead of repeating the section title. */
+export const PageNoAppsSelected = page({ scenario: "connectors-no-apps" });
 /** The app picker open: every app is listed and unsupported targets explain why. */
 export const PageClientMenu = page({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
   const canvas = within(canvasElement);

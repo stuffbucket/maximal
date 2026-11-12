@@ -310,6 +310,24 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
   BUDGET_HOLDS_MODEL_MIGRATION,
   BUDGET_OVERRIDES_MIGRATION,
   BUDGET_HOLDS_TOKENS_MIGRATION,
+  {
+    // Older builds used the same user_version slots for a different schema.
+    // Repair the two current objects known to be absent in that lineage without
+    // changing or reordering the shipped positional migrations above.
+    name: "reconcile plugin attribution and provider windows",
+    up: (db) => {
+      ensureColumn(db, "plugin_id", "TEXT")
+      db.exec(
+        "UPDATE token_usage_events SET plugin_id = endpoint WHERE plugin_id IS NULL AND endpoint IN ('images', 'decisions', 'systemone')",
+      )
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_token_usage_events_created_plugin ON token_usage_events(created_at_ms, plugin_id)",
+      )
+      db.exec(
+        "CREATE TABLE IF NOT EXISTS provider_quota_windows (provider TEXT NOT NULL, window_id TEXT NOT NULL, window_json TEXT NOT NULL, previous_resets_at TEXT, updated_at_ms INTEGER NOT NULL, PRIMARY KEY (provider, window_id))",
+      )
+    },
+  },
 ]
 
 /** Migration step 2's columns: which client sent a request, how long its

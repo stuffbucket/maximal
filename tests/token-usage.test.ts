@@ -441,7 +441,7 @@ describe("token usage migrations", () => {
       user_version: number
     }
     db.close?.()
-    expect(version.user_version).toBe(9)
+    expect(version.user_version).toBe(10)
     expect(oldRow.request_started_at_ms).toBeNull()
   })
 
@@ -504,6 +504,103 @@ describe("token usage migrations", () => {
 
     const [row] = await readRows()
     expect(row.request_started_at_ms).toBe(startTime)
+  })
+})
+
+describe("token usage lineage repair", () => {
+  const { dbPath, readRows } = useTempUsageDb()
+
+  test("repairs a version 9 database from the older migration lineage", async () => {
+    recordTokenUsageEvent({
+      endpoint: "images",
+      input_tokens: 1,
+      model: "old-image",
+      source: "copilot",
+    })
+    await closeUsageStore()
+
+    const broken = await openSqliteDatabase(dbPath())
+    broken.exec("DROP INDEX idx_token_usage_events_created_plugin")
+    broken.exec("DROP TABLE provider_quota_windows")
+    broken.exec("ALTER TABLE token_usage_events DROP COLUMN plugin_id")
+    broken.exec("PRAGMA user_version = 9")
+    broken.close?.()
+
+    recordTokenUsageEvent({
+      endpoint: "messages",
+      input_tokens: 1,
+      model: "after-repair",
+      source: "copilot",
+    })
+
+    let rows = await readRows()
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({
+      model: "old-image",
+      plugin_id: "images",
+    })
+    expect(rows[1]).toMatchObject({
+      model: "after-repair",
+      plugin_id: null,
+    })
+
+    const repaired = await openSqliteDatabase(dbPath())
+    const version = repaired.prepare("PRAGMA user_version").get() as {
+      user_version: number
+    }
+    const providerWindows = repaired
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_quota_windows'",
+      )
+      .get() as { name?: string } | undefined
+    const pluginIndex = repaired
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_token_usage_events_created_plugin'",
+      )
+      .get() as { name?: string } | undefined
+    expect(version.user_version).toBe(10)
+    expect(providerWindows?.name).toBe("provider_quota_windows")
+    expect(pluginIndex?.name).toBe("idx_token_usage_events_created_plugin")
+    repaired.close?.()
+
+    // Reopening at the repaired version is a no-op, and later writes continue.
+    recordTokenUsageEvent({
+      endpoint: "messages",
+      input_tokens: 1,
+      model: "after-reopen",
+      source: "copilot",
+    })
+    rows = await readRows()
+    expect(rows.map((row) => row.model)).toEqual([
+      "old-image",
+      "after-repair",
+      "after-reopen",
+    ])
+  })
+
+  test("keeps existing plugin attribution while reconciling schema", async () => {
+    recordTokenUsageEvent({
+      endpoint: "images",
+      input_tokens: 1,
+      model: "custom-image",
+      pluginId: "custom-images",
+      source: "copilot",
+    })
+    await closeUsageStore()
+
+    const old = await openSqliteDatabase(dbPath())
+    old.exec("PRAGMA user_version = 9")
+    old.close?.()
+
+    recordTokenUsageEvent({
+      endpoint: "messages",
+      input_tokens: 1,
+      model: "migration-trigger",
+      source: "copilot",
+    })
+
+    const [custom] = await readRows()
+    expect(custom.plugin_id).toBe("custom-images")
   })
 })
 

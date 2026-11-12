@@ -1731,6 +1731,11 @@ export const SCENARIOS = {
     connectors: [workiqDetail({ stage: "ready" })],
   },
 
+  "connectors-no-apps": {
+    ...healthy("Connectors · Work IQ ready, no apps selected"),
+    connectors: [workiqDetail({ stage: "ready", selected: false })],
+  },
+
   "connectors-detail-terms-needed": {
     ...healthy("Connectors · Work IQ on, Microsoft’s terms to accept"),
     connectors: [workiqDetail({ stage: "terms-needed" })],
