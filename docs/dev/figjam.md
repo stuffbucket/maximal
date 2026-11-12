@@ -37,11 +37,23 @@ build embeds them (text imports, so a compiled Maximal can write the plugin with
    (param `name`); it has no localized wording yet, so the English message is
    shown.
 
+   The same request can be answered from the tray, without opening Settings.
+   While a panel waits, the status carries `attention` (summary: `A FigJam panel
+   ("name") wants to connect`, actions: Approve and Deny), so the tray icon
+   turns to its attention state and the menu (macOS menu bar, Windows
+   notification-area right-click) starts with `FigJam: Approve "name"` and
+   `FigJam: Deny "name"`. They disappear once the request is answered or
+   expires. The action ids are stable per panel name (`approve-<name>-<hash>`,
+   the name reduced to `a-z0-9-` plus a short hash of the exact name), so a
+   menu item that has gone stale still targets the right panel.
+
 If the port is taken (for example by `bun run figjam:bridge`), the status is an
 error that names the port, with **Try again**. The plugin is
 `packages/plugin-figjam`; it's a thin shell over `startBridge` and the
-figjam-plugin build (see Embedding). The Figma plugin's Maximal port defaults
-to 4141 and is an advanced setting.
+figjam-plugin build (see Embedding). The port the Figma plugin calls Maximal on
+is not a setting: the plugin asks the host (`ctx.host.maximalPort()`), which
+answers with the port Maximal is actually serving on, and the folder is rebuilt
+when that changes. An old `maximalPort` value in a saved config is ignored.
 
 ## Build and run the plugin (developers)
 
@@ -169,8 +181,11 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
 - `plugin-figjam` runs the plugin conformance suite, then the real bridge on a
   spare port with a temporary data directory: a fake panel asks to pair, and
   the test checks the `figjam-pair-requested` notice, the Approve/Deny status
-  actions, that approving pairs the panel, the stale-folder rebuild, the
-  port-in-use error and that stopping the plugin frees the port. It runs with
+  actions and the `attention` that carries them (with action ids that stay
+  the same for the same panel name), that approving pairs the panel, that the
+  host's Maximal port reaches the built manifest's `devAllowedDomains`, the
+  stale-folder rebuild, the port-in-use error and that stopping the plugin
+  frees the port. It runs with
   `bun run plugins:test`.
 - `figjam-bridge` starts a bridge on a spare port with a temporary data
   directory and drives pairing the way the panel and the CLI do, both as a

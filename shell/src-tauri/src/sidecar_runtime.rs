@@ -562,6 +562,132 @@ impl LatestUpdate {
     }
 }
 
+/// One thing a plugin asks the person to do now (`status.attention` in the
+/// plugin SDK), as a tray menu entry: the plugin, and one of its actions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct AttentionEntry {
+    /// Plugin id, as the actions route takes it.
+    pub(super) plugin: String,
+    /// Plugin display name, for the menu label.
+    pub(super) plugin_name: String,
+    /// Action id, stable for the same thing across polls.
+    pub(super) action: String,
+    /// The plugin's own English label for the action.
+    pub(super) label: String,
+}
+
+impl AttentionEntry {
+    /// The tray item's text: `FigJam: Approve "name"`.
+    pub(super) fn menu_text(&self) -> String {
+        format!("{}: {}", self.plugin_name, self.label)
+    }
+
+    /// The tray item's id; `parse_attention_menu_id` reads it back.
+    pub(super) fn menu_id(&self) -> String {
+        format!("{ATTENTION_MENU_PREFIX}{}:{}", self.plugin, self.action)
+    }
+}
+
+const ATTENTION_MENU_PREFIX: &str = "plugin-action:";
+
+/// Ids go into a URL path and a menu id, so only the characters plugin and
+/// action ids are made of are let through.
+fn is_path_safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// The plugin and action a tray item id (`AttentionEntry::menu_id`) names.
+pub(super) fn parse_attention_menu_id(id: &str) -> Option<(&str, &str)> {
+    let (plugin, action) = id.strip_prefix(ATTENTION_MENU_PREFIX)?.split_once(':')?;
+    (is_path_safe_id(plugin) && is_path_safe_id(action)).then_some((plugin, action))
+}
+
+/// What `GET /settings/api/plugins/attention` says, one entry per action.
+/// Anything malformed is skipped rather than failing the whole poll.
+pub(super) fn parse_attention(payload: &serde_json::Value) -> Vec<AttentionEntry> {
+    let Some(items) = payload
+        .get("attention")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let text = |value: &serde_json::Value, key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    let mut entries = Vec::new();
+    for item in items {
+        let (Some(plugin), Some(plugin_name)) = (text(item, "plugin"), text(item, "name")) else {
+            continue;
+        };
+        let Some(actions) = item.get("actions").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for action in actions {
+            let (Some(id), Some(label)) = (text(action, "id"), text(action, "label")) else {
+                continue;
+            };
+            let entry = AttentionEntry {
+                plugin: plugin.clone(),
+                plugin_name: plugin_name.clone(),
+                action: id,
+                label,
+            };
+            if parse_attention_menu_id(&entry.menu_id()).is_some() {
+                entries.push(entry);
+            }
+        }
+    }
+    entries
+}
+
+/// What plugins currently ask for, as the poll loop last saw it. Non-empty
+/// turns the tray icon to ATTENTION and adds the actions to the menu. Mutex
+/// because the poll task writes it while the tray paths read it.
+pub(super) struct PluginAttention(Mutex<Vec<AttentionEntry>>);
+
+impl PluginAttention {
+    pub(super) fn new() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+
+    pub(super) fn get(&self) -> Vec<AttentionEntry> {
+        self.0.lock().expect("attention mutex poisoned").clone()
+    }
+
+    /// Stores the entries; returns true if they changed.
+    pub(super) fn set(&self, next: Vec<AttentionEntry>) -> bool {
+        let mut guard = self.0.lock().expect("attention mutex poisoned");
+        if *guard == next {
+            return false;
+        }
+        *guard = next;
+        true
+    }
+}
+
+/// One-shot fetch of `/settings/api/plugins/attention`. None when the sidecar
+/// couldn't be asked (silent skip, like the other polls: don't churn the tray
+/// on a transient); Some(empty) when nothing needs the person.
+pub(super) async fn fetch_plugin_attention(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    url: &str,
+) -> Option<Vec<AttentionEntry>> {
+    let key = app.state::<ShellApiKey>().value().to_owned();
+    let resp = client.get(url).header("x-api-key", key).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let payload: serde_json::Value = resp.json().await.ok()?;
+    Some(parse_attention(&payload))
+}
+
 /// Armed by an in-place update just before it stops the sidecar. The
 /// Terminated handler hands the exit to the waiting update instead of
 /// quitting the app (a clean exit) or marking it Failed (a hard kill): the
@@ -1634,6 +1760,68 @@ pub(super) fn respawn_sidecar(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::extract_error_reason;
+
+    #[test]
+    fn plugin_attention_becomes_one_tray_entry_per_action() {
+        use super::{parse_attention, parse_attention_menu_id};
+
+        let entries = parse_attention(&serde_json::json!({
+            "attention": [{
+                "plugin": "figjam",
+                "name": "FigJam",
+                "summary": "A FigJam panel (\"lynx\") wants to connect",
+                "actions": [
+                    { "id": "approve-lynx-1a2b3c4d", "label": "Approve \"lynx\"" },
+                    { "id": "deny-lynx-1a2b3c4d", "label": "Deny \"lynx\"", "kind": "secondary" },
+                    { "id": "bad id/../x", "label": "Skipped" },
+                    { "label": "No id" }
+                ]
+            }, { "name": "No plugin id", "actions": [] }]
+        }));
+        let texts: Vec<String> = entries.iter().map(|e| e.menu_text()).collect();
+        assert_eq!(texts, ["FigJam: Approve \"lynx\"", "FigJam: Deny \"lynx\""]);
+        assert_eq!(
+            parse_attention_menu_id(&entries[0].menu_id()),
+            Some(("figjam", "approve-lynx-1a2b3c4d"))
+        );
+    }
+
+    #[test]
+    fn nothing_waiting_or_a_bad_payload_is_no_entries() {
+        use super::parse_attention;
+
+        assert!(parse_attention(&serde_json::json!({ "attention": [] })).is_empty());
+        assert!(parse_attention(&serde_json::json!({ "plugins": [] })).is_empty());
+        assert!(parse_attention(&serde_json::json!(null)).is_empty());
+    }
+
+    #[test]
+    fn only_plugin_action_menu_ids_parse_as_attention() {
+        use super::parse_attention_menu_id;
+
+        assert_eq!(parse_attention_menu_id("settings"), None);
+        assert_eq!(parse_attention_menu_id("plugin-action:figjam"), None);
+        assert_eq!(parse_attention_menu_id("plugin-action:fig/jam:x"), None);
+        assert_eq!(parse_attention_menu_id("plugin-action::x"), None);
+    }
+
+    #[test]
+    fn attention_state_reports_changes_only() {
+        use super::{AttentionEntry, PluginAttention};
+
+        let state = PluginAttention::new();
+        assert!(!state.set(Vec::new()));
+        let entry = AttentionEntry {
+            plugin: "figjam".into(),
+            plugin_name: "FigJam".into(),
+            action: "approve-x".into(),
+            label: "Approve".into(),
+        };
+        assert!(state.set(vec![entry.clone()]));
+        assert!(!state.set(vec![entry]));
+        assert!(state.set(Vec::new()));
+        assert!(state.get().is_empty());
+    }
 
     #[test]
     fn classifies_profiles_from_the_final_identifier() {

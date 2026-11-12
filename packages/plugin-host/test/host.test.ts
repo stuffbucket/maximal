@@ -593,6 +593,45 @@ describe("host services and lifecycle", () => {
     expect(host.opened).toEqual(["https://login.example.test/"])
   })
 
+  test("ctx.host.maximalPort() answers the host's port, read when called", async () => {
+    const ports: Array<number> = []
+    const alpha = define("alpha", Empty, (ctx) => {
+      ports.push(ctx.host.maximalPort())
+    })
+    const { gateway } = createHost([alpha])
+    await gateway.reconcile({ alpha: { enabled: true } })
+    expect(ports).toEqual([4141])
+  })
+
+  test("a status may carry attention; a malformed one is refused", async () => {
+    const errors: Array<string> = []
+    const alpha = define("alpha", Empty, (ctx) => {
+      const base = { state: "ready", code: "ready", summary: "Ready" } as const
+      ctx.surface.setStatus({
+        ...base,
+        attention: {
+          summary: "Needs you",
+          actions: [{ id: "approve-x", label: "Approve" }],
+        },
+      })
+      for (const attention of [
+        { summary: 1, actions: [] },
+        { summary: "x", actions: "nope" },
+        { summary: "x", actions: [{ id: "bad id!", label: "Approve" }] },
+      ]) {
+        try {
+          ctx.surface.setStatus({ ...base, attention } as never)
+        } catch (error) {
+          errors.push((error as PluginContractError).code)
+        }
+      }
+    })
+    const { gateway } = createHost([alpha])
+    await gateway.reconcile({ alpha: { enabled: true } })
+    expect(errors).toEqual(Array.from({ length: 3 }, () => "invalid-status"))
+    expect(gateway.get("alpha")?.status?.attention?.summary).toBe("Needs you")
+  })
+
   test("listener failures are contained; unsubscribe stops delivery", async () => {
     const { gateway } = createHost([define("alpha", Empty, () => {})])
     const seen: Array<string> = []

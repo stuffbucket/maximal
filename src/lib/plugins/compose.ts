@@ -31,6 +31,7 @@ import {
   type CopilotProviderDeps,
   createCopilotProvider,
 } from "~/lib/plugins/providers/copilot"
+import { currentProxyPort } from "~/lib/start/proxy-port"
 import { runFile } from "~/lib/system/run-file"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 
@@ -88,6 +89,8 @@ function hostServices(): HostServices {
   return {
     openExternal,
     appVersion: BUILD_VERSION,
+    // Read each time: the port is known only once the server is listening.
+    maximalPort: currentProxyPort,
     logger: {
       debug: (message, ...args) => consola.debug(message, ...args),
       info: (message, ...args) => consola.info(message, ...args),

@@ -492,6 +492,7 @@ export type ClaudeDesktopToggleRequest = z.infer<
 // camelCase like the snapshot it carries.
 //
 //   GET   /settings/api/plugins                        → PluginsListResponse
+//   GET   /settings/api/plugins/attention              → PluginsAttentionResponse
 //   GET   /settings/api/plugins/:id                    → PluginDetailView
 //   PATCH /settings/api/plugins/:id                    PluginUpdateRequest → PluginDetailView
 //   PUT   /settings/api/plugins/:id/tool-permissions   PluginToolPermissionsRequest → PluginDetailView
@@ -557,21 +558,23 @@ export const PluginToolAnnotations = z.object({
 })
 export type PluginToolAnnotations = z.infer<typeof PluginToolAnnotations>
 
+const PluginStatusAction = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.enum(["primary", "secondary", "destructive"]).optional(),
+  confirm: z.string().optional(),
+})
+
 export const PluginStatus = z.object({
   state: z.enum(["ready", "needs-setup", "working", "error"]),
   code: z.string(),
   summary: z.string(),
   detail: z.string().optional(),
   facts: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
-  actions: z
-    .array(
-      z.object({
-        id: z.string(),
-        label: z.string(),
-        kind: z.enum(["primary", "secondary", "destructive"]).optional(),
-        confirm: z.string().optional(),
-      }),
-    )
+  actions: z.array(PluginStatusAction).optional(),
+  /** Set while the plugin needs the person now (see `PluginsAttentionResponse`). */
+  attention: z
+    .object({ summary: z.string(), actions: z.array(PluginStatusAction) })
     .optional(),
 })
 export type PluginStatus = z.infer<typeof PluginStatus>
@@ -705,6 +708,25 @@ export const PluginDetailView = PluginView.extend({
   catalogUpdatedAt: z.string().optional(),
 })
 export type PluginDetailView = z.infer<typeof PluginDetailView>
+
+/** One enabled plugin that needs the person now (`status.attention`). Run an
+ *  action with `POST /settings/api/plugins/:plugin/actions/:actionId`. */
+export const PluginAttentionItem = z.object({
+  /** Plugin id. */
+  plugin: z.string(),
+  /** Plugin display name. */
+  name: z.string(),
+  summary: z.string(),
+  actions: z.array(PluginStatusAction),
+})
+export type PluginAttentionItem = z.infer<typeof PluginAttentionItem>
+
+/** `GET /settings/api/plugins/attention`: the menu-bar shell polls it to
+ *  light its attention icon and list the actions in the tray menu. */
+export const PluginsAttentionResponse = z.object({
+  attention: z.array(PluginAttentionItem),
+})
+export type PluginsAttentionResponse = z.infer<typeof PluginsAttentionResponse>
 
 export const PluginsListResponse = z.object({ plugins: z.array(PluginView) })
 export type PluginsListResponse = z.infer<typeof PluginsListResponse>

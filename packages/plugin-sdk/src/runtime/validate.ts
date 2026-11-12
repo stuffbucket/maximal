@@ -427,6 +427,13 @@ function checkStatusActions(pluginId: string, actions: unknown): void {
   }
 }
 
+function checkStatusAttention(pluginId: string, attention: unknown): void {
+  if (!isRecord(attention) || typeof attention.summary !== "string") {
+    invalidStatus(pluginId, "attention needs a string summary and actions.")
+  }
+  checkStatusActions(pluginId, attention.actions)
+}
+
 /** Validate and deep-copy a status (frozen). */
 export function normalizeStatus(
   pluginId: string,
@@ -444,6 +451,8 @@ export function normalizeStatus(
     invalidStatus(pluginId, "detail must be a string.")
   if (status.facts !== undefined) checkStatusFacts(pluginId, status.facts)
   if (status.actions !== undefined) checkStatusActions(pluginId, status.actions)
+  if (status.attention !== undefined)
+    checkStatusAttention(pluginId, status.attention)
   const copy = structuredClone(status) as unknown as PluginStatus
   return deepFreeze(copy)
 }

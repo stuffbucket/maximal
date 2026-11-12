@@ -21,6 +21,7 @@ import type { FigjamConfig } from "./manifest"
 import {
   composeStatus,
   displayName,
+  pairActionIds,
   type PluginFolder,
   RETRY_ACTION,
   SETUP_ACTION,
@@ -115,7 +116,6 @@ export class FigjamController {
   #folder: PluginFolder = "missing"
   #building = false
   #buildError: string | undefined
-  #sequence = 0
   #stopped = false
 
   constructor(
@@ -196,7 +196,7 @@ export class FigjamController {
     try {
       this.#folder = await inspectFolder(this.#pluginDir, {
         bridge: this.#config.port,
-        maximal: this.#config.maximalPort,
+        maximal: this.#ctx.host.maximalPort(),
       })
     } catch (error) {
       this.#ctx.host.logger.warn(
@@ -216,7 +216,7 @@ export class FigjamController {
       await buildPlugin({
         outDir: this.#pluginDir,
         bridgePort: this.#handle?.port ?? this.#config.port,
-        maximalPort: this.#config.maximalPort,
+        maximalPort: this.#ctx.host.maximalPort(),
       })
       this.#folder = "current"
     } catch (error) {
@@ -280,9 +280,7 @@ export class FigjamController {
 
   /** Give a waiting panel its own Approve and Deny actions. */
   #track(name: string): void {
-    this.#sequence += 1
-    const approveId = `approve-${this.#sequence}`
-    const denyId = `deny-${this.#sequence}`
+    const { approveId, denyId } = pairActionIds(name)
     const { surface } = this.#ctx
     const disposers = [
       surface.registerAction(approveId, () => this.#decide("approve", name)),

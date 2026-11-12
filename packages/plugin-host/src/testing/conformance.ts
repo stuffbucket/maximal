@@ -264,6 +264,7 @@ function buildBareHost(suite: Suite, plugin: PluginModule) {
       storageRoot: "/nonexistent-plugin-conformance",
       host: {
         appVersion: "0.0.0-test",
+        maximalPort: () => 4141,
         logger: SILENT_LOGGER,
         openExternal: () => Promise.resolve(),
       },

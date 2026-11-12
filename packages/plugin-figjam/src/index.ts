@@ -18,7 +18,6 @@ export const apply: typeof plugin.apply = (ctx, config) =>
 export { type FigjamPluginOptions, FIGMA_PLUGIN_DIR } from "./controller"
 export {
   DEFAULT_BRIDGE_PORT,
-  DEFAULT_MAXIMAL_PORT,
   FIGJAM_MANIFEST,
   type FigjamConfig,
 } from "./manifest"

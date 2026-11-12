@@ -1,7 +1,10 @@
 import type {
+  PluginAttention,
   PluginStatus,
   PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
+
+import { createHash } from "node:crypto"
 
 /** What the Figma plugin folder holds relative to this build and these ports. */
 export type PluginFolder = "missing" | "stale" | "current"
@@ -59,8 +62,49 @@ function readySummary(boards: number, pending: number): string {
   return `Connected to ${boards} FigJam board${boards === 1 ? "" : "s"}`
 }
 
+/**
+ * Action ids for a waiting panel, stable for the same panel name (unlike a
+ * counter) so a tray menu item that has gone stale still reaches the right
+ * panel. Ids are `a-z0-9-`: the readable part is the sanitized name, and a
+ * short hash of the exact name keeps names that sanitize alike apart.
+ */
+export function pairActionIds(name: string): {
+  approveId: string
+  denyId: string
+} {
+  const slug = name
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-|-$/g, "")
+    .slice(0, 24)
+    .replaceAll(/-$/g, "")
+  const hash = createHash("sha256").update(name).digest("hex").slice(0, 8)
+  const suffix = slug === "" ? hash : `${slug}-${hash}`
+  return { approveId: `approve-${suffix}`, denyId: `deny-${suffix}` }
+}
+
+/** What the person is asked while panels wait, or `undefined` when none do. */
+function pairAttention(input: StatusInput): PluginAttention | undefined {
+  const pending = input.bridge?.pending ?? []
+  if (pending.length === 0 || input.pairActions.length === 0) return undefined
+  const [first] = pending
+  return {
+    summary:
+      pending.length === 1 ?
+        `A FigJam panel ("${displayName(first)}") wants to connect`
+      : `${pending.length} FigJam panels want to connect`,
+    actions: input.pairActions,
+  }
+}
+
 /** The Settings status for the plugin. */
 export function composeStatus(input: StatusInput): PluginStatus {
+  const status = composeBase(input)
+  const attention = status.state === "error" ? undefined : pairAttention(input)
+  return attention ? { ...status, attention } : status
+}
+
+function composeBase(input: StatusInput): PluginStatus {
   const { startFailure, bridge } = input
   if (startFailure) {
     return {

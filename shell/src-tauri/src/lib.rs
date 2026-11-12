@@ -67,15 +67,15 @@ mod sidecar_runtime;
 mod windows_jump_list;
 
 use sidecar_runtime::{
-    begin_exit, extract_error_reason, fetch_rejection, fetch_setup_status,
-    fetch_update_payload, kill_sidecar, manual_check_outcome, parse_update_status,
-    profile_data_override, read_preferred_port, runtime_event_channel, spawn_sidecar,
-    update_status_endpoint, AppDataDir, AppProfile, AppStatus, LastRejection, LastSidecarError,
-    LatestUpdate, ManagedEndpoint, ManualCheck, RejectionSnapshot, RejectionTransition,
-    RuntimeEvent, RuntimeExiting,
-    SetupStatusResponse, ShellApiKey, Sidecar, SidecarEndpoint, SidecarFailureStop, SidecarHandoff,
-    SidecarRestarting, SidecarState, TokenUsageEvent, UpdateCheck, UpdateSnapshot,
-    DASHBOARD_WINDOW_LABEL, LOOPBACK_HOST, SETTINGS_WINDOW_LABEL, UPDATE_PAGE_URL,
+    begin_exit, extract_error_reason, fetch_plugin_attention, fetch_rejection, fetch_setup_status,
+    fetch_update_payload, kill_sidecar, manual_check_outcome, parse_attention_menu_id,
+    parse_update_status, profile_data_override, read_preferred_port, runtime_event_channel,
+    spawn_sidecar, update_status_endpoint, AppDataDir, AppProfile, AppStatus, AttentionEntry,
+    LastRejection, LastSidecarError, LatestUpdate, ManagedEndpoint, ManualCheck, PluginAttention,
+    RejectionSnapshot, RejectionTransition, RuntimeEvent, RuntimeExiting, SetupStatusResponse,
+    ShellApiKey, Sidecar, SidecarEndpoint, SidecarFailureStop, SidecarHandoff, SidecarRestarting,
+    SidecarState, TokenUsageEvent, UpdateCheck, UpdateSnapshot, DASHBOARD_WINDOW_LABEL,
+    LOOPBACK_HOST, SETTINGS_WINDOW_LABEL, UPDATE_PAGE_URL,
 };
 
 /// Brand-minimum time the splash stays on screen once the sidecar reaches a
@@ -790,6 +790,7 @@ pub fn run() {
         .manage(SidecarFailureStop::new())
         .manage(LastRejection::new())
         .manage(LatestUpdate::new())
+        .manage(PluginAttention::new())
         .manage(UpdateInstall::new())
         .manage(SidecarHandoff::new())
         .manage(LastSidecarError::new())
@@ -1020,6 +1021,7 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
         .then(|| update_status_endpoint(endpoint, false));
     let working_notice_url = endpoint.http_url("/settings/api/notices/working");
     let plugin_notices_url = endpoint.http_url("/settings/api/notices/plugins");
+    let plugin_attention_url = endpoint.http_url("/settings/api/plugins/attention");
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
     // `next_update_check` is when the next check is due (None = now, so the
@@ -1046,6 +1048,7 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
         }
         check_working_notice(&app, &client, &working_notice_url).await;
         check_plugin_notices(&app, &client, &plugin_notices_url).await;
+        check_plugin_attention(&app, &client, &plugin_attention_url).await;
         let update_due = next_update_check.is_none_or(|t| std::time::Instant::now() >= t);
         if update_due {
             if let Some(update_url) = update_status_url.as_deref() {
@@ -1152,6 +1155,68 @@ async fn check_plugin_notices(app: &AppHandle, client: &reqwest::Client, url: &s
     for notice in notices {
         fire_plugin_notification(app, notice);
     }
+}
+
+/// Plugins that need the person now (src/lib/plugins/attention.ts): while any
+/// does, the tray icon is ATTENTION and the menu lists their actions, such as
+/// approving a FigJam panel. The notification that announces each request is
+/// the plugin's notice; this only keeps the tray in step. Unreachable or
+/// failed → the tray is left as it is.
+async fn check_plugin_attention(app: &AppHandle, client: &reqwest::Client, url: &str) {
+    let Some(next) = fetch_plugin_attention(app, client, url).await else {
+        return;
+    };
+    apply_plugin_attention(app, next);
+}
+
+fn apply_plugin_attention(app: &AppHandle, next: Vec<AttentionEntry>) {
+    if !app.state::<PluginAttention>().set(next) {
+        return;
+    }
+    let current_state = app.state::<AppStatus>().get();
+    if let Err(err) = refresh_tray(app, current_state) {
+        eprintln!("[shell] tray refresh after plugin attention change failed: {err}");
+    }
+}
+
+/// A tray item for a plugin's action: runs it through the same route the
+/// Settings buttons use, then re-reads what still needs attention so the item
+/// goes away at once instead of at the next poll. A stale item (the request
+/// already gone) just gets a 404, and the re-read removes it.
+fn run_plugin_action(app: &AppHandle, plugin: &str, action: &str) {
+    let Some(endpoint) = app.state::<ManagedEndpoint>().current() else {
+        return;
+    };
+    let action_url = endpoint.http_url(&format!("/settings/api/plugins/{plugin}/actions/{action}"));
+    let attention_url = endpoint.http_url("/settings/api/plugins/attention");
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(client) = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+        else {
+            return;
+        };
+        let key = app.state::<ShellApiKey>().value().to_owned();
+        match client
+            .post(&action_url)
+            .header("x-api-key", key)
+            .send()
+            .await
+        {
+            Ok(resp) if !resp.status().is_success() => {
+                eprintln!(
+                    "[shell] plugin action {action_url} answered {}",
+                    resp.status()
+                );
+            }
+            Err(err) => eprintln!("[shell] plugin action {action_url} failed: {err}"),
+            Ok(_) => {}
+        }
+        // The action runs on after the 202; give it a moment to settle.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        check_plugin_attention(&app, &client, &attention_url).await;
+    });
 }
 
 /// One plugin notice as a notification. Best-effort like the others.
@@ -1775,10 +1840,11 @@ fn refresh_tray(app: &AppHandle, state: SidecarState) -> tauri::Result<()> {
     };
     let locale = app.state::<LocaleState>().get();
     let rejection = app.state::<LastRejection>().get();
+    let plugin_attention = !app.state::<PluginAttention>().get().is_empty();
     let menu = build_menu(app, &locale, state)?;
     tray.set_menu(Some(menu))?;
     tray.set_icon_with_as_template(
-        Some(icon_for(state, rejection.is_some())?),
+        Some(icon_for(state, rejection.is_some() || plugin_attention)?),
         cfg!(target_os = "macos"),
     )?;
     tray.set_tooltip(Some(tooltip_for(&locale, state, rejection.as_ref())))?;
@@ -2229,6 +2295,18 @@ fn build_menu(
     )?;
     let sep_upgrade = PredefinedMenuItem::separator(app)?;
 
+    // Whatever plugins ask the person to do now (approve a FigJam panel, say):
+    // one item per action, labelled with the plugin's own text, at the very
+    // top of the running menus and set off by a separator. Empty (and so no
+    // separator) when nothing is waiting.
+    let attention_items = app
+        .state::<PluginAttention>()
+        .get()
+        .iter()
+        .map(|entry| MenuItem::with_id(app, entry.menu_id(), entry.menu_text(), true, None::<&str>))
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let sep_attention = PredefinedMenuItem::separator(app)?;
+
     match state {
         SidecarState::Starting => {
             let starting = MenuItem::with_id(
@@ -2250,6 +2328,14 @@ fn build_menu(
             )?;
             let sep2 = PredefinedMenuItem::separator(app)?;
             let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
+            items.extend(
+                attention_items
+                    .iter()
+                    .map(|item| item as &dyn IsMenuItem<tauri::Wry>),
+            );
+            if !attention_items.is_empty() {
+                items.push(&sep_attention);
+            }
             items.push(&sign_in);
             // Updates are their own section BELOW the primary action — never
             // above sign-in: "Update to X.Y.Z…" when one is available, then
@@ -2283,6 +2369,14 @@ fn build_menu(
             )?;
             let sep2 = PredefinedMenuItem::separator(app)?;
             let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
+            items.extend(
+                attention_items
+                    .iter()
+                    .map(|item| item as &dyn IsMenuItem<tauri::Wry>),
+            );
+            if !attention_items.is_empty() {
+                items.push(&sep_attention);
+            }
             items.push(&info);
             // Updates are their own section BELOW the account line — never
             // above it: "Update to X.Y.Z…" when one is available, then
@@ -2361,7 +2455,11 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::UPGRADE => start_update(app),
         menu_id::CHECK_UPDATES => check_updates_from_tray(app),
         menu_id::QUIT => request_quit(app),
-        _ => {}
+        other => {
+            if let Some((plugin, action)) = parse_attention_menu_id(other) {
+                run_plugin_action(app, plugin, action);
+            }
+        }
     }
 }
 

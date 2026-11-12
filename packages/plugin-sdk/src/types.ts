@@ -283,6 +283,24 @@ export interface PluginStatus {
   detail?: string
   facts?: Array<{ label: string; value: string }>
   actions?: Array<PluginStatusAction>
+  /**
+   * Set while the plugin needs the person now (a pairing request waiting for
+   * approval, say). The app may then call attention to it outside Settings:
+   * the menu-bar tray lists each action so it can be taken from there. Omit
+   * it, or leave it out of the next status, when nothing is waiting. Each
+   * action id must be one the plugin has registered with `registerAction`,
+   * and should stay the same for the same thing (not a counter), so a menu
+   * item that has gone stale still reaches the right target.
+   */
+  attention?: PluginAttention
+}
+
+/** What a plugin needs the person to look at now; see `PluginStatus.attention`. */
+export interface PluginAttention {
+  /** English one-liner, for what is waiting. */
+  summary: string
+  /** What the person can do about it; the labels are shown as they are. */
+  actions: Array<PluginStatusAction>
 }
 
 /** Handler for a surface action; errors should be reported via status. */
@@ -358,6 +376,12 @@ export interface HostServices {
   openExternal(url: string): Promise<void>
   readonly logger: PluginLogger
   readonly appVersion: string
+  /**
+   * The port Maximal itself serves on, for plugins that hand it to something
+   * else (a FigJam panel that calls Maximal for models). Read it when
+   * needed: the port can differ between runs.
+   */
+  maximalPort(): number
 }
 
 /**
