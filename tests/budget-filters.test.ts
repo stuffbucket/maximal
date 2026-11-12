@@ -17,6 +17,7 @@ import {
 import type { BudgetFilterConfig } from "~/lib/budget/schema"
 
 import { globMatches, globToSqlite } from "~/lib/budget/glob"
+import { buildLimitTimeline } from "~/lib/budget/reports/timeline"
 import { resolveScope, scopeMatches } from "~/lib/budget/scope"
 import { createUsageDbBudgetStore } from "~/lib/budget/store"
 import { requestContext } from "~/lib/http/request-context"
@@ -376,6 +377,51 @@ describe("filters over the usage database", () => {
     expect(
       await sum({ kind: "members", field: "model", members: ["gpt-5"] }),
     ).toBe(204)
+  })
+})
+
+describe("a filter rule's timeline", () => {
+  beforeEach(async () => {
+    process.env[DB_PATH_ENV] = ":memory:"
+    await closeUsageStore()
+  })
+
+  afterEach(async () => {
+    setSystemTime()
+    await closeUsageStore()
+    Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  })
+
+  test("counts only the rows its filter selects", async () => {
+    seed()
+    const config = {
+      filters: [
+        {
+          id: "claude",
+          name: "Claude",
+          kind: "models" as const,
+          members: ["claude-*"],
+        },
+      ],
+      limits: [
+        limit({
+          id: "claude-cap",
+          scope: { kind: "filter", id: "claude" },
+          limitReset: "never",
+        }),
+      ],
+    }
+    const timeline = await buildLimitTimeline({
+      limit: config.limits[0],
+      config,
+      range: { fromMs: NOON - 3_600_000, toMs: NOON + 1, label: "custom" },
+      bucket: "hour",
+      nowMs: NOON,
+      findWindow: () => undefined,
+    })
+    // claude-sonnet-4 (1) and claude-opus-4 (2), not the gpt rows.
+    expect(timeline.totals.nano_aiu).toBe(3)
+    expect(timeline.totals.requests).toBe(2)
   })
 })
 

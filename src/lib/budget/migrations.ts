@@ -15,7 +15,11 @@ import type { Migration } from "~/lib/platform/sqlite"
 export const BUDGET_HOLDS_MODEL_MIGRATION: Migration = {
   name: "add budget_holds.model",
   up: (db) => {
-    db.exec("ALTER TABLE budget_holds ADD COLUMN model TEXT")
+    const columns = db.prepare("PRAGMA table_info(budget_holds)").all()
+    const has = columns.some(
+      (column) => (column as { name?: unknown }).name === "model",
+    )
+    if (!has) db.exec("ALTER TABLE budget_holds ADD COLUMN model TEXT")
   },
 }
 
