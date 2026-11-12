@@ -6,9 +6,11 @@
       "name": "@stuffbucket/maximal",
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
+        "@stuffbucket/maximal-plugin-decisions": "workspace:*",
         "@stuffbucket/maximal-plugin-figjam": "workspace:*",
         "@stuffbucket/maximal-plugin-host": "workspace:*",
         "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+        "@stuffbucket/maximal-plugin-systemone": "workspace:*",
         "@stuffbucket/maximal-plugin-workiq": "workspace:*",
         "citty": "^0.1.6",
         "clipboardy": "^5.0.0",
@@ -82,6 +84,20 @@
       "name": "@stuffbucket/maximal-figjam-plugin",
       "version": "0.10.1",
     },
+    "packages/plugin-decisions": {
+      "name": "@stuffbucket/maximal-plugin-decisions",
+      "version": "0.0.0",
+      "dependencies": {
+        "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+        "zod": "4.6.7",
+      },
+      "devDependencies": {
+        "@stuffbucket/maximal-plugin-host": "workspace:*",
+      },
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "4.0.2",
+      },
+    },
     "packages/plugin-figjam": {
       "name": "@stuffbucket/maximal-plugin-figjam",
       "version": "0.0.0",
@@ -112,6 +128,20 @@
       "dependencies": {
         "@deepseek-ai/cordis": "4.0.2",
         "@standard-schema/spec": "1.1.0",
+      },
+    },
+    "packages/plugin-systemone": {
+      "name": "@stuffbucket/maximal-plugin-systemone",
+      "version": "0.0.0",
+      "dependencies": {
+        "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+        "zod": "4.6.7",
+      },
+      "devDependencies": {
+        "@stuffbucket/maximal-plugin-host": "workspace:*",
+      },
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "4.0.2",
       },
     },
     "packages/plugin-workiq": {
@@ -422,11 +452,15 @@
 
     "@stuffbucket/maximal-figjam-plugin": ["@stuffbucket/maximal-figjam-plugin@workspace:packages/figjam-plugin"],
 
+    "@stuffbucket/maximal-plugin-decisions": ["@stuffbucket/maximal-plugin-decisions@workspace:packages/plugin-decisions"],
+
     "@stuffbucket/maximal-plugin-figjam": ["@stuffbucket/maximal-plugin-figjam@workspace:packages/plugin-figjam"],
 
     "@stuffbucket/maximal-plugin-host": ["@stuffbucket/maximal-plugin-host@workspace:packages/plugin-host"],
 
     "@stuffbucket/maximal-plugin-sdk": ["@stuffbucket/maximal-plugin-sdk@workspace:packages/plugin-sdk"],
+
+    "@stuffbucket/maximal-plugin-systemone": ["@stuffbucket/maximal-plugin-systemone@workspace:packages/plugin-systemone"],
 
     "@stuffbucket/maximal-plugin-workiq": ["@stuffbucket/maximal-plugin-workiq@workspace:packages/plugin-workiq"],
 

@@ -32,6 +32,12 @@ const beta = definePlugin("beta", () => undefined)
 
 let storageRoot: string
 
+/** What the boot migration adds for the default-on plugins. */
+const DEFAULT_ON = {
+  decisions: { enabled: true },
+  systemone: { enabled: true },
+}
+
 function settingsPath(id: string): string {
   return path.join(storageRoot, id, "settings.json")
 }
@@ -76,6 +82,7 @@ describe("startPlugins", () => {
       beta: { enabled: false, clients: ["claude-code"] },
       // Unknown ids are left alone.
       ghost: { config: { kept: true } },
+      ...DEFAULT_ON,
     })
   })
 
@@ -97,7 +104,10 @@ describe("startPlugins", () => {
     )
     const gateway = await boot()
     expect(gateway?.get("alpha")?.config).toEqual({ greeting: "file" })
-    expect(getConfig().plugins).toEqual({ alpha: { enabled: true } })
+    expect(getConfig().plugins).toEqual({
+      alpha: { enabled: true },
+      ...DEFAULT_ON,
+    })
   })
 
   test("an unreadable settings file keeps the legacy value for next time", async () => {
@@ -113,6 +123,7 @@ describe("startPlugins", () => {
     const plugins: unknown = getConfig().plugins
     expect(plugins).toEqual({
       alpha: { enabled: true, config: { greeting: "legacy" } },
+      ...DEFAULT_ON,
     })
     expect(fs.readFileSync(settingsPath("alpha"), "utf8")).toBe("{ not json")
   })

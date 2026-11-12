@@ -1,11 +1,9 @@
 /**
- * `/v1/systemone`: dispatched to the `systemone` operation (today Copilot's
- * `/v1/systemone`, through the built-in handler) and answered with the JSON
- * unchanged.
+ * `/v1/systemone`: dispatched to the `systemone` operation (served by the
+ * systemone capability plugin) and answered with the JSON unchanged.
  *
- * `createSystemOneRoutes(deps)` lets tests inject the operation dispatch (or
- * the built-in upstream call) without a process-wide `mock.module`
- * (docs/architecture.md § Testing gotchas).
+ * `createSystemOneRoutes(deps)` lets tests inject the operation dispatch
+ * without a process-wide `mock.module` (docs/architecture.md § Testing gotchas).
  */
 
 import type { OperationDispatch } from "@stuffbucket/maximal-plugin-sdk/gateway"
@@ -14,19 +12,16 @@ import { Hono } from "hono"
 
 import { requireGithubAuth } from "~/lib/auth/request-auth"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
-import {
-  type BuiltinOperationDeps,
-  createBuiltinOperationDispatch,
-} from "~/lib/operations/builtin"
+import { pluginOperations } from "~/lib/plugins/gateway"
 import { runOperation } from "~/routes/passthrough"
 
-export type SystemOneRoutesDeps = Partial<BuiltinOperationDeps> & {
-  /** Serves the operation; the built-in Copilot handler by default. */
+export interface SystemOneRoutesDeps {
+  /** Serves the operation; the running plugin gateway's by default. */
   operations?: OperationDispatch
 }
 
 export function createSystemOneRoutes(deps: SystemOneRoutesDeps = {}): Hono {
-  const operations = deps.operations ?? createBuiltinOperationDispatch(deps)
+  const operations = deps.operations ?? pluginOperations
 
   // Errors propagate to the error handler, which answers in OpenAI's format;
   // the token gate's "not signed in" goes the same way.

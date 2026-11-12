@@ -8,6 +8,8 @@
  * that need the real service stub `fetch` and restore it after each test.
  */
 
+import * as decisions from "@stuffbucket/maximal-plugin-decisions"
+import * as systemone from "@stuffbucket/maximal-plugin-systemone"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
@@ -20,6 +22,8 @@ import { createDecisionsRoutes } from "~/routes/decisions/route"
 import { createImagesRoutes } from "~/routes/images/route"
 import { createSystemOneRoutes } from "~/routes/systemone/route"
 import { tokenUsageRoute } from "~/routes/token-usage/route"
+
+import { startTestGateway, type TestGateway } from "./helpers/plugins"
 
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 
@@ -95,19 +99,20 @@ const postJson = (app: Hono, path: string, body: unknown) =>
   })
 
 /** Copilot's validation-error shape: JSON text under `text/plain`. */
-function upstream400(): HTTPError {
-  return new HTTPError(
-    "Failed upstream",
-    new Response(
-      JSON.stringify({
-        error: {
-          message: "model gpt-x is not supported via this endpoint",
-          code: "model_not_supported",
-        },
-      }),
-      { status: 400, headers: { "content-type": "text/plain" } },
-    ),
+function upstream400Response(): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        message: "model gpt-x is not supported via this endpoint",
+        code: "model_not_supported",
+      },
+    }),
+    { status: 400, headers: { "content-type": "text/plain" } },
   )
+}
+
+function upstream400(): HTTPError {
+  return new HTTPError("Failed upstream", upstream400Response())
 }
 
 /** A hidden catalog entry serving `endpoints`. */
@@ -419,6 +424,21 @@ describe("POST /v1/images/edits", () => {
   })
 })
 
+/** The decisions and SystemOne plugins on, installed as the running gateway
+ *  the routes dispatch through. */
+let plugins: TestGateway | undefined
+beforeEach(async () => {
+  plugins = await startTestGateway(
+    [decisions, systemone],
+    ["decisions", "systemone"],
+  )
+})
+afterEach(async () => {
+  const started = plugins
+  plugins = undefined
+  await started?.dispose()
+})
+
 describe("POST /v1/decisions", () => {
   const decisionsResult = {
     model: "gpt-6-luna",
@@ -433,15 +453,8 @@ describe("POST /v1/decisions", () => {
   }
 
   test("relays the reply unchanged and records usage against the request model", async () => {
-    const app = withUsage([
-      [
-        "/v1/decisions",
-        createDecisionsRoutes({
-          createDecisions: () =>
-            Promise.resolve(structuredClone(decisionsResult)),
-        }),
-      ],
-    ])
+    captureFetch(() => Response.json(structuredClone(decisionsResult)))
+    const app = withUsage([["/v1/decisions", createDecisionsRoutes()]])
 
     const response = await postJson(app, "/v1/decisions", {
       model: "gpt-6-luna-decisions",
@@ -464,16 +477,12 @@ describe("POST /v1/decisions", () => {
   })
 
   test("an upstream 400 comes back in OpenAI's error format", async () => {
-    const app = withUsage([
-      [
-        "/v1/decisions",
-        createDecisionsRoutes({
-          createDecisions: () => Promise.reject(upstream400()),
-        }),
-      ],
-    ])
+    captureFetch(upstream400Response)
+    const app = withUsage([["/v1/decisions", createDecisionsRoutes()]])
 
-    const response = await postJson(app, "/v1/decisions", { model: "gpt-x" })
+    const response = await postJson(app, "/v1/decisions", {
+      model: "gpt-6-luna-decisions",
+    })
 
     expect(response.status).toBe(400)
     const body = (await response.json()) as { error: { message: string } }
@@ -500,15 +509,8 @@ describe("POST /v1/systemone", () => {
   }
 
   test("relays the reply unchanged and records usage against the request model", async () => {
-    const app = withUsage([
-      [
-        "/v1/systemone",
-        createSystemOneRoutes({
-          createSystemOne: () =>
-            Promise.resolve(structuredClone(systemOneResult)),
-        }),
-      ],
-    ])
+    captureFetch(() => Response.json(structuredClone(systemOneResult)))
+    const app = withUsage([["/v1/systemone", createSystemOneRoutes()]])
 
     const response = await postJson(app, "/v1/systemone", {
       model: "microsoft-decision-1",
@@ -542,16 +544,12 @@ describe("POST /v1/systemone", () => {
   })
 
   test("an upstream 400 comes back in OpenAI's error format", async () => {
-    const app = withUsage([
-      [
-        "/v1/systemone",
-        createSystemOneRoutes({
-          createSystemOne: () => Promise.reject(upstream400()),
-        }),
-      ],
-    ])
+    captureFetch(upstream400Response)
+    const app = withUsage([["/v1/systemone", createSystemOneRoutes()]])
 
-    const response = await postJson(app, "/v1/systemone", { model: "gpt-x" })
+    const response = await postJson(app, "/v1/systemone", {
+      model: "microsoft-decision-1",
+    })
 
     expect(response.status).toBe(400)
     const body = (await response.json()) as { error: { message: string } }

@@ -7,8 +7,10 @@ import {
 import { forwardError } from "~/lib/errors/error"
 import { isVariantId } from "~/lib/models/anthropic-id-rewrite"
 import { cacheModels } from "~/lib/platform/utils"
+import { getPluginGateway } from "~/lib/plugins/gateway"
 import { state } from "~/lib/runtime-state/state"
 
+import { withoutUnservedModels } from "./served-models"
 import {
   anthropicModelList,
   openAiModelList,
@@ -30,8 +32,10 @@ modelRoutes.get("/", async (c) => {
     // show duplicate "Opus 4.7" entries. The handlers route the right
     // upstream variant when output_config.effort or the 1M-context beta
     // header is set.
-    const models = (state.models?.data ?? []).filter(
-      (model) => !isVariantId(model.id),
+    // Operation models (decisions) are listed only while a plugin serves them.
+    const models = withoutUnservedModels(
+      (state.models?.data ?? []).filter((model) => !isVariantId(model.id)),
+      getPluginGateway()?.operations().servedModels(),
     )
 
     // Serve the shape the client's protocol expects. Anthropic clients

@@ -12,6 +12,7 @@
 
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import * as decisions from "@stuffbucket/maximal-plugin-decisions"
 import * as figjam from "@stuffbucket/maximal-plugin-figjam"
 import {
   createPluginHost,
@@ -21,6 +22,7 @@ import {
   type PluginModule,
   providersService,
 } from "@stuffbucket/maximal-plugin-host"
+import * as systemone from "@stuffbucket/maximal-plugin-systemone"
 import * as workiq from "@stuffbucket/maximal-plugin-workiq"
 import consola from "consola"
 import path from "node:path"
@@ -36,7 +38,12 @@ import { runFile } from "~/lib/system/run-file"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 
 /** The first-party plugins every Maximal build ships. */
-const BUILTIN_PLUGINS: ReadonlyArray<PluginModule> = [workiq, figjam]
+const BUILTIN_PLUGINS: ReadonlyArray<PluginModule> = [
+  workiq,
+  figjam,
+  decisions,
+  systemone,
+]
 
 const OPEN_TIMEOUT_MS = 10_000
 
