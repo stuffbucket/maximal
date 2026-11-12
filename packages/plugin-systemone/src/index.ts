@@ -10,13 +10,20 @@ import {
   bindingsStatus,
   plainUsage,
   relayOperation,
+  serverToolWhileAvailable,
 } from "@stuffbucket/maximal-plugin-sdk"
 
+import { classifyTool } from "./classify"
 import { SYSTEMONE_MANIFEST, type SystemOneConfig } from "./manifest"
 
 export const name = SYSTEMONE_MANIFEST.id
 
-export const inject = ["operations", "providers", "surface"] as const
+export const inject = [
+  "operations",
+  "providers",
+  "serverTools",
+  "surface",
+] as const
 
 const PATH = "/v1/systemone"
 
@@ -35,8 +42,19 @@ export const apply: PluginModule<SystemOneConfig>["apply"] = (
       }),
   })
 
-  const refresh = () =>
+  const tool =
+    config.tools.classify ?
+      serverToolWhileAvailable(
+        ctx,
+        config.bindings,
+        classifyTool(ctx, config, PATH),
+      )
+    : undefined
+  // The tool is offered to Claude only while the model is.
+  const refresh = () => {
     ctx.surface.setStatus(bindingsStatus(ctx, config.bindings, PATH))
+    tool?.sync()
+  }
   refresh()
   // The catalog (and so "is the model on this account's plan") changes after
   // sign-in and on every refresh.

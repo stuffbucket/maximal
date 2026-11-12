@@ -13,6 +13,7 @@ import {
   operationsService,
   type PluginServiceFactory,
   providersService,
+  serverToolsService,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
 
 export interface FakeUpstreamCall {
@@ -106,9 +107,13 @@ export function createFakeUpstream(
   }
 }
 
-/** `extraServices` for a harness whose plugins serve operations through `fake`. */
+/** `extraServices` (operations, providers, server tools) for a harness whose plugins serve operations through `fake`. */
 export function capabilityServices(
   fake: FakeUpstream,
 ): ReadonlyArray<PluginServiceFactory> {
-  return [operationsService, providersService([fake.provider])]
+  return [
+    operationsService,
+    providersService([fake.provider]),
+    serverToolsService,
+  ]
 }

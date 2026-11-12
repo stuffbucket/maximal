@@ -30,6 +30,16 @@ export const Config = z.object({
     description:
       "The models served on /v1/decisions, each bound to the provider model that answers it.",
   }),
+  tools: z
+    .object({
+      decide: z.boolean().default(true).meta({
+        title: "decide tool for Claude Code",
+        description:
+          "Offer the decide tool to Claude Code, so it can ask this model for yes/no, choice and score answers while it works. Free on Copilot.",
+      }),
+    })
+    .default({ decide: true })
+    .meta({ title: "Tools" }),
 })
 
 export type DecisionsConfig = z.output<typeof Config>
