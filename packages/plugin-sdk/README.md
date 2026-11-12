@@ -146,13 +146,17 @@ never destructured.
   desktop app shows as a native notification (worded by `code` when the app
   knows it, else `message`): for changes worth interrupting for, not for
   status. Best effort; nothing shows it outside the desktop app. `code` is
-  `a-z0-9-`, `message` non-empty English text.
+  `a-z0-9-`, `message` non-empty English text. A status may also carry
+  `attention: { summary, actions }` while the plugin needs the person now:
+  the menu-bar tray lists each action (so they can be taken without opening
+  Settings). Use stable action ids, and clear it when nothing is waiting.
 - **`ctx.storage`** — private `<app dir>/plugins/<id>/` (0700): `readText`,
   `writeText` (atomic, 0600), `delete`, `dir`. Names are single path
   segments (`/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/`); `settings.json` is
   reserved for the host.
 - **`ctx.host`** — `openExternal(url)` (http/https only), `logger`
-  (prefixed with the plugin id), `appVersion`.
+  (prefixed with the plugin id), `appVersion`, `maximalPort()` (the port
+  Maximal serves on, for handing to something else).
 - **`ctx.serverTools`** (inject `serverTools`; provided by Maximal's composition
   root, not by every host) — `register({ name, description, input_schema,
   render, offer, clients?, execute(input, call) })` → disposer. A server tool is

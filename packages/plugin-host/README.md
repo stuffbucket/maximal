@@ -12,7 +12,7 @@ import * as workiq from "@stuffbucket/maximal-plugin-workiq"
 
 const gateway = createPluginHost({
   plugins: [workiq],                                   // static first-party set
-  services: { host: { openExternal, logger, appVersion }, storageRoot: path.join(appDir, "plugins") },
+  services: { host: { openExternal, logger, appVersion, maximalPort }, storageRoot: path.join(appDir, "plugins") },
 })
 await gateway.importLegacyConfig("workiq", legacy)    // once, for a config.json `plugins.<id>.config`
 await gateway.reconcile(config.plugins)               // start what is enabled

@@ -91,6 +91,8 @@ export type MemoryStorage = TestbedStorage
 
 export interface TestbedOptions {
   appVersion?: string
+  /** What `ctx.host.maximalPort()` answers (default 4141). */
+  maximalPort?: number
   /** Called after the URL is recorded, e.g. to drive a loopback OAuth redirect. */
   openExternal?: (url: string) => void | Promise<void>
   /** Initial storage: `{ [pluginId]: { [name]: text } }`. */
@@ -188,6 +190,7 @@ function createFakeHost(options: TestbedOptions): FakeHost {
     opened,
     logs,
     appVersion: options.appVersion ?? "0.0.0-test",
+    maximalPort: () => options.maximalPort ?? 4141,
     logger: {
       debug: record("debug"),
       info: record("info"),

@@ -112,6 +112,8 @@ export interface LifecycleHarnessOptions {
   /** Plugin storage root; default a fresh temp dir, removed on `dispose`. */
   storageRoot?: string
   appVersion?: string
+  /** What `ctx.host.maximalPort()` answers (default 4141). */
+  maximalPort?: number
   /** Runs after the URL is recorded (e.g. drive a loopback redirect). */
   openExternal?: (url: string) => void | Promise<void>
   /** Values that must never be recorded in the clear: masked in `transcript()`, reported by `secretsSeen()`. */
@@ -411,6 +413,7 @@ function recordingHost(
     }
   return {
     appVersion: options.appVersion ?? "0.0.0-test",
+    maximalPort: () => options.maximalPort ?? 4141,
     logger: {
       debug: log("debug"),
       info: log("info"),

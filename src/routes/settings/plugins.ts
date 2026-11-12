@@ -3,6 +3,7 @@
  * Wire contract: `src/lib/config/settings-types.ts` (Plugins / Connectors).
  *
  *   GET    /                          → { plugins: PluginView[] }
+ *   GET    /attention                 → { attention: PluginAttentionItem[] }
  *   GET    /:id                       → PluginDetailView
  *   PATCH  /:id                       { enabled?, clients?, config? } → PluginDetailView
  *   PUT    /:id/tool-permissions      { permissions } → PluginDetailView
@@ -35,11 +36,13 @@ import { Hono } from "hono"
 import {
   PluginActionResponse,
   PluginDetailView,
+  PluginsAttentionResponse,
   PluginsListResponse,
   PluginToolPermissionsRequest,
   PluginUpdateRequest,
   type PluginValidationIssue,
 } from "~/lib/config/settings-types"
+import { pluginAttention } from "~/lib/plugins/attention"
 import { getPluginGateway } from "~/lib/plugins/gateway"
 import {
   applyPluginSettings,
@@ -199,6 +202,16 @@ pluginsRoutes.get("/", async (c) => {
     c,
     { schema: PluginsListResponse, label: "plugins list" },
     await listPluginViews(gateway),
+  )
+})
+
+// Before `/:id`, which would take "attention" for a plugin id.
+pluginsRoutes.get("/attention", (c) => {
+  const gateway = getPluginGateway()
+  return respondValidated(
+    c,
+    { schema: PluginsAttentionResponse, label: "plugins attention" },
+    { attention: gateway ? pluginAttention(gateway) : [] },
   )
 })
 

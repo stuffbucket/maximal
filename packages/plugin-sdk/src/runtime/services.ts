@@ -210,6 +210,10 @@ class HostService extends Service implements HostServices {
     return this[kHost].appVersion
   }
 
+  maximalPort(): number {
+    return this[kHost].maximalPort()
+  }
+
   /** The app logger, prefixed with the calling plugin's id. */
   get logger(): PluginLogger {
     return prefixedLogger(

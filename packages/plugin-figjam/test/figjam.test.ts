@@ -15,6 +15,7 @@ import {
   FIGMA_PLUGIN_DIR,
   IMPORT_INSTRUCTIONS,
 } from "../src/index"
+import { pairActionIds } from "../src/status"
 
 type Loaded = Awaited<ReturnType<typeof loadPlugin>>
 
@@ -47,11 +48,14 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-async function load(config: Record<string, unknown> = {}): Promise<Loaded> {
+async function load(
+  config: Record<string, unknown> = {},
+  maximalPort?: number,
+): Promise<Loaded> {
   const loaded = await loadPlugin(
     createFigjamPlugin({ dataDir }),
     { port, ...config },
-    { storageDir },
+    { storageDir, ...(maximalPort === undefined ? {} : { maximalPort }) },
   )
   cleanups.push(() => loaded.dispose())
   return loaded
@@ -138,6 +142,26 @@ describe("FigJam plugin: setup", () => {
     )
   })
 
+  test("tells the Figma plugin the port Maximal serves on, and ignores an old maximalPort setting", async () => {
+    // 5141 comes from the host; the old config value must not win or fail.
+    const loaded = await load({ maximalPort: 4999 }, 5141)
+    await waitFor(statusIs(loaded, "plugin-not-built"))
+    await loaded.runAction("setup")
+    await waitFor(statusIs(loaded, "ready"))
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "manifest.json"),
+        "utf8",
+      ),
+    ) as { networkAccess: { devAllowedDomains: Array<string> } }
+    expect(manifest.networkAccess.devAllowedDomains).toContain(
+      "http://localhost:5141",
+    )
+    expect(manifest.networkAccess.devAllowedDomains).not.toContain(
+      "http://localhost:4999",
+    )
+  })
+
   test("rebuilds on start when the folder is stale", async () => {
     const first = await load()
     await waitFor(statusIs(first, "plugin-not-built"))
@@ -197,13 +221,24 @@ describe("FigJam plugin: pairing", () => {
       'Deny "test-lynx"',
     )
 
-    const approve = actionIds(loaded).find((id) => id.startsWith("approve"))
-    if (approve === undefined) throw new Error("no approve action")
+    // The ids follow the panel's name, not a counter, and the status asks
+    // for attention while the request waits.
+    const { approveId: approve, denyId } = pairActionIds("test-lynx")
+    expect(approve).toMatch(/^approve-test-lynx-[0-9a-f]{8}$/)
+    expect(status(loaded)?.attention).toEqual({
+      summary: 'A FigJam panel ("test-lynx") wants to connect',
+      actions: [
+        { id: approve, label: 'Approve "test-lynx"', kind: "primary" },
+        { id: denyId, label: 'Deny "test-lynx"', kind: "secondary" },
+      ],
+    })
+
     await loaded.runAction(approve)
     await panel.next("paired")
     await waitFor(() => fact(loaded, "Connected boards") === "Roadmap")
     expect(fact(loaded, "Waiting for approval")).toBe("None")
     expect(actionIds(loaded)).toEqual(["setup"])
+    expect(status(loaded)?.attention).toBeUndefined()
     expect(loaded.actions().filter((id) => id !== "setup")).not.toContain(
       approve,
     )
@@ -221,7 +256,21 @@ describe("FigJam plugin: pairing", () => {
     await loaded.runAction(deny)
     await waitFor(() => fact(loaded, "Waiting for approval") === "None")
     expect(actionIds(loaded)).toEqual(["setup"])
+    expect(status(loaded)?.attention).toBeUndefined()
     expect(loaded.actions()).not.toContain(deny)
+  })
+
+  test("action ids are valid, stable per name, and distinct for names that sanitize alike", () => {
+    const valid = /^[a-z0-9][\w.-]{0,63}$/i
+    for (const name of ["x", "Test Lynx!", "日本語", "a".repeat(200), ""]) {
+      const { approveId, denyId } = pairActionIds(name)
+      expect(approveId).toMatch(valid)
+      expect(denyId).toMatch(valid)
+      expect(pairActionIds(name)).toEqual({ approveId, denyId })
+    }
+    expect(pairActionIds("a b").approveId).not.toBe(
+      pairActionIds("a-b").approveId,
+    )
   })
 })
 

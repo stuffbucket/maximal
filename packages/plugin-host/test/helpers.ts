@@ -42,6 +42,7 @@ export function fakeHost(): HostServices & {
     logs,
     opened,
     appVersion: "1.2.3",
+    maximalPort: () => 4141,
     logger: {
       debug: log("debug"),
       info: log("info"),
