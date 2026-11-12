@@ -161,9 +161,10 @@ const containsVisionContent = (value: unknown): boolean => {
     return true
   }
 
-  if (Array.isArray(record.content)) {
-    return record.content.some((entry) => containsVisionContent(entry))
-  }
-
-  return false
+  // A message nests its parts under `content`; a `function_call_output`
+  // (a tool result, e.g. a screenshot) nests them under `output`.
+  return (
+    containsVisionContent(record.content)
+    || containsVisionContent(record.output)
+  )
 }
