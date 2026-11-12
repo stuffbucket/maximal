@@ -11,12 +11,10 @@
 
 import { z } from "zod"
 
+const SLUG = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
+
 /** A limit's stable, user-visible slug (`images-daily`). */
-export const BudgetLimitId = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u)
+export const BudgetLimitId = z.string().min(1).max(64).regex(SLUG)
 
 /** What a limit applies to. `global` matches every billed request; `key`
  *  matches one client key (the API key's label, or for a request with no
@@ -39,7 +37,7 @@ export type BudgetScope = z.infer<typeof BudgetScope>
 export type BudgetScopeKind = BudgetScope["kind"]
 
 /** A reusable filter's stable, user-visible slug (`claude-models`). */
-export const BudgetFilterId = BudgetLimitId
+export const BudgetFilterId = z.string().min(1).max(64).regex(SLUG)
 
 /** What a filter's members are matched against: the model a request names,
  *  the client key (as for a `key` scope), or the plugin or capability. */
