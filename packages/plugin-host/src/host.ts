@@ -1,5 +1,6 @@
 import type { Fiber, Plugin } from "@deepseek-ai/cordis"
 import type {
+  OperationDispatch,
   PluginGateway,
   PluginGatewayEvent,
   PluginLifecycle,
@@ -39,6 +40,7 @@ import {
   migrateSettingsDocument,
   newSettingsDocument,
   nonJsonPath,
+  operationDispatchOf,
   normalizeManifest,
   parsePluginConfig,
   parseSettingsDocument,
@@ -222,6 +224,7 @@ class PluginHost implements PluginGateway {
   readonly #records = new Map<string, PluginRecord>()
   readonly #listeners = new Set<(event: PluginGatewayEvent) => void>()
   readonly #host: HostServices
+  readonly #operations: OperationDispatch
   readonly #storage: PluginStorageBackend
   #queue: Promise<void> = Promise.resolve()
   #disposed = false
@@ -229,6 +232,7 @@ class PluginHost implements PluginGateway {
 
   constructor(options: PluginHostOptions) {
     this.#host = options.services.host
+    this.#operations = operationDispatchOf(this.#root)
     this.#runtime = new PluginRuntime({
       onChange: (event) => {
         if (event.type === "tools") this.#scheduleCatalog(event.pluginId)
@@ -288,6 +292,10 @@ class PluginHost implements PluginGateway {
 
   reconcile(settings: PluginSettings | undefined): Promise<void> {
     return this.#enqueue(() => this.#reconcileNow(settings))
+  }
+
+  operations(): OperationDispatch {
+    return this.#operations
   }
 
   list(): Array<PluginSnapshot> {

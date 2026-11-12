@@ -14,6 +14,8 @@ export type PluginContractErrorCode =
   | "invalid-notice"
   | "invalid-storage-name"
   | "invalid-url"
+  | "invalid-operation"
+  | "duplicate-operation"
 
 /**
  * Thrown when a plugin (or a plugin list) violates the plugin contract:
