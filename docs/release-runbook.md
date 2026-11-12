@@ -136,6 +136,37 @@ key's fingerprint equals that variable and the committed public key
 public key. Rotating the key means replacing all four together and telling
 Linux users to fetch the new public key.
 
+## mxml.sh pages
+
+`deploy-pages.yml` publishes mxml.sh, but the pages come from
+[stuffbucket/maximal-site](https://github.com/stuffbucket/maximal-site). The
+`content` job calls that repository's `build-mxml.yml`. It builds the newest
+maximal-site tag `vX.Y.Z[.N]` at or below `channels.stable.version` in this
+deploy's `site/public/updates/manifest.json`. `deploy` then puts this
+repository's files on top:
+
+- `CNAME`;
+- `site/public/updates/**`;
+- the `/maximal/` redirect;
+- `/apt`.
+
+It finishes with `site/scripts/verify-dist.mjs`.
+
+- **A stable release** goes live with the content tagged for its version. The
+  manifest PR merge deploys it; release candidates don't change the content.
+- **A content-only change** goes live when maximal-site tags it and someone
+  runs `gh workflow run deploy-pages.yml --ref main`.
+- **No matching tag** fails `content` and skips `deploy`. Everything already
+  live stays as it was, including `/updates` and `/apt`. Tag the content in
+  maximal-site, then start a fresh run.
+- **Rollback:** `gh workflow run deploy-pages.yml --ref main -f source=legacy`
+  rebuilds the old pages under `site/` instead. To build a specific
+  maximal-site ref, pass `-f content-ref=<ref>`.
+
+`build-mxml.yml` is pinned to a maximal-site commit in `deploy-pages.yml`, like
+any action. A change to that workflow takes effect here only when a PR moves
+the pin; the content it builds still follows the tags.
+
 ## Recovery
 
 | Failure | Action |
@@ -147,6 +178,7 @@ Linux users to fetch the new public key.
 | `manifest` failed after publication | Rerun `manifest`, then merge its protected PR after checks pass. |
 | `homebrew-tap` failed | Rerun only `homebrew-tap`. |
 | Pages deployment failed | Start a fresh run with `gh workflow run deploy-pages.yml --ref main`. |
+| `content` failed: no maximal-site tag at or below the stable version | Tag the content in stuffbucket/maximal-site (e.g. `vX.Y.Z`), then start a fresh Pages run. If that can't wait, run it with `-f source=legacy` (see *mxml.sh pages*). |
 | An apt step failed (the whole Pages deploy stops) | Read its annotation: a missing or wrong signing secret or variable, a channel listing Linux packages its release lacks, or an oversized package. Fix it, then start a fresh Pages run (see *apt repository*). |
 | A published asset is wrong | Cut a new patch release. |
 
