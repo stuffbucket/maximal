@@ -105,6 +105,7 @@ interface StatusContext {
   held: (scope: BudgetScope, metric: SpendMetric) => number
   overrides: (limitId: string) => ReadonlyArray<BudgetOverride>
   approval: (limitId: string) => ApprovalState | null
+  paused: (limitId: string) => number
   presence: Presence | undefined
 }
 
@@ -133,6 +134,7 @@ async function limitStatus(
     filters,
     overrides,
     approval,
+    paused,
     presence,
   }: StatusContext,
 ): Promise<BudgetLimitStatus> {
@@ -182,6 +184,7 @@ async function limitStatus(
     effective_limit: cap,
     limit_reset: limit.limitReset,
     limit_remaining: remaining,
+    paused: paused(limit.id),
     usage,
     held: held(limit.scope, metric),
     usage_daily: usageDaily,
@@ -306,6 +309,8 @@ export interface BudgetStatusOptions {
   overrides?: (limitId: string) => ReadonlyArray<BudgetOverride>
   /** What an `ask` rule is waiting on; nothing by default. */
   approval?: (limitId: string) => ApprovalState | null
+  /** Requests a `pause` rule is holding; none by default. */
+  paused?: (limitId: string) => number
 }
 
 export async function buildBudgetStatus(
@@ -335,6 +340,7 @@ export async function buildBudgetStatus(
           held: options.held ?? (() => 0),
           overrides: options.overrides ?? (() => []),
           approval: options.approval ?? (() => null),
+          paused: options.paused ?? (() => 0),
           presence: options.presence,
         },
       ),

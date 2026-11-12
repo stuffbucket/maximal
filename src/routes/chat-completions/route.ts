@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 
 import { requireGithubAuth } from "~/lib/auth/request-auth"
+import { withPause } from "~/lib/budget/pause-hold"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
 
 import { handleCompletion } from "./handler"
@@ -11,4 +12,12 @@ export const completionRoutes = new Hono()
 completionRoutes.onError(proxyErrorHandler("openai"))
 completionRoutes.use(requireGithubAuth)
 
-completionRoutes.post("/", (c) => handleCompletion(c))
+completionRoutes.post(
+  "/",
+  withPause({
+    wire: "openai",
+    operation: "chat_completions",
+    handler: handleCompletion,
+    onError: proxyErrorHandler("openai"),
+  }),
+)

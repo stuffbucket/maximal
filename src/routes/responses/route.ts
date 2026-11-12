@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 
 import { requireGithubAuth } from "~/lib/auth/request-auth"
+import { withPause } from "~/lib/budget/pause-hold"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
 
 import { handleResponses } from "./handler"
@@ -11,4 +12,12 @@ export const responsesRoutes = new Hono()
 responsesRoutes.onError(proxyErrorHandler("openai"))
 responsesRoutes.use(requireGithubAuth)
 
-responsesRoutes.post("/", (c) => handleResponses(c))
+responsesRoutes.post(
+  "/",
+  withPause({
+    wire: "openai",
+    operation: "responses",
+    handler: handleResponses,
+    onError: proxyErrorHandler("openai"),
+  }),
+)

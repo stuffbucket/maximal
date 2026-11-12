@@ -80,6 +80,8 @@ export const BudgetLimitStatus = z.object({
   effective_limit: NanoAiuAmount,
   limit_reset: BudgetLimitReset,
   limit_remaining: NanoAiuAmount,
+  /** Requests a `pause` rule is holding now. */
+  paused: z.number().int().min(0),
   /** Spend in the current period. */
   usage: NanoAiuAmount,
   /** Held by calls in progress (their estimates), not yet spent. */
@@ -576,10 +578,13 @@ export type BudgetRulesImportResponse = z.infer<
  *  about a rule that has reached its limit. `more` allows extra room for the
  *  rest of the period (`extra` in nano-AIU or `amount` in the display unit;
  *  by default a quarter of the limit), `hour` stops enforcing it for an hour,
- *  `keep` leaves it blocked and stops asking until the period turns over. */
+ *  `keep` leaves it blocked and stops asking until the period turns over,
+ *  `reset` stops enforcing it until its period resets (an hour for a limit
+ *  that never does) and `resume` lets the requests a `pause` rule is holding
+ *  through once, leaving the limit as it is. */
 export const BudgetApproveRequest = z
   .object({
-    choice: z.enum(["more", "hour", "keep"]),
+    choice: z.enum(["more", "hour", "keep", "reset", "resume"]),
     extra: NanoAiuAmount.optional(),
     amount: z.number().positive().optional(),
   })

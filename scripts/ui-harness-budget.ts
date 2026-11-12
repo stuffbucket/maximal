@@ -38,7 +38,7 @@ interface StoredLimit {
   limit: number
   limitReset: LimitReset
   warnAt: number
-  action: "block" | "warn" | "ask"
+  action: "block" | "warn" | "ask" | "pause"
 }
 
 /** A limit as a scenario describes it: sized so the current period is `fill` spent. */
@@ -458,6 +458,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
       scope: entry.scope,
       action: entry.action,
       warn_at: entry.warnAt,
+      paused: 0,
       unit: "cost",
       measure: null,
       max_requests: null,
