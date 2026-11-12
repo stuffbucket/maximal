@@ -21,14 +21,14 @@ Always read the linked doc before acting in its area.
 | Touch the Codex integration | [`docs/dev/codex-integration.md`](docs/dev/codex-integration.md) |
 | Touch the FigJam agent (`packages/figjam-*`: plugin, bridge, layout) | [`docs/dev/figjam.md`](docs/dev/figjam.md) |
 | Touch a `/v1/messages` or client-auth wire contract | [`docs/spec/wire/`](docs/spec/wire/) |
-| Touch i18n catalogs / translation wording (`shell/src/i18n/`) | [`docs/dev/i18n.md`](docs/dev/i18n.md); loop in the i18n expert per [`CONTRIBUTORS.md`](CONTRIBUTORS.md) |
+| Touch i18n catalogs / translation wording (`shell/src/i18n/`) | [`docs/dev/i18n.md`](docs/dev/i18n.md) |
 
 ## Other knowledge in this repo
 
 - `docs/decisions/` — the few decision records still in force (CodeQL suppressions, Copilot coupling, the site version manifest)
 - `docs/dev/` — developer notes (testing strategy, i18n, Codex, Windows VM)
 - `docs/admin/` — operational docs
-- `CONTRIBUTORS.md` — trusted domain experts to loop in per area
+- `CONTRIBUTORS.md` — mandatory domain-expert reviewers, when any are listed
 
 **The code is the authority.** Docs here describe current behavior only — no plans, research notes, or history (that lives in git). If a doc disagrees with the code, trust the code and fix the doc in the same change. Don't add dated investigation notes or proposals to the repo.
 
