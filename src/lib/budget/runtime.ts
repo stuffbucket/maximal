@@ -31,7 +31,7 @@ import { createUsageDbBudgetStore } from "./store"
 function announceWarning(warning: BudgetWarning): void {
   const percent = Math.round((warning.used / Math.max(1, warning.limit)) * 100)
   consola.warn(
-    `Budget "${warning.limitId}" is at ${percent}% of its limit${
+    `Rule "${warning.limitId}" is at ${percent}% of its limit${
       warning.resetsAtMs === null ?
         ""
       : `; it resets ${new Date(warning.resetsAtMs).toISOString()}`

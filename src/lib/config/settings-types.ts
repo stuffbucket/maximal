@@ -910,6 +910,54 @@ export const BudgetLimitPutRequest = z
   )
 export type BudgetLimitPutRequest = z.infer<typeof BudgetLimitPutRequest>
 
+/** One way a rule's period can reset, for the UI to offer. */
+export const BudgetResetPreset = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string(),
+  limit_reset: BudgetLimitReset,
+  /** `<provider>:<window id>` for a "Follow ..." preset, else null. */
+  window: z.string().nullable(),
+})
+export type BudgetResetPreset = z.infer<typeof BudgetResetPreset>
+
+/** A rule a persona preset suggests: the fields of a PUT body, plus the
+ *  `id` to give it. A `null` scope `id` means "the person picks one". */
+export const BudgetPresetLimit = z.object({
+  id: BudgetLimitId,
+  label: z.string(),
+  scope: z.union([
+    z.object({ kind: z.literal("global") }),
+    z.object({
+      kind: z.enum(["key", "plugin", "provider"]),
+      id: z.string().nullable(),
+    }),
+  ]),
+  limit: NanoAiuAmount,
+  /** `limit` in the display unit. */
+  amount: z.number().min(0),
+  limit_reset: BudgetLimitReset,
+  warn_at: BudgetWarnAt,
+  action: BudgetLimitAction,
+})
+export type BudgetPresetLimit = z.infer<typeof BudgetPresetLimit>
+
+export const BudgetPersonaPreset = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string(),
+  limits: z.array(BudgetPresetLimit),
+})
+export type BudgetPersonaPreset = z.infer<typeof BudgetPersonaPreset>
+
+/** GET /settings/api/budget/presets: suggestions only; none is applied. */
+export const BudgetPresetsResponse = z.object({
+  display: z.object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate }),
+  resets: z.array(BudgetResetPreset),
+  personas: z.array(BudgetPersonaPreset),
+})
+export type BudgetPresetsResponse = z.infer<typeof BudgetPresetsResponse>
+
 /** One validation problem. `path` is dotted and relative to the request
  *  body (`"config.endpoint"`, `"permissions.fetch"`; `""` = the body). */
 export const PluginValidationIssue = z.object({

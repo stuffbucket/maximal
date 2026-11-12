@@ -68,7 +68,7 @@ const SERVED_RENDERS: ReadonlySet<string> = new Set(["hidden"])
 function refusalResult(refusal: BudgetRefusal): ToolResult {
   const retry =
     refusal.inFlight ? "" : (
-      " Don't retry this tool until the budget resets or is raised."
+      " Don't retry this tool until the rule resets or is raised."
     )
   return {
     isError: true,

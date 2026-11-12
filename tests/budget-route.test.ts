@@ -422,3 +422,38 @@ describe("GET /settings/api/budget/activity", () => {
     )
   })
 })
+
+describe("rolling and monthly resets over the API", () => {
+  test("a rolling or monthly limit is stored and reported as given", async () => {
+    const app = buildApp()
+    const rolling = await put(app, "agents", {
+      ...images,
+      limit_reset: { every: { hours: 5 } },
+    })
+    expect(rolling.status).toBe(200)
+    const monthly = await put(app, "monthly", {
+      ...images,
+      limit_reset: { monthly: { day: 15 } },
+    })
+    const body = await status(monthly)
+    const byId = new Map(body.budgets.map((entry) => [entry.id, entry]))
+    expect(byId.get("agents")?.limit_reset).toEqual({ every: { hours: 5 } })
+    expect(byId.get("monthly")?.limit_reset).toEqual({ monthly: { day: 15 } })
+    expect(getConfig().budget?.limits?.map((l) => l.limitReset)).toEqual([
+      { every: { hours: 5 } },
+      { monthly: { day: 15 } },
+    ])
+  })
+
+  test("an out-of-range window is a 400", async () => {
+    const app = buildApp()
+    for (const limit_reset of [
+      { every: { hours: 0 } },
+      { every: { hours: 721 } },
+      { monthly: { day: 29 } },
+    ]) {
+      const response = await put(app, "bad", { ...images, limit_reset })
+      expect(response.status).toBe(400)
+    }
+  })
+})

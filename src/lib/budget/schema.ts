@@ -39,11 +39,27 @@ export const ProviderWindowRef = z
   .max(160)
   .regex(/^[\w.-]+:[\w.-]+$/u)
 
-/** When a limit's period resets: with a provider's quota window, or at
- *  00:00 UTC every day / every Monday, or never. */
+/** Longest rolling window: the spend it counts is read into memory. */
+export const MAX_EVERY_HOURS = 720
+export const MAX_EVERY_DAYS = 90
+
+/** When a limit's period resets: with a provider's quota window, at 00:00
+ *  UTC every day / every Monday / on a day of the month, never, or
+ *  continuously over a trailing window of N hours or days. */
 export const BudgetLimitReset = z.union([
   z.enum(["daily", "weekly", "never"]),
   z.object({ follow: ProviderWindowRef }),
+  z.object({
+    every: z.union([
+      z
+        .object({ hours: z.number().int().min(1).max(MAX_EVERY_HOURS) })
+        .strict(),
+      z.object({ days: z.number().int().min(1).max(MAX_EVERY_DAYS) }).strict(),
+    ]),
+  }),
+  z.object({
+    monthly: z.object({ day: z.number().int().min(1).max(28) }).strict(),
+  }),
 ])
 export type BudgetLimitReset = z.infer<typeof BudgetLimitReset>
 

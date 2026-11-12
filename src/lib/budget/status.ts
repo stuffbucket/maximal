@@ -14,12 +14,13 @@ import type {
   ProviderQuotaWindowStatus,
 } from "~/lib/config/settings-types"
 
-import { getNanoAiuSpend } from "~/lib/token-usage/spend"
+import { getNanoAiuSpend, getOldestSpendMs } from "~/lib/token-usage/spend"
 import { isTokenUsageStorageEnabled } from "~/lib/token-usage/store"
 
 import {
   fixedPeriod,
   resolvePeriod,
+  rollingPeriodEnd,
   type BudgetPeriod,
   type FollowedWindow,
 } from "./periods"
@@ -74,11 +75,21 @@ async function limitStatus(
   period: BudgetPeriod,
   { nowMs, display, held }: StatusContext,
 ): Promise<BudgetLimitStatus> {
-  const [usage, usageDaily, usageWeekly] = await getNanoAiuSpend(limit.scope, [
-    period,
-    fixedPeriod("daily", nowMs),
-    fixedPeriod("weekly", nowMs),
+  const [[usage, usageDaily, usageWeekly], oldest] = await Promise.all([
+    getNanoAiuSpend(limit.scope, [
+      period,
+      fixedPeriod("daily", nowMs),
+      fixedPeriod("weekly", nowMs),
+    ]),
+    // A rolling window resets when its oldest counted spend ages out.
+    period.rollingMs === undefined ?
+      undefined
+    : getOldestSpendMs(limit.scope, period),
   ])
+  const endMs =
+    period.rollingMs === undefined ?
+      period.endMs
+    : rollingPeriodEnd(oldest, period.rollingMs)
   const remaining = Math.max(0, limit.limit - usage)
   const warnAt = limit.warnAt ?? DEFAULT_WARN_AT
   return {
@@ -95,7 +106,7 @@ async function limitStatus(
     usage_daily: usageDaily,
     usage_weekly: usageWeekly,
     period_start: iso(period.startMs),
-    resets_at: period.endMs === null ? null : iso(period.endMs),
+    resets_at: endMs === null ? null : iso(endMs),
     reset_basis: period.basis,
     reset_estimated: period.estimated,
     state: limitState(usage, limit.limit, warnAt),

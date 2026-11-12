@@ -10,6 +10,9 @@
  * - `DELETE /limits/:id` — remove a limit.
  * - `PATCH /` — `enabled` (enforcement on or off) and `display_unit`
  *   (`BudgetSettingsPatchRequest`).
+ * - `GET /presets` — reset presets and persona presets
+ *   (`BudgetPresetsResponse`): suggestions the UI turns into draft rules,
+ *   never applied here.
  * - `GET /activity?period=day|week|month&group=model|plugin|key|provider|day`
  *   — spend per group (`BudgetActivityResponse`); `GET /activity.csv` is the
  *   same rows as CSV.
@@ -31,6 +34,8 @@ import {
   type ActivityGroup,
   type ActivityPeriod,
 } from "~/lib/budget/activity"
+import { buildBudgetPresets } from "~/lib/budget/presets"
+import { listProviderWindows } from "~/lib/budget/provider-windows"
 import { currentBudgetStatus, emitBudgetChanged } from "~/lib/budget/runtime"
 import {
   BudgetLimitId,
@@ -43,6 +48,7 @@ import { getConfig, writeConfig } from "~/lib/config/config"
 import {
   BudgetActivityResponse,
   BudgetLimitPutRequest,
+  BudgetPresetsResponse,
   BudgetSettingsPatchRequest,
   BudgetStatusResponse,
 } from "~/lib/config/settings-types"
@@ -189,6 +195,26 @@ budgetRoutes.patch("/", async (c) => {
       },
     })
     return await respondChanged(c)
+  } catch (error) {
+    return forwardError(c, error)
+  }
+})
+
+budgetRoutes.get("/presets", async (c) => {
+  try {
+    const config = getConfig()
+    const keyLabels = (config.auth?.apiKeyEntries ?? [])
+      .filter((entry) => entry.enabled)
+      .map((entry) => entry.label)
+    return respondValidated(
+      c,
+      { schema: BudgetPresetsResponse, label: "Budget presets" },
+      buildBudgetPresets({
+        display: resolveBudgetDisplay(config.budget),
+        windows: await listProviderWindows(),
+        keyLabels,
+      }),
+    )
   } catch (error) {
     return forwardError(c, error)
   }

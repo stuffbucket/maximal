@@ -124,7 +124,7 @@ function budgetMetadata(refusal: BudgetRefusal): Record<string, unknown> {
       refusal.resetsAtMs === null ?
         null
       : new Date(refusal.resetsAtMs).toISOString(),
-    remedy_hint: "Raise or remove it in Maximal → Budget.",
+    remedy_hint: "Raise or remove it in Maximal → Rules.",
   }
 }
 
