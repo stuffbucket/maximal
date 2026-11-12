@@ -26,7 +26,8 @@ function definitionProblem(
   definition: Record<string, unknown>,
   where: string,
 ): string | undefined {
-  const { description, input_schema, render, offer, clients } = definition
+  const { description, input_schema, render, offer, clients, estimate } =
+    definition
   if (typeof description !== "string" || description === "")
     return `${where} needs a description.`
   if (!isRecord(input_schema) || input_schema.type !== "object")
@@ -39,6 +40,8 @@ function definitionProblem(
     return `${where} cannot be offered "when-client-declares" and rendered "hidden": a client declares Anthropic's own server tools, which render as such.`
   if (clients !== undefined && !isClientList(clients))
     return `${where} clients must be a non-empty list of client names.`
+  if (estimate !== undefined && typeof estimate !== "function")
+    return `${where} estimate must be a function.`
   if (typeof definition.execute !== "function")
     return `${where} needs an execute function.`
   return undefined
@@ -87,6 +90,8 @@ function normalizeServerToolDefinition(
   // Captured now so later mutation of `source` cannot swap the handler.
   // eslint-disable-next-line @typescript-eslint/unbound-method
   const execute = source.execute
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const estimate = source.estimate
   return Object.freeze({
     name,
     description: source.description,
@@ -96,6 +101,12 @@ function normalizeServerToolDefinition(
     clients: Object.freeze([
       ...(source.clients ?? DEFAULT_SERVER_TOOL_CLIENTS),
     ]),
+    ...(estimate === undefined ?
+      {}
+    : {
+        estimate: (input: Record<string, unknown>) =>
+          estimate.call(source, input),
+      }),
     execute: (
       input: Record<string, unknown>,
       call: Parameters<ServerToolDefinition["execute"]>[1],

@@ -37,6 +37,7 @@ export function listServerToolViews(
         render: tool.render,
         offer: tool.offer,
         clients: tool.clients ?? DEFAULT_SERVER_TOOL_CLIENTS,
+        ...(tool.estimate ? { estimate: tool.estimate } : {}),
       })
     }
   }

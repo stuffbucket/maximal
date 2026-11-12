@@ -301,8 +301,10 @@ export type {
 export type {
   ServerToolBudget,
   ServerToolCall,
+  ServerToolEstimate,
   ServerToolOffer,
   ServerToolRender,
+  ServerToolSpend,
   ServerToolView,
 } from "./server-tools"
 export type {

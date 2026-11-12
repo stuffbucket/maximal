@@ -4,16 +4,21 @@
 
 import type {
   PluginGateway,
+  ServerToolEstimate,
+  ServerToolSpend,
   ServerToolView,
   ToolResult,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import type { BudgetRefusal } from "~/lib/budget/errors"
-import type { BudgetService } from "~/lib/budget/service"
+import type { BudgetHold, BudgetService } from "~/lib/budget/service"
 import type { AnthropicToolUseBlock } from "~/lib/models/anthropic-types"
 
+import { bookedResult } from "~/lib/budget/dispatch"
 import { BudgetExceededError } from "~/lib/budget/errors"
+import { estimateOperationNanoAiu } from "~/lib/budget/estimate"
 import { currentBudgetKey, reserveBudget } from "~/lib/budget/runtime"
+import { recordOperationUsage } from "~/routes/passthrough"
 
 import type { ServerToolListing, ServerToolRun } from "./types"
 
@@ -80,6 +85,20 @@ function refusalResult(refusal: BudgetRefusal): ToolResult {
   }
 }
 
+type ReleaseReason = Parameters<BudgetHold["release"]>[0]
+
+/** The tool's estimate for this input; a tool that throws has none. */
+function estimateOf(
+  view: ServerToolView,
+  input: Record<string, unknown>,
+): ServerToolEstimate | undefined {
+  try {
+    return view.estimate?.(input)
+  } catch {
+    return undefined
+  }
+}
+
 function listingFor(
   gateway: PluginGateway,
   view: ServerToolView,
@@ -96,9 +115,10 @@ function listingFor(
     run: async (toolUse: AnthropicToolUseBlock, call) => {
       // The host books a call to `{ plugin, tool }` (`ServerToolCall.budget`).
       // The limits covering that pair, the caller's key, or everything decide
-      // it here. A server tool has no estimate of its own yet, so it runs
-      // while those limits have room; what it spends lands in them through
-      // its usage rows.
+      // it here. A billed tool names the operation it would run
+      // (`ServerToolView.estimate`), and that operation's estimate is held;
+      // any other runs while those limits have room.
+      const estimate = estimateOf(view, toolUse.input)
       let hold
       try {
         hold = await reserveBudget(
@@ -107,7 +127,13 @@ function listingFor(
             plugin: view.pluginId,
             tool: view.name,
             key: currentBudgetKey(),
-            estimateNanoAiu: 0,
+            ...(estimate?.provider === undefined ?
+              {}
+            : { provider: estimate.provider }),
+            estimateNanoAiu:
+              estimate ?
+                estimateOperationNanoAiu(estimate.operation, estimate.body)
+              : 0,
           },
           budget,
         )
@@ -121,18 +147,38 @@ function listingFor(
           content: [{ type: "text", text: failureText(error) }],
         })
       }
+      // What the tool reports it spent: recorded as usage (so the limits
+      // count it) and booked against the hold.
+      const held = hold
+      let billedNanoAiu: number | undefined
+      const reportSpend = (spend: ServerToolSpend): void => {
+        const booked = bookedResult(spend.result, held)
+        recordOperationUsage(
+          {
+            operation: spend.operation,
+            model: spend.model,
+            provider: spend.provider,
+          },
+          booked,
+        )
+        billedNanoAiu = (billedNanoAiu ?? 0) + (booked.cost?.amount ?? 0)
+      }
+      // A call that reported spend was billed even if it then failed.
+      const close = (failed: boolean, reason: ReleaseReason): void => {
+        if (failed && billedNanoAiu === undefined) held.release(reason)
+        else held.commit({ nanoAiu: billedNanoAiu })
+      }
       try {
         const result = await gateway.callServerTool(
           view.pluginId,
           view.name,
           toolUse.input,
-          call,
+          { ...call, reportSpend },
         )
-        if (result.isError === true) hold.release("upstream-error")
-        else hold.commit()
+        close(result.isError === true, "upstream-error")
         return runFrom(toolUse.id, result)
       } catch (error) {
-        hold.release(call.signal.aborted ? "aborted" : "upstream-error")
+        close(true, call.signal.aborted ? "aborted" : "upstream-error")
         // The plugin stopped between the plan and the call. The model gets
         // the failure and carries on without the tool.
         return runFrom(toolUse.id, {

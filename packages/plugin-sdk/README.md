@@ -165,8 +165,16 @@ never destructured.
   `description` is part of the prompt-cache prefix, so keep it fixed. `render:
   "hidden"` keeps the call and its result from the client; `offer: "always"`
   offers it on every agent turn of the `clients` (default `["claude-code"]`).
-  `call` has `signal`, `sessionId?`, `model`, `client` and `budget?` (the
-  `{ plugin, tool }` scope spend will be booked under; nothing enforces it yet).
+  `call` has `signal`, `sessionId?`, `model`, `client`, `budget?` (the
+  `{ plugin, tool }` scope the host checks the budget limits under before
+  `execute` runs; a refusal is the tool's result and `execute` never runs) and
+  `reportSpend?(spend)`. A billed tool declares `estimate?(input)` → `{
+  operation, provider?, body }` (the model operation the call would make and
+  the body to price it from; the app core holds that operation's estimate, so
+  the tool carries no price list) and calls `call.reportSpend({ operation,
+  model, provider, result })` with the operation's `{ usage, cost }` once the
+  provider answered, which records the usage and books the cost against the
+  hold. A free tool does neither.
   Server tools are not MCP tools and have no tool permissions.
   `decision-tools.ts` has the shared pieces of a capability plugin that offers
   its model this way: `serverToolWhileAvailable` (register only while a binding's
