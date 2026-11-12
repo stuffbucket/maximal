@@ -3,6 +3,7 @@ import path from "node:path"
 import { z } from "zod"
 
 import { BUDGET_HOLDS_MIGRATION } from "~/lib/budget/migrations"
+import { BUDGET_EVENTS_MIGRATION } from "~/lib/budget/reports/migrations"
 import { PATHS } from "~/lib/platform/paths"
 import { registerProcessCleanup } from "~/lib/platform/process-cleanup"
 import {
@@ -13,6 +14,12 @@ import {
   type SqliteDatabase,
 } from "~/lib/platform/sqlite"
 
+import {
+  emptyTotals,
+  numberFromRow,
+  totalsFromRow,
+  USAGE_TOTALS_SELECT,
+} from "./aggregate"
 import {
   addToRecentMinutes,
   emptyRecentMinutes,
@@ -294,6 +301,7 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
     },
   },
   BUDGET_HOLDS_MIGRATION,
+  BUDGET_EVENTS_MIGRATION,
 ]
 
 /** Migration step 2's columns: which client sent a request, how long its
@@ -520,18 +528,6 @@ function getPeriodRange(period: TokenUsagePeriod, now = new Date()) {
   }
 }
 
-function createEmptyTotals(): TokenUsageTotals {
-  return {
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    request_count: 0,
-    total_tokens: 0,
-    total_nano_aiu: 0,
-  }
-}
-
 function createEmptySummary(period: TokenUsagePeriod): TokenUsageSummary {
   const range = getPeriodRange(period)
 
@@ -544,7 +540,7 @@ function createEmptySummary(period: TokenUsagePeriod): TokenUsageSummary {
       start_ms: range.startMs,
       start_utc: new Date(range.startMs).toISOString(),
     },
-    totals: createEmptyTotals(),
+    totals: emptyTotals(),
     recent_minutes: emptyRecentMinutes(Date.now()),
   }
 }
@@ -571,31 +567,6 @@ function createEmptyEventsPage(input: {
     },
     total: 0,
     total_pages: 1,
-  }
-}
-
-function numberFromRow(
-  row: Record<string, unknown> | undefined,
-  key: string,
-): number {
-  const value = row?.[key]
-  return typeof value === "number" && Number.isFinite(value) ? value : 0
-}
-
-function totalsFromRow(
-  row: Record<string, unknown> | undefined,
-): TokenUsageTotals {
-  return {
-    cache_creation_input_tokens: numberFromRow(
-      row,
-      "cache_creation_input_tokens",
-    ),
-    cache_read_input_tokens: numberFromRow(row, "cache_read_input_tokens"),
-    input_tokens: numberFromRow(row, "input_tokens"),
-    output_tokens: numberFromRow(row, "output_tokens"),
-    request_count: numberFromRow(row, "request_count"),
-    total_tokens: numberFromRow(row, "total_tokens"),
-    total_nano_aiu: numberFromRow(row, "total_nano_aiu"),
   }
 }
 
@@ -664,13 +635,7 @@ export async function getTokenUsageSummary(
     .prepare(
       `
     SELECT
-      COUNT(*) AS request_count,
-      COALESCE(SUM(input_tokens), 0) AS input_tokens,
-      COALESCE(SUM(output_tokens), 0) AS output_tokens,
-      COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_input_tokens,
-      COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
-      COALESCE(SUM(total_tokens), 0) AS total_tokens,
-      COALESCE(SUM(total_nano_aiu), 0) AS total_nano_aiu
+      ${USAGE_TOTALS_SELECT}
     FROM token_usage_events
     WHERE created_at_ms >= ? AND created_at_ms < ?
   `,
@@ -682,13 +647,7 @@ export async function getTokenUsageSummary(
       `
     SELECT
       model,
-      COUNT(*) AS request_count,
-      COALESCE(SUM(input_tokens), 0) AS input_tokens,
-      COALESCE(SUM(output_tokens), 0) AS output_tokens,
-      COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_input_tokens,
-      COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
-      COALESCE(SUM(total_tokens), 0) AS total_tokens,
-      COALESCE(SUM(total_nano_aiu), 0) AS total_nano_aiu,
+      ${USAGE_TOTALS_SELECT},
       MAX(is_premium) AS is_premium
     FROM token_usage_events
     WHERE created_at_ms >= ? AND created_at_ms < ?
