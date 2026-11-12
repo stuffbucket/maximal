@@ -48,7 +48,7 @@ interface LimitSeed {
   scope: Scope
   limitReset: LimitReset
   warnAt?: number
-  action: "block" | "warn" | "ask"
+  action: "block" | "warn" | "ask" | "pause"
   /** Share of the limit already spent (1.2 means over it). */
   fill: number
   /** nano-AIU reserved by calls in progress. */

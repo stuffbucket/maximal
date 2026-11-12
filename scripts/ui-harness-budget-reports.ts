@@ -58,7 +58,7 @@ export interface ReportLimit {
   limit: number
   limitReset: LimitReset
   warnAt: number
-  action: "block" | "warn" | "ask"
+  action: "block" | "warn" | "ask" | "pause"
 }
 
 /** A reusable filter, as the status lists it. */
