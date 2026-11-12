@@ -179,6 +179,20 @@ describe("matching a subject", () => {
     expect(scopeMatches(plugins, { key: "images" })).toBe(false)
   })
 
+  test("a subject without the attribute matches no pattern, not even *", () => {
+    expect(scopeMatches(modelsOf("*"), { key: "k" })).toBe(false)
+    expect(scopeMatches(modelsOf("undef*", "undefined"), { key: "k" })).toBe(
+      false,
+    )
+    expect(
+      scopeMatches(
+        { kind: "members", field: "plugin", members: ["*"] },
+        { key: "k", model: "m" },
+      ),
+    ).toBe(false)
+    expect(scopeMatches(modelsOf("*"), { key: "k", model: "" })).toBe(true)
+  })
+
   test("no members select nothing", () => {
     expect(scopeMatches(modelsOf(), { key: "k", model: "x" })).toBe(false)
   })

@@ -304,6 +304,7 @@ describe("budget status", () => {
     expect(credits.display).toEqual({ unit: "credits", credit_usd: 0.01 })
     expect(credits.budgets[0].display).toEqual({
       limit: 4,
+      effective_limit: 4,
       usage: 3,
       limit_remaining: 1,
     })

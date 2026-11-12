@@ -91,8 +91,28 @@ export const BudgetLimitReset = z.union([
 ])
 export type BudgetLimitReset = z.infer<typeof BudgetLimitReset>
 
-export const BudgetLimitAction = z.enum(["block", "warn"])
+/** What reaching a limit does: `block` refuses; `warn` never refuses; `ask`
+ *  refuses and asks the person to allow more (a notice and an attention
+ *  entry), recording what they allow as a temporary override. */
+export const BudgetLimitAction = z.enum(["block", "warn", "ask"])
 export type BudgetLimitAction = z.infer<typeof BudgetLimitAction>
+
+/** Where a rule's warning, or its limit being reached, is told: nowhere, a
+ *  native notification, the menu-bar attention list, or both. */
+export const BudgetNotifyChannel = z.enum([
+  "none",
+  "notification",
+  "tray",
+  "both",
+])
+export type BudgetNotifyChannel = z.infer<typeof BudgetNotifyChannel>
+
+/** Per-rule routing of its notices; what is left out takes the default
+ *  (`~/lib/budget/notify`: warnings notify, the limit notifies and lists). */
+export const BudgetNotifySchema = z.object({
+  warn: BudgetNotifyChannel.optional(),
+  limit: BudgetNotifyChannel.optional(),
+})
 
 /** Fraction of the limit (0–1) at which the limit reads as a warning. */
 export const BudgetWarnAt = z.number().min(0).max(1)
@@ -121,6 +141,7 @@ const BudgetLimitConfigSchema = z
     limitReset: BudgetLimitReset,
     warnAt: BudgetWarnAt.optional(),
     action: BudgetLimitAction,
+    notify: BudgetNotifySchema.optional(),
   })
   .loose()
 

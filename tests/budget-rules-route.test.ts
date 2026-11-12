@@ -260,7 +260,13 @@ describe("GET /rules/export", () => {
     expect(body).toEqual({
       version: 1,
       filters: [{ id: "claude", ...claude }],
-      limits: [{ id: "claude-daily", ...rule }],
+      limits: [
+        {
+          id: "claude-daily",
+          ...rule,
+          notify: { warn: "notification", limit: "both" },
+        },
+      ],
       display: { unit: "usd", credit_usd: 0.01 },
     })
   })

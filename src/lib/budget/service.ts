@@ -26,10 +26,13 @@
 import consola from "consola"
 import { randomUUID } from "node:crypto"
 
+import type { ApprovalState, LimitEvent } from "./approvals"
 import type { BudgetRefusal } from "./errors"
+import type { BudgetOverride } from "./overrides"
 import type { BudgetPeriod, FollowedWindow } from "./periods"
 import type { BudgetOperation, BudgetSubject, ResolvedScope } from "./scope"
 
+import { effectiveLimit, hasUnlimited } from "./overrides"
 import { resolvePeriod, rollingPeriodEnd } from "./periods"
 import {
   DEFAULT_WARN_AT,
@@ -166,8 +169,23 @@ export interface BudgetServiceDeps {
   onWarning?: (warning: BudgetWarning) => void
   /** Called for each refusal, first warning and approved hold, to log it. */
   onEvent?: (event: BudgetEvent) => void
+  /** The temporary overrides approvals granted: `ready` resolves once the
+   *  stored ones are loaded. */
+  overrides?: {
+    ready?(): Promise<void>
+    active(limitId: string, nowMs: number): ReadonlyArray<BudgetOverride>
+  }
+  /** An `ask` limit refused a call (not merely for calls in flight): asks
+   *  the person, and says whether a request is waiting or they said no. */
+  onAsk?: (event: LimitEvent) => ApprovalState
+  /** Another limit refused a call, once per limit and period. */
+  onLimitReached?: (event: LimitEvent) => void
   newId?: () => string
 }
+
+/** Said to the caller of an `ask` rule that refused: what to do next. */
+const APPROVAL_REQUESTED =
+  "Approval was requested in Maximal: allow more in the menu-bar list or the Rules window, then retry."
 
 /** Widest scope first, for a stable order. */
 const SCOPE_ORDER: Record<BudgetScopeKind, number> = {
@@ -269,6 +287,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
   const entries = new Map<string, LedgerEntry>()
   const holds = new Map<string, OpenHold>()
   const warned = new Set<string>()
+  const reached = new Set<string>()
   let started: Promise<void> | undefined
   let unsubscribe: (() => void) | undefined
 
@@ -302,6 +321,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
   function start(): Promise<void> {
     started ??= (async () => {
       await deps.windows.ready()
+      await deps.overrides?.ready?.()
       await deps.store.recover(clock())
       unsubscribe = deps.spendEvents(onSpend)
     })()
@@ -419,18 +439,19 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
   function refusalFor(
     { limit, entry }: ActiveLimit,
     estimate: number,
+    cap: number,
   ): BudgetRefusal | undefined {
     const used = entry.committed
     const held = heldFor(entry.scope)
     const total = used + held
-    if (total < limit.limit && total + estimate <= limit.limit) return undefined
-    const inFlight = used < limit.limit && used + estimate <= limit.limit
+    if (total < cap && total + estimate <= cap) return undefined
+    const inFlight = used < cap && used + estimate <= cap
     const display = resolveBudgetDisplay(deps.config())
     const nowMs = clock()
     const resetsAtMs = resetMsOf(entry)
     const words = {
       name: limit.label ?? limit.id,
-      limit: limit.limit,
+      limit: cap,
       used,
       held,
       requested: estimate,
@@ -446,7 +467,7 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
       limitId: limit.id,
       label: limit.label ?? null,
       scope: limit.scope,
-      limit: limit.limit,
+      limit: cap,
       used,
       held,
       requested: estimate,
@@ -461,14 +482,15 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
   function warningFor(
     { limit, entry }: ActiveLimit,
     estimate: number,
+    cap: number,
   ): BudgetWarning | undefined {
     const total = entry.committed + heldFor(entry.scope) + estimate
-    const threshold = limit.limit * (limit.warnAt ?? DEFAULT_WARN_AT)
+    const threshold = cap * (limit.warnAt ?? DEFAULT_WARN_AT)
     if (total < threshold) return undefined
     return {
       limitId: limit.id,
       used: entry.committed,
-      limit: limit.limit,
+      limit: cap,
       resetsAtMs: resetMsOf(entry),
     }
   }
@@ -481,18 +503,63 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
     const refusals: Array<BudgetRefusal> = []
     const warnings: Array<BudgetWarning> = []
     for (const item of active) {
-      if (item.limit.action === "block") {
-        const refusal = refusalFor(item, estimate)
+      const overrides = deps.overrides?.active(item.limit.id, clock()) ?? []
+      // An hour's allowance: the limit isn't enforced, nor warned about.
+      if (hasUnlimited(overrides)) continue
+      const cap = effectiveLimit(item.limit.limit, overrides)
+      if (item.limit.action !== "warn") {
+        const refusal = refusalFor(item, estimate, cap)
         if (refusal) {
-          refusals.push(refusal)
+          refusals.push(refused(item, refusal, cap))
           logEvent("refused", item, intent)
           continue
         }
+        reached.delete(`${item.limit.id}@${item.entry.key}`)
       }
-      const warning = warningFor(item, estimate)
+      const warning = warningFor(item, estimate, cap)
       if (warning) warnings.push(warning)
     }
     return { refusal: decisive(refusals), warnings }
+  }
+
+  /** Tell the person a limit refused a call, and for an `ask` limit add
+   *  whether approval is waiting. Calls in flight clearing on their own
+   *  aren't the limit being reached. */
+  function refused(
+    { limit, entry }: ActiveLimit,
+    refusal: BudgetRefusal,
+    cap: number,
+  ): BudgetRefusal {
+    if (refusal.inFlight) return refusal
+    const event: LimitEvent = {
+      limitId: limit.id,
+      periodKey: entry.key,
+      used: entry.committed,
+      limit: cap,
+      resetsAtMs: refusal.resetsAtMs,
+    }
+    try {
+      if (limit.action === "ask") {
+        const approval = deps.onAsk?.(event)
+        if (approval === undefined) return refusal
+        return {
+          ...refusal,
+          approval,
+          message:
+            approval === "pending" ?
+              `${refusal.message} ${APPROVAL_REQUESTED}`
+            : refusal.message,
+        }
+      }
+      const key = `${limit.id}@${entry.key}`
+      if (!reached.has(key)) {
+        reached.add(key)
+        deps.onLimitReached?.(event)
+      }
+    } catch (error) {
+      consola.warn("Budget: a limit handler failed", error)
+    }
+    return refusal
   }
 
   /** Hand a decision to `onEvent`; a failing logger never fails a call. */
@@ -511,7 +578,10 @@ export function createBudgetService(deps: BudgetServiceDeps): BudgetService {
         operation: intent.operation,
         estimateNanoAiu: estimateOf(intent),
         usedNanoAiu: entry.committed,
-        limitNanoAiu: limit.limit,
+        limitNanoAiu: effectiveLimit(
+          limit.limit,
+          deps.overrides?.active(limit.id, clock()) ?? [],
+        ),
       })
     } catch (error) {
       consola.warn("Budget: an event handler failed", error)

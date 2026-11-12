@@ -73,7 +73,7 @@ import {
 import { parseUsageRange } from "~/lib/budget/reports/range"
 import { buildLimitTimeline } from "~/lib/budget/reports/timeline"
 import { exportRules, planImport } from "~/lib/budget/rules"
-import { currentBudgetStatus, emitBudgetChanged } from "~/lib/budget/runtime"
+import { emitBudgetChanged, getOverrideRegistry } from "~/lib/budget/runtime"
 import {
   BudgetFilterId,
   BudgetLimitId,
@@ -81,6 +81,7 @@ import {
   NanoAiuAmount,
   type BudgetFilterConfig,
   type BudgetLimitConfig,
+  type BudgetScope,
 } from "~/lib/budget/schema"
 import { filterStatuses } from "~/lib/budget/status"
 import { displayToNanoAiu, resolveBudgetDisplay } from "~/lib/budget/units"
@@ -98,46 +99,15 @@ import {
   BudgetSettingsPatchRequest,
   BudgetSimulateRequest,
   BudgetSimulateResponse,
-  BudgetStatusResponse,
   BudgetSuggestRequest,
   BudgetSuggestResponse,
   BudgetTimelineResponse,
 } from "~/lib/config/settings-types"
 import { forwardError } from "~/lib/errors/error"
 
+import { budgetActionRoutes } from "./budget-actions"
+import { respondChanged, respondStatus, validationError } from "./budget-http"
 import { respondValidated } from "./respond-validated"
-
-async function respondStatus(c: Context): Promise<Response> {
-  return respondValidated(
-    c,
-    { schema: BudgetStatusResponse, label: "Budget" },
-    await currentBudgetStatus(),
-  )
-}
-
-/** The reply to a change, which also tells the shell. */
-async function respondChanged(c: Context): Promise<Response> {
-  const response = await respondStatus(c)
-  emitBudgetChanged()
-  return response
-}
-
-function validationError(
-  c: Context,
-  message: string,
-  details?: unknown,
-): Response {
-  return c.json(
-    {
-      error: {
-        message,
-        type: "validation_error",
-        ...(details === undefined ? {} : { details }),
-      },
-    },
-    400,
-  )
-}
 
 function notFound(c: Context): Response {
   return c.json(
@@ -153,7 +123,21 @@ function withLimits(
   return { ...config, budget: { ...config.budget, limits } }
 }
 
+/** The id of the filter a scope names when there is no such filter. */
+function missingFilter(
+  config: AppConfig,
+  scope: BudgetScope,
+): string | undefined {
+  if (scope.kind !== "filter") return undefined
+  const known = (config.budget?.filters ?? []).some(
+    (filter) => filter.id === scope.id,
+  )
+  return known ? undefined : scope.id
+}
+
 export const budgetRoutes = new Hono()
+
+budgetRoutes.route("/", budgetActionRoutes)
 
 budgetRoutes.get("/", async (c) => {
   try {
@@ -192,14 +176,9 @@ budgetRoutes.put("/limits/:id", async (c) => {
       return validationError(c, "Limit amount is out of range")
     }
 
-    const { scope } = request
-    if (
-      scope.kind === "filter"
-      && !(config.budget?.filters ?? []).some(
-        (filter) => filter.id === scope.id,
-      )
-    ) {
-      return validationError(c, `Unknown filter '${scope.id}'; create it first`)
+    const missing = missingFilter(config, request.scope)
+    if (missing !== undefined) {
+      return validationError(c, `Unknown filter '${missing}'; create it first`)
     }
 
     const entry: BudgetLimitConfig = {
@@ -210,6 +189,7 @@ budgetRoutes.put("/limits/:id", async (c) => {
       limitReset: request.limit_reset,
       warnAt: request.warn_at ?? DEFAULT_WARN_AT,
       action: request.action,
+      ...(request.notify === undefined ? {} : { notify: request.notify }),
     }
     const limits = [...(config.budget?.limits ?? [])]
     const index = limits.findIndex((limit) => limit.id === id.data)
@@ -229,6 +209,8 @@ budgetRoutes.delete("/limits/:id", async (c) => {
     const next = limits.filter((limit) => limit.id !== c.req.param("id"))
     if (next.length === limits.length) return notFound(c)
     writeConfig(withLimits(config, next))
+    // What approvals granted a rule goes with it.
+    getOverrideRegistry().removeForLimit(c.req.param("id"))
     return await respondChanged(c)
   } catch (error) {
     return forwardError(c, error)

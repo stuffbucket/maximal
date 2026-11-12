@@ -34,3 +34,14 @@ export const BUDGET_HOLDS_MIGRATION: Migration = {
     )
   },
 }
+
+/** What approvals granted a limit (`~/lib/budget/override-store`): extra room
+ *  or an hour without enforcement, in force until `expires_at_ms`. */
+export const BUDGET_OVERRIDES_MIGRATION: Migration = {
+  name: "add budget_overrides",
+  up: (db) => {
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS budget_overrides (id TEXT PRIMARY KEY, limit_id TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('extra', 'unlimited')), extra_nano_aiu INTEGER NOT NULL, created_at_ms INTEGER NOT NULL, expires_at_ms INTEGER)",
+    )
+  },
+}
