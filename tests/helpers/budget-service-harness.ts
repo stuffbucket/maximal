@@ -4,13 +4,16 @@
  * module-mocks anything.
  */
 
+import type { ApprovalState, LimitEvent } from "~/lib/budget/approvals"
 import type { FollowedWindow } from "~/lib/budget/periods"
 import type { BudgetConfig } from "~/lib/budget/schema"
 
 import { scopeMatches } from "~/lib/budget/scope"
 import {
   createBudgetService,
+  type BudgetEvent,
   type BudgetIntent,
+  type BudgetServiceDeps,
   type BudgetStore,
   type BudgetWarning,
   type SpendEvent,
@@ -63,11 +66,15 @@ export interface Harness {
   emit(row: SpendEvent): void
   rows: Array<SpendEvent>
   warnings: Array<BudgetWarning>
+  /** What the service handed to `onEvent`. */
+  events: Array<BudgetEvent>
   /** Usage listeners currently subscribed. */
   listening(): number
   calls: {
     config: number
     spend: Array<{ startMs: number; endMs: number | null }>
+    /** How many of those reads were for every cost (rolling windows). */
+    rowReads: number
     recover: number
     subscribed: number
     opened: Array<StoredHold>
@@ -93,6 +100,13 @@ export function harness(
     filters?: BudgetConfig["filters"]
     /** `none`: no `onWarning` dependency; `throws`: a handler that fails. */
     onWarning?: "none" | "throws"
+    /** The approvals the service reads: overrides in force, and who is
+     *  asked when a rule asks or reaches its limit. */
+    approvals?: {
+      overrides?: BudgetServiceDeps["overrides"]
+      onAsk?: (event: LimitEvent) => ApprovalState
+      onLimitReached?: (event: LimitEvent) => void
+    }
   } = {},
 ): Harness {
   let now = NOON
@@ -105,10 +119,12 @@ export function harness(
   const rows: Array<SpendEvent> = []
   const listeners = new Set<(row: SpendEvent) => void>()
   const warnings: Array<BudgetWarning> = []
+  const events: Array<BudgetEvent> = []
   let deferred: { started(): void; gate: Promise<void> } | undefined
   const calls: Harness["calls"] = {
     config: 0,
     spend: [],
+    rowReads: 0,
     recover: 0,
     subscribed: 0,
     opened: [],
@@ -136,6 +152,7 @@ export function harness(
     },
     async spendRows(scope, range) {
       calls.spend.push(range)
+      calls.rowReads += 1
       if (options.spendFails) throw new Error("database is down")
       const found = rows
         .filter(
@@ -183,6 +200,10 @@ export function harness(
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    ...options.approvals,
+    onEvent: (logged) => {
+      events.push(logged)
+    },
     ...(options.onWarning === "none" ?
       {}
     : {
@@ -211,6 +232,7 @@ export function harness(
     },
     rows,
     warnings,
+    events,
     listening: () => listeners.size,
     calls,
     deferSpend: () => {

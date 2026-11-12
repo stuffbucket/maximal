@@ -233,7 +233,8 @@ function decide(
   return {
     warned: used >= draft.limit * draft.warnAt,
     tripped,
-    refused: draft.action === "block" && tripped,
+    // A rule that asks refuses until it is answered, like one that blocks.
+    refused: draft.action !== "warn" && tripped,
   }
 }
 

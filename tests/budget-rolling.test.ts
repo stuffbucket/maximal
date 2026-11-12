@@ -304,6 +304,33 @@ describe("a rolling limit in the service", () => {
     expect(over.ok).toBe(false)
   })
 
+  test("a fixed period reads sums, a rolling window reads each cost", async () => {
+    const fixed = harness([limit({ id: "d" })])
+    await fixed.service.check(intent())
+    expect(fixed.calls.rowReads).toBe(0)
+    expect(fixed.calls.spend).toHaveLength(1)
+
+    const rolling = harness([limit({ id: "r", limitReset: every5h })])
+    await rolling.service.check(intent())
+    expect(rolling.calls.rowReads).toBe(1)
+    expect(rolling.calls.spend).toHaveLength(1)
+  })
+
+  test("the oldest cost sets the reset, wherever it sits and whatever else was recorded", async () => {
+    const h = harness([limit({ id: "r", limit: 3 * AIU, limitReset: every5h })])
+    await h.service.check(intent())
+    // Oldest first, then newer, then a free row older than any of them.
+    h.emit(event({ createdAtMs: NOON - 3 * HOUR_MS, nanoAiu: AIU }))
+    h.emit(event({ createdAtMs: NOON - HOUR_MS, nanoAiu: AIU }))
+    h.emit(event({ createdAtMs: NOON - 4 * HOUR_MS, nanoAiu: 0 }))
+    h.emit(event({ createdAtMs: NOON - 2 * HOUR_MS, nanoAiu: AIU }))
+    const refused = await h.service.check(intent())
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) {
+      expect(refused.refusal.resetsAtMs).toBe(NOON - 3 * HOUR_MS + FIVE_HOURS)
+    }
+  })
+
   test("the reset is the oldest cost's, whatever order they were recorded in", async () => {
     const h = harness([limit({ id: "r", limit: 2 * AIU, limitReset: every5h })])
     await h.service.check(intent())

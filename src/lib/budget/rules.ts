@@ -18,6 +18,7 @@ import {
   type BudgetRulesImportResponse,
 } from "~/lib/config/settings-types"
 
+import { DEFAULT_NOTIFY, resolveNotify } from "./notify"
 import {
   DEFAULT_WARN_AT,
   type BudgetConfig,
@@ -55,6 +56,7 @@ export function limitToWire(limit: BudgetLimitConfig): BudgetRuleLimit {
     limit_reset: limit.limitReset,
     warn_at: limit.warnAt ?? DEFAULT_WARN_AT,
     action: limit.action,
+    notify: resolveNotify(limit),
   }
 }
 
@@ -76,6 +78,10 @@ function limitFromWire(limit: BudgetRuleLimit): BudgetLimitConfig {
     limitReset: limit.limit_reset,
     warnAt: limit.warn_at,
     action: limit.action,
+    // Only what differs from the default is stored.
+    ...(same(limit.notify, DEFAULT_NOTIFY) || limit.notify === undefined ?
+      {}
+    : { notify: limit.notify }),
   }
 }
 
@@ -297,7 +303,12 @@ export function planImport(
   })
   const limits = mergeList({
     current: (budget?.limits ?? []).map((limit) => limitToWire(limit)),
-    imported: followRenames(document.limits, filters.renamed),
+    imported: followRenames(document.limits, filters.renamed).map(
+      (limit): BudgetRuleLimit => ({
+        ...limit,
+        notify: limit.notify ?? DEFAULT_NOTIFY,
+      }),
+    ),
     mode,
     collisions,
   })

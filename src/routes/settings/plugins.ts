@@ -33,6 +33,7 @@ import {
 import consola from "consola"
 import { Hono } from "hono"
 
+import { coreAttention, runCoreAttentionAction } from "~/lib/attention"
 import {
   PluginActionResponse,
   PluginDetailView,
@@ -211,7 +212,14 @@ pluginsRoutes.get("/attention", (c) => {
   return respondValidated(
     c,
     { schema: PluginsAttentionResponse, label: "plugins attention" },
-    { attention: gateway ? pluginAttention(gateway) : [] },
+    {
+      // The app's own first (a budget rule asking for more room), then the
+      // plugins'.
+      attention: [
+        ...coreAttention(),
+        ...(gateway ? pluginAttention(gateway) : []),
+      ],
+    },
   )
 })
 
@@ -284,6 +292,17 @@ pluginsRoutes.put("/:id/tool-permissions", async (c) => {
 pluginsRoutes.post("/:id/actions/:actionId", async (c) => {
   const id = c.req.param("id")
   const actionId = c.req.param("actionId")
+  // An item the app itself listed (see `/attention`) is answered here.
+  const core = runCoreAttentionAction(id, actionId)
+  if (core !== undefined) {
+    if (!core) return apiError(c, 404, `Nothing is waiting on ${actionId}.`)
+    c.status(202)
+    return respondValidated(
+      c,
+      { schema: PluginActionResponse, label: "plugin action" },
+      { ok: true },
+    )
+  }
   const gateway = getPluginGateway()
   if (!gateway) {
     return apiError(c, 503, "Plugins are not running.")

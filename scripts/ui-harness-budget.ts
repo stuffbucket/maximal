@@ -37,7 +37,7 @@ interface StoredLimit {
   limit: number
   limitReset: LimitReset
   warnAt: number
-  action: "block" | "warn"
+  action: "block" | "warn" | "ask"
 }
 
 /** A limit as a scenario describes it: sized so the current period is `fill` spent. */
@@ -47,7 +47,7 @@ interface LimitSeed {
   scope: Scope
   limitReset: LimitReset
   warnAt?: number
-  action: "block" | "warn"
+  action: "block" | "warn" | "ask"
   /** Share of the limit already spent (1.2 means over it). */
   fill: number
   /** nano-AIU reserved by calls in progress. */
@@ -470,6 +470,7 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
       action: entry.action,
       warn_at: entry.warnAt,
       limit: entry.limit,
+      effective_limit: entry.limit,
       limit_reset: entry.limitReset,
       limit_remaining: remaining,
       usage,
@@ -481,8 +482,12 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
       reset_basis: period.basis,
       reset_estimated: period.estimated,
       state: usage >= entry.limit ? "exhausted" : usage >= entry.limit * entry.warnAt ? "warning" : "ok",
+      notify: { warn: "notification", limit: "both" },
+      overrides: [],
+      approval: null,
       display: {
         limit: nanoAiuToDisplay(entry.limit, shown),
+        effective_limit: nanoAiuToDisplay(entry.limit, shown),
         usage: nanoAiuToDisplay(usage, shown),
         limit_remaining: nanoAiuToDisplay(remaining, shown),
       },

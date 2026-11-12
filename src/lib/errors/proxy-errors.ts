@@ -124,7 +124,11 @@ function budgetMetadata(refusal: BudgetRefusal): Record<string, unknown> {
       refusal.resetsAtMs === null ?
         null
       : new Date(refusal.resetsAtMs).toISOString(),
-    remedy_hint: "Raise or remove it in Maximal → Rules.",
+    remedy_hint:
+      refusal.approval === "pending" ?
+        "Allow more in the Maximal menu or Rules, then retry."
+      : "Raise or remove it in Maximal → Rules.",
+    ...(refusal.approval === undefined ? {} : { approval: refusal.approval }),
   }
 }
 
@@ -136,6 +140,9 @@ function budgetHeaders(refusal: BudgetRefusal): Record<string, string> {
     "x-maximal-budget-scope": refusal.scope.kind,
     "x-maximal-budget-limit": String(refusal.limit),
     "x-maximal-budget-used": String(refusal.used),
+    ...(refusal.approval === undefined ?
+      {}
+    : { "x-maximal-budget-approval": refusal.approval }),
     ...(refusal.resetsAtMs === null ?
       {}
     : {

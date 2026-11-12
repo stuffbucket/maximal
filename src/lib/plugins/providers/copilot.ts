@@ -14,6 +14,7 @@ import type {
 import type { sendRequest } from "~/lib/http/send-request"
 import type { Model } from "~/services/copilot/get-models"
 
+import { copilotWindowsFromUsage } from "~/lib/budget/copilot-windows"
 import { listProviderWindows } from "~/lib/budget/provider-windows"
 import { adviseUpstreamError } from "~/lib/errors/upstream-error-advice"
 import {
@@ -24,10 +25,14 @@ import {
 import { extractCopilotCost } from "~/lib/token-usage"
 import { postCopilotJson } from "~/services/copilot/post-copilot-json"
 import { COPILOT_PROVIDER_ID } from "~/services/copilot/upstream-request"
+import { getCopilotUsage } from "~/services/github/get-copilot-usage"
 
 export interface CopilotProviderDeps {
   /** The authenticated HTTP transport; the real one by default. */
   sendRequest?: typeof sendRequest
+  /** Reads GitHub's `/copilot_internal/user` reply, which carries the
+   *  quotas; the real call by default. */
+  getUsage?: () => Promise<unknown>
 }
 
 /** Numeric rates of a model's default price tier (or its flat rates). */
@@ -88,5 +93,9 @@ export function createCopilotProvider(
       (await listProviderWindows()).filter(
         (window) => window.provider === COPILOT_PROVIDER_ID,
       ),
+    async refreshQuotaWindows() {
+      const usage = await (deps.getUsage ?? (() => getCopilotUsage()))()
+      return copilotWindowsFromUsage(usage)
+    },
   }
 }

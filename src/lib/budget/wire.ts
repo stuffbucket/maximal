@@ -15,6 +15,7 @@ import {
   BudgetLimitAction,
   BudgetLimitId,
   BudgetLimitReset,
+  BudgetNotifyChannel,
   BudgetScope,
   BudgetWarnAt,
   CreditUsdRate,
@@ -28,6 +29,27 @@ import {
 
 export const BudgetLimitState = z.enum(["ok", "warning", "exhausted"])
 
+/** Where a rule's warning and its limit being reached are told. */
+export const BudgetNotifyStatus = z.object({
+  warn: BudgetNotifyChannel,
+  limit: BudgetNotifyChannel,
+})
+export type BudgetNotifyStatus = z.infer<typeof BudgetNotifyStatus>
+
+/** Room or time an approval granted a rule, in force until `expires_at`. */
+export const BudgetOverrideStatus = z.object({
+  id: z.string(),
+  /** `extra`: more room on top of the limit; `unlimited`: not enforced. */
+  kind: z.enum(["extra", "unlimited"]),
+  /** Extra room, in nano-AIU and the display unit; 0 for `unlimited`. */
+  extra_nano_aiu: NanoAiuAmount,
+  extra: z.number().min(0),
+  created_at: z.string(),
+  /** Null: lasts until it is removed (`DELETE /overrides/:id`). */
+  expires_at: z.string().nullable(),
+})
+export type BudgetOverrideStatus = z.infer<typeof BudgetOverrideStatus>
+
 /** One limit with its spend in the current period. */
 export const BudgetLimitStatus = z.object({
   id: BudgetLimitId,
@@ -36,6 +58,9 @@ export const BudgetLimitStatus = z.object({
   action: BudgetLimitAction,
   warn_at: BudgetWarnAt,
   limit: NanoAiuAmount,
+  /** The limit plus the room `extra` overrides granted; `limit_remaining`,
+   *  `state` and a refusal use this one. */
+  effective_limit: NanoAiuAmount,
   limit_reset: BudgetLimitReset,
   limit_remaining: NanoAiuAmount,
   /** Spend in the current period. */
@@ -55,8 +80,16 @@ export const BudgetLimitStatus = z.object({
   /** The period boundaries are Maximal's estimate, not the provider's. */
   reset_estimated: z.boolean(),
   state: BudgetLimitState,
+  notify: BudgetNotifyStatus,
+  /** What approvals granted that is still in force. An `unlimited` one
+   *  reads as `ok` whatever the spend. */
+  overrides: z.array(BudgetOverrideStatus),
+  /** For an `ask` rule: `pending` while a request for more room waits for
+   *  the person, `declined` after they chose to keep it blocked. */
+  approval: z.enum(["pending", "declined"]).nullable(),
   display: z.object({
     limit: z.number().min(0),
+    effective_limit: z.number().min(0),
     usage: z.number().min(0),
     limit_remaining: z.number().min(0),
   }),
@@ -301,6 +334,15 @@ export const BudgetLimitPutRequest = z
     limit_reset: BudgetLimitReset,
     warn_at: BudgetWarnAt.optional(),
     action: BudgetLimitAction,
+    /** Where this rule's notices go; what is left out takes the default
+     *  (warn: `notification`, limit: `both`). */
+    notify: z
+      .object({
+        warn: BudgetNotifyChannel.optional(),
+        limit: BudgetNotifyChannel.optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine(
@@ -390,6 +432,8 @@ export const BudgetRuleLimit = z
     limit_reset: BudgetLimitReset,
     warn_at: BudgetWarnAt,
     action: BudgetLimitAction,
+    /** Always written on export; an import without it takes the defaults. */
+    notify: BudgetNotifyStatus.strict().optional(),
   })
   .strict()
 export type BudgetRuleLimit = z.infer<typeof BudgetRuleLimit>
@@ -484,3 +528,27 @@ export const BudgetRulesImportResponse = z.object({
 export type BudgetRulesImportResponse = z.infer<
   typeof BudgetRulesImportResponse
 >
+
+/** Body of POST /settings/api/budget/limits/:id/approve: decide what to do
+ *  about a rule that has reached its limit. `more` allows extra room for the
+ *  rest of the period (`extra` in nano-AIU or `amount` in the display unit;
+ *  by default a quarter of the limit), `hour` stops enforcing it for an hour,
+ *  `keep` leaves it blocked and stops asking until the period turns over. */
+export const BudgetApproveRequest = z
+  .object({
+    choice: z.enum(["more", "hour", "keep"]),
+    extra: NanoAiuAmount.optional(),
+    amount: z.number().positive().optional(),
+  })
+  .strict()
+  .refine(
+    (body) =>
+      body.choice === "more"
+      || (body.extra === undefined && body.amount === undefined),
+    { message: "extra and amount only go with choice more", path: ["choice"] },
+  )
+  .refine((body) => body.extra === undefined || body.amount === undefined, {
+    message: "give extra (nano-AIU) or amount (display unit), not both",
+    path: ["extra"],
+  })
+export type BudgetApproveRequest = z.infer<typeof BudgetApproveRequest>

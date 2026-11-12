@@ -23,6 +23,7 @@ import {
 } from "~/lib/budget/schema"
 
 const AIU = 1_000_000_000
+const NOTIFY = { warn: "notification", limit: "both" } as const
 
 const claudeFilter: BudgetFilterConfig = {
   id: "claude",
@@ -105,6 +106,7 @@ describe("export", () => {
           limit_reset: "daily",
           warn_at: 0.5,
           action: "block",
+          notify: NOTIFY,
         },
         {
           id: "all-weekly",
@@ -113,6 +115,7 @@ describe("export", () => {
           limit_reset: { every: { hours: 5 } },
           warn_at: 0.8,
           action: "warn",
+          notify: NOTIFY,
         },
       ],
       display: { unit: "credits", credit_usd: 0.02 },
@@ -217,7 +220,7 @@ describe("validation", () => {
       ["limits.0.limit", { ...base, limit: 1.5 }],
       ["limits.0.limit", { ...base, limit: -1 }],
       ["limits.0.id", { ...base, id: "Bad Id" }],
-      ["limits.0.action", { ...base, action: "ask" }],
+      ["limits.0.action", { ...base, action: "pause" }],
       ["limits.0.warn_at", { ...base, warn_at: 2 }],
       [
         "limits.0.limit_reset",
@@ -327,7 +330,9 @@ describe("validation", () => {
       warn_at: 0.8,
       action: "block" as const,
     }
-    expect(ok(plan(doc({ limits: [rule] }))).diff.limits.added).toEqual([rule])
+    expect(ok(plan(doc({ limits: [rule] }))).diff.limits.added).toEqual([
+      { ...rule, notify: NOTIFY },
+    ])
   })
 
   test("more rules or filters than the config holds", () => {
@@ -383,7 +388,7 @@ describe("merge", () => {
   test("adds what is new after what is there, and removes nothing", () => {
     const result = ok(plan(doc({ limits: [added] })))
     expect(result.diff.limits).toEqual({
-      added: [added],
+      added: [{ ...added, notify: NOTIFY }],
       changed: [],
       removed: [],
       unchanged: [],
@@ -565,7 +570,7 @@ describe("replace", () => {
   test("makes the config the document: removes what it lacks", () => {
     const result = ok(plan(doc({ limits: [fresh, kept] }), "replace"))
     expect(result.diff.limits).toEqual({
-      added: [fresh],
+      added: [{ ...fresh, notify: NOTIFY }],
       changed: [],
       removed: [limitToWire(limits[0])],
       unchanged: ["all-weekly"],
@@ -660,6 +665,174 @@ describe("the config schema", () => {
     expect(
       BudgetConfigSchema.safeParse({ filters: [{ ...filter, kind: "tools" }] })
         .success,
+    ).toBe(false)
+  })
+})
+
+const askRule = (overrides: Record<string, unknown> = {}) => ({
+  id: "asking",
+  scope: { kind: "global" as const },
+  limit: AIU,
+  limit_reset: "daily" as const,
+  warn_at: 0.8,
+  action: "ask" as const,
+  ...overrides,
+})
+
+describe("ask rules and notify routing in rules documents", () => {
+  test("an ask rule and its routing export and import back unchanged", () => {
+    const limits: Array<BudgetLimitConfig> = [
+      {
+        id: "asking",
+        scope: { kind: "global" },
+        limit: AIU,
+        limitReset: "daily",
+        action: "ask",
+        notify: { warn: "tray", limit: "none" },
+      },
+    ]
+    const budget: BudgetConfig = { limits }
+    const exported = exportRules(budget)
+    expect(exported.limits[0]).toMatchObject({
+      action: "ask",
+      notify: { warn: "tray", limit: "none" },
+    })
+    const result = ok(planImport(budget, { rules: exported, mode: "replace" }))
+    expect(result.diff.limits.unchanged).toEqual(["asking"])
+    expect(result.next.limits[0]).toBe(limits[0])
+  })
+
+  test("a rule that leaves notify out takes the defaults, and equals a stored rule without it", () => {
+    const stored: BudgetConfig = {
+      limits: [
+        {
+          id: "asking",
+          scope: { kind: "global" },
+          limit: AIU,
+          limitReset: "daily",
+          warnAt: 0.8,
+          action: "ask",
+        },
+      ],
+    }
+    const result = ok(
+      planImport(stored, {
+        rules: doc({ limits: [askRule()] }),
+        mode: "merge",
+      }),
+    )
+    expect(result.diff.limits.unchanged).toEqual(["asking"])
+    expect(result.diff.limits.changed).toEqual([])
+  })
+
+  test("only a routing that differs from the default is stored", () => {
+    const fresh = ok(
+      planImport(undefined, {
+        rules: doc({
+          limits: [
+            askRule({
+              id: "plain",
+              notify: { warn: "notification", limit: "both" },
+            }),
+            askRule({ id: "custom", notify: { warn: "none", limit: "tray" } }),
+          ],
+        }),
+        mode: "merge",
+      }),
+    )
+    expect(fresh.next.limits[0]).not.toHaveProperty("notify")
+    expect(fresh.next.limits[1].notify).toEqual({ warn: "none", limit: "tray" })
+  })
+
+  test("a different routing is a change", () => {
+    const stored: BudgetConfig = {
+      limits: [
+        {
+          id: "asking",
+          scope: { kind: "global" },
+          limit: AIU,
+          limitReset: "daily",
+          warnAt: 0.8,
+          action: "ask",
+        },
+      ],
+    }
+    const result = ok(
+      planImport(stored, {
+        rules: doc({
+          limits: [askRule({ notify: { warn: "tray", limit: "tray" } })],
+        }),
+        mode: "merge",
+      }),
+    )
+    expect(result.diff.limits.changed).toHaveLength(1)
+    expect(result.next.limits[0].notify).toEqual({
+      warn: "tray",
+      limit: "tray",
+    })
+  })
+
+  test("a channel that isn't one is refused, and notify takes both keys", () => {
+    for (const notify of [
+      { warn: "loud", limit: "both" },
+      { warn: "tray" },
+      { warn: "tray", limit: "both", extra: 1 },
+    ]) {
+      expect(
+        problems(
+          planImport(undefined, {
+            rules: doc({ limits: [askRule({ notify })] }),
+            mode: "merge",
+          }),
+        ).length,
+      ).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe("the schema's ask action and routing", () => {
+  const base = {
+    id: "l",
+    scope: { kind: "global" },
+    limit: 1,
+    limitReset: "daily",
+  }
+
+  test("accepts ask, and each channel for each notice", () => {
+    for (const action of ["block", "warn", "ask"]) {
+      expect(
+        BudgetConfigSchema.safeParse({ limits: [{ ...base, action }] }).success,
+      ).toBe(true)
+    }
+    for (const channel of ["none", "notification", "tray", "both"]) {
+      expect(
+        BudgetConfigSchema.safeParse({
+          limits: [
+            {
+              ...base,
+              action: "ask",
+              notify: { warn: channel, limit: channel },
+            },
+          ],
+        }).success,
+      ).toBe(true)
+    }
+    expect(
+      BudgetConfigSchema.safeParse({
+        limits: [{ ...base, action: "ask", notify: {} }],
+      }).success,
+    ).toBe(true)
+  })
+
+  test("refuses another action or channel", () => {
+    expect(
+      BudgetConfigSchema.safeParse({ limits: [{ ...base, action: "pause" }] })
+        .success,
+    ).toBe(false)
+    expect(
+      BudgetConfigSchema.safeParse({
+        limits: [{ ...base, action: "ask", notify: { limit: "email" } }],
+      }).success,
     ).toBe(false)
   })
 })

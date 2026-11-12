@@ -47,6 +47,7 @@ function limit(overrides: Partial<BudgetLimitStatus> = {}): BudgetLimitStatus {
     action: "block",
     warn_at: 0.8,
     limit: 3_000_000_000,
+    effective_limit: 3_000_000_000,
     limit_reset: "daily",
     limit_remaining: 600_000_000,
     usage: 2_400_000_000,
@@ -58,7 +59,15 @@ function limit(overrides: Partial<BudgetLimitStatus> = {}): BudgetLimitStatus {
     reset_basis: "fixed",
     reset_estimated: false,
     state: "warning",
-    display: { limit: 0.03, usage: 0.024, limit_remaining: 0.006 },
+    notify: { warn: "notification", limit: "both" },
+    overrides: [],
+    approval: null,
+    display: {
+      limit: 0.03,
+      effective_limit: 0.03,
+      usage: 0.024,
+      limit_remaining: 0.006,
+    },
     ...overrides,
   }
 }

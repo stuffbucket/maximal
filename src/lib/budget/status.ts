@@ -18,6 +18,11 @@ import type {
 import { getNanoAiuSpend, getOldestSpendMs } from "~/lib/token-usage/spend"
 import { isTokenUsageStorageEnabled } from "~/lib/token-usage/store"
 
+import type { ApprovalState } from "./approvals"
+import type { BudgetOverride } from "./overrides"
+
+import { resolveNotify } from "./notify"
+import { effectiveLimit, hasUnlimited } from "./overrides"
 import {
   fixedPeriod,
   resolvePeriod,
@@ -72,14 +77,33 @@ interface StatusContext {
   filters: BudgetConfig["filters"]
   display: BudgetDisplay
   held: (scope: BudgetScope) => number
+  overrides: (limitId: string) => ReadonlyArray<BudgetOverride>
+  approval: (limitId: string) => ApprovalState | null
+}
+
+function overrideStatus(
+  override: BudgetOverride,
+  display: BudgetDisplay,
+): BudgetLimitStatus["overrides"][number] {
+  return {
+    id: override.id,
+    kind: override.kind,
+    extra_nano_aiu: override.extraNanoAiu,
+    extra: nanoAiuToDisplay(override.extraNanoAiu, display),
+    created_at: iso(override.createdAtMs),
+    expires_at:
+      override.expiresAtMs === null ? null : iso(override.expiresAtMs),
+  }
 }
 
 async function limitStatus(
   limit: BudgetLimitConfig,
   period: BudgetPeriod,
-  { nowMs, display, held, filters }: StatusContext,
+  { nowMs, display, held, filters, overrides, approval }: StatusContext,
 ): Promise<BudgetLimitStatus> {
   const scope = resolveScope(limit.scope, filters)
+  const granted = overrides(limit.id)
+  const cap = effectiveLimit(limit.limit, granted)
   const [[usage, usageDaily, usageWeekly], oldest] = await Promise.all([
     getNanoAiuSpend(scope, [
       period,
@@ -95,7 +119,7 @@ async function limitStatus(
     period.rollingMs === undefined ?
       period.endMs
     : rollingPeriodEnd(oldest, period.rollingMs)
-  const remaining = Math.max(0, limit.limit - usage)
+  const remaining = Math.max(0, cap - usage)
   const warnAt = limit.warnAt ?? DEFAULT_WARN_AT
   return {
     id: limit.id,
@@ -104,6 +128,7 @@ async function limitStatus(
     action: limit.action,
     warn_at: warnAt,
     limit: limit.limit,
+    effective_limit: cap,
     limit_reset: limit.limitReset,
     limit_remaining: remaining,
     usage,
@@ -114,9 +139,13 @@ async function limitStatus(
     resets_at: endMs === null ? null : iso(endMs),
     reset_basis: period.basis,
     reset_estimated: period.estimated,
-    state: limitState(usage, limit.limit, warnAt),
+    state: hasUnlimited(granted) ? "ok" : limitState(usage, cap, warnAt),
+    notify: resolveNotify(limit),
+    overrides: granted.map((override) => overrideStatus(override, display)),
+    approval: approval(limit.id),
     display: {
       limit: nanoAiuToDisplay(limit.limit, display),
+      effective_limit: nanoAiuToDisplay(cap, display),
       usage: nanoAiuToDisplay(usage, display),
       limit_remaining: nanoAiuToDisplay(remaining, display),
     },
@@ -124,12 +153,16 @@ async function limitStatus(
 }
 
 /** The blocking limit a request would hit first: one already spent, else the
- *  one with the least room. Warn-only limits never refuse, so they don't
- *  count. */
+ *  one with the least room. Warn-only limits never refuse, and one that is
+ *  allowed for an hour isn't enforced, so neither counts. */
 function effectiveBudget(
   budgets: ReadonlyArray<BudgetLimitStatus>,
 ): string | null {
-  const blocking = budgets.filter((budget) => budget.action === "block")
+  const blocking = budgets.filter(
+    (budget) =>
+      budget.action !== "warn"
+      && !budget.overrides.some((override) => override.kind === "unlimited"),
+  )
   const spent = blocking.find((budget) => budget.state === "exhausted")
   if (spent) return spent.id
   let tightest: BudgetLimitStatus | undefined
@@ -199,6 +232,10 @@ export interface BudgetStatusOptions {
   windows?: ReadonlyArray<ObservedProviderWindow>
   /** Nano-AIU calls in progress hold for a scope; none by default. */
   held?: (scope: BudgetScope) => number
+  /** The overrides in force for a limit; none by default. */
+  overrides?: (limitId: string) => ReadonlyArray<BudgetOverride>
+  /** What an `ask` rule is waiting on; nothing by default. */
+  approval?: (limitId: string) => ApprovalState | null
 }
 
 export async function buildBudgetStatus(
@@ -226,6 +263,8 @@ export async function buildBudgetStatus(
           display,
           filters: budget?.filters,
           held: options.held ?? (() => 0),
+          overrides: options.overrides ?? (() => []),
+          approval: options.approval ?? (() => null),
         },
       ),
     ),

@@ -32,13 +32,18 @@ export function queuePluginNotice(
   displayName: string,
 ): void {
   if (event.type !== "notice" || !event.notice) return
-  queue.push({
+  queueNotice({
     plugin: event.pluginId,
     name: displayName,
     code: event.notice.code,
     message: event.notice.message,
     params: { ...event.notice.params },
   })
+}
+
+/** Queue a notice the app itself raises (a budget rule reached its limit). */
+export function queueNotice(notice: PluginNoticeView): void {
+  queue.push(notice)
   if (queue.length > MAX_QUEUED) queue.splice(0, queue.length - MAX_QUEUED)
 }
 

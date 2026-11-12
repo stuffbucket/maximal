@@ -23,6 +23,9 @@ export interface BudgetRefusal {
   /** Refused only because requests in progress hold the room: it comes
    *  back by itself in moments, not at the reset. */
   inFlight: boolean
+  /** For a rule that asks: `pending` while a request for more room waits for
+   *  the person, `declined` once they said to keep it blocked this period. */
+  approval?: "pending" | "declined"
   /** One plain sentence for the person and for the model. */
   message: string
   /** USD per AI credit, for the figures a body reports in dollars. */
