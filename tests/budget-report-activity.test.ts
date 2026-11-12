@@ -582,6 +582,39 @@ describe("GET /settings/api/budget/limits/:id/timeline, edge cases", () => {
     expect(body.buckets.at(-1)?.cumulative_nano_aiu).toBe(12 * AIU)
   })
 
+  test("a rolling limit reads as one open window whose spend ages out", async () => {
+    writeConfig({
+      budget: {
+        limits: [
+          {
+            id: "rolling",
+            scope: { kind: "global" },
+            limit: 10 * AIU,
+            limitReset: { every: { hours: 5 } },
+            action: "block",
+          },
+        ],
+      },
+    })
+    recordAt(at(2026, 11, 11, 3), { total_nano_aiu: 9 * AIU })
+    recordAt(at(2026, 11, 11, 9), { total_nano_aiu: 2 * AIU })
+
+    const body = await json(
+      await buildApp().request("/budget/limits/rolling/timeline?range=24h"),
+      (v) => BudgetTimelineResponse.parse(v),
+    )
+
+    expect(body.periods).toHaveLength(1)
+    expect(body.periods[0].end).toBeNull()
+    const at9 = body.buckets.find((b) => b.start.startsWith("2026-11-11T09"))
+    expect(at9?.cumulative_nano_aiu).toBe(2 * AIU)
+    const at7 = body.buckets.find((b) => b.start.startsWith("2026-11-11T07"))
+    expect(at7?.cumulative_nano_aiu).toBe(9 * AIU)
+    const at8 = body.buckets.find((b) => b.start.startsWith("2026-11-11T08"))
+    expect(at8?.cumulative_nano_aiu).toBe(0)
+    expect(body.markers.map((m) => m.kind)).toEqual(["warned"])
+  })
+
   test("a followed window's earlier cycles are estimated", async () => {
     writeConfig({
       budget: {

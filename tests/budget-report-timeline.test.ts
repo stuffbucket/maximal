@@ -507,3 +507,126 @@ describe("computeTimeline, edge cases", () => {
     expect(timeline.buckets.map((b) => b.nanoAiu)).toEqual([0, 3, 4])
   })
 })
+
+describe("monthly and rolling limits", () => {
+  test("a monthly limit steps from its day of the month", () => {
+    const periods = periodsInRange({ monthly: { day: 15 } }, none, {
+      fromMs: at(2026, 10, 1),
+      toMs: NOW,
+      nowMs: NOW,
+    })
+    expect(periods.map((p) => [p.startMs, p.endMs])).toEqual([
+      [at(2026, 9, 15), at(2026, 10, 15)],
+      [at(2026, 10, 15), at(2026, 11, 15)],
+    ])
+    expect(periods.every((p) => !p.estimated)).toBe(true)
+  })
+
+  test("a rolling limit is one open period carrying its window", () => {
+    expect(
+      periodsInRange({ every: { hours: 5 } }, none, {
+        fromMs: at(2026, 11, 10),
+        toMs: NOW,
+        nowMs: NOW,
+      }),
+    ).toEqual([
+      {
+        startMs: at(2026, 11, 10),
+        endMs: null,
+        basis: "fixed",
+        estimated: false,
+        rollingMs: 5 * HOUR,
+      },
+    ])
+    expect(
+      periodsInRange({ every: { days: 7 } }, none, {
+        fromMs: 0,
+        toMs: NOW,
+        nowMs: NOW,
+      })[0].rollingMs,
+    ).toBe(7 * DAY)
+  })
+
+  test("a rolling window's cumulative spend ages out exactly one window after each cost", () => {
+    const timeline = computeTimeline(
+      input({
+        bucket: "hour",
+        fromMs: at(2026, 11, 10, 10),
+        toMs: at(2026, 11, 10, 17),
+        periods: [
+          {
+            startMs: at(2026, 11, 10, 10),
+            endMs: null,
+            basis: "fixed",
+            estimated: false,
+            rollingMs: 5 * HOUR,
+          },
+        ],
+        rows: [
+          // Before the range, still inside the window when it opens.
+          { createdAtMs: at(2026, 11, 10, 7), nanoAiu: 40 },
+          { createdAtMs: at(2026, 11, 10, 10, 30), nanoAiu: 10 },
+          { createdAtMs: at(2026, 11, 10, 12), nanoAiu: 20 },
+          { createdAtMs: at(2026, 11, 10, 14), nanoAiu: 5 },
+        ],
+      }),
+    )
+    // 07:00 leaves at 12:00; 10:30 at 15:30; 12:00 at 17:00.
+    expect(timeline.buckets.map((b) => b.cumulativeNanoAiu)).toEqual([
+      50, 50, 30, 30, 35, 25, 25,
+    ])
+    expect(timeline.buckets.map((b) => b.nanoAiu)).toEqual([
+      10, 0, 20, 0, 5, 0, 0,
+    ])
+    expect(timeline.periods).toHaveLength(1)
+    expect(timeline.periods[0].warnedAtMs).toBeNull()
+  })
+
+  test("a rolling window that crosses reports the first crossing", () => {
+    const timeline = computeTimeline(
+      input({
+        bucket: "hour",
+        fromMs: at(2026, 11, 10, 10),
+        toMs: at(2026, 11, 10, 14),
+        periods: [
+          {
+            startMs: at(2026, 11, 10, 10),
+            endMs: null,
+            basis: "fixed",
+            estimated: false,
+            rollingMs: 2 * HOUR,
+          },
+        ],
+        rows: [
+          { createdAtMs: at(2026, 11, 10, 10, 10), nanoAiu: 90 },
+          { createdAtMs: at(2026, 11, 10, 11, 0), nanoAiu: 20 },
+          { createdAtMs: at(2026, 11, 10, 13, 0), nanoAiu: 5 },
+        ],
+      }),
+    )
+    expect(timeline.periods[0].warnedAtMs).toBe(at(2026, 11, 10, 10, 10))
+    expect(timeline.periods[0].crossedAtMs).toBe(at(2026, 11, 10, 11))
+    // 10:10 ages out at 12:10, 11:00 at 13:00 (before the 13:00 row counts).
+    expect(timeline.buckets.map((b) => b.cumulativeNanoAiu)).toEqual([
+      90, 110, 20, 5,
+    ])
+  })
+
+  test("a crossing from before the range reads as the range's start", () => {
+    const timeline = computeTimeline(
+      input({
+        periods: [
+          {
+            startMs: at(2026, 11, 8),
+            endMs: at(2026, 11, 15),
+            basis: "fixed",
+            estimated: false,
+          },
+        ],
+        rows: [{ createdAtMs: at(2026, 11, 8, 6), nanoAiu: 120 }],
+      }),
+    )
+    expect(timeline.periods[0].crossedAtMs).toBe(at(2026, 11, 9))
+    expect(timeline.periods[0].warnedAtMs).toBe(at(2026, 11, 9))
+  })
+})

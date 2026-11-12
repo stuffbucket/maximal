@@ -17,6 +17,7 @@ import type { UsageRange } from "./range"
 import type { SpendRow } from "./usage"
 
 import {
+  everyDurationMs,
   followedPeriod,
   resolvePeriod,
   type BudgetPeriod,
@@ -26,47 +27,59 @@ import { DEFAULT_WARN_AT, type BudgetLimitReset } from "../schema"
 import { nanoAiuToDisplay, resolveBudgetDisplay } from "../units"
 import { bucketStart, nextBucketStart, type BucketSize } from "./buckets"
 import { getBudgetEvents } from "./events"
+import { createLedger } from "./ledger"
 import { getSpendRows } from "./usage"
 
 /** The periods of a reset rule that overlap `[fromMs, toMs)`, oldest first.
- *  Fixed rules step through `resolvePeriod`. A followed window only knows its
- *  current period, so the others are that period's length repeated, marked
- *  estimated. */
+ *  Fixed rules (daily, weekly, monthly) step through `resolvePeriod`. A
+ *  followed window only knows its current period, so the others are that
+ *  period's length repeated, marked estimated. A rolling window has no periods
+ *  to step through: one open period stands for it, with `rollingMs` set. */
 export function periodsInRange(
   reset: BudgetLimitReset,
   findWindow: (ref: string) => FollowedWindow | undefined,
   range: { fromMs: number; toMs: number; nowMs: number },
 ): Array<BudgetPeriod> {
   const { fromMs, toMs, nowMs } = range
-  const current =
-    typeof reset === "string" ? undefined : (
+  if (typeof reset !== "string" && "every" in reset) {
+    return [
+      {
+        startMs: fromMs,
+        endMs: null,
+        basis: "fixed",
+        estimated: false,
+        rollingMs: everyDurationMs(reset.every),
+      },
+    ]
+  }
+  const followed =
+    typeof reset !== "string" && "follow" in reset ?
       followedPeriod(findWindow(reset.follow), nowMs)
-    )
-  if (current?.basis === "provider" && current.endMs !== null) {
-    const length = current.endMs - current.startMs
-    const first = Math.floor((fromMs - current.startMs) / length)
-    const last = Math.ceil((toMs - current.startMs) / length) - 1
+    : undefined
+  if (followed?.basis === "provider" && followed.endMs !== null) {
+    const length = followed.endMs - followed.startMs
+    const first = Math.floor((fromMs - followed.startMs) / length)
+    const last = Math.ceil((toMs - followed.startMs) / length) - 1
     const periods: Array<BudgetPeriod> = []
     for (let k = first; k <= last; k++) {
-      const startMs = current.startMs + k * length
+      const startMs = followed.startMs + k * length
       periods.push({
         startMs,
         endMs: startMs + length,
         basis: "provider",
-        estimated: current.estimated || k !== 0,
+        estimated: followed.estimated || k !== 0,
       })
     }
     return periods
   }
 
   // A fixed rule, or a followed window that fell back to daily.
-  const stepReset: BudgetLimitReset =
-    typeof reset === "string" ? reset : "daily"
+  const stepReset: BudgetLimitReset = followed === undefined ? reset : "daily"
   const periods: Array<BudgetPeriod> = []
   let period = resolvePeriod(stepReset, fromMs, () => undefined)
   while (period.startMs < toMs) {
     periods.push(
-      current === undefined ? period : (
+      followed === undefined ? period : (
         { ...period, basis: "fallback", estimated: true }
       ),
     )
@@ -209,66 +222,66 @@ function openPeriod(source: BudgetPeriod): TimelinePeriodMs {
   }
 }
 
-/** Walk the buckets in order, carrying the running spend of the current
- *  period and consuming the rows as the buckets pass them. Fills each
- *  bucket's spend, requests and cumulative spend; returns the periods. */
+/** Walk the buckets in order through a ledger of the limit's spend, consuming
+ *  the rows as the buckets pass them. Fills each bucket's spend, requests and
+ *  cumulative spend; returns the periods. A crossing before the range opened
+ *  reads as the range's start. */
 function walkBuckets(
   input: TimelineInput,
   buckets: ReadonlyArray<TimelineBucketMs>,
 ): Map<number, TimelinePeriodMs> {
   const periods = new Map<number, TimelinePeriodMs>()
-  let running = 0
-  let runningPeriod = -1
-  let rowIndex = 0
-  const absorb = (row: SpendRow, period: TimelinePeriodMs): void => {
-    const before = running
-    running += row.nanoAiu
-    noteCrossings(period, input, {
-      atMs: row.createdAtMs,
-      before,
-      after: running,
-    })
-  }
-  for (const bucket of buckets) {
-    const index = Math.max(0, periodIndexAt(input.periods, bucket.startMs))
-    const source = input.periods[index]
+  const ledger = createLedger(input.periods, input.baselineNanoAiu ?? 0)
+  const firstStartMs = buckets.at(0)?.startMs ?? input.toMs
+  const periodNow = (): TimelinePeriodMs => {
+    const source = input.periods[ledger.periodIndex]
     const period = periods.get(source.startMs) ?? openPeriod(source)
     periods.set(source.startMs, period)
-    if (index !== runningPeriod) {
-      runningPeriod = index
-      running = index === 0 ? (input.baselineNanoAiu ?? 0) : 0
-      // Already past a line when the range opened: no later than its start.
+    return period
+  }
+  let rowIndex = 0
+  const absorb = (row: SpendRow): void => {
+    ledger.advance(row.createdAtMs)
+    const before = ledger.used
+    ledger.add(row.nanoAiu)
+    noteCrossings(periodNow(), input, {
+      atMs: Math.max(row.createdAtMs, firstStartMs),
+      before,
+      after: ledger.used,
+    })
+  }
+  // Rows from before the range, in the first period (or the first window).
+  while (
+    rowIndex < input.rows.length
+    && input.rows[rowIndex].createdAtMs < firstStartMs
+  ) {
+    absorb(input.rows[rowIndex++])
+  }
+  const opened = new Set<number>()
+  for (const bucket of buckets) {
+    ledger.advance(bucket.startMs)
+    const period = periodNow()
+    if (!opened.has(ledger.periodIndex)) {
+      opened.add(ledger.periodIndex)
+      // Already past a line when the period opened.
       noteCrossings(period, input, {
         atMs: bucket.startMs,
         before: -1,
-        after: running,
+        after: ledger.used,
       })
-      // Rows of this period from before the first bucket count toward it.
-      for (
-        ;
-        rowIndex < input.rows.length
-        && input.rows[rowIndex].createdAtMs < bucket.startMs;
-        rowIndex++
-      ) {
-        const row = input.rows[rowIndex]
-        if (periodIndexAt(input.periods, row.createdAtMs) === index) {
-          absorb(row, period)
-        }
-      }
     }
-    for (
-      ;
+    while (
       rowIndex < input.rows.length
-      && input.rows[rowIndex].createdAtMs < bucket.endMs;
-      rowIndex++
+      && input.rows[rowIndex].createdAtMs < bucket.endMs
     ) {
-      const row = input.rows[rowIndex]
-      absorb(row, period)
+      const row = input.rows[rowIndex++]
+      absorb(row)
       bucket.nanoAiu += row.nanoAiu
       bucket.requests += 1
     }
-    bucket.cumulativeNanoAiu = running
-    period.spendNanoAiu = running
+    ledger.advance(bucket.endMs - 1)
+    bucket.cumulativeNanoAiu = ledger.used
+    period.spendNanoAiu = ledger.used
   }
   return periods
 }
@@ -360,14 +373,20 @@ async function readTimelineData(
   refusals: Array<{ atMs: number; estimateNanoAiu: number }>
 }> {
   const { limit, range } = query
-  // The first period's earlier rows count toward it. A bounded period is read
-  // from its start; a lifetime one is summed.
+  // The first period's earlier rows count toward it: a bounded period is read
+  // from its start, a rolling window from one window back, and a lifetime
+  // period is summed.
   const first = periods.at(0)
+  const rollingMs = first?.rollingMs
   const bounded = first !== undefined && first.endMs !== null
-  const rowsFromMs =
-    bounded ? Math.min(alignedFromMs, first.startMs) : alignedFromMs
+  let rowsFromMs = alignedFromMs
+  if (rollingMs !== undefined) rowsFromMs = alignedFromMs - rollingMs
+  else if (bounded) rowsFromMs = Math.min(alignedFromMs, first.startMs)
   const summed =
-    !bounded && first !== undefined && first.startMs < alignedFromMs
+    !bounded
+    && rollingMs === undefined
+    && first !== undefined
+    && first.startMs < alignedFromMs
   const [rows, [baselineNanoAiu], refusals] = await Promise.all([
     getSpendRows(limit.scope, rowsFromMs, range.toMs),
     summed ?
