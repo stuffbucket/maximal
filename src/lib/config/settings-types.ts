@@ -933,3 +933,35 @@ export type PluginValidationErrorResponse = z.infer<
 
 export const PluginActionResponse = z.object({ ok: z.literal(true) })
 export type PluginActionResponse = z.infer<typeof PluginActionResponse>
+
+// ── Presence (/settings/api/presence) ───────────────────────────────────
+// Whether the person is at the machine, reported by the menu-bar shell and
+// read by consumers such as budget limits that apply only while away.
+// Local only: nothing here leaves the machine, and nothing but these three
+// fields is accepted.
+//
+//   POST /settings/api/presence   PresenceReport → PresenceStatus
+//   GET  /settings/api/presence   → PresenceStatus (debugging)
+//   SSE  `presence.changed` on /settings/api/events (lock state changes only)
+
+/** The shell's report. `null` means the platform can't say. */
+export const PresenceReport = z
+  .object({
+    locked: z.boolean().nullable(),
+    /** Seconds since the last keyboard or pointer input. */
+    idleSeconds: z.number().min(0).nullable(),
+    /** When the shell sampled it (ISO 8601). */
+    at: z.iso.datetime({ offset: true }),
+  })
+  .strict()
+export type PresenceReport = z.infer<typeof PresenceReport>
+
+/** What `currentPresence()` says. A stale or never-reported presence is
+ *  `{ locked: null, idleSeconds: null, stale: true }`: unknown, which
+ *  consumers must treat as not away. */
+export const PresenceStatus = z.object({
+  locked: z.boolean().nullable(),
+  idleSeconds: z.number().min(0).nullable(),
+  stale: z.boolean(),
+})
+export type PresenceStatus = z.infer<typeof PresenceStatus>

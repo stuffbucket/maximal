@@ -62,6 +62,8 @@ use tauri_plugin_window_state::{StateFlags, WindowExt};
 /// Native-string i18n (tray, notifications, window titles, quit dialog),
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
 mod native_i18n;
+/// Screen lock and idle time, reported to the sidecar (local only).
+mod presence;
 mod sidecar_runtime;
 #[cfg(target_os = "windows")]
 mod windows_jump_list;
@@ -1029,6 +1031,25 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
     let working_notice_url = endpoint.http_url("/settings/api/notices/working");
     let plugin_notices_url = endpoint.http_url("/settings/api/notices/plugins");
     let plugin_attention_url = endpoint.http_url("/settings/api/plugins/attention");
+    // Presence (screen lock, idle time) goes to the sidecar from its own task:
+    // it reads every second and posts on the 5 s cadence and at once on a
+    // lock change. It ends with this generation, like the loop below.
+    {
+        let key = app.state::<ShellApiKey>().value().to_owned();
+        let presence_app = app.clone();
+        tauri::async_runtime::spawn(presence::report_loop(
+            client.clone(),
+            endpoint.http_url("/settings/api/presence"),
+            key,
+            move || {
+                presence_app.state::<ManagedEndpoint>().current() == Some(endpoint)
+                    && !matches!(
+                        presence_app.state::<AppStatus>().get(),
+                        SidecarState::Failed | SidecarState::Stopped
+                    )
+            },
+        ));
+    }
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
     // `next_update_check` is when the next check is due (None = now, so the

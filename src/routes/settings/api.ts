@@ -46,6 +46,7 @@ import { ghRoutes } from "./gh"
 import { modelsRoutes } from "./models"
 import { noticesRoutes } from "./notices"
 import { pluginsRoutes } from "./plugins"
+import { presenceRoutes } from "./presence"
 import { respondValidated } from "./respond-validated"
 
 /** Captured once at module load. process.uptime() works too, but
@@ -177,4 +178,5 @@ settingsApiRoutes.route("/budget", budgetRoutes)
 settingsApiRoutes.route("/models", modelsRoutes)
 settingsApiRoutes.route("/notices", noticesRoutes)
 settingsApiRoutes.route("/plugins", pluginsRoutes)
+settingsApiRoutes.route("/presence", presenceRoutes)
 settingsApiRoutes.route("/events", eventsRoutes)
