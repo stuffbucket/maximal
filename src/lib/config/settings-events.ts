@@ -21,6 +21,7 @@ import type {
   AuthStatus,
   BudgetStatusResponse,
   PluginsListResponse,
+  PresenceStatus,
 } from "~/lib/config/settings-types"
 
 import { EventBus } from "~/lib/runtime-state/event-bus"
@@ -34,6 +35,10 @@ export interface SettingsEventMap {
   /** A limit was added, changed or removed, or one crossed its warning
    *  threshold; identical to GET /settings/api/budget. */
   "budget.changed": BudgetStatusResponse
+  /** The lock state a consumer sees changed (locked, unlocked, or known
+   *  to unknown and back); identical to GET /settings/api/presence. Not
+   *  sent for idle time alone. */
+  "presence.changed": PresenceStatus
 }
 
 export const settingsEventBus = new EventBus<SettingsEventMap>()
