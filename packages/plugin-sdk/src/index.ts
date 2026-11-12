@@ -26,6 +26,7 @@ export {
   OperationUnavailableError,
 } from "./gateway"
 export * from "./operations"
+export * from "./providers"
 export * from "./types"
 export { Context, Service } from "@deepseek-ai/cordis"
 

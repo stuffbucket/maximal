@@ -29,6 +29,10 @@ import {
 
 import type { Initiator } from "./agent-initiator"
 
+/** The id of the Copilot upstream provider: on `HTTPError.call.provider`, in
+ *  usage rows and as the provider-plugin registry key. */
+export const COPILOT_PROVIDER_ID = "copilot"
+
 /**
  * Options shared by every member of the `create*` upstream family.
  *
@@ -121,7 +125,10 @@ export const finishUpstreamResponse = async <T>(
       remediationUrl: parsed.remediationUrl,
       status: response.status,
     })
-    throw new HTTPError(errorMessage, response, call)
+    throw new HTTPError(errorMessage, response, {
+      provider: COPILOT_PROVIDER_ID,
+      ...call,
+    })
   }
 
   clearLastUpstreamRejection()

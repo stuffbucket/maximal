@@ -16,6 +16,8 @@ export type PluginContractErrorCode =
   | "invalid-url"
   | "invalid-operation"
   | "duplicate-operation"
+  | "invalid-provider"
+  | "duplicate-provider"
 
 /**
  * Thrown when a plugin (or a plugin list) violates the plugin contract:

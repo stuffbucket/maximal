@@ -17,4 +17,5 @@ export {
   createFileStorage,
   operationsService,
   type PluginServiceFactory,
+  providersService,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
