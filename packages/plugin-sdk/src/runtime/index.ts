@@ -17,6 +17,7 @@ export { createFileStorage } from "./file-storage"
 export { nonJsonPath, normalizeManifest } from "./manifest"
 export {
   installPluginServices,
+  type PluginServiceFactory,
   type PluginServiceOptions,
   type PluginStorageBackend,
 } from "./services"
@@ -52,6 +53,7 @@ export {
   assertPluginDependencies,
   formatConfigIssues,
   injectedServices,
+  isInjectList,
   normalizeNotice,
   normalizeStatus,
   normalizeToolDefinition,

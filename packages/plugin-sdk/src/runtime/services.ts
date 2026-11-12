@@ -15,6 +15,7 @@ import type {
 import type { PluginRuntime } from "./state"
 
 import { PluginContractError } from "../errors"
+import { PLUGIN_SERVICE_NAMES } from "../types"
 import {
   assertActionId,
   assertHttpUrl,
@@ -234,22 +235,41 @@ function prefixedLogger(logger: PluginLogger, pluginId: string): PluginLogger {
   }
 }
 
+/**
+ * Builds an app-provided service on the root context. The service registers
+ * itself under its own name (`super(root, "name")`), and plugins reach it with
+ * that name in `inject`. `runtime` identifies the calling plugin
+ * (`runtime.slotOf(this.ctx, "<name>")`).
+ */
+export type PluginServiceFactory = (
+  root: Context,
+  runtime: PluginRuntime,
+) => Service
+
 export interface PluginServiceOptions {
   storage: PluginStorageBackend
   host: HostServices
+  /** App-provided services, installed after the built-in ones. */
+  extra?: ReadonlyArray<PluginServiceFactory>
 }
 
 /**
- * Provide `tools`, `surface`, `storage` and `host` on `root`. The services
- * live as long as the root fiber.
+ * Provide `tools`, `surface`, `storage` and `host` on `root`, then the
+ * `extra` services. The services live as long as the root fiber. Returns
+ * every service name now available to plugins.
  */
 export function installPluginServices(
   root: Context,
   runtime: PluginRuntime,
   options: PluginServiceOptions,
-): void {
+): Array<string> {
   new ToolRegistryService(root, runtime)
   new SurfaceService(root, runtime)
   new StorageService(root, runtime, options.storage)
   new HostService(root, runtime, options.host)
+  // cordis itself refuses a name that is already registered.
+  return [
+    ...PLUGIN_SERVICE_NAMES,
+    ...(options.extra ?? []).map((create) => create(root, runtime).name),
+  ]
 }
