@@ -248,6 +248,68 @@ describe("messages handler orchestration", () => {
     }
   })
 
+  test.each([
+    ["claude-haiku-4-5-20251001", "haikuModel"],
+    ["claude-sonnet-4-5-20250929", "sonnetModel"],
+  ] as const)(
+    "resolves %s for a generic Messages caller while Claude Code routing is off",
+    async (requestedModel, configKey) => {
+      const previousModels = state.models
+      const target = `gpt-${configKey}`
+      selectedModel = {
+        id: target,
+        supported_endpoints: ["/responses"],
+      }
+      state.models = {
+        object: "list",
+        data: [
+          {
+            id: target,
+            name: target,
+            object: "model",
+            version: "1",
+            vendor: "openai",
+            model_picker_enabled: true,
+            preview: false,
+            supported_endpoints: ["/responses"],
+            capabilities: {
+              family: target,
+              object: "model_capabilities",
+              tokenizer: "o200k_base",
+              type: "chat",
+              limits: {},
+              supports: { tool_calls: true, streaming: true },
+            },
+          },
+        ],
+      }
+      actualConfigModule.writeConfig({
+        modelMappings: [],
+        anthropicMessages: { [configKey]: target },
+        apps: { claudeCode: { enabled: false } },
+      })
+
+      try {
+        const response = await createApp().request("/", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "user-agent": "generic-anthropic-client/1.0",
+          },
+          body: JSON.stringify(createPayload({ model: requestedModel })),
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.text()).toBe("responses")
+        expect(findEndpointModel).toHaveBeenCalledWith(target)
+        const [, forwardedPayload] = handleWithResponsesApi.mock.calls[0]
+        expect(forwardedPayload.model).toBe(target)
+      } finally {
+        Object.assign(state, { models: previousModels })
+      }
+    },
+  )
+
   test("strips unsupported top-level diagnostics before forwarding", async () => {
     selectedModel = {
       id: "messages-model",

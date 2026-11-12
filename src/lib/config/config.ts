@@ -29,6 +29,15 @@ export interface ModelMappingRule {
   target: string
 }
 
+export interface AnthropicMessagesConfig {
+  /** Concrete catalog model used for inbound Claude Haiku identifiers. */
+  haikuModel?: string
+  /** Concrete catalog model used for inbound Claude Sonnet identifiers. */
+  sonnetModel?: string
+  /** Claude Code's client-side Auto permission classifier model. */
+  autoPermissionModel?: string
+}
+
 export interface AppConfig {
   auth?: {
     /** Legacy free-form list of accepted bearer tokens. */
@@ -57,6 +66,9 @@ export interface AppConfig {
     "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
   >
   modelMappings?: Array<ModelMappingRule>
+  /** Model aliases owned by the Anthropic Messages ingress, independent of any
+   *  client integration that happens to send those identifiers. */
+  anthropicMessages?: AnthropicMessagesConfig
   useFunctionApplyPatch?: boolean
   useMessagesApi?: boolean
   anthropicApiKey?: string
@@ -101,11 +113,10 @@ export interface AppsConfig {
     /** Legacy: entry names older versions wrote into Claude Code's user
      *  scope. The next plugin client sync removes them and this list. */
     mcpServers?: Array<string>
-    /** Explicit model for Claude Code's Haiku alias. Missing means Automatic. */
+    /** Legacy model selections. Read as a compatibility fallback; new writes
+     *  use the route-scoped `anthropicMessages` block. */
     fastModel?: string
-    /** Explicit model for Claude Code's Sonnet alias. Missing means Automatic. */
     capableModel?: string
-    /** Explicit client-side Auto permission classifier. Missing means Automatic. */
     classifierModel?: string
   }
   claudeDesktop?: {
@@ -113,6 +124,24 @@ export interface AppsConfig {
     enabled?: boolean
     /** MCP endpoint ids Maximal added to Claude Desktop's config. */
     mcpServers?: Array<string>
+  }
+}
+
+/** Read route-scoped Messages selections, falling back to pre-migration
+ *  Claude Code app fields so existing config files keep their behavior. */
+export function anthropicMessagesConfig(
+  config: AppConfig,
+): AnthropicMessagesConfig {
+  const legacy = config.apps?.claudeCode
+  const haikuModel = config.anthropicMessages?.haikuModel ?? legacy?.fastModel
+  const sonnetModel =
+    config.anthropicMessages?.sonnetModel ?? legacy?.capableModel
+  const autoPermissionModel =
+    config.anthropicMessages?.autoPermissionModel ?? legacy?.classifierModel
+  return {
+    ...(haikuModel ? { haikuModel } : {}),
+    ...(sonnetModel ? { sonnetModel } : {}),
+    ...(autoPermissionModel ? { autoPermissionModel } : {}),
   }
 }
 

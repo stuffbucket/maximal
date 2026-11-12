@@ -238,11 +238,11 @@ describe("PATCH Claude Code model settings", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(getConfig().apps?.claudeCode).toMatchObject({
-      enabled: true,
-      fastModel: smallGpt.id,
-      capableModel: fullGpt.id,
-      classifierModel: fullGpt.id,
+    expect(getConfig().apps?.claudeCode).toEqual({ enabled: true })
+    expect(getConfig().anthropicMessages).toEqual({
+      haikuModel: smallGpt.id,
+      sonnetModel: fullGpt.id,
+      autoPermissionModel: fullGpt.id,
     })
     const settings = readClaudeCodeSettings()
     expect(settings.env).toMatchObject({
@@ -253,7 +253,7 @@ describe("PATCH Claude Code model settings", () => {
   })
 
   test.skipIf(process.platform === "win32")(
-    "rolls back config when enabled Claude settings cannot be updated",
+    "keeps route mappings when enabled Claude settings cannot be updated",
     async () => {
       writeConfig({ apps: { claudeCode: { enabled: true } } })
       const target = path.join(configDir, "real-settings.json")
@@ -269,12 +269,15 @@ describe("PATCH Claude Code model settings", () => {
         },
       )
 
-      expect(response.status).toBe(500)
+      expect(response.status).toBe(200)
       expect(getConfig().apps?.claudeCode).toEqual({ enabled: true })
+      expect(getConfig().anthropicMessages).toEqual({
+        autoPermissionModel: fullGpt.id,
+      })
     },
   )
 
-  test("rolls back config when Claude routing is foreign", async () => {
+  test("keeps route mappings when Claude routing is foreign", async () => {
     writeConfig({ apps: { claudeCode: { enabled: true } } })
     writeClaudeCodeSettings(getClaudeCodeSettingsPath(), {
       env: { ANTHROPIC_BASE_URL: "https://other.example" },
@@ -289,10 +292,15 @@ describe("PATCH Claude Code model settings", () => {
       },
     )
 
-    expect(response.status).toBe(500)
+    expect(response.status).toBe(200)
     expect(getConfig().apps?.claudeCode).toEqual({ enabled: true })
+    expect(getConfig().anthropicMessages).toEqual({
+      autoPermissionModel: fullGpt.id,
+    })
   })
+})
 
+describe("PATCH model selection persistence", () => {
   test("a partial null clears only that tier back to Automatic", async () => {
     writeConfig({
       apps: {
@@ -313,7 +321,10 @@ describe("PATCH Claude Code model settings", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(getConfig().apps?.claudeCode).toEqual({ capableModel: fullGpt.id })
+    expect(getConfig().apps?.claudeCode).toEqual({})
+    expect(getConfig().anthropicMessages).toEqual({
+      sonnetModel: fullGpt.id,
+    })
     const auto = (await json(response)).claude_code_auto
     expect(auto.fast).toMatchObject({
       configured: null,
@@ -371,9 +382,10 @@ describe("PATCH Claude Code model settings", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(getConfig().apps?.claudeCode).toEqual({
-      fastModel: "gpt-retired",
-      capableModel: fullGpt.id,
+    expect(getConfig().apps?.claudeCode).toEqual({})
+    expect(getConfig().anthropicMessages).toEqual({
+      haikuModel: "gpt-retired",
+      sonnetModel: fullGpt.id,
     })
   })
 

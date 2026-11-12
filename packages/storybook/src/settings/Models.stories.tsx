@@ -17,7 +17,7 @@ type Story = StoryObj<typeof meta>;
 const state = (mockApi: MockApiParameters): Story => ({ parameters: { mockApi } });
 
 export const Loaded = state({ scenario: "signed-in" });
-export const NotLoadedYet = state({ scenario: "signed-out" });
+export const SignedOut = state({ scenario: "signed-out" });
 export const Loading = state({ overrides: { "/settings/api/models": "hang" } });
 export const LoadError = state({
   overrides: { "/settings/api/models": { status: 500, body: { error: { message: "Model cache file is unreadable." } } } },

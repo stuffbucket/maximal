@@ -122,6 +122,7 @@ export function Models(): JSX.Element {
     isLoading,
     isRefreshing,
     isSavingAutoModels,
+    isSignedOut,
     problem,
     refresh,
     setAutoModels,
@@ -138,7 +139,7 @@ export function Models(): JSX.Element {
     }
   }
 
-  const showEmpty = !isLoading && models.length === 0;
+  const showEmpty = !isLoading && !isSignedOut && models.length === 0;
 
   return (
     <div className="models">
@@ -146,6 +147,7 @@ export function Models(): JSX.Element {
         <AutoModelControls
           state={autoModels}
           saving={isSavingAutoModels}
+          signedOut={isSignedOut}
           onChange={setAutoModels}
         />
       )}
@@ -158,7 +160,7 @@ export function Models(): JSX.Element {
           variant="secondary"
           size="sm"
           onClick={() => void refresh()}
-          disabled={isRefreshing}
+          disabled={isRefreshing || isSignedOut}
         >
           {isRefreshing ? "Refreshing…" : "Refresh now"}
         </Button>

@@ -55,6 +55,29 @@ test("renders accessible Automatic controls and preserves the other settings on 
   })
 
   await openModels(page)
+  await expect(
+    page.getByRole("heading", { name: "Anthropic Messages model settings" }),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Map Haiku and Sonnet aliases for Claude Code, Claude Desktop, and other /v1/messages clients routed through Maximal. Choose the model used for Claude Code Auto permission checks.",
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Used when an Anthropic Messages client requests Haiku, including background work.",
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Used when an Anthropic Messages client requests Sonnet, including Claude Code’s opusplan.",
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Used by Claude Code to decide whether an action can run without asking in Auto permission mode.",
+    ),
+  ).toBeVisible()
   const fast = page.getByLabel("Haiku alias")
   const capable = page.getByLabel("Sonnet alias")
   const classifier = page.getByLabel("Auto permission checks")
@@ -200,9 +223,13 @@ test("shows an unavailable override without substituting it", async ({
   const fast = page.getByLabel("Haiku alias")
   await expect(fast).toHaveValue("gpt-retired")
   await expect(fast.getByText("gpt-retired (unavailable)")).toHaveCount(1)
+  await expect(fast).toHaveAttribute(
+    "aria-describedby",
+    "models-auto-fast-problem",
+  )
   await expect(
-    page.getByText("Your Haiku alias model is no longer available"),
-  ).toBeVisible()
+    fast.locator("..").locator("#models-auto-fast-problem"),
+  ).toContainText("Your Haiku alias model is no longer available")
 })
 
 test("lets Automatic reclaim an unavailable external classifier", async ({
@@ -275,6 +302,49 @@ test("reclaims an eligible external classifier without changing models first", a
   })
 })
 
+test("signed out shows one shared Account prerequisite", async ({
+  page,
+  request,
+}) => {
+  const response = await request.post(`${BASE}/__harness/scenario`, {
+    data: { id: "signed-out" },
+  })
+  expect(response.ok()).toBe(true)
+
+  await openModels(page)
+  const prerequisite = page.locator("#models-auto-account-prerequisite")
+  await expect(prerequisite).toHaveCount(1)
+  await expect(prerequisite).toContainText(
+    "Sign-in to retrieve the list of available models.",
+  )
+  const accountAction = prerequisite.getByRole("link", {
+    name: "Open Account settings",
+  })
+  await expect(accountAction).toBeVisible()
+  await expect(accountAction).toHaveClass(/\bbtn--primary\b/u)
+  await expect(
+    page.getByText("No compatible model found—choose one"),
+  ).toHaveCount(0)
+  await expect(page.getByText("These settings apply when")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Refresh now" })).toBeDisabled()
+
+  for (const control of [
+    page.getByLabel("Haiku alias"),
+    page.getByLabel("Sonnet alias"),
+    page.getByLabel("Auto permission checks"),
+  ]) {
+    await expect(control).toHaveAttribute(
+      "aria-describedby",
+      "models-auto-account-prerequisite",
+    )
+  }
+  await expect(page.locator('[id$="-problem"]')).toHaveCount(0)
+
+  await accountAction.click()
+  await expect(page).toHaveURL(/#account$/u)
+  await expect(page.locator('[data-section="account"]')).toBeVisible()
+})
+
 test("shows the no-match state without choosing an arbitrary model", async ({
   page,
 }) => {
@@ -303,15 +373,25 @@ test("shows the no-match state without choosing an arbitrary model", async ({
   })
 
   await openModels(page)
-  await expect(page.getByLabel("Haiku alias")).toHaveValue("")
+  const problemControls = [
+    [page.getByLabel("Haiku alias"), "models-auto-fast-problem"],
+    [page.getByLabel("Sonnet alias"), "models-auto-capable-problem"],
+    [
+      page.getByLabel("Auto permission checks"),
+      "models-auto-classifier-problem",
+    ],
+  ] as const
+  for (const [control, problemId] of problemControls) {
+    await expect(control).toHaveValue("")
+    await expect(control).toHaveAttribute("aria-describedby", problemId)
+    await expect(control.locator("..").locator(`#${problemId}`)).toContainText(
+      "No compatible model found—choose one",
+    )
+  }
   await expect(
     page.getByText("No compatible model found—choose one"),
   ).toHaveCount(3)
-  await expect(
-    page.getByText(
-      "No compatible model is available. Refresh the catalog or select a model.",
-    ),
-  ).toHaveCount(3)
+  await expect(page.locator(".models-auto .callout__detail")).toHaveCount(0)
 })
 
 test("keeps the Auto controls separated, focused, and within the narrow window", async ({

@@ -87,10 +87,20 @@ describe("renderRemoteUsage", () => {
     expect(html).toContain('<p class="usage-status">')
   })
 
-  test("signed out keeps the sign-in prompt", () => {
+  test("signed out renders one Account prerequisite callout", () => {
     const html = renderRemoteUsage({ status: "signed-out" }, options)
-    expect(html).toContain("usage-signed-out")
-    expect(html).toContain('data-usage-action="open-settings"')
+    expect(html).toContain('class="callout callout--notice usage-signed-out"')
+    expect(html).toContain('role="status"')
+    expect(html).toContain('data-lucide="info"')
+    expect(html).toContain("Sign-in to retrieve usage quotas.")
+    expect(html).toContain('class="btn btn--primary btn--sm"')
+    expect(html).toContain('data-usage-action="open-account-settings"')
+    expect(html).toContain("Open Account settings")
+    expect(html).not.toContain("Account setup required")
+    expect(html).not.toContain(
+      "Sign-in and account setup are handled in Settings.",
+    )
+    expect(html).not.toContain('data-lucide="settings"')
     expect(html).not.toContain("usage-quotas--unavailable")
   })
 

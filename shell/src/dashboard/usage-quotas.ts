@@ -53,7 +53,7 @@ export function renderRemoteUsage(
     case "idle":
       return "";
     case "signed-out":
-      return renderQuotaColumn(renderUsageSignedOut());
+      return renderUsageSignedOut();
     case "ready":
       return renderUsageQuotas(usage.snapshot, options);
     case "unavailable": {
@@ -129,13 +129,16 @@ function renderUnavailableColumn(
 
 function renderUsageSignedOut(): string {
   return `
-    <div class="usage-signed-out">
-      <i data-lucide="log-in" aria-hidden="true"></i>
-      <div class="usage-signed-out__content">
-        <strong>${escapeHtml(t("account-unauth-title"))}</strong>
-        <p>${escapeHtml(t("account-unauth-body"))}</p>
-        <button type="button" class="usage-signed-out__action" data-usage-action="open-settings">
-          ${escapeHtml(t("account-sign-in"))}
+    <div class="callout callout--notice usage-signed-out" role="status">
+      <span class="callout__icon" aria-hidden="true">
+        <i data-lucide="info"></i>
+      </span>
+      <div class="callout__text">
+        <p class="callout__title">${escapeHtml(t("dashboard-usage-signed-out"))}</p>
+      </div>
+      <div class="callout__action">
+        <button type="button" class="btn btn--primary btn--sm" data-usage-action="open-account-settings">
+          ${escapeHtml(t("account-setup-required-action"))}
         </button>
       </div>
     </div>`;

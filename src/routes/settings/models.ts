@@ -20,7 +20,7 @@ import type { Context } from "hono"
 
 import { Hono } from "hono"
 
-import type { AppConfig } from "~/lib/config/config"
+import type { AnthropicMessagesConfig } from "~/lib/config/config"
 import type { ClaudeAutoModelsUpdateRequest as AutoModelsUpdate } from "~/lib/config/settings-types"
 import type { ClaudeAutoTier } from "~/lib/models/claude-auto-models"
 import type { Model } from "~/services/copilot/get-models"
@@ -30,7 +30,11 @@ import {
   getClaudeCodeSettingsPath,
 } from "~/apps/claude-code/config"
 import { reconcileClaudeCodeAutoModels } from "~/apps/claude-code/reconcile"
-import { getConfig, writeConfig } from "~/lib/config/config"
+import {
+  anthropicMessagesConfig,
+  getConfig,
+  writeConfig,
+} from "~/lib/config/config"
 import {
   ClaudeAutoModelsUpdateRequest,
   ModelsListResponse,
@@ -130,31 +134,33 @@ function validateSelection(
   }
 }
 
-type ClaudeCodeConfig = NonNullable<
-  NonNullable<AppConfig["apps"]>["claudeCode"]
->
-
 function updateTierConfig(
-  current: ClaudeCodeConfig,
-  key: "fastModel" | "capableModel" | "classifierModel",
+  current: AnthropicMessagesConfig,
+  key: "haikuModel" | "sonnetModel" | "autoPermissionModel",
   value: string | null | undefined,
-): ClaudeCodeConfig {
+): AnthropicMessagesConfig {
   if (value === undefined) return current
   const { [key]: _removed, ...without } = current
   return value === null ? without : { ...without, [key]: value }
 }
 
-function persistSelections(input: AutoModelsUpdate): AppConfig {
+function persistSelections(input: AutoModelsUpdate): void {
   const config = getConfig()
-  let claudeCode = config.apps?.claudeCode ?? {}
-  claudeCode = updateTierConfig(claudeCode, "fastModel", input.fast)
-  claudeCode = updateTierConfig(claudeCode, "capableModel", input.capable)
-  claudeCode = updateTierConfig(claudeCode, "classifierModel", input.classifier)
+  const {
+    fastModel: _legacyFast,
+    capableModel: _legacyCapable,
+    classifierModel: _legacyClassifier,
+    ...claudeCode
+  } = config.apps?.claudeCode ?? {}
+  let messages = anthropicMessagesConfig(config)
+  messages = updateTierConfig(messages, "haikuModel", input.fast)
+  messages = updateTierConfig(messages, "sonnetModel", input.capable)
+  messages = updateTierConfig(messages, "autoPermissionModel", input.classifier)
   writeConfig({
     ...config,
+    anthropicMessages: messages,
     apps: { ...config.apps, claudeCode },
   })
-  return config
 }
 
 export const modelsRoutes = new Hono()
@@ -174,20 +180,14 @@ modelsRoutes.patch("/claude-code-auto", async (c) => {
     validateSelection("fast", parsed.data.fast)
     validateSelection("capable", parsed.data.capable)
     validateSelection("classifier", parsed.data.classifier)
-    const previousConfig = persistSelections(parsed.data)
+    persistSelections(parsed.data)
     const claimed = new Set<ClaudeAutoTier>()
     if (parsed.data.fast !== undefined) claimed.add("fast")
     if (parsed.data.capable !== undefined) claimed.add("capable")
     if (parsed.data.classifier !== undefined) claimed.add("classifier")
-    try {
-      reconcileClaudeCodeAutoModels(getClaudeCodeSettingsPath(), {
-        claimAutoModels: claimed,
-        throwOnError: true,
-      })
-    } catch (error) {
-      writeConfig(previousConfig)
-      throw error
-    }
+    reconcileClaudeCodeAutoModels(getClaudeCodeSettingsPath(), {
+      claimAutoModels: claimed,
+    })
     return jsonModels(c)
   } catch (error) {
     return forwardError(c, error)

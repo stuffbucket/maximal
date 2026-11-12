@@ -101,6 +101,11 @@ const contentArea = document.getElementById("content-area") as HTMLElement;
 // index.html and live/controller.ts).
 const bento = document.getElementById("dashboard-bento") as HTMLElement;
 const quotaSection = document.getElementById("usage-column") as HTMLElement;
+const usagePrerequisite = document.getElementById(
+  "usage-prerequisite",
+) as HTMLElement;
+const liveMetrics = document.getElementById("live-metrics") as HTMLElement;
+const quotaMetrics = document.getElementById("quota-metrics") as HTMLElement;
 const quotaColumn = document.getElementById("usage-quotas") as HTMLElement;
 const restArea = document.getElementById("dashboard-rest") as HTMLElement;
 const observabilityViews = Array.from(
@@ -586,7 +591,12 @@ function render(): void {
   // own empty state explains what will appear here.
   bento.hidden = false;
   quotaSection.hidden = false;
-  quotaColumn.innerHTML = quotasHtml;
+  const signedOut = usage.status === "signed-out";
+  usagePrerequisite.hidden = !signedOut;
+  usagePrerequisite.innerHTML = signedOut ? quotasHtml : "";
+  liveMetrics.hidden = signedOut;
+  quotaMetrics.hidden = signedOut;
+  quotaColumn.innerHTML = signedOut ? "" : quotasHtml;
   restArea.innerHTML = welcome
     ? renderWelcomeMessage()
     : `${tokenUsageHtml}${detailedHtml}`;
@@ -1106,7 +1116,7 @@ function handleContentAreaClick(event: Event): void {
     return;
   }
 
-  if (event.target.closest('[data-usage-action="open-settings"]')) {
+  if (event.target.closest('[data-usage-action="open-account-settings"]')) {
     if (window.parent === window) {
       window.location.assign("/ui/settings/#account");
     } else {

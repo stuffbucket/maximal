@@ -196,7 +196,7 @@ describe("validateAppConfig", () => {
   })
 })
 
-describe("validateAppConfig — Claude Code model settings", () => {
+describe("validateAppConfig — Anthropic Messages model settings", () => {
   it("accepts missing overrides", () => {
     expect(
       validateAppConfig({ apps: { claudeCode: { enabled: true } } }),
@@ -205,7 +205,27 @@ describe("validateAppConfig — Claude Code model settings", () => {
     })
   })
 
-  it("round-trips model overrides", () => {
+  it("round-trips route-scoped model selections", () => {
+    const config = {
+      anthropicMessages: {
+        haikuModel: "gpt-5.6-mini",
+        sonnetModel: "gpt-5.6",
+        autoPermissionModel: "claude-haiku-5.5",
+      },
+    }
+    expect(validateAppConfig(config)).toEqual(config)
+  })
+
+  it.each(["haikuModel", "sonnetModel", "autoPermissionModel"])(
+    "rejects a blank %s selection",
+    (key) => {
+      expect(() =>
+        validateAppConfig({ anthropicMessages: { [key]: "   " } }),
+      ).toThrow(ConfigValidationError)
+    },
+  )
+
+  it("keeps legacy Claude Code model overrides readable", () => {
     const config = {
       apps: {
         claudeCode: {
@@ -217,15 +237,6 @@ describe("validateAppConfig — Claude Code model settings", () => {
     }
     expect(validateAppConfig(config)).toEqual(config)
   })
-
-  it.each(["fastModel", "capableModel", "classifierModel"])(
-    "rejects a blank %s override",
-    (key) => {
-      expect(() =>
-        validateAppConfig({ apps: { claudeCode: { [key]: "   " } } }),
-      ).toThrow(ConfigValidationError)
-    },
-  )
 
   it("preserves and reports unknown app keys", () => {
     const config = {
