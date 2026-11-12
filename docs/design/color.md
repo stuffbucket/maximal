@@ -115,6 +115,6 @@ label beside it says what:
   alone. Activity's share bar
   gives the first five parts `--series-1` to `--series-5` and folds the rest into
   a neutral `--border-strong` "Other"; every part is named by the swatch on its
-  table row, so identity never rests on color. Day columns are one series
-  (`--series-1`). Text stays text ink.
+  table row, so identity never rests on color. Day and hour columns are one series
+  (`--series-1`). The totals strip is text ink at three sizes, no hue. Text stays text ink.
 - **Status colors are for state only**, never to tell categories apart.

@@ -19,7 +19,8 @@ import type {
   ProviderQuotaWindowStatus,
 } from "../src/lib/config/settings-types"
 
-import { type FollowedWindow, DAY_MS, resolvePeriod, startOfUtcDay, startOfUtcWeek } from "../src/lib/budget/periods"
+import { type FollowedWindow, DAY_MS, HOUR_MS, resolvePeriod, startOfUtcDay, startOfUtcWeek } from "../src/lib/budget/periods"
+import { parseUsageRange } from "../src/lib/budget/reports/range"
 import { displayToNanoAiu, nanoAiuToDisplay } from "../src/lib/budget/units"
 import { BudgetLimitPutRequest, BudgetSettingsPatchRequest } from "../src/lib/config/settings-types"
 
@@ -75,6 +76,20 @@ interface LedgerRow {
   provider: string
   nanoAiu: number
   requests: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  /** The session the requests belonged to; "" for none (unattributed). */
+  sessionId: string
+}
+
+/** What one request of a kind of traffic uses, in tokens. */
+interface TokenProfile {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
 }
 
 /** One kind of traffic and what it costs on an ordinary day (nano-AIU). */
@@ -84,15 +99,93 @@ const TRAFFIC: ReadonlyArray<{
   key: string
   daily: number
   requests: number
+  tokens: TokenProfile
+  /** The client the session ids are named for. */
+  session: string | null
 }> = [
-  { model: "claude-sonnet-5-5", plugin: null, key: "claude-code", daily: 110_000_000_000, requests: 120 },
-  { model: "claude-opus-5", plugin: null, key: "claude-code", daily: 52_000_000_000, requests: 18 },
-  { model: "claude-haiku-5-5", plugin: null, key: "claude-code", daily: 14_000_000_000, requests: 160 },
-  { model: "gpt-6.1-sol", plugin: null, key: "codex", daily: 62_000_000_000, requests: 64 },
-  { model: "gpt-6.1-mini", plugin: null, key: "codex", daily: 9_000_000_000, requests: 90 },
-  { model: "gemini-3.8-flash", plugin: null, key: "claude-desktop", daily: 7_000_000_000, requests: 44 },
-  { model: "gpt-image-2", plugin: "images", key: "claude-code", daily: 18_000_000_000, requests: 30 },
-  { model: "gpt-5.6-luna", plugin: "decisions", key: "claude-code", daily: 2_000_000_000, requests: 40 },
+  {
+    model: "claude-sonnet-5-5",
+    plugin: null,
+    key: "claude-code",
+    daily: 110_000_000_000,
+    requests: 120,
+    tokens: { input: 5200, output: 880, cacheRead: 31_000, cacheWrite: 2400 },
+    session: "cc",
+  },
+  {
+    model: "claude-opus-5",
+    plugin: null,
+    key: "claude-code",
+    daily: 52_000_000_000,
+    requests: 18,
+    tokens: { input: 7400, output: 2100, cacheRead: 52_000, cacheWrite: 5200 },
+    session: "cc",
+  },
+  {
+    model: "claude-haiku-5-5",
+    plugin: null,
+    key: "claude-code",
+    daily: 14_000_000_000,
+    requests: 160,
+    tokens: { input: 1800, output: 260, cacheRead: 9000, cacheWrite: 700 },
+    session: "cc",
+  },
+  {
+    model: "gpt-6.1-sol",
+    plugin: null,
+    key: "codex",
+    daily: 62_000_000_000,
+    requests: 64,
+    tokens: { input: 6100, output: 1400, cacheRead: 22_000, cacheWrite: 0 },
+    session: "cx",
+  },
+  {
+    model: "gpt-6.1-mini",
+    plugin: null,
+    key: "codex",
+    daily: 9_000_000_000,
+    requests: 90,
+    tokens: { input: 2200, output: 390, cacheRead: 7000, cacheWrite: 0 },
+    session: "cx",
+  },
+  {
+    model: "gemini-3.8-flash",
+    plugin: null,
+    key: "claude-desktop",
+    daily: 7_000_000_000,
+    requests: 44,
+    tokens: { input: 3100, output: 640, cacheRead: 0, cacheWrite: 0 },
+    // Claude Desktop sends no session id, so this lands in an unattributed pseudo-session.
+    session: null,
+  },
+  {
+    model: "gpt-image-2",
+    plugin: "images",
+    key: "claude-code",
+    daily: 18_000_000_000,
+    requests: 30,
+    tokens: { input: 420, output: 1300, cacheRead: 0, cacheWrite: 0 },
+    session: "cc",
+  },
+  {
+    model: "gpt-5.6-luna",
+    plugin: "decisions",
+    key: "claude-code",
+    daily: 2_000_000_000,
+    requests: 40,
+    tokens: { input: 900, output: 80, cacheRead: 0, cacheWrite: 0 },
+    session: "cc",
+  },
+  // A model that costs nothing still has usage to show; the Dashboard lists it too.
+  {
+    model: "gpt-5-mini",
+    plugin: null,
+    key: "claude-desktop",
+    daily: 0,
+    requests: 70,
+    tokens: { input: 1500, output: 300, cacheRead: 0, cacheWrite: 0 },
+    session: null,
+  },
 ]
 
 /** A steady 0..1 value for a day and a kind of traffic, so a day always reads the same. */
@@ -101,23 +194,66 @@ function wobble(day: number, index: number): number {
   return x - Math.floor(x)
 }
 
-/** Every day from 35 days ago to today; weekends are quieter. */
+/** Working hours, busiest around midday: the weight of each of twelve hours (08:00 to 19:00 UTC). */
+const HOUR_WEIGHTS = [0.4, 0.8, 1.2, 1.4, 1.1, 0.7, 1.1, 1.4, 1.5, 1.2, 0.8, 0.4]
+const FIRST_HOUR = 8
+
+/** Split `total` by `weights` into whole numbers, none negative, that add up to `total`. */
+function split(total: number, weights: ReadonlyArray<number>): Array<number> {
+  const sum = weights.reduce((a, b) => a + b, 0)
+  const parts = weights.map((weight) => Math.floor((total * weight) / sum))
+  let rest = total - parts.reduce((a, b) => a + b, 0)
+  // The remainder goes to the heaviest hours first.
+  const order = weights.map((_, index) => index).sort((a, b) => (weights[b] ?? 0) - (weights[a] ?? 0))
+  for (let step = 0; rest > 0; step += 1, rest -= 1) {
+    const index = order[step % order.length] ?? 0
+    parts[index] = (parts[index] ?? 0) + 1
+  }
+  return parts
+}
+
+/**
+ * Every day from 35 days ago to today, spread over the working hours (today's
+ * over the hours so far, so nothing is dated in the future); weekends are
+ * quieter. A day's total is what it always was, so a limit's figures don't
+ * depend on how it is cut into hours.
+ */
 function ledgerFor(nowMs: number): Array<LedgerRow> {
   const today = Math.floor(nowMs / DAY_MS)
+  const nowHour = Math.floor((nowMs - today * DAY_MS) / HOUR_MS)
   const rows: Array<LedgerRow> = []
   for (let day = today - 35; day <= today; day += 1) {
     const weekday = new Date(day * DAY_MS).getUTCDay()
     const weekend = weekday === 0 || weekday === 6 ? 0.4 : 1
+    // Today's hours end at this one; earlier days keep the working day.
+    const hours =
+      day === today ?
+        Array.from({ length: Math.min(12, nowHour + 1) }, (_, i) => Math.max(0, nowHour - 11) + i)
+      : HOUR_WEIGHTS.map((_, i) => FIRST_HOUR + i)
+    const weights = hours.map((hour) => HOUR_WEIGHTS[Math.min(11, Math.max(0, hour - FIRST_HOUR))] ?? 0.5)
     TRAFFIC.forEach((traffic, index) => {
       const factor = (0.35 + 0.65 * wobble(day, index)) * weekend
-      rows.push({
-        atMs: day * DAY_MS + 12 * 3_600_000,
-        model: traffic.model,
-        plugin: traffic.plugin,
-        key: traffic.key,
-        provider: "copilot",
-        nanoAiu: Math.round(traffic.daily * factor),
-        requests: Math.max(1, Math.round(traffic.requests * factor)),
+      const nano = split(Math.round(traffic.daily * factor), weights)
+      const requests = split(Math.max(1, Math.round(traffic.requests * factor)), weights)
+      hours.forEach((hour, slot) => {
+        const count = requests[slot] ?? 0
+        if (count === 0 && (nano[slot] ?? 0) === 0) return
+        const atMs = Math.min(day * DAY_MS + hour * HOUR_MS + 5 * 60_000, nowMs - 1)
+        const block = hour < 12 ? "a" : hour < 15 ? "b" : "c"
+        rows.push({
+          atMs,
+          model: traffic.model,
+          plugin: traffic.plugin,
+          key: traffic.key,
+          provider: "copilot",
+          nanoAiu: nano[slot] ?? 0,
+          requests: count,
+          inputTokens: count * traffic.tokens.input,
+          outputTokens: count * traffic.tokens.output,
+          cacheReadTokens: count * traffic.tokens.cacheRead,
+          cacheWriteTokens: count * traffic.tokens.cacheWrite,
+          sessionId: traffic.session ? `${traffic.session}-${new Date(day * DAY_MS).toISOString().slice(0, 10)}-${block}` : "",
+        })
       })
     })
   }
@@ -255,8 +391,7 @@ const SCOPE_ORDER: Record<Scope["kind"], number> = {
   key: 4,
 }
 
-const ACTIVITY_GROUPS = new Set(["model", "plugin", "key", "provider", "day"])
-const ACTIVITY_PERIODS = new Set(["day", "week", "month"])
+const ACTIVITY_GROUPS = new Set(["model", "plugin", "key", "provider", "day", "hour"])
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
 
 const json = (body: unknown, status = 200): Response =>
@@ -381,30 +516,59 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
     for (const listener of listeners) listener(current)
   }
 
-  function activity(period: string, group: string): BudgetActivityResponse {
+  /**
+   * What `/activity` answers: the ledger in the query's range, grouped, with the
+   * Dashboard's measures per row and in `totals`. Free groups are kept only for
+   * `include_free=true`, like the real route.
+   */
+  function activityFor(query: URLSearchParams): BudgetActivityResponse | { error: string } {
+    const group = query.get("group") ?? "model"
+    if (!ACTIVITY_GROUPS.has(group)) return { error: "group must be model, plugin, key, provider, day or hour" }
     const nowMs = Date.now()
-    const now = new Date(nowMs)
-    const startMs =
-      period === "day" ? startOfUtcDay(nowMs)
-      : period === "week" ? startOfUtcWeek(nowMs)
-      : Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    const parsed = parseUsageRange(
+      {
+        range: query.get("range") ?? undefined,
+        from: query.get("from") ?? undefined,
+        to: query.get("to") ?? undefined,
+        period: query.get("period") ?? undefined,
+      },
+      nowMs,
+      "day",
+    )
+    if (!parsed.ok) return { error: parsed.message }
+    const { range } = parsed
     const keyOf = (row: LedgerRow): string | null =>
       group === "model" ? row.model
       : group === "plugin" ? row.plugin
       : group === "key" ? row.key
       : group === "provider" ? row.provider
+      : group === "hour" ? `${new Date(row.atMs).toISOString().slice(0, 13)}:00:00Z`
       : new Date(row.atMs).toISOString().slice(0, 10)
-    const grouped = new Map<string | null, { nano: number; requests: number }>()
+    type Sum = { nano: number; requests: number; input: number; output: number; cacheRead: number; cacheWrite: number }
+    const empty = (): Sum => ({ nano: 0, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+    const add = (sum: Sum, row: LedgerRow): Sum => ({
+      nano: sum.nano + row.nanoAiu,
+      requests: sum.requests + row.requests,
+      input: sum.input + row.inputTokens,
+      output: sum.output + row.outputTokens,
+      cacheRead: sum.cacheRead + row.cacheReadTokens,
+      cacheWrite: sum.cacheWrite + row.cacheWriteTokens,
+    })
+    const grouped = new Map<string | null, Sum>()
+    let all = empty()
     for (const row of ledger) {
-      if (row.atMs < startMs || row.nanoAiu <= 0) continue
+      if (row.atMs < range.fromMs || row.atMs >= range.toMs) continue
+      all = add(all, row)
       const key = keyOf(row)
-      const sum = grouped.get(key) ?? { nano: 0, requests: 0 }
-      grouped.set(key, { nano: sum.nano + row.nanoAiu, requests: sum.requests + row.requests })
+      grouped.set(key, add(grouped.get(key) ?? empty(), row))
     }
+    const includeFree = query.get("include_free") === "true"
     const shown = display()
+    const timeGroup = group === "day" || group === "hour"
     const rows = [...grouped.entries()]
+      .filter(([, sum]) => includeFree || sum.nano > 0)
       .sort(([keyA, a], [keyB, b]) =>
-        group === "day" ?
+        timeGroup ?
           String(keyA).localeCompare(String(keyB))
         : b.nano - a.nano || String(keyA).localeCompare(String(keyB)),
       )
@@ -413,14 +577,37 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
         nano_aiu: sum.nano,
         requests: sum.requests,
         amount: nanoAiuToDisplay(sum.nano, shown),
+        input_tokens: sum.input,
+        output_tokens: sum.output,
+        cache_read_input_tokens: sum.cacheRead,
+        cache_creation_input_tokens: sum.cacheWrite,
+        total_tokens: sum.input + sum.output + sum.cacheRead + sum.cacheWrite,
       }))
     return {
-      period: period as BudgetActivityResponse["period"],
+      period:
+        range.label === "day" || range.label === "week" || range.label === "month" ? range.label : "range",
       group: group as BudgetActivityResponse["group"],
-      period_start: new Date(startMs).toISOString(),
+      period_start: new Date(range.fromMs).toISOString(),
       display: { unit: state.unit, credit_usd: state.creditUsd },
+      range: { from: new Date(range.fromMs).toISOString(), to: new Date(range.toMs).toISOString(), label: range.label },
+      totals: {
+        request_count: all.requests,
+        input_tokens: all.input,
+        output_tokens: all.output,
+        cache_read_input_tokens: all.cacheRead,
+        cache_creation_input_tokens: all.cacheWrite,
+        total_tokens: all.input + all.output + all.cacheRead + all.cacheWrite,
+        total_nano_aiu: all.nano,
+      },
       rows,
     }
+  }
+
+  /** The original `period=day|week|month` form, for callers that name only that. */
+  function activity(period: string, group: string): BudgetActivityResponse {
+    const result = activityFor(new URLSearchParams({ period, group }))
+    if ("error" in result) throw new Error(result.error)
+    return result
   }
 
   const csvCell = (value: string): string => (/[",\n\r]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value)
@@ -475,22 +662,32 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
     }
 
     if ((path === "/settings/api/budget/activity" || path === "/settings/api/budget/activity.csv") && method === "GET") {
-      const period = url.searchParams.get("period") ?? "day"
-      const group = url.searchParams.get("group") ?? "model"
-      if (!ACTIVITY_PERIODS.has(period) || !ACTIVITY_GROUPS.has(group)) {
-        return validationError("period must be day, week or month; group must be model, plugin, key, provider or day")
-      }
-      const result = activity(period, group)
+      const result = activityFor(url.searchParams)
+      if ("error" in result) return validationError(result.error)
       if (path.endsWith(".csv")) {
-        const lines = [`${result.group},nano_aiu,requests,amount_${result.display.unit}`]
+        const lines = [
+          `${result.group},nano_aiu,requests,amount_${result.display.unit},input_tokens,output_tokens,cache_read_input_tokens,cache_creation_input_tokens,total_tokens`,
+        ]
         for (const row of result.rows) {
-          lines.push([csvCell(row.key ?? ""), row.nano_aiu, row.requests, row.amount].join(","))
+          lines.push(
+            [
+              csvCell(row.key ?? ""),
+              row.nano_aiu,
+              row.requests,
+              row.amount,
+              row.input_tokens ?? 0,
+              row.output_tokens ?? 0,
+              row.cache_read_input_tokens ?? 0,
+              row.cache_creation_input_tokens ?? 0,
+              row.total_tokens ?? 0,
+            ].join(","),
+          )
         }
         return new Response(`${lines.join("\n")}\n`, {
           status: 200,
           headers: {
             "content-type": "text/csv; charset=utf-8",
-            "content-disposition": `attachment; filename="maximal-budget-${result.group}-${result.period}.csv"`,
+            "content-disposition": `attachment; filename="maximal-budget-${result.group}-${result.range?.label ?? result.period}.csv"`,
           },
         })
       }

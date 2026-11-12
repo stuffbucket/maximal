@@ -245,16 +245,37 @@ no heading repeats it.
   what it opened with, a click on the backdrop (or in the dialog's padding) and
   Escape do nothing, and Cancel is the explicit way out. An untouched form closes
   on either. Deleting asks in a `ConfirmDialog`.
-- **Activity.** Period and group pickers, the period's total, a chart, a table of
-  the same rows and a "Download activity statement (CSV)" button (the shell's
-  save dialog; a plain download in a browser) whose tooltip and file name
-  (`maximal-activity-<period>-by-<group>.csv`) name the period and grouping. By model, plugin, client key or provider the chart is a
-  thin segmented bar (`.budget-share`): five parts in `--series-1` to
-  `--series-5`, the tail folded into a neutral "Other", and a swatch on each
-  table row standing in for a legend. By day it is columns (`.budget-columns`, at
-  most `--size-lg` wide, `--radius-chip` rounded tops, one baseline) with the busiest
-  day labelled. The chart never carries a number the table doesn't, and rows that
-  spent nothing are not listed. A table longer than ten rows folds under "Show all".
+- **Activity.** What was used, over any range, laid out like the Dashboard. A
+  range picker (`.range-seg`, a segmented row: 24 hours, 7 days, 30 days, 90 days,
+  All time, Custom; the chosen option steps forward onto the card surface, as in
+  the permission control) and a group select (model, plugin, client key, provider,
+  day, hour). Custom opens two day fields (UTC, the second day included); a range
+  that runs backwards says so under them and fetches nothing. The shared
+  `RangePicker` and `range.ts` also serve a rule's timeline and the what-if
+  preview. Then a totals strip (`.budget-totals`, hairlines above and below, not a
+  card) in the Dashboard's measures and its catalog labels: total tokens as the
+  headline, then input, output, cache read, cache write, requests and cost. Then a chart and a
+  table of the same rows with the same measures per row (token counts compact, the
+  exact figure in the cell's tooltip), and a "Download activity statement (CSV)"
+  button (the shell's save dialog; a plain download in a browser) whose tooltip and
+  file name (`maximal-activity-<range>-by-<group>.csv`, the range being `7d` or
+  `2026-11-01_to_2026-11-08`) name the range and grouping. A group that used nothing
+  is still listed (`include_free`), so the rows add up to the totals, as on the
+  Dashboard. By model, plugin, client key or provider the chart is a thin segmented
+  bar (`.budget-share`): five parts in `--series-1` to `--series-5`, the tail folded
+  into a neutral "Other", and a swatch on each table row standing in for a legend. By
+  day or hour it is columns (`.budget-columns`, at most `--size-lg` wide,
+  `--radius-chip` rounded tops, one baseline) on an even time axis, quiet buckets
+  drawn empty; a long span packs its columns closer (`--dense`, `--packed`), and the
+  first and last bucket and the busiest are named under them. The chart never
+  carries a number the table doesn't. A table longer than ten rows folds under "Show
+  all" (newest first for a span of time, the biggest spender first otherwise, at most
+  500 rows; the statement has the rest). The table is seven columns in a 640px window
+  with tight cells and headings that wrap (a long German compound breaks inside its
+  column) rather than an inner scroller. While another range loads the previous
+  figures stay (`aria-busy`); a failed load drops them, so a range's figures never
+  sit under another's heading, and shows an error `ProblemCallout` with a retry; a
+  range with nothing recorded is an `EmptyState` that suggests a longer one.
 
 - **Settings.** Two `.form` rows (an on/off `Switch` for enforcement, a `.select`
   for the display unit), then what each provider reports: its allowances grouped

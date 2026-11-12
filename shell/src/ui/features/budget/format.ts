@@ -8,6 +8,8 @@
  * same arithmetic as `src/lib/budget/units.ts`.
  */
 
+import { type RangeChoice, rangeFileLabel, rangeParams } from "./range";
+
 import type {
   BudgetActivityResponse,
   BudgetLimitPutRequest,
@@ -21,11 +23,9 @@ export type DisplayUnit = DisplayInfo["unit"];
 export type BudgetScope = BudgetLimitStatus["scope"];
 export type LimitReset = BudgetLimitStatus["limit_reset"];
 export type ActivityRow = BudgetActivityResponse["rows"][number];
-export type ActivityPeriod = BudgetActivityResponse["period"];
 export type ActivityGroup = BudgetActivityResponse["group"];
 
-export const ACTIVITY_PERIODS: ReadonlyArray<ActivityPeriod> = ["day", "week", "month"];
-export const ACTIVITY_GROUPS: ReadonlyArray<ActivityGroup> = ["model", "plugin", "key", "provider", "day"];
+export const ACTIVITY_GROUPS: ReadonlyArray<ActivityGroup> = ["model", "plugin", "key", "provider", "day", "hour"];
 
 const NANO_AIU_PER_CREDIT = 1_000_000_000;
 
@@ -131,9 +131,30 @@ export function formatDayKey(key: string, locale: string): string {
   );
 }
 
-/** The start of an activity period as "Nov 10", in UTC like the period itself. */
-export function formatPeriodStart(iso: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" }).format(Date.parse(iso));
+/** An hour key (`2026-11-11T14:00:00Z`, UTC, as the API groups hours) as "Nov 11, 2 PM". */
+export function formatHourKey(key: string, locale: string): string {
+  const ms = Date.parse(key);
+  if (Number.isNaN(ms)) return key;
+  return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", hour: "numeric", timeZone: "UTC" }).format(ms);
+}
+
+/**
+ * A range as the Activity subtitle reads it, in UTC like the API counts: the
+ * days it spans ("Nov 4 – Nov 11") or, for two days or less, the hours too.
+ * `to` is exclusive, so a longer range that ends at midnight names the day before.
+ */
+export function formatSpan(fromIso: string, toIso: string, locale: string): string {
+  const fromMs = Date.parse(fromIso);
+  const toMs = Date.parse(toIso);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs)) return "";
+  const short = toMs - fromMs <= 2 * DAY_MS;
+  const formatter = new Intl.DateTimeFormat(
+    locale,
+    short ?
+      { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" }
+    : { month: "short", day: "numeric", timeZone: "UTC" },
+  );
+  return `${formatter.format(fromMs)} – ${formatter.format(short ? toMs : toMs - 1)}`;
 }
 
 // ── Limits ──────────────────────────────────────────────────────────────
@@ -503,18 +524,141 @@ export function topSegments(rows: ReadonlyArray<ActivityRow>, limit: number): Ar
   ];
 }
 
+/** The most columns a chart will draw by filling the quiet hours and days in; beyond it the rows drawn are the rows there are. */
+const MAX_FILLED_COLUMNS = 2400;
+
+/** The key a bucket starts at: `2026-11-11T14:00:00Z` for an hour, `2026-11-11` for a day. */
+function bucketKey(group: "day" | "hour", ms: number): string {
+  const iso = new Date(ms).toISOString();
+  return group === "day" ? iso.slice(0, 10) : `${iso.slice(0, 13)}:00:00Z`;
+}
+
+/**
+ * The rows of a day or hour grouping with the quiet buckets filled in as zero,
+ * so a chart's columns sit on an even time axis (the server leaves out a day or
+ * hour that recorded nothing). The span is the range when it has a start
+ * (`from` is epoch for "all", so that one runs from the first row), else the
+ * first row to the last. A span too long to draw one column each is left as given.
+ */
+export function timeSeries(
+  rows: ReadonlyArray<ActivityRow>,
+  group: "day" | "hour",
+  range?: { from: string; to: string; label: string },
+): Array<ActivityRow> {
+  const step = group === "day" ? DAY_MS : HOUR_MS;
+  const floor = (ms: number): number => Math.floor(ms / step) * step;
+  const first = rows.length > 0 ? Date.parse(rows[0]?.key ?? "") : Number.NaN;
+  const last = rows.length > 0 ? Date.parse(rows[rows.length - 1]?.key ?? "") : Number.NaN;
+  if (Number.isNaN(first) || Number.isNaN(last)) return [...rows];
+  const rangeFrom = range && range.label !== "all" ? Date.parse(range.from) : Number.NaN;
+  const rangeTo = range && range.label !== "all" ? Date.parse(range.to) : Number.NaN;
+  const start = floor(Number.isNaN(rangeFrom) ? first : Math.min(rangeFrom, first));
+  const end = floor(Number.isNaN(rangeTo) ? last : Math.max(rangeTo - 1, last));
+  if ((end - start) / step + 1 > MAX_FILLED_COLUMNS) return [...rows];
+  const byKey = new Map(rows.map((row) => [row.key, row]));
+  const filled: Array<ActivityRow> = [];
+  for (let at = start; at <= end; at += step) {
+    const key = bucketKey(group, at);
+    filled.push(byKey.get(key) ?? { key, nano_aiu: 0, requests: 0, amount: 0 });
+  }
+  return filled;
+}
+
 /** The column height for a day, 0 to 1 of the tallest day. */
 export function columnHeights(rows: ReadonlyArray<ActivityRow>): Array<number> {
   const max = rows.reduce((peak, row) => Math.max(peak, row.nano_aiu), 0);
   return rows.map((row) => (max > 0 ? row.nano_aiu / max : 0));
 }
 
-/** The query string the activity and CSV endpoints share. */
-export function activityQuery(period: ActivityPeriod, group: ActivityGroup): string {
-  return new URLSearchParams({ period, group }).toString();
+/** Groups that are a span of time (oldest first, drawn as columns) rather than a set of things. */
+export function isTimeGroup(group: ActivityGroup): group is "day" | "hour" {
+  return group === "day" || group === "hour";
 }
 
-/** A file name for the exported statement, naming its period and grouping: `maximal-activity-week-by-model.csv`. */
-export function csvFileName(period: ActivityPeriod, group: ActivityGroup): string {
-  return `maximal-activity-${period}-by-${group}.csv`;
+/**
+ * The query string the activity and CSV endpoints share, or null while a
+ * custom range is incomplete. Groups that spent nothing are kept, so the
+ * table agrees with the totals and with the Dashboard, which lists every model.
+ */
+export function activityQuery(choice: RangeChoice, group: ActivityGroup): string | null {
+  const range = rangeParams(choice);
+  if (!range) return null;
+  return new URLSearchParams([...range, ["group", group], ["include_free", "true"]]).toString();
+}
+
+/** A file name for the exported statement, naming its range and grouping: `maximal-activity-7d-by-model.csv`. */
+export function csvFileName(choice: RangeChoice, group: ActivityGroup): string {
+  return `maximal-activity-${rangeFileLabel(choice)}-by-${group}.csv`;
+}
+
+/** A token or request count for a table cell: "1.2M", "345K", "812". The exact figure belongs in the cell's title. */
+export function formatCompact(value: number, locale: string): string {
+  try {
+    return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/** The measures a table row or the totals strip shows, in the Dashboard's order. */
+export interface UsageFigures {
+  requests: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+/** A row's measures; a row from a server that predates the token fields reads zero tokens. */
+export function rowFigures(row: ActivityRow): UsageFigures {
+  const input = row.input_tokens ?? 0;
+  const output = row.output_tokens ?? 0;
+  const cacheRead = row.cache_read_input_tokens ?? 0;
+  const cacheWrite = row.cache_creation_input_tokens ?? 0;
+  return {
+    requests: row.requests,
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    total: row.total_tokens ?? input + output + cacheRead + cacheWrite,
+  };
+}
+
+/**
+ * The totals strip's measures: the response's `totals` (everything the range
+ * recorded, free groups included, like the Dashboard's), else the sum of the
+ * rows for a server that doesn't send them.
+ */
+export function activityTotals(
+  activity: Pick<BudgetActivityResponse, "totals" | "rows">,
+): UsageFigures & { nanoAiu: number } {
+  const { totals } = activity;
+  if (totals) {
+    return {
+      requests: totals.request_count,
+      input: totals.input_tokens,
+      output: totals.output_tokens,
+      cacheRead: totals.cache_read_input_tokens,
+      cacheWrite: totals.cache_creation_input_tokens,
+      total: totals.total_tokens,
+      nanoAiu: totals.total_nano_aiu,
+    };
+  }
+  return activity.rows.reduce(
+    (acc, row) => {
+      const figures = rowFigures(row);
+      return {
+        requests: acc.requests + figures.requests,
+        input: acc.input + figures.input,
+        output: acc.output + figures.output,
+        cacheRead: acc.cacheRead + figures.cacheRead,
+        cacheWrite: acc.cacheWrite + figures.cacheWrite,
+        total: acc.total + figures.total,
+        nanoAiu: acc.nanoAiu + row.nano_aiu,
+      };
+    },
+    { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, nanoAiu: 0 },
+  );
 }

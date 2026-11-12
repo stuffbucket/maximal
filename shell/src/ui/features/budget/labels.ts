@@ -5,6 +5,7 @@ import {
   type BudgetScope,
   type ResetDescription,
   formatDayKey,
+  formatHourKey,
   formatRelative,
   formatWhen,
 } from "./format";
@@ -61,6 +62,8 @@ export function segmentName(group: ActivityGroup, key: string | null, other: boo
       return providerName(key);
     case "day":
       return formatDayKey(key, locale);
+    case "hour":
+      return formatHourKey(key, locale);
     default:
       return key;
   }

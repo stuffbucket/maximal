@@ -96,8 +96,103 @@ test("the export button says what it downloads", async ({ page }) => {
   await expect(button).toBeVisible()
   await expect(button).toHaveAttribute(
     "title",
-    /maximal-activity-week-by-model\.csv/,
+    /maximal-activity-7d-by-model\.csv/,
   )
+})
+
+// Activity: any range, every grouping, the Dashboard's measures.
+test("activity opens on seven days and shows the Dashboard's measures", async ({
+  page,
+}) => {
+  const range = page.getByRole("group", { name: "Range" })
+  await expect(range.getByRole("button", { name: "7 days" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  const totals = page.locator(".budget-totals")
+  for (const label of [
+    "Total tokens",
+    "Input",
+    "Output",
+    "Cache Read",
+    "Cache Write",
+    "Requests",
+    "Cost",
+  ]) {
+    await expect(totals).toContainText(label)
+  }
+  await expect(page.locator(".budget-table thead th")).toHaveText([
+    "Model",
+    "Requests",
+    "Input",
+    "Output",
+    "Cache Read",
+    "Cache Write",
+    "Cost",
+  ])
+})
+
+test("picking a range, grouping by hour or choosing two days refetches and renames the file", async ({
+  page,
+}) => {
+  const range = page.getByRole("group", { name: "Range" })
+  await range.getByRole("button", { name: "24 hours" }).click()
+  await page.locator("#budget-group").selectOption("hour")
+  await expect(page.locator(".budget-columns")).toBeVisible()
+  await expect(page.locator(".budget-table thead th").first()).toHaveText(
+    "Hour",
+  )
+  const button = page.getByRole("button", {
+    name: "Download activity statement (CSV)",
+  })
+  await expect(button).toHaveAttribute(
+    "title",
+    /maximal-activity-24h-by-hour\.csv/,
+  )
+  // Custom asks for two days and says so when they run backwards.
+  await range.getByRole("button", { name: "Custom" }).click()
+  const from = page.locator("#budget-activity-range-from")
+  const to = page.locator("#budget-activity-range-to")
+  await expect(from).toBeVisible()
+  await from.fill("2026-01-10")
+  await to.fill("2026-01-05")
+  await expect(page.locator(".range-picker .budget-field__error")).toBeVisible()
+  await expect(page.locator(".budget-totals")).toBeHidden()
+  await expect(button).toBeDisabled()
+  await from.fill("2026-01-01")
+  await expect(page.locator(".range-picker .budget-field__error")).toBeHidden()
+  await expect(button).toHaveAttribute(
+    "title",
+    /maximal-activity-2026-01-01_to_2026-01-05-by-hour\.csv/,
+  )
+})
+
+test("the activity table stays inside a 640px window with every measure", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 480 })
+  const fits = await page.evaluate<boolean>(
+    `(() => { const t = document.querySelector(".budget-table"); const p = document.getElementById("pane"); return t.scrollWidth <= t.clientWidth && p.scrollWidth <= p.clientWidth })()`,
+  )
+  expect(fits).toBe(true)
+  await page.locator(".budget-table").scrollIntoViewIfNeeded()
+  await page.screenshot({ path: "test-results/rules-activity-640x480.png" })
+})
+
+test("a failed activity load says so, with another try, and shows no stale figures", async ({
+  page,
+}) => {
+  await page.route("**/settings/api/budget/activity?*", (route) =>
+    route.fulfill({ status: 500, body: '{"error":{"message":"boom"}}' }),
+  )
+  await page
+    .getByRole("group", { name: "Range" })
+    .getByRole("button", { name: "30 days" })
+    .click()
+  await expect(
+    page.locator(".budget-block").nth(1).locator(".callout"),
+  ).toBeVisible()
+  await expect(page.locator(".budget-totals")).toBeHidden()
 })
 
 test("rule meters name their figures and a spent rule says so", async ({
