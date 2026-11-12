@@ -29,6 +29,7 @@
     "packages/plugin-sdk",
     "packages/plugin-host",
     "packages/plugin-workiq",
+    "packages/plugin-figjam",
     "packages/figjam-plugin",
     "packages/figjam-bridge",
     "packages/figjam-layout"
@@ -99,6 +100,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
+    "@stuffbucket/maximal-plugin-figjam": "workspace:*",
     "@stuffbucket/maximal-plugin-host": "workspace:*",
     "@stuffbucket/maximal-plugin-sdk": "workspace:*",
     "@stuffbucket/maximal-plugin-workiq": "workspace:*",

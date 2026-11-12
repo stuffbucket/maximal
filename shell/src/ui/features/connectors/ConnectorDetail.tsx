@@ -99,6 +99,8 @@ export function ConnectorDetail({ summary, version, focusOnOpen, onFresh, onBack
   };
 
   const upstream = connector.manifest.connector;
+  // Extensions have no MCP endpoint, clients or tools: just status and settings.
+  const isConnector = connector.kind === "connector";
 
   return (
     <article className="connector-detail" data-connector={connector.id} aria-busy={busy}>
@@ -158,6 +160,7 @@ export function ConnectorDetail({ summary, version, focusOnOpen, onFresh, onBack
         />
       )}
 
+      {isConnector && (
       <section className="connector-section" aria-labelledby={`${connector.id}-connect-title`}>
         <div className="connector-section__head">
           <h4 className="connector-section__title" id={`${connector.id}-connect-title`}>
@@ -213,8 +216,9 @@ export function ConnectorDetail({ summary, version, focusOnOpen, onFresh, onBack
           </Button>
         </div>
       </section>
+      )}
 
-      {detail && <ToolPermissions connector={detail} onChange={setPermissions} />}
+      {detail && isConnector && <ToolPermissions connector={detail} onChange={setPermissions} />}
 
       {/* An unreadable settings file has no config to edit, and Maximal
           won't write over it; the callout above says what to do instead. */}

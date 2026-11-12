@@ -11,13 +11,39 @@ read and change the board through the same tools.
 |---|---|
 | `packages/figjam-plugin` | The Figma plugin: the sandbox (`src/legacy/code.js`), the panel (`src/legacy/ui.html`), and `scripts/build.ts`, which writes an importable plugin folder. |
 | `packages/figjam-bridge` | The bridge (`src/server.ts`, HTTP and WebSocket on port 4150; `src/bridge.ts` is its CLI entry), the chat store (`src/chats-store.ts`, SQLite with FTS5) and the `figjam` CLI (`src/cli.ts`). |
+| `packages/plugin-figjam` | The built-in Maximal plugin (an `extension`, off by default) that runs the bridge in-process, writes the Figma development plugin and approves panels from Integrations. |
 | `packages/figjam-layout` | Layout and edge routing for boards. The recommended pipeline is plain TypeScript; the older baseline strategies use elkjs and libavoid-js. |
 
 The sandbox and panel are still the single-file sources they started as. The
-build copies them through, stamps `PLUGIN_VERSION` from
+build embeds them (text imports, so a compiled Maximal can write the plugin without the source tree), stamps `PLUGIN_VERSION` from
 `packages/figjam-plugin/package.json`, and writes `manifest.json`.
 
-## Build and run the plugin
+## Use it from Maximal
+
+1. Open Settings → Integrations, open **FigJam** and switch it on. It's off by
+   default because it opens a local port (4150, changeable in its settings).
+2. Click **Set up the Figma plugin**. Maximal builds the development plugin
+   into `<app dir>/plugins/figjam/figma-plugin/` and shows the path of its
+   `manifest.json`. The folder is rebuilt on start when its version or ports no
+   longer match, and **Rebuild the Figma plugin** does it on demand.
+3. In the Figma desktop app: **Plugins → Development → Import plugin from
+   manifest…**, then choose that `manifest.json`. Run **Maximal Agent (dev)**
+   on a FigJam board and tick **Let Claude Code drive this board** in its
+   Settings.
+4. Maximal raises a notification, "A FigJam panel ("grumpy-lynx") wants to
+   connect.", and FigJam's page in Integrations lists the request with
+   **Approve** and **Deny**. The status also shows the port, the connected
+   boards and who's waiting. The notice code is `figjam-pair-requested`
+   (param `name`); it has no localized wording yet, so the English message is
+   shown.
+
+If the port is taken (for example by `bun run figjam:bridge`), the status is an
+error that names the port, with **Try again**. The plugin is
+`packages/plugin-figjam`; it's a thin shell over `startBridge` and the
+figjam-plugin build (see Embedding). The Figma plugin's Maximal port defaults
+to 4141 and is an advanced setting.
+
+## Build and run the plugin (developers)
 
 ```sh
 bun run figjam:build                  # → packages/figjam-plugin/dist/dev
@@ -66,6 +92,9 @@ Figma's REST API can't resolve comments, and there are no delete tools.
 
 ## The bridge
 
+Developers can run the bridge without Maximal's plugin. Don't run both at once:
+they'd compete for the port (and `startBridge` allows one bridge per process).
+
 ```sh
 bun run figjam:bridge                 # serves :4150 (FIGJAM_BRIDGE_PORT overrides)
 bun run figjam -- status              # connected boards
@@ -77,8 +106,8 @@ bun run figjam -- get_board '{}' --board <name>
 A panel connects only when its user ticks **Let Claude Code drive this board**
 in the panel's Settings. Each panel instance has a name such as
 `grumpy-lynx`, shown in the plugin's title bar. The first time it connects,
-the bridge holds the request until someone approves that name with
-`figjam approve <name>`, or denies it. An approved panel gets a token of its
+the bridge holds the request until someone approves that name (in Maximal's
+Integrations page, or with `figjam approve <name>` from the CLI), or denies it. An approved panel gets a token of its
 own and reconnects without asking again. Requests expire after five minutes
 (`FIGJAM_PAIR_TTL_S`).
 
@@ -100,7 +129,8 @@ Windows, `$XDG_DATA_HOME/maximal`, or `~/.local/share/maximal`.
 ### Embedding
 
 `startBridge` (`@stuffbucket/maximal-figjam-bridge/server`) runs the same
-bridge in-process; `bun run figjam:bridge` is a thin wrapper around it.
+bridge in-process; Maximal's FigJam plugin and `bun run figjam:bridge` are
+both thin wrappers around it.
 
 ```ts
 const bridge = await startBridge({
@@ -136,6 +166,12 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
   Each stub loads the built `code.js` in a `vm` context with a fake `figma`
   global. They need Node rather than Bun, because Bun's `vm` doesn't keep a
   context's top-level `var` bindings in sync with the context object.
+- `plugin-figjam` runs the plugin conformance suite, then the real bridge on a
+  spare port with a temporary data directory: a fake panel asks to pair, and
+  the test checks the `figjam-pair-requested` notice, the Approve/Deny status
+  actions, that approving pairs the panel, the stale-folder rebuild, the
+  port-in-use error and that stopping the plugin frees the port. It runs with
+  `bun run plugins:test`.
 - `figjam-bridge` starts a bridge on a spare port with a temporary data
   directory and drives pairing the way the panel and the CLI do, both as a
   subprocess (the CLI path) and in-process through `startBridge`.

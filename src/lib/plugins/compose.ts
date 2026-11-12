@@ -12,6 +12,7 @@
 
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import * as figjam from "@stuffbucket/maximal-plugin-figjam"
 import {
   createPluginHost,
   type HostServices,
@@ -33,7 +34,7 @@ import { runFile } from "~/lib/system/run-file"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 
 /** The first-party plugins every Maximal build ships. */
-const BUILTIN_PLUGINS: ReadonlyArray<PluginModule> = [workiq]
+const BUILTIN_PLUGINS: ReadonlyArray<PluginModule> = [workiq, figjam]
 
 const OPEN_TIMEOUT_MS = 10_000
 

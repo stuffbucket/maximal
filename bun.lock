@@ -6,6 +6,7 @@
       "name": "@stuffbucket/maximal",
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
+        "@stuffbucket/maximal-plugin-figjam": "workspace:*",
         "@stuffbucket/maximal-plugin-host": "workspace:*",
         "@stuffbucket/maximal-plugin-sdk": "workspace:*",
         "@stuffbucket/maximal-plugin-workiq": "workspace:*",
@@ -80,6 +81,22 @@
     "packages/figjam-plugin": {
       "name": "@stuffbucket/maximal-figjam-plugin",
       "version": "0.10.1",
+    },
+    "packages/plugin-figjam": {
+      "name": "@stuffbucket/maximal-plugin-figjam",
+      "version": "0.0.0",
+      "dependencies": {
+        "@stuffbucket/maximal-figjam-bridge": "workspace:*",
+        "@stuffbucket/maximal-figjam-plugin": "workspace:*",
+        "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+        "zod": "4.6.7",
+      },
+      "devDependencies": {
+        "@stuffbucket/maximal-plugin-host": "workspace:*",
+      },
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "4.0.2",
+      },
     },
     "packages/plugin-host": {
       "name": "@stuffbucket/maximal-plugin-host",
@@ -404,6 +421,8 @@
     "@stuffbucket/maximal-figjam-layout": ["@stuffbucket/maximal-figjam-layout@workspace:packages/figjam-layout"],
 
     "@stuffbucket/maximal-figjam-plugin": ["@stuffbucket/maximal-figjam-plugin@workspace:packages/figjam-plugin"],
+
+    "@stuffbucket/maximal-plugin-figjam": ["@stuffbucket/maximal-plugin-figjam@workspace:packages/plugin-figjam"],
 
     "@stuffbucket/maximal-plugin-host": ["@stuffbucket/maximal-plugin-host@workspace:packages/plugin-host"],
 
