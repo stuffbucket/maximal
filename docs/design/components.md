@@ -173,7 +173,8 @@ typographic sections:
   `confirm` asks in a `ConfirmDialog` first. One that failed to start
   shows an error `Callout` instead. Off shows no status line.
 - Connect to apps: a compact checkbox menu lists every app, summarizes the
-  selected apps in its trigger, and stays open while choices are changed. Apps
+  selected apps in its trigger (or names the connector when none are selected),
+  and stays open while choices are changed. Apps
   that cannot receive the connector remain visible as disabled menu items with
   a warning glyph and an accessible reason. Changes save as made. The endpoint
   address and its Copy button sit below the menu.
