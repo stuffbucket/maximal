@@ -55,6 +55,29 @@ test("renders accessible Automatic controls and preserves the other settings on 
   })
 
   await openModels(page)
+  await expect(
+    page.getByRole("heading", { name: "Anthropic Messages model settings" }),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Map Haiku and Sonnet aliases for Claude Code, Claude Desktop, and other /v1/messages clients routed through Maximal. Choose the model used for Claude Code Auto permission checks.",
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Used when an Anthropic Messages client requests Haiku, including background work.",
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Used when an Anthropic Messages client requests Sonnet, including Claude Code’s opusplan.",
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Used by Claude Code to decide whether an action can run without asking in Auto permission mode.",
+    ),
+  ).toBeVisible()
   const fast = page.getByLabel("Haiku alias")
   const capable = page.getByLabel("Sonnet alias")
   const classifier = page.getByLabel("Auto permission checks")
