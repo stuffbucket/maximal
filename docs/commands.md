@@ -154,7 +154,8 @@ bun run dev -- start --port 4141
 
 # Terminal B — rebuild the UI bundles on every save.
 bun run app:ui
-# Open http://localhost:4141/ui/settings/, /ui/dashboard/, or /ui/sessions/
+# Open http://localhost:4141/ui/settings/, /ui/dashboard/, /ui/sessions/,
+# or /ui/budget/
 # Reload the window after a save to pick up changes.
 ```
 
@@ -164,7 +165,7 @@ no-op gracefully — everything else works.
 
 ## Storybook (UI catalog)
 
-Every Settings, Dashboard and Sessions piece in every state, without a running proxy.
+Every Settings, Dashboard, Sessions and Budget piece in every state, without a running proxy.
 It's an isolated package (`packages/storybook`, its own pnpm lockfile):
 
 ```sh
@@ -180,7 +181,10 @@ a story whose props no longer match the component, and on a fixture that no
 longer matches the wire contract.
 
 It shares its mock backend and fixtures with `bun run ui:harness`
-(`scripts/ui-harness-api.ts`, `scripts/ui-harness-fixtures.ts`). Use the harness
+(`scripts/ui-harness-api.ts`, `scripts/ui-harness-fixtures.ts`; the Budget window's
+limits, spend and activity come from a small working budget service in
+`scripts/ui-harness-budget.ts`, so adding, editing and deleting a limit behave like
+the real routes and push `budget.changed`). Use the harness
 to click through the whole app against one scenario, and Storybook to see
 each piece in each state side by side. Details: `packages/storybook/README.md`.
 

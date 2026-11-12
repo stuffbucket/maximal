@@ -148,3 +148,42 @@ export async function setDockVisibility(
     return false;
   }
 }
+
+export type SaveTextFileOutcome = "saved" | "cancelled" | "failed";
+
+/**
+ * Save text as a file the person picks the place for. In the app that is the
+ * system's save dialog (`save_text_file` in the shell), because a webview
+ * can't be relied on to honour a download link; in a plain browser it is an
+ * ordinary download.
+ */
+export async function saveTextFile(
+  suggestedName: string,
+  contents: string,
+): Promise<SaveTextFileOutcome> {
+  if ("__TAURI_INTERNALS__" in window) {
+    try {
+      const saved = await invoke<boolean>("save_text_file", {
+        suggestedName,
+        contents,
+      });
+      return saved ? "saved" : "cancelled";
+    } catch (err) {
+      console.warn("save_text_file failed:", err);
+      return "failed";
+    }
+  }
+  try {
+    const url = URL.createObjectURL(new Blob([contents], { type: "text/csv" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = suggestedName;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    return "saved";
+  } catch {
+    return "failed";
+  }
+}

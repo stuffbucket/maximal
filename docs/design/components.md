@@ -196,6 +196,52 @@ Text a connector supplies is shown as written; only http(s) addresses in
 it become links, opened in the system browser. Glyphs are Maximal's own
 (`glyphs.tsx`).
 
+## Budget
+
+The fourth surface of the unified window (`shell/src/ui/features/budget/`, a
+React island in the Settings bundle). One scrolling column of three typographic
+sections, no cards: **Overview**, **Limits**, **Activity**. The first heading
+(Overview, `.section__title`) is the window's one Fraunces moment; the others
+step down to Commissioner (`.budget-block__title`). The window's own name is in
+the native title bar, so no heading repeats it.
+
+- **Overview.** Two `.form` rows (an on/off `Switch` for enforcement, a `.select`
+  for the display unit), then what each provider reports: its allowances grouped
+  under the provider's name, each a label, the percent used, a meter and
+  "Resets <date> (<relative>)". These are the provider's figures and can lag, so
+  the section says so; limits count what Maximal records. A spent blocking limit
+  and a missing usage database each show a notice `Callout` above the form.
+- **Limits.** A hairline-divided list (`.limits`), one row per limit that exists,
+  in the server's order (widest scope first, so a row never jumps as spend
+  changes). A row is the name (with a `.chip` for its scope when it has a name of
+  its own, and a "Warn only" chip), edit and delete as ghost icon buttons, a
+  meter, then the figures: ".40 of .00", the state (icon and word, for
+  nearly spent and spent), what is left, what is held by calls in progress, and
+  when it resets. The meter (`.budget-meter`) is the Dashboard's quota meter: the
+  fill is `--accent` while fine, `--status-warning` from the limit's own warn
+  threshold, `--status-error` once spent; the track is a pale step of the same
+  color. No limit exists until someone adds it, so the empty state is an
+  `EmptyState` with "Add a limit"; there are never per-model rows.
+- **Add or edit a limit.** A native `<dialog>` in `.confirm-dialog`'s shell
+  (`.budget-editor`): name, what it applies to (everything, one client key, one
+  plugin, one provider, listing only what exists), amount in the display unit,
+  warn-at percent, when it resets (with each window the provider reported, else
+  daily, weekly or never) and whether reaching it refuses requests or only warns.
+  A validation problem is a caption under its field; a refused save is an error
+  `Callout` inside the dialog. Deleting asks in a `ConfirmDialog`.
+- **Activity.** Period and group pickers, the period's total, a chart, a table of
+  the same rows and an Export CSV button (the shell's save dialog; a plain
+  download in a browser). By model, plugin, client key or provider the chart is a
+  thin segmented bar (`.budget-share`): five parts in `--series-1` to
+  `--series-5`, the tail folded into a neutral "Other", and a swatch on each
+  table row standing in for a legend. By day it is columns (`.budget-columns`, at
+  most `--size-lg` wide, `--radius-chip` rounded tops, one baseline) with the busiest
+  day labelled. The chart never carries a number the table doesn't, and rows that
+  spent nothing are not listed. A table longer than ten rows folds under "Show all".
+
+All text is in the catalog (`budget-*` keys); amounts and dates go through `Intl`
+in the active locale, with the unit passed as an ICU argument.
+
 ## Focus rings
 
 - **Always visible on keyboard navigation; hidden on mouse use** via

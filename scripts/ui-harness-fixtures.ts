@@ -29,6 +29,15 @@ import type {
   PluginsAttentionResponse,
   ToolGroup,
 } from "../src/lib/config/settings-types"
+import {
+  type BudgetSeed,
+  budgetCreditsSeed,
+  budgetEmptySeed,
+  budgetLimitsSeed,
+  budgetNoLimitsSeed,
+  budgetOffSeed,
+  budgetStorageOffSeed,
+} from "./ui-harness-budget"
 
 // gh-status isn't a settings-types export (it's typed in shell/src/proxy/client.ts),
 // so it's a plain shape here. installed:false hides the gh-reuse list.
@@ -111,6 +120,9 @@ export interface Scenario {
   connectors?: Array<PluginDetailView>
   clients?: ActiveClientsFixture
   dashboard?: DashboardFixture
+  /** The Budget window's limits, enforcement switch, unit and provider windows
+   *  (the mock service in ui-harness-budget.ts builds spend and activity). */
+  budget?: BudgetSeed
 }
 
 export type ResolvedScenario = Required<Omit<Scenario, "deviceCode">> &
@@ -1790,6 +1802,36 @@ export const SCENARIOS = {
     connectors: [workiqDetail({ stage: "ready" }), figjamDetail("port-in-use")],
   },
 
+  "budget-limits": {
+    ...healthy("Budget · limits fine, nearly spent and spent, with activity"),
+    budget: budgetLimitsSeed,
+  },
+
+  "budget-off": {
+    ...healthy("Budget · enforcement off (limits kept)"),
+    budget: budgetOffSeed,
+  },
+
+  "budget-empty": {
+    ...healthy("Budget · first run: no limits, nothing spent"),
+    budget: budgetEmptySeed,
+  },
+
+  "budget-no-limits": {
+    ...healthy("Budget · no limits yet, with spend and a provider allowance"),
+    budget: budgetNoLimitsSeed,
+  },
+
+  "budget-credits": {
+    ...healthy("Budget · amounts shown in AI credits"),
+    budget: budgetCreditsSeed,
+  },
+
+  "budget-storage-off": {
+    ...healthy("Budget · no usage database (every amount reads zero)"),
+    budget: budgetStorageOffSeed,
+  },
+
 } satisfies Record<string, Scenario>
 
 export type ScenarioId = keyof typeof SCENARIOS
@@ -1803,5 +1845,6 @@ export function resolveScenario(id: ScenarioId): ResolvedScenario {
     connectors: s.connectors ?? workiqOff,
     clients: s.clients ?? recentClients,
     dashboard: s.dashboard ?? busyDashboard,
+    budget: s.budget ?? budgetLimitsSeed,
   }
 }

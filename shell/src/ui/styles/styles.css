@@ -3522,3 +3522,418 @@ html[data-os="macos"] .topbar {
   opacity: 0;
   visibility: hidden;
 }
+
+/* ---- Budget (features/budget) ----
+   The Budget surface: Overview, Limits and Activity as typographic sections
+   in one column (no card grid). The first heading is the one Fraunces moment
+   (.section__title); the others step down to Commissioner like the stacked
+   Settings sections. Limits are hairline-divided rows, not cards. The meter
+   is the Dashboard's quota meter: the fill is the state, the track a pale
+   step of the same color, and the row beside it carries the words and icon. */
+.budget {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+.budget-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.budget-block__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.budget-block__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-xl);
+  line-height: var(--leading-xl);
+  letter-spacing: var(--tracking-xl);
+  color: var(--text-strong);
+}
+
+.budget-block__head .btn svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.empty__action .btn svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.budget-meter {
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background-color: color-mix(
+    in srgb,
+    var(--meter-color) 18%,
+    var(--surface-base)
+  );
+}
+
+.budget-meter__fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background-color: var(--meter-color);
+}
+
+.budget-meter--ok {
+  --meter-color: var(--accent);
+}
+
+.budget-meter--warning {
+  --meter-color: var(--status-warning);
+}
+
+.budget-meter--exhausted {
+  --meter-color: var(--status-error);
+}
+
+/* Provider allowances, grouped under the provider's name. */
+.budget-provider {
+  display: flex;
+  flex-direction: column;
+}
+
+.budget-provider__name {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-muted);
+}
+
+.budget-windows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.budget-window {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-3);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.budget-window:last-child {
+  border-block-end: 0;
+}
+
+.budget-window__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.budget-window__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.budget-window__used {
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.budget-window__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.budget-window__over {
+  color: var(--status-warning);
+}
+
+/* Limits */
+.limits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.limit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.limit:first-child {
+  padding-block-start: 0;
+}
+
+.limit:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.limit__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.limit__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.limit__name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.limit__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+}
+
+.limit__figures {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.limit__amounts {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.limit__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: var(--weight-md);
+}
+
+.limit__state svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.limit__state--warning {
+  color: var(--status-warning);
+}
+
+.limit__state--exhausted {
+  color: var(--status-error);
+}
+
+/* Add / edit a limit: the confirm dialog's shell with a form inside. In a short
+   window the fields scroll and the title and buttons stay in reach. */
+.budget-editor {
+  max-width: var(--content-max);
+}
+
+.budget-editor .confirm-dialog__panel {
+  max-height: calc(100vh - var(--space-6));
+}
+
+.budget-editor__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for the focus ring, which the scroll box would otherwise clip. */
+  padding: var(--space-1);
+  margin: calc(var(--space-1) * -1);
+}
+
+/* Two short fields side by side (what it applies to, how much) so the whole
+   form fits a short window without scrolling much. */
+.budget-editor__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.budget-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.budget-field label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.budget-field .form__hint {
+  max-width: 65ch;
+}
+
+.budget-field__error {
+  color: var(--status-error);
+}
+
+.budget-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.budget-field--inline .select {
+  width: auto;
+}
+
+.input[aria-invalid="true"],
+.select[aria-invalid="true"] {
+  border-color: var(--status-error);
+}
+
+/* Activity */
+.budget-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+}
+
+.budget-activity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.budget-activity__total {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.budget-activity__amount {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One whole split into parts: a thin segmented bar with a surface gap
+   between parts. The table beside it names each part by its swatch. */
+.budget-share {
+  display: flex;
+  gap: var(--border-width-thick);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.budget-share__part {
+  flex-basis: 0;
+  flex-shrink: 0;
+}
+
+/* Spend per day: columns on one baseline, at most one size-lg wide. */
+.budget-columns {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  height: calc(var(--size-2xl) * 4);
+}
+
+.budget-column {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: var(--size-lg);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--space-5) 1fr var(--space-5);
+}
+
+.budget-column__value,
+.budget-column__label {
+  justify-self: center;
+  font-size: var(--text-sm);
+  line-height: var(--space-5);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-column__value {
+  color: var(--text-base-color);
+}
+
+.budget-column__label {
+  color: var(--text-muted);
+}
+
+.budget-column__track {
+  display: flex;
+  align-items: flex-end;
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.budget-column__bar {
+  display: block;
+  width: 100%;
+  min-height: var(--border-width-thick);
+  background-color: var(--series-1);
+  border-start-start-radius: var(--radius-chip);
+  border-start-end-radius: var(--radius-chip);
+}
+
+.table .budget-table__number {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The row header reads as a name, not as the table's muted column caption. */
+.table .budget-table__row {
+  font-weight: var(--weight-base);
+  color: var(--text-strong);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.budget-table__name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.budget-swatch {
+  flex-shrink: 0;
+  width: var(--size-xs);
+  height: var(--size-xs);
+  border-radius: var(--radius-chip);
+}

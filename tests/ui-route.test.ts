@@ -67,6 +67,14 @@ describe("ui routes", () => {
     }
   })
 
+  test("redirects Budget to its section of the Settings bundle", async () => {
+    for (const path of ["/ui/budget", "/ui/budget/"]) {
+      const res = await app.request(path)
+      expect(res.status).toBe(301)
+      expect(res.headers.get("location")).toBe("/ui/settings/#budget")
+    }
+  })
+
   test("serves the dashboard index", async () => {
     const res = await app.request("/ui/dashboard/")
     expect(res.status).toBe(200)
