@@ -45,8 +45,9 @@ export function defaultDbPath(): string {
 export function loadPairingToken({
   rotate = false,
   create = true,
-} = {}): string {
-  const file = pairingTokenPath()
+  dataDir: base,
+}: { rotate?: boolean; create?: boolean; dataDir?: string } = {}): string {
+  const file = pairingTokenPath(base)
   if (!rotate && existsSync(file)) {
     const token = readFileSync(file, "utf8").trim()
     if (token) return token
