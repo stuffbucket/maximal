@@ -8,8 +8,8 @@ import {
 import { type Problem, describeProblem, withRetry } from "../../problems";
 
 /**
- * The connectors list over `GET /settings/api/plugins` (connectors only;
- * other plugin kinds aren't shown in Settings). The server pushes
+ * The connectors list over `GET /settings/api/plugins` (connectors and extensions;
+ * model plugins are not listed here). The server pushes
  * `plugins.changed` whenever a plugin's lifecycle, status, tools or settings
  * move (a sign-in finishing minutes after the click), so the hook refetches
  * on that frame, on every (re)connect of the stream, and when Settings
@@ -59,7 +59,7 @@ export function useConnectors(): UseConnectors {
         again.current = false;
         const result = await withRetry(() => listPlugins());
         if (result.ok) {
-          setConnectors(sortByName(result.data.plugins.filter((p) => p.kind === "connector")));
+          setConnectors(sortByName(result.data.plugins.filter((p) => p.kind === "connector" || p.kind === "extension")));
           setProblem(null);
         } else {
           setProblem(describeProblem(result, { subject: "your connectors" }));

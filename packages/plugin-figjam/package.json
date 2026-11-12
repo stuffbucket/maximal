@@ -1,0 +1,28 @@
+{
+  "name": "@stuffbucket/maximal-plugin-figjam",
+  "version": "0.0.0",
+  "private": true,
+  "description": "FigJam plugin for maximal: runs the FigJam bridge, writes the Figma development plugin and approves panels from Integrations",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stuffbucket/maximal-figjam-bridge": "workspace:*",
+    "@stuffbucket/maximal-figjam-plugin": "workspace:*",
+    "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@stuffbucket/maximal-plugin-host": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}
