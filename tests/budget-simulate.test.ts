@@ -183,6 +183,20 @@ describe("a daily block limit", () => {
   })
 })
 
+describe("an ask limit", () => {
+  test("refuses like a block limit: it asks, but until answered it blocks", () => {
+    const rows = [
+      row(at(2026, 11, 9, 1), 90),
+      row(at(2026, 11, 9, 2), 90),
+      row(at(2026, 11, 9, 3), 90),
+    ]
+    const asked = simulateDraft(draft({ action: "ask" }), rows, week)
+    const blocked = simulateDraft(draft({ action: "block" }), rows, week)
+    expect(asked).toEqual(blocked)
+    expect(asked.refusedRequests).toBe(1)
+  })
+})
+
 describe("a warn limit", () => {
   test("refuses nothing and counts everything, but still trips and warns", () => {
     const result = simulateDraft(
