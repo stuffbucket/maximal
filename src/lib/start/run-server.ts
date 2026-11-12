@@ -8,32 +8,16 @@
  * claude-code-flow.ts) so this file reads as a checklist.
  */
 
+import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
+
 import consola from "consola"
 import { serve } from "srvx"
 
 import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
-import {
-  refreshCatalogCommands,
-  syncMcpClientsWhenBrokerReady,
-} from "~/apps/mcp"
 import { runAppBootHooks } from "~/apps/registry"
 import { type AccountType } from "~/lib/auth/auth-types"
-import {
-  type AppConfig,
-  getConfig,
-  mergeConfigWithDefaults,
-} from "~/lib/config/config"
+import { mergeConfigWithDefaults } from "~/lib/config/config"
 import { initProxyFromEnv } from "~/lib/http/proxy"
-import {
-  reconfigureBroker,
-  setBrokerConfigFilter,
-  startBrokerSupervisor,
-  stopBrokerSupervisor,
-} from "~/lib/mcp-broker/supervisor"
-import {
-  holdBackWorkIqUntilSetUp,
-  reconfigureBrokerAfterSetupCheck,
-} from "~/lib/mcp-broker/workiq"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
 import { ensurePaths } from "~/lib/platform/paths"
 import { writePidfile } from "~/lib/platform/replace-running"
@@ -43,8 +27,8 @@ import {
   cacheVsCodeSessionId,
   cacheVSCodeVersion,
 } from "~/lib/platform/utils"
+import { startPlugins, stopPlugins } from "~/lib/plugins/runtime"
 import { hasGithubToken, state } from "~/lib/runtime-state/state"
-import { warmNpmDetection } from "~/lib/system/npm-login-config"
 import { startUpdateNotice } from "~/lib/update/update-notice"
 import { getGitVersion, shortSha } from "~/lib/update/version"
 import { startWorkingNotice } from "~/lib/working-notice"
@@ -76,6 +60,10 @@ export interface RunServerOptions {
   /** Evict any running instance on :4141 before binding. Optional —
    *  test fixtures + non-CLI callers can omit; treated as false. */
   replace?: boolean
+  /** Serve this plugin gateway instead of composing the built-in plugins.
+   *  Composition-level override for harnesses (the connectors bench builds
+   *  one with `composePluginGateway({ plugins })`); the CLI never sets it. */
+  pluginGateway?: PluginGateway
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -93,7 +81,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   await preflightPort(options.port, options.replace ?? false)
 
   // Ensure config is merged with defaults at startup
-  const config = mergeConfigWithDefaults()
+  mergeConfigWithDefaults()
 
   const git = getGitVersion()
   consola.info(
@@ -194,7 +182,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       + `auth=${hasGithubToken() ? "authenticated" : "unauthenticated"}`,
   )
 
-  afterListening(config, actualPort, httpServer)
+  afterListening(actualPort, httpServer, options.pluginGateway)
 
   if (options.claudeCode) {
     if (state.models) {
@@ -235,42 +223,15 @@ function advertisedServerUrl(hostname: string, port: number): string {
   return `http://${urlHost}:${port}`
 }
 
-/** Boot steps that need the bound listener: the broker, client entries that
- *  point at `port`, and the shutdown path that reverts them. */
+/** Boot steps that need the bound listener: plugins and the client entries
+ *  that point at `port`, and the shutdown path that reverts them. */
 function afterListening(
-  config: AppConfig,
   port: number,
   httpServer: ReturnType<typeof serve>,
+  pluginGateway: PluginGateway | undefined,
 ): void {
   setListeningPort(port)
 
-  // Broker startup is deliberately detached from ordinary server readiness.
-  // A missing, hung, or crashing broker degrades MCP only; Hono is already bound.
-  // A Work IQ whose setup isn't done is held back from the broker. Until its
-  // config has been read it counts as not done, so the broker starts
-  // without it; the check queued right after starts it if it's set up, and
-  // anything waiting for the broker waits for that too.
-  setBrokerConfigFilter((broker) => holdBackWorkIqUntilSetUp(broker))
-  // An upgraded catalog server (e.g. Work IQ) may have moved; find it first.
-  const brokerConfig = refreshCatalogCommands(config).mcpBroker ?? {}
-  startBrokerSupervisor(brokerConfig)
-  void reconfigureBrokerAfterSetupCheck(brokerConfig).catch(
-    (error: unknown) => {
-      consola.warn("Could not check Work IQ's setup", error)
-    },
-  )
-  // npm's registry and global prefix are looked up in the background, never
-  // on the event loop; once known, a server installed with npm may turn out
-  // to have moved too. (Until then a refresh keeps each server's last path.)
-  void warmNpmDetection()
-    .then(async () => {
-      const before = getConfig()
-      const after = refreshCatalogCommands(before)
-      if (after !== before) await reconfigureBroker(after.mcpBroker ?? {})
-    })
-    .catch((error: unknown) => {
-      consola.warn("Could not recheck MCP server paths", error)
-    })
   // One-time "Maximal is working" notification (shown by the menu-bar shell).
   void startWorkingNotice()
   // Log a line when a newer version is out (with the apt command for an apt
@@ -288,10 +249,12 @@ function afterListening(
   // crash/force-kill stranded over a dead proxy and picks up this run's port.
   // Ownership-guarded; no-op when off.
   runAppBootHooks()
-  // MCP entries wait (bounded) for the broker, so an app that connects right
-  // away isn't turned away while it probes its servers. Detached: nothing
-  // else here, and no ordinary request, waits on the broker.
-  void syncMcpClientsWhenBrokerReady()
+  // Start the plugins the user turned on, then register their MCP endpoints
+  // (`/mcp/<id>`) with the chosen clients. Detached: a slow plugin or
+  // `claude` CLI never holds up the listener or ordinary requests.
+  void startPlugins({ gateway: pluginGateway }).catch((error: unknown) => {
+    consola.warn("Could not start plugins", error)
+  })
 
   // Drop the "session running" sentinel only AFTER the boot hooks
   // so the freshly-written URL is in place when we promise the session is
@@ -300,5 +263,5 @@ function afterListening(
   // staleSession check above).
   markSessionRunning(port)
 
-  installShutdownHandlers(httpServer, stopBrokerSupervisor)
+  installShutdownHandlers(httpServer, stopPlugins)
 }

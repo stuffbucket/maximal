@@ -98,6 +98,14 @@ function resolveUserId(input: TokenUsageEventInput): string {
   return state.userName?.trim() || ""
 }
 
+/** Endpoints that are a built-in capability of their own, recorded as that
+ *  capability's `plugin_id` so a `plugin:images` budget covers them. */
+const BUILT_IN_CAPABILITY_ENDPOINTS: ReadonlySet<TokenUsageEndpoint> = new Set([
+  "decisions",
+  "images",
+  "systemone",
+])
+
 function toPersistedEvent(
   input: TokenUsageEventInput,
 ): PersistedTokenUsageEvent | null {
@@ -128,6 +136,8 @@ function toPersistedEvent(
     is_premium: resolveIsPaid(input.model),
     trace_id: resolveTraceId(input.traceId),
     user_id: resolveUserId(input),
+    plugin_id:
+      BUILT_IN_CAPABILITY_ENDPOINTS.has(input.endpoint) ? input.endpoint : null,
     ...resolveRequestUsageFields(),
   }
 }

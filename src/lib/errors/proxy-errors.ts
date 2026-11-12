@@ -40,6 +40,7 @@ import {
   CopilotAuthFatalError,
   HTTPError,
   NoUpstreamError,
+  type UpstreamCall,
 } from "~/lib/errors/http-errors"
 import { PROXY_ERROR_REWRITES } from "~/lib/errors/proxy-error-rewrites"
 import { parseUpstreamError } from "~/lib/errors/upstream-error-advice"
@@ -75,6 +76,8 @@ export interface ProxyErrorEvent {
     text: string
     /** The error message parsed out of the body. */
     message: string
+    /** The endpoint and model of the refused request, when known. */
+    call?: UpstreamCall
   }
 }
 
@@ -140,6 +143,7 @@ async function readUpstream(
     headers,
     text,
     message: parseUpstreamError(status, text).message,
+    ...(error.call ? { call: error.call } : {}),
   }
 }
 

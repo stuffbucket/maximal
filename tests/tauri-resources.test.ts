@@ -50,11 +50,8 @@ describe("Tauri packaging contracts", () => {
     ).toBe(false)
   })
 
-  test("packages both sidecar executables", () => {
-    expect(loadConf().bundle?.externalBin).toEqual([
-      "binaries/maximal",
-      "binaries/maximal-mcp-broker",
-    ])
+  test("packages only the proxy sidecar (no MCP broker)", () => {
+    expect(loadConf().bundle?.externalBin).toEqual(["binaries/maximal"])
   })
 
   test("contains Windows sidecars before their suspended process starts", () => {
@@ -79,7 +76,8 @@ describe("Tauri packaging contracts", () => {
   test("the NSIS installer and uninstaller stop every Maximal process", () => {
     // These hooks run before Tauri's CheckIfAppIsRunning. The shell must be
     // stopped without /T so an updater-launched installer is not killed as a
-    // descendant; the sidecar and broker trees are then stopped explicitly.
+    // descendant; the sidecar tree is then stopped explicitly, plus a broker an older
+    // install may have left running (current builds don't ship one).
     const hooksPath = loadConf().bundle?.windows?.nsis?.installerHooks
     expect(hooksPath).toBe("./windows/hooks.nsh")
     const hooksFile = resolve(dirname(TAURI_CONF), hooksPath ?? "")

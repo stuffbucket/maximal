@@ -56,19 +56,23 @@ describe("windows installer template", () => {
   })
 
   it(
-    String.raw`installs both binaries under %LocalAppData%\Programs\maximal`,
+    String.raw`installs only maximal.exe under %LocalAppData%\Programs\maximal`,
     () => {
       const ps = read(SCRIPT)
       expect(ps).toContain("$env:LOCALAPPDATA")
       expect(ps).toContain(String.raw`Programs\maximal`)
       expect(ps).toContain("$BinPath")
-      expect(ps).toContain("$BrokerPath")
-      expect(ps).toContain("maximal-mcp-broker.exe")
-      expect(ps).toContain("foreach ($binaryPath in @($BinPath, $BrokerPath))")
+      // The broker is no longer shipped; an upgrade removes a leftover copy.
+      expect(ps).not.toContain(
+        "foreach ($binaryPath in @($BinPath, $BrokerPath))",
+      )
+      expect(ps).toContain(
+        "Remove-Item -LiteralPath $BrokerPath -Force -ErrorAction SilentlyContinue",
+      )
     },
   )
 
-  it("stops both executable images before replacing files", () => {
+  it("stops the executable image (and an older broker) before replacing files", () => {
     const ps = read(SCRIPT)
     expect(ps).toContain("Get-Process -Name 'maximal', 'maximal-mcp-broker'")
   })

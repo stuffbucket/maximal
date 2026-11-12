@@ -44,15 +44,15 @@ an explicit version. Pre-1.0 `feat:` commits otherwise produce patch releases.
 | `publish` | Publishes only after every required asset and verification gate succeeds |
 | `homebrew-tap`, `manifest` | Independent post-publication distribution updates |
 
-Each raw archive and installed application layout must contain `maximal` and
-`maximal-mcp-broker` as executable siblings (`.exe` on Windows). On Linux the
-`maximal` package installs both in `/usr/bin`, where `maximal-desktop` finds
-them next to its own executable. The SBOM covers
-both production dependency graphs. On Windows the broker puts itself in a
-kill-on-close Job Object before it starts any MCP server, and refuses to run if
-Windows won't allow that. The PowerShell installer owns a dedicated
-ARP uninstaller that waits for the CLI cleanup, then removes both sibling
-executables, its exact user-PATH entry, its ARP key, and itself. It refuses to
+Each raw archive and installed application layout must contain `maximal` as an
+executable (`.exe` on Windows); none ships `maximal-mcp-broker`, though
+installers and the updater still stop and remove one left by an older version.
+On Linux the `maximal` package installs it in `/usr/bin`, where
+`maximal-desktop` finds it next to its own executable. The SBOM covers the
+production dependency graph. The PowerShell installer owns a dedicated
+ARP uninstaller that waits for the CLI cleanup, then removes the executable
+(and a leftover broker from an older install), its exact user-PATH entry, its
+ARP key, and itself. It refuses to
 overwrite an MSI-managed installation, and its helper leaves MSI-owned files and
 PATH registration to `msiexec` if an MSI was installed later.
 

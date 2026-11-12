@@ -6,13 +6,24 @@
 
 import { HTTPException } from "hono/http-exception"
 
-/** The upstream answered with an error; `response` is its response. */
+/** The Copilot call an upstream error answered: the endpoint path as the
+ *  model catalog's `supported_endpoints` spells it (`/chat/completions`,
+ *  `/v1/images/generations`, ...) and the model the request named. */
+export interface UpstreamCall {
+  endpoint: string
+  model?: string
+}
+
+/** The upstream answered with an error; `response` is its response and
+ *  `call`, when known, the request it refused. */
 export class HTTPError extends Error {
   response: Response
+  call?: UpstreamCall
 
-  constructor(message: string, response: Response) {
+  constructor(message: string, response: Response, call?: UpstreamCall) {
     super(message)
     this.response = response
+    this.call = call
   }
 }
 

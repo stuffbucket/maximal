@@ -7,39 +7,38 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import type {
-  AnthropicMessagesPayload,
-  AnthropicResponse,
-} from "~/lib/models/anthropic-types"
+import type { AnthropicMessagesPayload } from "~/lib/models/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
 
-import {
-  translateAnthropicMessagesToResponsesPayload,
-  translateResponsesResultToAnthropic,
-} from "~/routes/messages/responses-translation"
 import { emitStreamError } from "~/routes/messages/stream-error"
-import { getResponsesRequestOptions } from "~/routes/responses/utils"
-import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
-import { createChatCompletions } from "~/services/copilot/create-chat-completions"
-import { createResponses } from "~/services/copilot/create-responses"
 
 import { type FlowBaseOptions } from "../api-flows"
-import {
-  translateToAnthropic,
-  translateToOpenAI,
-} from "../non-stream-translation"
 import { runAgentLoop } from "./agent"
 import { type Executor, selectExecutor } from "./executor"
 import { attachClientShims, type WebToolPolicy } from "./rewriter"
 import { runStreamingAgent } from "./stream"
+import {
+  buildCallOnce,
+  prepareNativeMessagesPayload,
+  buildTurnUpstream,
+  selectTurnTransport,
+  type TransportPolicy,
+  type WebToolsUpstreamDeps,
+} from "./transport"
 
 export interface WebToolsFlowArgs {
   c: Context
   payload: AnthropicMessagesPayload
   options: FlowBaseOptions
   policy: WebToolPolicy
+  /** Catalog entry for the resolved model; picks each turn's transport. */
   selectedModel?: Model
   executor?: Executor
+  /** Which transports this request may use. Omitted: today's web-tools
+   *  choice (`/responses` or chat completions), see {@link TransportPolicy}. */
+  transportPolicy?: TransportPolicy
+  /** Upstream-call seam; production omits it and gets the real calls. */
+  deps?: Partial<WebToolsUpstreamDeps>
 }
 
 export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
@@ -47,45 +46,17 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
   attachClientShims(payload, policy)
   const wantsStream = payload.stream === true
 
-  const callOnce = async (
-    turnPayload: AnthropicMessagesPayload,
-  ): Promise<AnthropicResponse> => {
-    if (selectedModel?.supported_endpoints?.includes("/responses")) {
-      const responsesPayload =
-        translateAnthropicMessagesToResponsesPayload(turnPayload)
-      responsesPayload.stream = false
-      const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
-      const response = await createResponses(responsesPayload, {
-        vision,
-        initiator,
-        requestId: options.requestId,
-        sessionId: options.sessionId,
-        compactType: options.compactType,
-        subagentMarker: options.subagentMarker,
-      })
-      if (isAsyncIterable(response)) {
-        throw new Error(
-          "web-tools agent: expected non-streaming response from Copilot",
-        )
-      }
-      return translateResponsesResultToAnthropic(response)
-    }
-
-    const openAIPayload = translateToOpenAI(turnPayload)
-    openAIPayload.stream = false
-    const response = await createChatCompletions(openAIPayload, {
-      requestId: options.requestId,
-      sessionId: options.sessionId,
-      compactType: options.compactType,
-      subagentMarker: options.subagentMarker,
-    })
-    if (!isNonStreaming(response)) {
-      throw new Error(
-        "web-tools agent: expected non-streaming response from Copilot",
-      )
-    }
-    return translateToAnthropic(response)
+  const transport = selectTurnTransport(selectedModel, args.transportPolicy)
+  if (transport === "messages") {
+    prepareNativeMessagesPayload(payload, selectedModel)
   }
+  const upstream = buildTurnUpstream({
+    transport,
+    options,
+    // Only the `messages` transport sends it, filtered as on the Messages flow.
+    anthropicBetaHeader: c.req.header("anthropic-beta"),
+    deps: args.deps,
+  })
 
   const executor = args.executor ?? selectExecutor()
 
@@ -94,7 +65,7 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
       initialPayload: payload,
       policy,
       executor,
-      callOnce,
+      callOnce: buildCallOnce(upstream),
       logger: options.logger,
     })
     return c.json(finalResponse)
@@ -111,7 +82,9 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
         stream,
         options,
         executor,
-        selectedModel,
+        transport,
+        deps: upstream.deps,
+        anthropicBetaHeader: upstream.anthropicBetaHeader,
       })
     } catch (error) {
       await emitStreamError(stream, options.logger, {

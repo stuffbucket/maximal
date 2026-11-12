@@ -14,7 +14,8 @@
  *     `display_name`, `created_at`, `max_input_tokens`, `max_tokens`, and a
  *     structured `capabilities` object). Used for Anthropic clients (Claude
  *     Desktop, the anthropic SDK), detected via the `anthropic-version` header
- *     or an anthropic/claude user-agent.
+ *     or an anthropic/claude user-agent. Lists only the models `/v1/messages`
+ *     can serve; the OpenAI list keeps every model.
  *
  * Neither mapper spreads the source model, so no Copilot-internal field can
  * reach a client.
@@ -23,6 +24,7 @@
 import type { Model } from "~/services/copilot/get-models"
 
 import { forwardId } from "~/lib/models/anthropic-id-rewrite"
+import { ROUTABLE_ENDPOINTS } from "~/lib/models/claude-auto-models"
 
 const EPOCH_ISO = new Date(0).toISOString()
 
@@ -131,8 +133,19 @@ export function toAnthropicModel(model: Model): AnthropicModel {
   }
 }
 
+/** Whether `/v1/messages` can serve the model: it has an endpoint the proxy
+ *  routes inference to. Image, decisions and embeddings models don't. */
+function servesMessages(model: Model): boolean {
+  return (model.supported_endpoints ?? []).some((endpoint) =>
+    ROUTABLE_ENDPOINTS.has(endpoint),
+  )
+}
+
+/** The Anthropic listing holds only models `/v1/messages` can serve. */
 export function anthropicModelList(models: Array<Model>): AnthropicModelList {
-  const data = models.map((model) => toAnthropicModel(model))
+  const data = models
+    .filter((model) => servesMessages(model))
+    .map((model) => toAnthropicModel(model))
   return {
     data,
     first_id: data[0]?.id ?? null,

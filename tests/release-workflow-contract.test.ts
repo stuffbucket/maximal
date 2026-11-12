@@ -349,41 +349,42 @@ describe("release action supply chain", () => {
   })
 })
 
-describe("isolated MCP broker distribution", () => {
-  test("raw release archives include both sibling executables", async () => {
+describe("parked MCP broker distribution", () => {
+  test("raw release archives carry only the maximal executable", async () => {
     const workflow = await readWorkflow("release.yml")
 
-    expect(workflow).toContain("maximal.exe maximal-mcp-broker.exe")
-    expect(workflow).toContain("maximal maximal-mcp-broker")
-    expect(workflow).toContain("--root packages/mcp-broker")
-    expect(workflow).toContain("pnpm install --frozen-lockfile")
+    expect(workflow).toContain('7z a "../dist-release/${BASE}.zip" maximal.exe')
+    expect(workflow).toContain(
+      'tar -czf "../dist-release/${BASE}.tar.gz" maximal',
+    )
+    expect(workflow).not.toContain("mcp-broker")
+    expect(workflow).not.toContain("pnpm install --frozen-lockfile")
   })
 
-  test("release smoke checks follow the broker usage contract", async () => {
-    const [workflow, debSmoke] = await Promise.all([
-      readWorkflow("release.yml"),
+  test("deb and Homebrew packaging do not ship or smoke-test a broker", async () => {
+    const [debSmoke, debBuild, formula] = await Promise.all([
       readRepoFile("build/linux/smoke-deb.sh"),
+      readRepoFile("build/linux/build-maximal-deb.sh"),
+      readRepoFile("build/homebrew/maximal.rb"),
     ])
 
-    expect(workflow).toContain("$brokerExit -ne 2")
-    expect(workflow).toContain("-notmatch 'USAGE'")
-    expect(debSmoke).toContain('[ "$broker_exit" -eq 2 ]')
-    expect(debSmoke).toContain('[[ "$broker_out" == *USAGE* ]]')
+    expect(debSmoke).toContain("[ ! -e /usr/bin/maximal-mcp-broker ]")
+    expect(debSmoke).not.toContain("USAGE")
+    expect(debBuild).not.toContain("maximal-mcp-broker")
+    expect(formula).not.toContain("maximal-mcp-broker")
   })
 
-  test("macOS signs both nested Bun executables", async () => {
+  test("macOS signs only the maximal sidecar", async () => {
     const config = await readRepoFile(".macos-builder/config")
     const producer = await readRepoFile(".macos-builder/build.sh")
 
     expect(config).toContain("Contents/MacOS/maximal:bun-runtime")
-    expect(config).toContain("Contents/MacOS/maximal-mcp-broker:bun-runtime")
-    expect(producer).toContain(
-      'BROKER="$APP/Contents/MacOS/maximal-mcp-broker"',
-    )
-    expect(producer).toContain('for binary in "$SIDECAR" "$BROKER"')
+    expect(config).not.toContain("maximal-mcp-broker")
+    expect(producer).not.toContain("BROKER")
+    expect(producer).not.toContain("mcp-broker")
   })
 
-  test("Windows installers carry and remove the broker sibling", async () => {
+  test("Windows installers don't ship the broker but still clear one from older installs", async () => {
     const [wix, installer, shellWorkflow, installerWorkflow] =
       await Promise.all([
         readRepoFile("build/windows/maximal.wxs"),
@@ -392,15 +393,16 @@ describe("isolated MCP broker distribution", () => {
         readWorkflow("windows-installer-dev.yml"),
       ])
 
-    expect(wix).toContain('Source="maximal-mcp-broker.exe"')
+    // Not packaged.
+    expect(wix).not.toContain('Source="maximal-mcp-broker.exe"')
+    expect(shellWorkflow).not.toContain("mcp-broker")
+    expect(installerWorkflow).not.toContain("packages/mcp-broker")
+    // Upgrade/uninstall still stops and removes a broker an older version left.
     expect(wix).toContain("StopRunningMcpBroker")
     expect(installer).toContain("$BrokerPath")
     expect(installer).toContain("maximal-mcp-broker.exe")
     expect(installer).toContain("Write-Uninstaller")
     expect(installer).toContain("& $BinPath uninstall --force --unattended")
-    expect(shellWorkflow).toContain(
-      "foreach ($name in @('maximal', 'maximal-mcp-broker'))",
-    )
     expect(shellWorkflow).toContain("x86_64-pc-windows-msvc")
     expect(installerWorkflow).toContain(
       "Uninstall through PowerShell ARP helper",
@@ -472,10 +474,10 @@ describe("Windows desktop lifecycle smoke", () => {
     expect(setupBun.match(/actions\/cache@55cc8345/gu)).toHaveLength(2)
     expect(shellWorkflow).toContain('cache-dependencies: "true"')
     expect(cacheWorkflow).toContain('cache-dependencies: "true"')
-    expect(shellWorkflow.match(/for attempt in 1 2 3;/gu)).toHaveLength(3)
+    expect(shellWorkflow.match(/for attempt in 1 2 3;/gu)).toHaveLength(2)
     expect(
       shellWorkflow.match(/sleep "\$\(\(attempt \* 15\)\)"/gu),
-    ).toHaveLength(3)
+    ).toHaveLength(2)
     expect(cacheWorkflow).toContain(
       "retry_install bun install --frozen-lockfile",
     )
@@ -584,9 +586,7 @@ describe("Windows desktop lifecycle smoke", () => {
     expect(workflow).toContain(
       "Get-NetTCPConnection -OwningProcess $sidecarPid",
     )
-    expect(workflow).toContain(
-      "Get-Process -Name 'maximal-shell', 'maximal', 'maximal-mcp-broker'",
-    )
+    expect(workflow).toContain("Get-Process -Name 'maximal-shell', 'maximal'")
     expect(workflow).toContain('"_?=$installRoot"')
     expect(workflow).toContain("$p.WaitForExit(60000)")
     expect(workflow).toContain("uninstaller timed out with Maximal running")

@@ -125,6 +125,8 @@ function stopProxy(platform: NodeJS.Platform, spawn: typeof spawnSync): void {
     return
   }
   if (platform === "win32") {
+    // Older installs shipped an MCP broker beside the proxy; stop one that is
+    // still running so its files can be removed. Current builds don't ship it.
     const broker = spawn(
       "taskkill",
       ["/F", "/IM", "maximal-mcp-broker.exe", "/T"],

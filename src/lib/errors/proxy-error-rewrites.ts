@@ -27,14 +27,15 @@ export const notSignedIn: ProxyErrorRewrite = (reply, { error }) =>
   : undefined
 
 /** Recognizable upstream errors (Copilot's opaque `model_not_supported`,
- *  say) get context and a recovery step, the original kept inline. */
+ *  say) get context and a recovery step, the original kept inline. The
+ *  refused call, when known, lets the advice tell a model that doesn't serve
+ *  the endpoint from one the plan lacks. */
 export const upstreamAdvice: ProxyErrorRewrite = (reply, { upstream }) => {
   if (!upstream) return undefined
-  const advice = adviseUpstreamError(
-    upstream.status,
-    upstream.text,
-    state.models?.data ?? [],
-  )
+  const advice = adviseUpstreamError(upstream.status, upstream.text, {
+    models: state.models?.data ?? [],
+    call: upstream.call,
+  })
   return advice === null ? undefined : { ...reply, message: advice }
 }
 
@@ -77,6 +78,26 @@ function retryHeaders(relay: (status: number) => boolean): ProxyErrorRewrite {
     return { ...reply, headers: { ...reply.headers, ...headers } }
   }
 }
+
+/** A bounded upstream read (`sendRequest`'s `timeoutMs`, an
+ *  `AbortSignal.timeout`) that ran out of time: 504 with a plain message,
+ *  not a 500 carrying the runtime's "The operation timed out.". Every bounded
+ *  read behind `forwardError` is a GitHub or Copilot API call
+ *  (`services/github`, `services/copilot`), hence the wording. Only
+ *  `forwardError` runs it; the inference routes keep their own mapping. */
+export const upstreamTimeout: ProxyErrorRewrite = (
+  reply,
+  { error, upstream },
+) =>
+  !upstream && error instanceof Error && error.name === "TimeoutError" ?
+    {
+      ...reply,
+      status: 504,
+      type: "api_error",
+      message: "GitHub didn't respond in time. Try again in a moment.",
+      openai: { ...reply.openai, type: "upstream_timeout" },
+    }
+  : undefined
 
 /** The rewrites for each wire, in order. */
 export const PROXY_ERROR_REWRITES: Record<

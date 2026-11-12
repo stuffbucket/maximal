@@ -25,7 +25,6 @@ interface BinaryBuild {
 }
 
 const REPO = resolve(import.meta.dir, "..")
-const BROKER_PACKAGE = join(REPO, "packages/mcp-broker")
 const FORCE =
   process.argv.includes("--force") || process.env.MAXIMAL_FORCE_SIDECAR === "1"
 
@@ -33,8 +32,7 @@ const FORCE =
 // (`.<hex>-<nnn>.bun-build`) in CWD before renaming to `--outfile`.
 // Interrupted compiles leave those large files behind.
 cleanBunBuildTemps(REPO)
-cleanBunBuildTemps(BROKER_PACKAGE)
-if (process.cwd() !== REPO && process.cwd() !== BROKER_PACKAGE) {
+if (process.cwd() !== REPO) {
   cleanBunBuildTemps(process.cwd())
 }
 
@@ -45,10 +43,6 @@ const binaryDirectory = join(REPO, "shell/src-tauri/binaries")
 const primaryOutfile = join(
   binaryDirectory,
   `maximal-${triple}${executableSuffix}`,
-)
-const brokerOutfile = join(
-  binaryDirectory,
-  `maximal-mcp-broker-${triple}${executableSuffix}`,
 )
 
 const sha = git(["rev-parse", "HEAD"])
@@ -77,6 +71,8 @@ const builds: Array<BinaryBuild> = [
       join(REPO, "src"),
       join(REPO, "package.json"),
       join(REPO, "bun.lock"),
+      // The plugin workspaces are compiled into the sidecar too.
+      ...pluginPackageSources(),
     ],
     args: [
       "build",
@@ -92,25 +88,6 @@ const builds: Array<BinaryBuild> = [
       `__MAXIMAL_CHANNEL__="${channel}"`,
       join(REPO, "src/main.ts"),
       `--outfile=${primaryOutfile}`,
-    ],
-  },
-  {
-    label: "mcp-broker",
-    cwd: BROKER_PACKAGE,
-    outfile: brokerOutfile,
-    watched: [
-      join(BROKER_PACKAGE, "src"),
-      join(BROKER_PACKAGE, "package.json"),
-      join(BROKER_PACKAGE, "pnpm-lock.yaml"),
-      join(BROKER_PACKAGE, "pnpm-workspace.yaml"),
-      join(BROKER_PACKAGE, "patches"),
-    ],
-    args: [
-      "build",
-      "--compile",
-      `--target=${target}`,
-      join(BROKER_PACKAGE, "src/main.ts"),
-      `--outfile=${brokerOutfile}`,
     ],
   },
 ]
@@ -150,6 +127,27 @@ function targetTriple(): string {
     return triple
   }
   return hostTriple()
+}
+
+/** `src/` and `package.json` of every `packages/plugin-*` workspace and the connector kit. */
+function pluginPackageSources(): Array<string> {
+  const packages = join(REPO, "packages")
+  let entries: ReturnType<typeof readdirSync>
+  try {
+    entries = readdirSync(packages, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
+    .filter(
+      (entry) =>
+        entry.isDirectory()
+        && (entry.name.startsWith("plugin-") || entry.name === "connector-kit"),
+    )
+    .flatMap((entry) => [
+      join(packages, entry.name, "src"),
+      join(packages, entry.name, "package.json"),
+    ])
 }
 
 function hostTriple(): string {

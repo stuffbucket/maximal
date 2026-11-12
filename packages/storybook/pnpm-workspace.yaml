@@ -1,2 +1,8 @@
 allowBuilds:
   esbuild: true
+overrides:
+  # GHSA-g3hv-75wg-m249: only minimatch 11.0.1+ is patched, and glob 13 both
+  # depends on minimatch ^10 and inlines a copy into the bundle it exports.
+  # The docgen plugin (latest included) still asks for glob ^13.0.6. Drop this
+  # once it moves to glob 14.
+  '@joshwooding/vite-plugin-react-docgen-typescript>glob': ^14.0.3

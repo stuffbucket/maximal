@@ -401,6 +401,13 @@ describe("token usage migrations", () => {
          VALUES (?, ?, 'old-trace', 'copilot', 'messages', 'gpt-old', 9)`,
       )
       .run(Date.now(), new Date().toISOString())
+    old
+      .prepare(
+        `INSERT INTO token_usage_events
+          (created_at_ms, created_at_utc, trace_id, source, endpoint, model, total_tokens)
+         VALUES (?, ?, 'old-image', 'copilot', 'images', 'gpt-image-old', 9)`,
+      )
+      .run(Date.now(), new Date().toISOString())
     old.exec("PRAGMA user_version = 1")
     old.close?.()
 
@@ -411,9 +418,10 @@ describe("token usage migrations", () => {
       source: "copilot",
     })
 
-    const [oldRow, newRow] = await readRows()
+    const [oldRow, oldImageRow, newRow] = await readRows()
     expect(oldRow).toMatchObject({
       model: "gpt-old",
+      plugin_id: null,
       client: "other",
       client_label: null,
       cache_ttl_s: 0,
@@ -425,13 +433,15 @@ describe("token usage migrations", () => {
       window_source: null,
     })
     expect(newRow.model).toBe("gpt-new")
+    // Step 3 back-fills the built-in capability for budget plugin scopes.
+    expect(oldImageRow.plugin_id).toBe("images")
 
     const db = await openSqliteDatabase(dbPath())
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number
     }
     db.close?.()
-    expect(version.user_version).toBe(2)
+    expect(version.user_version).toBe(4)
     expect(oldRow.request_started_at_ms).toBeNull()
   })
 

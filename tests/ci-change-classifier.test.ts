@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test"
 import {
   GENERATED_MANIFEST_BRANCH,
   GENERATED_RELEASE_BRANCH,
-  affectsWindowsBroker,
   classifyCiChanges,
   diffSpecForEvent,
   hasSuccessfulCounterpart,
@@ -56,44 +55,17 @@ describe("diffSpecForEvent", () => {
   })
 })
 
-describe("Windows broker classification", () => {
-  test.each([
-    ["packages/mcp-broker/src/main.ts", true],
-    ["packages/mcp-broker/pnpm-lock.yaml", true],
-    ["src/lib/mcp-broker/supervisor.ts", true],
-    ["src/routes/mcp/route.ts", true],
-    ["tests/mcp-adapter-end-to-end.test.ts", true],
-    [".github/workflows/ci.yml", true],
-    ["package.json", true],
-    ["docs/architecture.md", false],
-    ["shell/src/main.ts", false],
-    ["src/routes/messages/handler.ts", false],
-  ])("classifies %s", (path, expected) => {
-    expect(affectsWindowsBroker(path)).toBe(expected)
-  })
-
-  test("runs both Windows architectures for full, unknown, or empty validation", () => {
+describe("change classification", () => {
+  test("runs full validation for full, unknown, or empty change sets", () => {
     for (const changed of ["all" as const, []]) {
-      expect(classifyCiChanges(changed)).toEqual({
-        mode: "full",
-        windowsBroker: true,
-      })
+      expect(classifyCiChanges(changed)).toEqual({ mode: "full" })
     }
   })
 
-  test("skips Windows only when every known path is unrelated", () => {
+  test("classifies a known set of paths as a paths run", () => {
     expect(
       classifyCiChanges(["docs/commands.md", "shell/src/main.ts"]),
-    ).toEqual({
-      mode: "paths",
-      windowsBroker: false,
-    })
-    expect(
-      classifyCiChanges([
-        "docs/commands.md",
-        "packages/mcp-broker/src/main.ts",
-      ]),
-    ).toEqual({ mode: "paths", windowsBroker: true })
+    ).toEqual({ mode: "paths" })
   })
 })
 
@@ -171,7 +143,7 @@ describe("CI workflow integration", () => {
     const source = await workflow
     expect(source).toContain("\n  test:\n    name: test\n    if: always()")
     expect(source).toContain(
-      "needs: [classify, deduplicate, quality, unit-tests, broker, storybook]",
+      "needs: [classify, deduplicate, quality, unit-tests, storybook]",
     )
     expect(source).toContain('if [ "$CLASSIFY" != "success" ]')
     expect(source).toContain('if [ "$DUPLICATE" = "true" ]')
@@ -182,9 +154,7 @@ describe("CI workflow integration", () => {
     const source = await workflow
     expect(
       source.match(/needs\.deduplicate\.outputs\.duplicate != 'true'/gu),
-    ).toHaveLength(5)
-    expect(source).toContain("needs.classify.outputs.windows_broker == 'true'")
-    expect(source).toContain("runner: [windows-latest, windows-11-arm]")
+    ).toHaveLength(3)
   })
 
   test("grants Actions read only to trusted de-duplication and queries exact successful counterparts", async () => {
@@ -219,21 +189,9 @@ describe("CI workflow integration", () => {
     expect(concurrency).not.toContain("|| github.sha")
   })
 
-  test("installs broker dependencies before root unit tests", async () => {
+  test("does not install or build the parked MCP broker", async () => {
     const source = await workflow
-    const unitTests = source.slice(
-      source.indexOf("\n  unit-tests:"),
-      source.indexOf("\n  broker:"),
-    )
-
-    expect(unitTests).toContain("uses: ./.github/actions/setup-mise")
-    expect(unitTests).toContain("mise -C packages/mcp-broker install")
-    expect(unitTests).toContain(
-      "mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile",
-    )
-    expect(
-      unitTests.indexOf("Install isolated broker dependencies"),
-    ).toBeLessThan(unitTests.indexOf("Run tests"))
+    expect(source).not.toContain("broker")
   })
 })
 

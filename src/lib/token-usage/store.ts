@@ -12,9 +12,6 @@ import {
   type SqliteDatabase,
 } from "~/lib/platform/sqlite"
 
-import type { UsageClient } from "./client"
-import type { WindowSource } from "./request-meta"
-
 import {
   addToRecentMinutes,
   emptyRecentMinutes,
@@ -23,14 +20,23 @@ import {
 } from "./minutes"
 import { SessionClient, SessionWindowSource } from "./sessions-schema"
 
+// The client and window-source types come from the schema, not from
+// `client.ts` / `request-meta.ts`, whose imports reach the upstream services
+// that record provider quota windows here.
+type UsageClient = z.infer<typeof SessionClient>
+type WindowSource = z.infer<typeof SessionWindowSource>
+
 export type TokenUsageSource = "copilot" | "provider"
 
 export type TokenUsageEndpoint =
   | "chat_completions"
+  | "decisions"
   | "embeddings"
+  | "images"
   | "messages"
   | "provider_messages"
   | "responses"
+  | "systemone"
 
 export type TokenUsagePeriod = "day" | "week" | "month"
 
@@ -80,6 +86,9 @@ export interface PersistedTokenUsageEvent {
   /** When the request arrived; null outside a request. `created_at_ms` is
    *  when its usage was recorded, at the end of the response. */
   request_started_at_ms: number | null
+  /** The plugin or built-in capability the spend belongs to (`images`);
+   *  null for ordinary chat. */
+  plugin_id: string | null
 }
 
 export interface TokenUsageTotals {
@@ -260,6 +269,29 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
       )
     },
   },
+  {
+    // Budget `plugin:<id>` scopes. Rows from the built-in capability routes
+    // already say which capability they were by their endpoint.
+    name: "add plugin_id",
+    up: (db) => {
+      db.exec("ALTER TABLE token_usage_events ADD COLUMN plugin_id TEXT")
+      db.exec(
+        "UPDATE token_usage_events SET plugin_id = endpoint WHERE endpoint IN ('images', 'decisions', 'systemone')",
+      )
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_token_usage_events_created_plugin ON token_usage_events(created_at_ms, plugin_id)",
+      )
+    },
+  },
+  {
+    // The latest quota window each provider reported (`~/lib/budget/provider-windows`).
+    name: "add provider_quota_windows",
+    up: (db) => {
+      db.exec(
+        "CREATE TABLE IF NOT EXISTS provider_quota_windows (provider TEXT NOT NULL, window_id TEXT NOT NULL, window_json TEXT NOT NULL, previous_resets_at TEXT, updated_at_ms INTEGER NOT NULL, PRIMARY KEY (provider, window_id))",
+      )
+    },
+  },
 ]
 
 /** Migration step 2's columns: which client sent a request, how long its
@@ -379,8 +411,9 @@ async function writeTokenUsageEvent(
         context_ceiling_tokens,
         compact_at_tokens,
         window_source,
-        request_started_at_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        request_started_at_ms,
+        plugin_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     event.created_at_ms,
@@ -409,6 +442,7 @@ async function writeTokenUsageEvent(
     event.compact_at_tokens,
     event.window_source,
     event.request_started_at_ms,
+    event.plugin_id,
   )
 }
 
@@ -710,6 +744,27 @@ export async function hasAnyTokenUsage(): Promise<boolean> {
   const db = await getDb()
   const row = db.prepare("SELECT 1 FROM token_usage_events LIMIT 1").get()
   return row !== undefined && row !== null
+}
+
+/** Run a read on the usage database once queued writes have landed. */
+export async function readUsageDb<T>(
+  read: (db: SqliteDatabase) => T,
+): Promise<T> {
+  await flushTokenUsageEvents()
+  return read(await getDb())
+}
+
+/** Queue a write behind the usage writes; a failure is logged, not thrown. */
+export function enqueueUsageDbWrite(
+  write: (db: SqliteDatabase) => void,
+  failureMessage: string,
+): void {
+  if (!isTokenUsageStorageEnabled()) return
+  writeQueue = writeQueue
+    .then(async () => write(await getDb()))
+    .catch((error: unknown) => {
+      consola.warn(failureMessage, error)
+    })
 }
 
 const SessionRowSchema = z.object({

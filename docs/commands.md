@@ -17,12 +17,18 @@ bun run lint:fast    # oxlint — mechanical pass, ~10ms full repo
 bun run typecheck    # tsc type check only (no emit)
 bun run casts        # inventory TypeScript assertions by source/target safety
 bun run casts:check  # fail on unexplained any→concrete boundary assertions
-bun test             # Run all tests
+bun test             # Run all tests (root suite under tests/)
 bun test tests/foo.test.ts  # Run a single test file
+bun run plugins:typecheck   # tsc in every packages/plugin-* workspace
+bun run plugins:test        # bun test in every packages/plugin-* workspace
+bun run figjam:typecheck    # tsc in every packages/figjam-* workspace that has one
+bun run figjam:test         # bun test in every packages/figjam-* workspace
+bun run bench:connectors    # real server + Work IQ against a fake upstream (see "Connectors bench")
+bun run test:e2e:plugins    # Work IQ through its whole lifecycle in-process, vs. a golden transcript
 
 # Aggregates
-bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + lint:all + casts:check + check:tokens
-bun run check:deep   # check:fast + bun test + knip (end-of-task gate)
+bun run check:fast   # ensure:ui-embed + lint:fast + typecheck + plugins:typecheck + figjam:typecheck + lint:all + casts:check + check:tokens (the per-edit inner loop)
+bun run check:deep   # check:fast + bun test + plugins:test + figjam:test + knip (end-of-task gate)
 bun run deps:check   # dependency-cruiser layer rules
 bun run knip         # find unused exports/files
 bun run git:tidy     # plan branch cleanup (archive-then-delete); --apply to act
@@ -36,10 +42,10 @@ bun run release:manual  # local fallback version commit + tag (bumpp). Primary
                         # release PR → tag → release.yml builds/publishes assets.
 
 # Tauri app (menu-bar shell wrapping the proxy as a sidecar on :4141)
-bun run app:setup    # one-time: install shell + broker deps and force-build binaries
+bun run app:setup    # one-time: install shell deps and force-build the sidecar
 bun run app:sidecar  # build the UI + regenerate the embed manifest + rebuild the
-                     # standalone proxy and isolated broker into src-tauri/binaries/
-                     # (each compile is a no-op when its output is current; override
+                     # standalone proxy into src-tauri/binaries/
+                     # (the compile is a no-op when its output is current; override
                      # with --force or MAXIMAL_FORCE_SIDECAR=1 — release pipelines
                      # must set it)
 bun run app:dev      # build sidecar (if stale) + tauri dev
@@ -81,7 +87,7 @@ docker run --rm -v "$PWD:/src:ro" -v "<out-dir>:/debs:ro" \
 
 ## pnpm lockfiles and the package feed
 
-`packages/mcp-broker` and `packages/storybook` each have their own pnpm
+`packages/storybook` has its own pnpm
 lockfile. The package feed serves tarballs from `ms-feed-N` hosts that rotate,
 and a lockfile that records one fails a later `--frozen-lockfile` install. Each
 package's `.pnpmfile.cjs` drops those URLs as pnpm writes the lockfile (pnpm
@@ -96,72 +102,44 @@ bun scripts/strip-lockfile-hosts.ts --check  # what CI runs
 Editing a package's `.pnpmfile.cjs` changes its lockfile's `pnpmfileChecksum`:
 run `pnpm install` in that package and commit the lockfile with it.
 
-## Isolated MCP broker package
+## Connectors bench
 
-The broker has its own exact dependency pins, lockfile, and mise tools. Run its
-commands from the package so the root Bun dependency state is not changed:
-
-```sh
-mise -C packages/mcp-broker exec -- pnpm install --frozen-lockfile
-mise -C packages/mcp-broker exec -- pnpm typecheck
-mise -C packages/mcp-broker exec -- pnpm test
-mise -C packages/mcp-broker exec -- pnpm build
-```
-
-The package-local build writes the ignored development binary to
-`packages/mcp-broker/dist/maximal-mcp-broker`. `bun run app:sidecar` instead
-stages a target-triple broker binary for Tauri. Work IQ is not installed by
-these commands; it is an externally configured stdio endpoint.
-
-### Using a brokered endpoint
-
-For Work IQ sign-in, logs and admin approval, see [Work IQ](workiq.md); for
-Linux installation and session-keyring access, see
-[Work IQ on Linux](linux-workiq.md). Pi has a separate
-[connection guide](pi-workiq.md).
-
-Maximal looks for servers it knows (Work IQ, for now) and offers the ones it
-finds to add. Anything else can be added from the CLI with its full command
-path, or written under `mcpBroker.servers` in `config.json`. An endpoint may set
-its own `apiKey`; without one, the normal main-port API-key rules apply.
+Run the whole Connectors experience — Settings → Integrations → Connectors and
+the `/mcp/workiq` endpoint — with the real Work IQ connector but no Microsoft
+account, tenant or network:
 
 ```sh
-maximal mcp                                       # endpoints, and servers to add
-maximal mcp workiq --add                          # add Work IQ (found here); off
-maximal mcp myserver --add --label "My server" -- /full/path/server --stdio
-maximal mcp workiq --enable                       # on; asks which apps get it
-maximal mcp workiq --enable --clients claude-code,claude-desktop
-maximal mcp workiq --disable                      # off; removed from every app
-maximal mcp workiq --remove                       # gone from Maximal and apps
+bun run build:ui                                # once, for the Settings page
+bun run bench:connectors                        # serve until Ctrl-C
+bun run bench:connectors --drive                # scripted MCP session, pass/fail table, exit 1 on failure
+bun run bench:connectors --entitlement=partial  # tenant allows only the read-only tools
+bun run bench:connectors --entitlement=none     # account not enabled: the admin error state
+bun run bench:connectors --port=4242 --verbose
 ```
 
-`--add` and `--remove` ask to confirm; `--unattended` skips every prompt. Put
-`--port` and other flags before `--`; everything after it is the server's
-command. The command must be a full path, because Maximal doesn't run servers
-with your shell's PATH.
+It starts a fake Work IQ MCP server (the connector kit's fake, seeded with the
+Work IQ fixture: 14 tools, read-only 6 / write-delete 5 / other 3, canned fake
+answers) and the real Maximal server (`runServer`) composing the Work IQ
+connector pointed at it, with a sign-in that completes instantly as
+bench@contoso.com. Everything runs in a throwaway user environment (HOME, app
+data, Claude config) that is deleted on exit, so nothing touches your real
+setup. It prints the Settings URL, the MCP endpoint and an API key (for
+attribution; "Block unknown connections" stays off so the page works in a
+browser) and a ready-to-paste `claude mcp add` line.
 
-Settings → MCP servers does the same: found servers appear under "Available to
-add" (with the install command when one isn't installed), and each added
-server has Remove. Only apps whose Maximal integration is on
-are offered; turning an app's integration off removes its MCP entries, and
-turning it back on restores them. Maximal's entries are removed while Maximal
-isn't running and come back when it starts. A same-name MCP server you already
-had in an app is left alone; if it is a local command, Maximal runs the same
-command for the endpoint (secret-looking environment variables aren't copied).
+`--drive` accepts the terms and signs in through the Settings API, checks the
+tool groups, lists tools over MCP, blocks a tool (the client gets
+`tools/list_changed`, the tool disappears, a call is refused), unblocks it,
+calls an allowed tool, injects a policy-denied (HTTP 403) call that must come
+back as an `isError` result while the connector stays ready, and prints a
+pass/fail table. `tests/bench-connectors.test.ts` runs the same drive
+in-process under `bun test`.
 
-The CLI applies the change to the running Maximal without a restart; it
-finds that instance's port itself (`--port` overrides). App entries always
-point at the port Maximal is actually listening on, and follow it if it moves.
+## Parked MCP broker
 
-Other clients connect to `http://127.0.0.1:<port>/mcp/<id>` (4141 by default)
-from the same machine. Stdio-only clients can run
-`maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>` with
-`MAXIMAL_MCP_API_KEY` in its environment when a key is required.
-
-Each connected session runs its own copy of the endpoint's server, so Claude
-Code, Claude Desktop, or several Claude Code windows can use one endpoint at
-the same time. `limits.sessions` on the endpoint caps how many (default 8);
-at the cap, the least recently used idle session is closed to make room.
+The MCP broker and its `maximal mcp` command are parked under `parked/mcp/`
+and are not built or tested. Work IQ is now a built-in plugin (Settings →
+Integrations → Connectors; see [`workiq.md`](workiq.md)).
 
 ## Fast UI iteration
 
@@ -187,8 +165,7 @@ no-op gracefully — everything else works.
 ## Storybook (UI catalog)
 
 Every Settings, Dashboard and Sessions piece in every state, without a running proxy.
-It's an isolated package (`packages/storybook`, its own pnpm lockfile), like
-the MCP broker:
+It's an isolated package (`packages/storybook`, its own pnpm lockfile):
 
 ```sh
 bun run storybook:install   # once, or after packages/storybook/pnpm-lock.yaml changes

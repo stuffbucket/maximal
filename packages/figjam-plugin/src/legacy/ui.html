@@ -1,0 +1,2941 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Agent</title>
+<style>
+  /* ---------- WCAG 2.2 AA contrast, measured (WCAG 2 relative luminance).
+     Surfaces and body text come from Figma's UI3 theme vars (themeColors)
+     with their documented values as fallbacks. Muted text, control borders,
+     brand fills, focus ring, danger and syntax colors are our own tokens
+     because the Figma ones fail; "was" = the failing value replaced.
+     Text needs 4.5:1; non-text UI (borders, icons, ring, chevron) 3:1.
+
+     LIGHT   bg #fff · bg-2 / bg-hover #f5f5f5 · bg-3 (drawer hover) #e6e6e6 · menu #1e1e1e
+       fg #1e1e1e (Figma rgba(0,0,0,.9))   bg 16.7 · bg-2 16.0 · bg-3 13.4
+       fg-2 #666 muted, placeholder, timestamps, hint line, chips, icons, chevrons
+                                           bg 5.74 · bg-2 5.27 · bg-3 4.60 · mark 5.09
+                                           was text-secondary rgba(0,0,0,.5) 3.95 / 3.62, tertiary #9a9a9a 2.8
+       accent-fg #0a6dc2 links             bg 5.28 · bg-2 4.84   was #0d99ff 2.99, #007be5 4.23
+       ring #0a6dc2 focus (non-text)       bg 5.28 · bg-2 4.84   was #0d99ff 2.99
+       on-accent #fff on accent #0a6dc2    5.28                  was on #0d99ff 2.99
+       danger #c22e0e                      bg 5.69 · bg-2 5.22   was #dc3412 4.24 on bg-2
+       placeholder #666 (fg-2, also when disabled: it carries status) on field bg 5.74
+       field focus border #0d99ff (Figma border-selected) vs bg 2.99
+       syntax on bg-2: key #0a6dc2 4.84 · str #0f7a3f 4.97 · num #7a3ce0 5.43 · lit #9a5200 5.38
+                                           was #14ae5c 2.66, #9747ff 4.13, #b86200 4.03
+       mark #fff1c2 behind fg 14.8
+     DARK    bg #2c2c2c · bg-2 / bg-hover #383838 · bg-3 #444
+       fg #fff                             bg 13.97 · bg-2 11.73 · bg-3 9.74
+       fg-2 #b3b3b3                        bg 6.66 · bg-2 5.59 · bg-3 4.65   was rgba(255,255,255,.4) 3.54
+       accent-fg / ring #7cc4f8            bg 7.39 · bg-2 6.20 · bg-3 5.15   was #0c8ce9 3.95
+       on-accent #fff on accent #0a6dc2    5.28                  was on #0c8ce9 3.53
+       danger #fca397                      bg 7.20 · bg-2 6.04
+       placeholder #b3b3b3 on field bg 6.66 · focus border #0c8ce9 vs bg 3.95
+       syntax on bg-2: #7cc4f8 6.20 · #79d297 6.41 · #c9a2ff 5.64 · #f3b562 6.48
+       mark #5a4a14 behind #fff 8.66
+     POPOVERS / MENUS (main ⋯ menu, model + Effort, chat-row ⋯, Settings) use
+       the panel surface in both themes, no inverted menus: fg / fg-2 / danger on
+       bg (rest) and bg-hover (hover); keyboard focus adds the ring — all pairs
+       are the bg / bg-2 columns above (light fg-2 on hover 5.27, danger 5.22;
+       dark fg-2 on hover 5.59, danger 6.04). Was #fff on #1e1e1e menus whose
+       selected row #0d99ff carried #fff at 2.99.
+     TEXT FIELDS — deliberate UI3-fidelity choice: rest borders use Figma's
+       own border var (#e6e6e6 light 1.25, #444 dark 1.43), below the 3:1
+       non-text guideline exactly as Figma's controls are. Fields stay
+       identifiable by placeholder, label and position; the 1px focus border is
+       the state indicator (light #0d99ff 2.99, a hair under 3:1; dark 3.95).
+       Disabled text uses text-disabled (#b3b3b3, exempt); the disabled
+       composer's placeholder keeps fg-2 because it carries the error.
+     Exempt: hairline dividers (--border, decorative), disabled controls.
+     Reconnect button: fg on bg-2 16.0 / 11.7; dots accent-fg on bg-2 4.84 / 6.20. */
+  :root {
+    color-scheme: light;
+    --bg: var(--figma-color-bg, #ffffff);
+    --bg-2: var(--figma-color-bg-secondary, #f5f5f5);
+    --bg-3: var(--figma-color-bg-tertiary, #e6e6e6);
+    --bg-hover: var(--figma-color-bg-hover, #f5f5f5);
+    --fg: var(--figma-color-text, #1e1e1e);
+    --fg-2: #666666;
+    --border: var(--figma-color-border, #e6e6e6);
+    /* UI3 text fields (UI3Kit): rest / focus / disabled straight from the theme. */
+    --field-bg: var(--figma-color-bg, #ffffff);
+    --field-border: var(--figma-color-border, #e6e6e6);
+    --field-focus: var(--figma-color-border-selected, #0d99ff);
+    --fg-disabled: var(--figma-color-text-disabled, #b3b3b3);
+    --selection: var(--figma-color-bg-selected, #e5f4ff);
+    --accent: #0a6dc2;
+    --accent-fg: #0a6dc2;
+    --ring: #0a6dc2;
+    --on-accent: #ffffff;
+    --danger: #c22e0e;
+    --mark: #fff1c2;
+    --syn-key: #0a6dc2;
+    --syn-str: #0f7a3f;
+    --syn-num: #7a3ce0;
+    --syn-lit: #9a5200;
+
+    /* type: system UI (SF Pro Text/Display picked optically on macOS).
+       rem so text zoom scales it: 11/16, 12/16, 14/20, 16/24 px at 100%. */
+    --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --text-xs: 0.6875rem/1rem;
+    --text-sm: 0.75rem/1rem;
+    --text-base: 0.875rem/1.25rem;
+    --text-lg: 1rem/1.5rem;
+
+    /* 4px grid */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+
+    --r-sm: 4px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-field: 6px;
+    --control-h: 32px;
+    --row-h: 36px;
+    --header-h: 44px;
+    --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  html.figma-dark {
+    color-scheme: dark;
+    --fg-2: #b3b3b3;
+    --accent-fg: #7cc4f8;
+    --ring: #7cc4f8;
+    --danger: #fca397;
+    --mark: #5a4a14;
+    --syn-key: #7cc4f8;
+    --syn-str: #79d297;
+    --syn-num: #c9a2ff;
+    --syn-lit: #f3b562;
+  }
+  /* Outside Figma (no theme class): follow the OS. */
+  @media (prefers-color-scheme: dark) {
+    html:not(.figma-light):not(.figma-dark) {
+      color-scheme: dark;
+      --bg: #2c2c2c; --bg-2: #383838; --bg-3: #444444; --bg-hover: #383838;
+      --fg: #ffffff; --border: #444444;
+      --fg-2: #b3b3b3; --accent-fg: #7cc4f8; --ring: #7cc4f8;
+      --field-bg: #2c2c2c; --field-border: #444444; --field-focus: #0c8ce9; --fg-disabled: #757575; --selection: #2b4a63;
+      --danger: #fca397; --mark: #5a4a14;
+      --syn-key: #7cc4f8; --syn-str: #79d297; --syn-num: #c9a2ff; --syn-lit: #f3b562;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: var(--bg); color: var(--fg); font: var(--text-base) var(--font-family); font-optical-sizing: auto; -webkit-font-smoothing: antialiased; }
+  button, input, textarea { font: inherit; font-optical-sizing: auto; color: inherit; }
+  ::placeholder { color: var(--fg-2); opacity: 1; }
+  .sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+  /* Text fields (UI3): theme bg + 1px theme border at rest; focus = 1px
+     selected-border (the one focus indicator, never an outline); disabled =
+     same border, disabled text. Placeholders stay fg-2 even when disabled
+     because they carry connection state. */
+  input:not([type="checkbox"]), textarea { background: var(--field-bg); color: var(--fg); border: 1px solid var(--field-border); border-radius: var(--r-field); padding: 0 var(--space-2); outline: none; }
+  input:not([type="checkbox"]):focus, textarea:focus { border-color: var(--field-focus); }
+  input:not([type="checkbox"]):focus-visible, textarea:focus-visible { outline: none; }
+  input:disabled, textarea:disabled { color: var(--fg-disabled); cursor: not-allowed; }
+  input::selection, textarea::selection { background: var(--selection); }
+  input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+
+  button { border: 0; background: none; border-radius: var(--r-sm); padding: 0 var(--space-2); cursor: pointer; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  /* Keyboard ring for buttons, menu items, checkboxes, summaries. */
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  :focus:not(:focus-visible) { outline: none; }
+  [hidden] { display: none !important; }
+  svg { display: block; flex: none; }
+  .icon { width: var(--control-h); height: var(--control-h); padding: 0; display: inline-grid; place-items: center; color: var(--fg-2); }
+  .icon:hover:not(:disabled) { background: var(--bg-hover); color: var(--fg); }
+  .round { width: var(--control-h); height: var(--control-h); padding: 0; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent); color: var(--on-accent); flex: none; }
+  .round:focus-visible { outline-offset: 2px; }
+  .round.stop { background: var(--fg); color: var(--bg); }
+  /* Maximal down: the send button becomes Reconnect (dots while retrying). */
+  .round.reconnect { background: var(--bg-2); color: var(--fg); }
+  .round.reconnect:hover { background: var(--bg-3); }
+  .round.reconnect[aria-disabled="true"] { cursor: progress; }
+  .spacer { flex: 1; }
+
+  /* ---------- layout: header / stage. The stage clips a stack (conversation
+     + composer, then the chats list) that slides up to reveal the chats. */
+  #app { position: relative; height: 100%; display: flex; flex-direction: column; }
+  #stage { flex: 1; min-height: 0; position: relative; overflow: hidden; overflow: clip; }
+  #stack { position: absolute; left: 0; right: 0; top: 0; height: 100%; }
+  #convo { height: 100%; display: flex; flex-direction: column; }
+
+  /* ---------- chats (below the fold) */
+  #chats { height: calc(100% - var(--composer-h, 160px)); display: flex; flex-direction: column; padding: var(--space-3) var(--space-4) 0; }
+  #search { flex: none; width: 100%; min-height: var(--control-h); }
+  .chats-label { color: var(--fg-2); font: var(--text-sm) var(--font-family); padding: var(--space-2) var(--space-2) 0; }
+  #chatList { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: var(--space-1) 0 var(--space-2); }
+  .chat-row { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+  .chat-row:last-child { border-bottom: 0; }
+  .chat-row:hover, .chat-row.active { background: var(--bg-hover); }
+  .chat-row.active .t { font-weight: 600; }
+  .chat-row .open { flex: 1; min-width: 0; min-height: var(--row-h); text-align: left; padding: var(--space-3) var(--space-2); display: flex; flex-direction: column; border-radius: 0; }
+  .chat-row .t { font: var(--text-base) var(--font-family); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-row .s { color: var(--fg-2); font: var(--text-sm) var(--font-family); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .chat-row .s mark { background: var(--mark); color: inherit; border-radius: var(--r-sm); }
+  /* Hidden with opacity, not visibility, so it stays in the tab order. */
+  .chat-row .more { opacity: 0; width: 28px; height: 28px; margin: var(--space-1); }
+  .chat-row:hover .more, .chat-row:focus-within .more, .chat-row .more[aria-expanded="true"] { opacity: 1; }
+  .chat-row input { flex: 1; min-width: 0; margin: var(--space-1) 0; min-height: var(--control-h); }
+  .nav-empty { color: var(--fg-2); padding: var(--space-3) var(--space-2); }
+
+  /* Scrollbars: fixed gutter, thumb only while hovering or scrolling. No
+     scrollbar-color here: it turns off the ::-webkit-scrollbar styling. */
+  .scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scroll::-webkit-scrollbar-track { background: transparent; }
+  .scroll::-webkit-scrollbar-thumb { background-color: transparent; border: 2px solid transparent; border-radius: 4px; background-clip: padding-box; }
+  .scroll:hover::-webkit-scrollbar-thumb, .scroll.scrolling::-webkit-scrollbar-thumb { background-color: rgba(128, 128, 128, 0.45); }
+
+  /* ---------- header */
+  header { min-height: var(--header-h); flex: none; display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); border-bottom: 1px solid var(--border); }
+  #chatTitle { flex: 1; min-width: 0; display: block; min-height: var(--control-h); padding: 0 var(--space-2); font: var(--text-base) var(--font-family); font-weight: 500; color: var(--fg); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
+  #chatTitle:hover { background: var(--bg-hover); }
+  #titleInput { flex: 1; min-width: 0; min-height: var(--control-h); font-weight: 500; }
+
+  /* ---------- popovers / menus */
+  .pop { position: absolute; z-index: 30; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--space-2) 0; box-shadow: 0 4px 16px rgba(0,0,0,0.2), 0 2px 8px rgba(0,0,0,0.15); min-width: 160px; max-width: calc(100vw - var(--space-4)); }
+  .pop .item { display: flex; align-items: center; gap: var(--space-2); width: calc(100% - var(--space-4)); min-height: var(--row-h); margin: 0 var(--space-2); padding: var(--space-1) var(--space-2); text-align: left; color: var(--fg); border-radius: var(--r-sm); overflow-wrap: anywhere; }
+  .pop .item:hover, .pop .item:focus { background: var(--bg-hover); }
+  .pop .item .check { width: 12px; flex: none; }
+  .pop .item .sub { margin-left: auto; color: var(--fg-2); font: var(--text-sm) var(--font-family); white-space: nowrap; }
+  .pop .item.danger { color: var(--danger); }
+  .pop .sep { height: 1px; margin: var(--space-2) 0; background: var(--border); }
+  .pop .label { padding: var(--space-1) var(--space-4); color: var(--fg-2); font: var(--text-sm) var(--font-family); }
+  #settingsPop { left: var(--space-2); top: var(--header-h); width: min(320px, calc(100% - var(--space-4))); max-height: calc(100% - var(--header-h) - var(--space-2)); overflow-y: auto; padding: var(--space-5); }
+  #settingsPop h2 { font: var(--text-base) var(--font-family); font-weight: 600; margin: 0; }
+  /* Labels sit above their fields so they reflow at any text size. */
+  .field { display: grid; gap: var(--space-1); margin-top: var(--space-4); }
+  .field input { min-width: 0; min-height: var(--control-h); }
+  .check-row { display: flex; gap: var(--space-2); align-items: flex-start; margin-top: var(--space-4); cursor: pointer; }
+  .check-row input { margin: var(--space-1) 0 0; }
+  .check-row small { display: block; color: var(--fg-2); font: var(--text-sm) var(--font-family); }
+  .bridge-row { margin: var(--space-2) 0 0 var(--space-6); }
+  /* Figma access token: write-only field + Save/Clear; status and help in fg-2 (5.74 / 6.66), link accent-fg (5.28 / 7.39), error danger. */
+  .token-row { display: flex; gap: var(--space-2); }
+  .token-row input { flex: 1; }
+  .field small { color: var(--fg-2); font: var(--text-sm) var(--font-family); }
+  .field small.error { color: var(--danger); }
+  .field a { justify-self: start; color: var(--accent-fg); font: var(--text-sm) var(--font-family); text-decoration: underline; text-underline-offset: 2px; border-radius: var(--r-sm); }
+  .field a:focus-visible { outline-offset: 2px; }
+  .pop-foot { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-5); }
+  .btn { display: inline-flex; align-items: center; min-height: var(--control-h); border: 1px solid var(--field-border); padding: var(--space-1) var(--space-3); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btn:focus-visible { outline-offset: 2px; }
+
+  /* ---------- transcript */
+  #log { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: var(--space-4) var(--space-2) var(--space-4) var(--space-4); display: flex; flex-direction: column; gap: var(--space-6); }
+  .msg { white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; max-width: 85%; background: var(--bg-2); border-radius: var(--r-lg); padding: var(--space-2) var(--space-3); }
+  .msg.user.queued { opacity: 0.7; }
+  .queued-tag { display: block; margin-top: var(--space-1); color: var(--fg-2); font: var(--text-sm) var(--font-family); }
+  .msg.note { color: var(--fg-2); }
+  /* Errors: icon + "Error:" (screen readers) + color, never color alone. */
+  .msg.error { color: var(--danger); display: flex; align-items: flex-start; gap: var(--space-2); }
+  .msg.error > svg { margin-top: var(--space-1); }
+  .hint { color: var(--fg-2); margin: auto 0; text-align: center; padding: var(--space-4) var(--space-2); }
+  .dots { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; }
+  .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent-fg); animation: dot 1.2s ease-in-out infinite; }
+  .dots i:nth-child(2) { animation-delay: 0.16s; }
+  .dots i:nth-child(3) { animation-delay: 0.32s; }
+  @keyframes dot { 0%, 70%, 100% { opacity: 0.3; transform: scale(0.8); } 35% { opacity: 1; transform: scale(1); } }
+  .live { display: flex; align-items: center; gap: var(--space-2); min-height: 24px; padding: 0 var(--space-1); color: var(--fg-2); font: var(--text-sm) var(--font-family); }
+  .live-label, .dz-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .live-t, .dz-t { flex: none; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+  .live-hint { flex: none; color: var(--fg-2); }
+  .dz { display: flex; flex-direction: column; align-items: flex-start; }
+  .dz-head { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; min-height: 24px; padding: var(--space-2) var(--space-1); color: var(--fg-2); font: var(--text-sm) var(--font-family); text-align: left; }
+  .dz-head:hover { background: var(--bg-hover); color: var(--fg); }
+  .dz-head .dots { margin-left: var(--space-1); }
+  #log .caret { flex: none; color: var(--fg-2); transition: transform 180ms var(--ease-out); }
+  .dz.open > .dz-head .caret, .thought.open .caret { transform: rotate(90deg); }
+  .dz-err { flex: none; color: var(--danger); }
+  .dz.failed > .dz-head .dz-label { color: var(--danger); }
+  .dz.pending > .dz-head { font-style: italic; }
+  .dz-body { align-self: stretch; display: flex; flex-direction: column; align-items: flex-start; margin: 0 0 0 var(--space-2); padding-left: var(--space-2); border-left: 1px solid var(--border); }
+  .dz-body[hidden] { display: none; }
+  .call > .dz-body { align-items: stretch; padding-bottom: var(--space-2); }
+  .thought { display: flex; align-items: flex-start; gap: var(--space-1); max-width: 100%; min-height: 24px; padding: var(--space-1); color: var(--fg-2); font: var(--text-sm) var(--font-family); text-align: left; }
+  .thought:hover { background: var(--bg-hover); }
+  .thought-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+  .thought-wrap { display: flex; align-items: flex-start; gap: var(--space-1); max-width: 100%; }
+  .thought-wrap.open .thought-text { display: none; }
+  .thought-md { flex: 1; min-width: 0; padding: var(--space-1); color: var(--fg-2); font: var(--text-sm) var(--font-family); }
+  .thought-md :is(h3, h4) { font: 600 var(--text-sm) var(--font-family); }
+  .thought-md[hidden] { display: none; }
+
+  /* ---------- markdown */
+  .msg.md { white-space: normal; }
+  .md { min-width: 0; overflow-wrap: anywhere; user-select: text; }
+  .md :where(p, h3, h4, ul, ol, li, blockquote, hr, pre, table) { margin: 0; }
+  .md > * + *, .md blockquote > * + *, .md li > * + * { margin-top: var(--space-2); }
+  .md > * + :is(h3, h4) { margin-top: var(--space-3); }
+  .md h3 { font: 600 var(--text-lg) var(--font-family); }
+  .md h4 { font: 600 var(--text-base) var(--font-family); }
+  .md :is(ul, ol) { padding-left: var(--space-5); }
+  .md li + li, .md li > :is(ul, ol) { margin-top: var(--space-1); }
+  .md a { color: var(--accent-fg); text-decoration: underline; text-underline-offset: 2px; }
+  .md code { font-family: var(--font-mono); font-size: 0.75rem; background: var(--bg-2); border-radius: var(--r-sm); padding: 0 var(--space-1); }
+  .md blockquote { border-left: 2px solid var(--border); padding-left: var(--space-3); color: var(--fg-2); }
+  .md hr { border: 0; border-top: 1px solid var(--border); }
+  .md-code { position: relative; }
+  .md-code pre { overflow-x: auto; background: var(--bg-2); border-radius: var(--r-md); padding: var(--space-2) var(--space-3); font: var(--text-sm) var(--font-mono); white-space: pre; overflow-wrap: normal; }
+  .md-code pre code { background: none; padding: 0; font-size: inherit; }
+  .md-copy { position: absolute; top: var(--space-1); right: var(--space-1); width: 24px; height: 24px; padding: 0; display: inline-grid; place-items: center; background: var(--bg); color: var(--fg-2); border: 1px solid var(--border); opacity: 0; }
+  .md-code:hover .md-copy, .md-copy:focus-visible, .md-code pre:focus-visible + .md-copy { opacity: 1; }
+  .md-copy:hover { color: var(--fg); }
+  @media (hover: none) { .md-copy { opacity: 1; } }
+  .md-table { overflow-x: auto; }
+  .md table { border-collapse: collapse; overflow-wrap: normal; }
+  .md :is(th, td) { border: 1px solid var(--border); padding: var(--space-1) var(--space-2); text-align: left; vertical-align: top; }
+  .md th { font-weight: 600; background: var(--bg-2); }
+  .thought .caret { margin-top: var(--space-1); }
+  .io { display: flex; flex-direction: column; gap: var(--space-1); padding-top: var(--space-1); }
+  .io-title { color: var(--fg-2); font: var(--text-xs) var(--font-family); font-weight: 500; }
+  .io pre { margin: 0; max-height: 320px; overflow: auto; padding: var(--space-2); background: var(--bg-2); border-radius: var(--r-md); font: var(--text-xs) var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+  .io .more { align-self: flex-start; min-height: 24px; padding: 0 var(--space-1); color: var(--accent-fg); font: var(--text-sm) var(--font-family); }
+  .io .more:hover { background: var(--bg-hover); }
+  .io img { display: block; align-self: flex-start; max-width: 100%; max-height: 160px; object-fit: contain; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md); }
+  .j-k { color: var(--syn-key); }
+  .j-s { color: var(--syn-str); }
+  .j-n { color: var(--syn-num); }
+  .j-b { color: var(--syn-lit); }
+  .answer { display: flex; flex-direction: column; gap: var(--space-1); }
+  .msg-foot { display: flex; align-items: center; gap: var(--space-1); color: var(--fg-2); font: var(--text-xs) var(--font-family); }
+  .msg-foot button { width: 24px; height: 24px; padding: 0; display: inline-grid; place-items: center; color: var(--fg-2); margin-left: calc(-1 * var(--space-1)); }
+  .msg-foot button:hover { background: var(--bg-hover); color: var(--fg); }
+  .spin { width: 12px; height: 12px; border: 2px solid var(--fg-2); border-top-color: transparent; border-radius: 50%; animation: rot 0.7s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* ---------- composer: the box is the single focus indicator for the textarea */
+  .composer { flex: none; padding: 0 var(--space-4); background: var(--bg); }
+  /* Hint line: only when it says something; otherwise it folds to 0 (the
+     top margin stays as the gap above the box). Height eases, no jump. */
+  .ctx { display: flex; align-items: center; gap: var(--space-1); height: 1.5rem; min-height: 24px; overflow: hidden; margin: var(--space-2) 0; padding: 0 var(--space-1) 0 var(--space-2); color: var(--fg-2); font: var(--text-sm) var(--font-family); transition: height 180ms var(--ease-out), min-height 180ms var(--ease-out), margin-bottom 180ms var(--ease-out), opacity 140ms var(--ease-out); }
+  .ctx.empty { height: 0; min-height: 0; margin-bottom: 0; opacity: 0; }
+  .ctx.on { color: var(--fg); }
+  #ctx { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #ctxX { width: 24px; height: 24px; padding: 0; display: inline-grid; place-items: center; color: var(--fg-2); flex: none; }
+  #ctxX:hover { background: var(--bg-hover); color: var(--fg); }
+  .box { border: 1px solid var(--field-border); border-radius: var(--r-field); background: var(--field-bg); display: flex; flex-direction: column; }
+  .box:has(#prompt:focus) { border-color: var(--field-focus); }
+  .box:has(#prompt:disabled) { cursor: not-allowed; }
+  #prompt { border: 0; border-radius: var(--r-field) var(--r-field) 0 0; resize: none; min-height: 48px; max-height: 160px; padding: var(--space-3) var(--space-4) var(--space-2); background: transparent; }
+  #prompt:focus, #prompt:focus-visible { border: 0; outline: none; }
+  .box-row { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2) var(--space-2) var(--space-3); min-width: 0; }
+  /* Model chip: full label, or (idle) a sparkles icon button. The spacer to
+     its left absorbs the width change, so its right edge and Send stay put. */
+  #modelBtn { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: flex-end; min-height: var(--control-h); color: var(--fg-2); font: var(--text-sm) var(--font-family); padding: 0 var(--space-2); min-width: 0; white-space: nowrap; }
+  #modelBtn .chip-text { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+  #modelBtn #modelLabel { overflow: hidden; text-overflow: ellipsis; }
+  #modelBtn .chip-icon { position: absolute; right: var(--space-2); top: 50%; margin-top: -8px; opacity: 0; pointer-events: none; }
+  #modelBtn.iconic { width: var(--control-h); flex: none; }
+  #modelBtn.iconic .chip-text { opacity: 0; }
+  #modelBtn.iconic .chip-icon { opacity: 1; }
+  #modelBtn:hover { background: var(--bg-hover); color: var(--fg); }
+  /* UI3 bottom drawer handle: full-bleed bar on the panel's bottom edge while
+     the chats are closed (chevron up); the drawer's top edge once open (down). */
+  .drawer { display: grid; place-items: center; width: calc(100% + 2 * var(--space-4)); height: 24px; margin: var(--space-3) calc(-1 * var(--space-4)) 0; padding: 0; background: var(--bg-2); color: var(--fg-2); border-top: 1px solid var(--border); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+  .drawer[aria-expanded="true"] { border-radius: 0; border-bottom: 1px solid var(--border); }
+  .drawer:hover { background: var(--bg-3); color: var(--fg); }
+  .drawer svg { transition: transform 160ms var(--ease-out); }
+  .drawer[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+  /* ---------- compact bar (48px; 32px controls leave 8px above/below) */
+  #compact { display: none; height: 100%; align-items: center; gap: var(--space-2); padding: 0 var(--space-2) 0 var(--space-3); }
+  body.compact #app { display: none; }
+  body.compact #compact { display: flex; }
+  #cprompt { flex: 1; min-width: 0; height: var(--control-h); }
+  #cactivity { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg-2); }
+  /* Unread: something happened while collapsed (non-color cue: the dot + label). */
+  #expand { position: relative; }
+  #expand.unread::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-fg); }
+
+  /* Pointer-only resize corner (24px target). Keyboard users have Collapse /
+     Expand; Figma's own window frame also resizes. */
+  #grip { position: absolute; right: 0; bottom: 0; width: 24px; height: 24px; display: grid; place-items: center; cursor: nwse-resize; z-index: 25; color: var(--fg-2); touch-action: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+    .dots i { opacity: 0.7; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="icon" id="menuBtn" title="Menu" aria-label="Menu" aria-haspopup="menu" aria-expanded="false" aria-controls="mainMenu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg></button>
+    <button id="chatTitle" title="Rename chat">New chat</button>
+    <button class="icon" id="collapse" title="Collapse to a bar" aria-label="Collapse to a bar"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 2.5L7 7M7 3v4H3M13.5 13.5L9 9M9 13V9h4"/></svg></button>
+  </header>
+  <div id="stage">
+    <div id="stack">
+      <div id="convo">
+        <div id="log" class="scroll" role="log" aria-live="polite" aria-label="Conversation"></div>
+        <footer class="composer" id="composer">
+          <div class="ctx empty" id="ctxRow"><span id="ctx"></span><button type="button" id="ctxX" hidden></button></div>
+          <div class="box">
+            <textarea id="prompt" rows="2" aria-label="Message" placeholder="Ask the agent to work on this board…"></textarea>
+            <div class="box-row">
+              <span class="spacer"></span>
+              <button id="modelBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="modelMenu" aria-label="Model: none"><span class="chip-text" aria-hidden="true"><span id="modelLabel">No model</span><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3.5 5l2.5 2.5L8.5 5"/></svg></span><svg class="chip-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 4.5Q7.1 8.9 11.5 9.5Q7.1 10.1 6.5 14.5Q5.9 10.1 1.5 9.5Q5.9 8.9 6.5 4.5Z"/><path d="M12 1.25Q12.33 3.67 14.75 4Q12.33 4.33 12 6.75Q11.67 4.33 9.25 4Q11.67 3.67 12 1.25Z"/><path d="M13 10.75Q13.21 12.29 14.75 12.5Q13.21 12.71 13 14.25Q12.79 12.71 11.25 12.5Q12.79 12.29 13 10.75Z"/></svg></button>
+              <button class="round" id="go" title="Send (↩)" aria-label="Send"></button>
+            </div>
+          </div>
+          <button type="button" class="drawer" id="chatsHandle" aria-expanded="false" aria-controls="chats" aria-label="Show chats" title="Chats"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5l3-3 3 3"/></svg></button>
+        </footer>
+      </div>
+      <section id="chats" aria-label="Chats" inert>
+        <input id="search" type="search" placeholder="Search this board's chats" spellcheck="false" aria-label="Search chats" />
+        <div class="chats-label" id="navLabel" hidden></div>
+        <div id="chatList" class="scroll"></div>
+      </section>
+    </div>
+  </div>
+  <div id="mainMenu" class="pop" hidden role="menu">
+    <button class="item" id="newChat" role="menuitem">New chat</button>
+    <button class="item" id="menuChats" role="menuitem">Chats</button>
+    <button class="item" id="menuSettings" role="menuitem">Settings…</button>
+    <div class="sep" id="versionSep" role="separator" hidden></div>
+    <div class="label" id="version" role="none" hidden></div>
+  </div>
+  <div id="settingsPop" class="pop" hidden role="dialog" aria-modal="false" aria-labelledby="settingsTitle">
+    <h2 id="settingsTitle">Settings</h2>
+    <label class="field"><span>Maximal</span><input id="baseUrl" spellcheck="false" /></label>
+    <label class="field"><span>API key</span><input id="apiKey" type="password" placeholder="Only if required" spellcheck="false" /></label>
+    <label class="check-row"><input type="checkbox" id="remote" /><span>Let Claude Code drive this board<small id="bridgeStatus">Connects to the bridge on localhost:4150</small></span></label>
+    <div class="bridge-row"><button type="button" class="btn" id="bridgeAct" hidden></button></div>
+    <label class="check-row"><input type="checkbox" id="allowRunCode" /><span>Allow run_code<small>Agents may run arbitrary Plugin API code on this board</small></span></label>
+    <div class="field" role="group" aria-labelledby="figmaTokenLabel">
+      <label id="figmaTokenLabel" for="figmaToken">Figma access token</label>
+      <div class="token-row">
+        <input id="figmaToken" type="password" autocomplete="off" spellcheck="false" placeholder="Paste a token" aria-describedby="figmaTokenStatus figmaTokenHelp" />
+        <button type="button" class="btn" id="figmaTokenSave">Save</button>
+        <button type="button" class="btn" id="figmaTokenClear" hidden>Clear</button>
+      </div>
+      <small id="figmaTokenStatus" role="status">No token saved</small>
+      <small id="figmaTokenHelp">For comments. Grant file_comments:read, file_comments:write and file_content:read; the token stays on this computer in Figma's plugin storage.</small>
+      <a id="figmaTokenLink" href="https://www.figma.com/settings" title="Opens Figma's settings: Security → Personal access tokens">Create a token in Figma</a>
+    </div>
+    <div class="pop-foot"><span class="spacer"></span><button type="button" class="btn primary" id="saveSettings">Save and reconnect</button></div>
+  </div>
+  <div id="modelMenu" class="pop" hidden role="menu"></div>
+  <div id="rowMenu" class="pop" hidden role="menu">
+    <button class="item" id="rowRename" role="menuitem">Rename</button>
+    <button class="item danger" id="rowDelete" role="menuitem">Delete</button>
+  </div>
+  <div id="grip" title="Resize (drag)" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14" stroke="currentColor"><path d="M12 5L5 12M12 9L9 12"/></svg></div>
+</div>
+<div id="netLive" class="sr" role="status" aria-live="polite"></div>
+<div id="compact">
+  <input id="cprompt" placeholder="Ask the agent…" spellcheck="false" aria-label="Prompt" />
+  <span id="cactivity" hidden></span>
+  <button class="round" id="cgo" title="Send" aria-label="Send"></button>
+  <button class="icon" id="expand" title="Expand" aria-label="Expand"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7L2.5 2.5M2.5 6.5v-4h4M9 9l4.5 4.5M13.5 9.5v4h-4"/></svg></button>
+</div>
+
+<script>
+"use strict";
+
+const DEFAULT_BASE = "http://localhost:4141";
+const PREFERRED_MODELS = ["claude-sonnet", "claude-opus", "claude-fable", "gpt-6", "gpt-5"];
+const MAX_STEPS = 30;
+const BRIDGE_URL = "ws://localhost:4150/plugin";
+// Maximal runs on this computer, so the panel only calls a loopback host.
+const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
+const DEFAULT_EFFORT = "high";
+const COMPACT = { width: 300, height: 48 };
+const DEFAULT_WINDOW = { width: 400, height: 640 };
+
+const SYSTEM = `You are a skilled workshop facilitator and visual thinker working inside a FigJam board through a Figma plugin. You change the board only through the provided tools; changes appear live and each tool call is one undo step (use batch to group several).
+
+Start: call get_board (or get_selection when the user says "this"/"these"). Use node ids from tool results only; never invent ids.
+
+Pick the right element:
+- Ideas, votes-to-be, one thought each → stickies (create_stickies, many per call). Vary color by meaning; wide stickies for longer text; hide the author line for facilitator content.
+- Flows, processes, architectures → create_shape (DIAMOND decisions, ELLIPSE start/end, ENG_DATABASE stores…) + connect with connections [{from, to, label}] in one call. Magnets auto-pick facing sides; elbowed by default. Label edges ("yes"/"no", verbs).
+- Areas / phases / groups → create_section. Grids and comparisons → create_table. Headings → create_text (48–64 board title, 32 section heading, 16–18 body).
+- Numbered steps / callouts → create_label pinned to a node. Votes and reactions → stamp (clones a real stamp if one exists, else an emoji stand-in; say which).
+- Annotate → draw: pen to circle a cluster (closed loop) or underline; style "highlighter" to highlight. Code → create_code_block. Links/images → create_link, create_image.
+- Comments → get_comments reads the board's comment threads (with the node each is pinned to); add_comment posts one (pinned with nodeId, or a reply with replyTo) and react_to_comment adds an emoji, but only when the user asks. They need the user's Figma access token; if a tool says there's none, tell the user to add one in Settings → Figma access token. You can't resolve, edit or delete comments: the user does that in Figma.
+
+Layout rules: omit x/y to place in free space (or below content with sectionId; section coordinates are relative). Flows: shapes ≥ 160×80, text 16–18px, gaps ≥ 64px so connectors read as arrows, nodes on a grid with no crossings. Sections wrap their content evenly (fit_section). Use align, distribute, arrange_grid.
+
+Color must mean something: pick one scheme per artifact (stage, status, owner or sentiment), keep it consistent, use ≤ 4 hues + a neutral, and add a small legend when color carries meaning; otherwise use one neutral color. Sticky defaults: green=positive, pink=concern, red=blocker, blue=discussion, violet=idea, yellow=question, teal=decision.
+
+Pages: when the user asks for something new and large (a workshop, a diagram, a plan), make it on its own page: create_page with a meaningful name (it switches to it). Rename vague pages ("Page 1") with rename_page. list_pages/switch_page to move around.
+
+Review in passes before you finish:
+1. review_layout on what you made; fix every issue it lists.
+2. export_png and look critically: balance, whitespace, hierarchy, readable text at 100% zoom, arrow lengths, color meaning. Fix what's off.
+3. review_layout again until clean.
+
+Finish: focus on what you made, call get_link for it, and reply with a short summary that includes the links. If get_link has no URL, ask the user for the board's share link and call set_board_url.
+
+Other: get_node for detail, find_nodes to search; update_node/style_text/set_link to edit. run_code (only if offered) is a last resort. Don't delete or rewrite content the user didn't ask you to change.`;
+
+const ICON_SEND = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 11.5v-9M3 6.5l4-4 4 4"/></svg>';
+const ICON_STOP = '<svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
+const ICON_CARET = '<svg class="caret" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor"><path d="M3.5 2l3 3-3 3"/></svg>';
+
+// Tool schemas come from code.js on init (single source of truth); run_code
+// is only offered to the model when "Allow run_code" is on.
+let allTools = [];
+let TOOLS = [];
+
+// ---------------------------------------------------------------- state
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  chatTitle: $("chatTitle"), baseUrl: $("baseUrl"), apiKey: $("apiKey"),
+  log: $("log"), ctx: $("ctx"), ctxRow: $("ctxRow"), ctxX: $("ctxX"), netLive: $("netLive"), prompt: $("prompt"), go: $("go"), cgo: $("cgo"), cprompt: $("cprompt"), cactivity: $("cactivity"),
+  newChat: $("newChat"), saveSettings: $("saveSettings"), remote: $("remote"),
+  allowRunCode: $("allowRunCode"), version: $("version"), versionSep: $("versionSep"), search: $("search"), chatList: $("chatList"), navLabel: $("navLabel"),
+  modelBtn: $("modelBtn"), modelLabel: $("modelLabel"), modelMenu: $("modelMenu"), settingsPop: $("settingsPop"),
+  menuBtn: $("menuBtn"), mainMenu: $("mainMenu"), menuChats: $("menuChats"), menuSettings: $("menuSettings"),
+  bridgeStatus: $("bridgeStatus"), bridgeAct: $("bridgeAct"), rowMenu: $("rowMenu"),
+  stage: $("stage"), stack: $("stack"), composer: $("composer"), chats: $("chats"), chatsHandle: $("chatsHandle"),
+  collapse: $("collapse"), expand: $("expand"), grip: $("grip"),
+  figmaToken: $("figmaToken"), figmaTokenSave: $("figmaTokenSave"), figmaTokenClear: $("figmaTokenClear"),
+  figmaTokenStatus: $("figmaTokenStatus"), figmaTokenLink: $("figmaTokenLink"),
+};
+
+let settings = { baseUrl: DEFAULT_BASE, apiKey: "", model: "", effort: DEFAULT_EFFORT, remote: false, allowRunCode: false, bridgeToken: "", bridgeClientId: "" };
+let pluginInfo = {};
+let messages = [];
+let selection = [];
+let fileInfo = {};
+let boardId = "";
+let running = false;
+let abort = null;
+const pendingTools = new Map();
+let toolSeq = 0;
+let models = []; // [{id, name}]
+let modelId = "";
+let effort = DEFAULT_EFFORT;
+let connState = { text: "Starting the plugin…", state: "", short: "Starting the plugin…" };
+// Messages typed while the agent runs: [{ text (sent to the model), raw (typed), el (bubble) }].
+let queue = [];
+// The user excluded the current selection from the next message (reset when the selection changes).
+let ctxExcluded = false;
+let selKey = "";
+
+let chat = null; // current chat meta {id, title, createdAt}
+let chats = []; // index for this board
+let searchResults = null; // null when not searching
+let storeOnline = false; // paired bridge socket answering chat requests
+
+// ---------------------------------------------------------------- plugin bridge
+
+function post(msg) {
+  parent.postMessage({ pluginMessage: msg }, "*");
+}
+
+function saveSettings() {
+  post({ type: "save-settings", settings });
+}
+
+function versionLine() {
+  if (!pluginInfo.version) return "";
+  const loaded = pluginInfo.loadedAt
+    ? new Date(pluginInfo.loadedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : "";
+  return `Agent v${pluginInfo.version} · build ${pluginInfo.build}${loaded ? ` · loaded ${loaded}` : ""}`;
+}
+
+const HINT = "Ask for anything on this board — e.g. “Make a retro with three sections and a few starter stickies” or “Group the selected stickies by theme.”";
+
+// Empty state: one hint.
+function welcome() {
+  const div = document.createElement("div");
+  div.className = "hint";
+  div.textContent = HINT;
+  els.log.append(div);
+}
+
+function clearHint() {
+  for (const h of els.log.querySelectorAll(".hint")) h.remove();
+}
+
+function applyToolGate() {
+  TOOLS = allTools.filter((t) => t.name !== "run_code" || settings.allowRunCode);
+}
+
+// code.js asks the panel to fetch image bytes (only hosts the manifest allows).
+async function fetchForSandbox(msg) {
+  try {
+    // By design: create_image's url can name any image, and the sandbox has no
+    // network of its own. Figma enforces the manifest's networkAccess list as
+    // this iframe's CSP, so only those hosts are reachable. See ADR-0001.
+    // codeql[js/client-side-request-forgery]
+    const res = await fetch(msg.url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    post({ type: "fetch-result", id: msg.id, ok: true, bytes });
+  } catch (error) {
+    post({ type: "fetch-result", id: msg.id, ok: false, error: error.message });
+  }
+}
+
+// Long strings (image base64) are shortened for the transcript.
+function forDisplay(value) {
+  return JSON.stringify(value, (key, v) => (typeof v === "string" && v.length > 2000 ? `…(${v.length} chars)` : v), 2);
+}
+
+function imagesOf(result) {
+  return result && Array.isArray(result.images) ? result.images.filter((i) => typeof i.base64 === "string") : [];
+}
+
+// Tool result content for the model: export_png images become image blocks.
+function toolResultContent(out) {
+  if (!out.ok) return out.error;
+  const images = imagesOf(out.result);
+  if (images.length === 0) return JSON.stringify(out.result);
+  const meta = Object.assign({}, out.result, {
+    images: out.result.images.map((i) => Object.assign({}, i, { base64: undefined })),
+  });
+  const blocks = [{ type: "text", text: JSON.stringify(meta) }];
+  for (const img of images) {
+    if (img.base64.length > 5_000_000) {
+      blocks.push({ type: "text", text: `Image ${img.id} is too large to attach (${img.bytes} bytes); export with a smaller maxDimension.` });
+      continue;
+    }
+    blocks.push({ type: "image", source: { type: "base64", media_type: img.format === "JPG" ? "image/jpeg" : "image/png", data: img.base64 } });
+  }
+  return blocks;
+}
+
+// actor tags the board changes a call makes: "panel:<session>" for the
+// panel's own agent, "agent:<name>" for calls relayed by the bridge.
+// Relayed calls always run as "agent:<name>". The bridge stamps them that way,
+// but the panel doesn't take its word for it: "panel:" calls get the panel's
+// own exemptions (run_code without a per-call confirm, deleting what this
+// panel made), which a relayed call must not.
+function relayedActor(actor) {
+  const name = typeof actor === "string" ? actor.replace(/^agent:/, "") : "";
+  const clean = name.replace(/[^\w.-]/g, "").slice(0, 64);
+  return `agent:${clean || "anonymous"}`;
+}
+
+function runTool(name, input, actor) {
+  const id = `t${++toolSeq}`;
+  return new Promise((resolve) => {
+    pendingTools.set(id, resolve);
+    post({ type: "tool", id, name, input, actor: actor || `panel:${SESSION}` });
+  });
+}
+
+// Requests to the sandbox's chat store (offline fallback) resolve on the
+// next reply of the expected type.
+const waiters = [];
+function sandboxRequest(msg, replyType, match) {
+  return new Promise((resolve, reject) => {
+    const w = { replyType, match, resolve, reject };
+    w.timer = setTimeout(() => { waiters.splice(waiters.indexOf(w), 1); reject(new Error("The plugin didn't answer")); }, 8000);
+    waiters.push(w);
+    post(msg);
+  });
+}
+function settleWaiters(msg) {
+  for (let i = 0; i < waiters.length; i++) {
+    const w = waiters[i];
+    if (msg.type === "chats-error" || (msg.type === w.replyType && (!w.match || w.match(msg)))) {
+      waiters.splice(i, 1);
+      clearTimeout(w.timer);
+      if (msg.type === "chats-error") w.reject(new Error(msg.error || "Chat storage failed"));
+      else w.resolve(msg);
+      return;
+    }
+  }
+}
+
+window.onmessage = (event) => {
+  // Plugin messages come from Figma, the frame hosting this panel (or the top
+  // window when Figma nests it); ignore messages from any other window.
+  if (event.source !== window.parent && event.source !== window.top) return;
+  const msg = event.data && event.data.pluginMessage;
+  if (!msg) return;
+  if (msg.type === "init") {
+    settings = Object.assign({}, settings, msg.settings);
+    fileInfo = msg.file || {};
+    boardId = msg.boardId || fileInfo.boardId || "";
+    selection = msg.selection || [];
+    pluginInfo = msg.plugin || {};
+    allTools = Array.isArray(msg.tools) ? msg.tools : [];
+    applyToolGate();
+    effort = settings.effort || DEFAULT_EFFORT;
+    els.baseUrl.value = settings.baseUrl;
+    els.apiKey.value = settings.apiKey || "";
+    delete settings.pairingCode; // pairing v1 leftover
+    els.allowRunCode.checked = Boolean(settings.allowRunCode);
+    els.remote.checked = Boolean(settings.remote);
+    renderFigmaToken(msg.figmaToken);
+    els.version.textContent = versionLine();
+    els.version.hidden = els.versionSep.hidden = !els.version.textContent;
+    applyWindowMode(settings.window && settings.window.mode === "compact" ? "compact" : "expanded", false);
+    els.log.replaceChildren();
+    welcome();
+    showContext();
+    if (Array.isArray(msg.chats)) { chats = msg.chats; renderChats(); }
+    if (msg.problem) add("error", msg.problem);
+    if (settings.remote) openBridge();
+    refreshChats();
+    connect();
+  } else if (msg.type === "selection") {
+    selection = msg.selection || [];
+    showContext();
+  } else if (msg.type === "page") {
+    fileInfo = msg.file || fileInfo;
+    selection = msg.selection || [];
+    showContext();
+    sendBoard();
+  } else if (msg.type === "fetch") {
+    fetchForSandbox(msg);
+  } else if (msg.type === "figma-token") {
+    renderFigmaToken(msg);
+  } else if (msg.type === "tool-result") {
+    const resolve = pendingTools.get(msg.id);
+    const target = msg.result && msg.result.target;
+    if (target && target.pageName && target.pageName !== agentPage) { agentPage = String(target.pageName); showContext(); }
+    if (typeof resolve === "function") {
+      pendingTools.delete(msg.id);
+      resolve(msg);
+    }
+  } else if (msg.type === "changes") {
+    // Board change feed from the sandbox; the bridge keeps it for agents.
+    if (bridge && bridge.readyState === WebSocket.OPEN) bridge.send(JSON.stringify(msg));
+  } else if (msg.type === "chats" || msg.type === "chat" || msg.type === "chats-error") {
+    if (msg.type === "chats" && !storeOnline && Array.isArray(msg.chats)) { chats = msg.chats; renderChats(); }
+    settleWaiters(msg);
+  }
+};
+
+// ---------------------------------------------------------------- chat store
+//
+// Primary: the paired bridge socket (SQLite on disk), {type:"chats", op,
+// reqId} -> {type:"chats-reply", reqId, ok, ...}. Fallback (socket not paired,
+// or no reply in 10 s): the sandbox's figma.clientStorage via chat-* messages.
+
+const chatReplies = new Map(); // reqId -> { resolve, reject, timer }
+let chatReqSeq = 0;
+let bridgePaired = false;
+
+function bridgeChats(op, args) {
+  return new Promise((resolve, reject) => {
+    const ws = bridge;
+    if (!ws || !bridgePaired || ws.readyState !== WebSocket.OPEN) return reject(new Error("Bridge not paired"));
+    const reqId = `q${++chatReqSeq}`;
+    const timer = setTimeout(() => { chatReplies.delete(reqId); reject(new Error("The bridge didn't answer")); }, 10000);
+    chatReplies.set(reqId, { resolve, reject, timer });
+    ws.send(JSON.stringify(Object.assign({ type: "chats", op, reqId }, args || {})));
+  }).then((body) => { storeOnline = true; return body; });
+}
+
+function settleChatReply(msg) {
+  const w = chatReplies.get(msg.reqId);
+  if (!w) return;
+  chatReplies.delete(msg.reqId);
+  clearTimeout(w.timer);
+  if (msg.ok) return w.resolve(msg);
+  const err = new Error(msg.error || "Chat storage failed");
+  err.status = msg.status || 500;
+  w.reject(err);
+}
+
+// The socket closed: pending requests fall back to the sandbox store.
+function failChatReplies() {
+  for (const [reqId, w] of chatReplies) { clearTimeout(w.timer); w.reject(new Error("Bridge disconnected")); chatReplies.delete(reqId); }
+}
+
+// No paired bridge (or it timed out) → fall back; an error reply from a live bridge is real.
+function offline(error) {
+  if (error && error.status) return false;
+  storeOnline = false;
+  return true;
+}
+
+const store = {
+  async list() {
+    try { return (await bridgeChats("list", { boardId })).chats || []; }
+    catch (e) { if (!offline(e)) throw e; return (await sandboxRequest({ type: "chats-list" }, "chats")).chats || []; }
+  },
+  async search(q) {
+    try { return (await bridgeChats("search", { q, boardId })).results || []; }
+    catch (e) {
+      if (!offline(e)) throw e;
+      const needle = q.toLowerCase();
+      return chats.filter((c) => (c.title || "").toLowerCase().includes(needle));
+    }
+  },
+  async load(id) {
+    try { return (await bridgeChats("get", { id })).chat; }
+    catch (e) {
+      if (!offline(e)) throw e;
+      const r = await sandboxRequest({ type: "chat-load", id }, "chat", (m) => m.id === id);
+      if (!r.chat) throw new Error(r.error || "Chat not found");
+      return r.chat;
+    }
+  },
+  async save(record) {
+    try {
+      const body = await bridgeChats("put", { id: record.id, chat: record });
+      upsertChat(body.chat);
+    } catch (e) {
+      if (!offline(e)) throw e;
+      chats = (await sandboxRequest({ type: "chat-save", chat: record }, "chats")).chats || chats;
+      renderChats();
+    }
+  },
+  async rename(id, title) {
+    try { upsertChat((await bridgeChats("rename", { id, title })).chat); }
+    catch (e) {
+      if (!offline(e)) throw e;
+      chats = (await sandboxRequest({ type: "chat-rename", id, title }, "chats")).chats || chats;
+      renderChats();
+    }
+  },
+  async remove(id) {
+    try { await bridgeChats("delete", { id }); chats = chats.filter((c) => c.id !== id); renderChats(); }
+    catch (e) {
+      if (!offline(e)) throw e;
+      chats = (await sandboxRequest({ type: "chat-delete", id }, "chats")).chats || chats;
+      renderChats();
+    }
+  },
+};
+
+function upsertChat(entry) {
+  if (!entry || !entry.id) return;
+  chats = [entry].concat(chats.filter((c) => c.id !== entry.id));
+  chats.sort((a, b) => toMs(b.updatedAt) - toMs(a.updatedAt));
+  renderChats();
+}
+
+async function refreshChats() {
+  try { chats = await store.list(); renderChats(); }
+  catch (error) { console.warn("chats", error); }
+}
+
+function newChatId() {
+  return "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function titleFrom(text) {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > 60 ? `${t.slice(0, 59).trimEnd()}…` : t;
+}
+
+// Saves run one at a time so an older snapshot never lands after a newer one.
+let saveChain = Promise.resolve();
+function saveChat() {
+  if (!chat || messages.length === 0) return;
+  const record = {
+    id: chat.id, title: chat.title, createdAt: chat.createdAt, model: modelId, effort,
+    boardId, boardName: fileInfo.name || "", messages: messages.slice(),
+  };
+  saveChain = saveChain.then(() => store.save(record)).catch((error) => console.warn("chat save failed", error));
+}
+
+// Title typed in the header before the chat exists; the first send uses it.
+let pendingTitle = "";
+
+function setChatTitle() {
+  els.chatTitle.textContent = chat ? chat.title : (pendingTitle || "New chat");
+  els.chatTitle.title = "Rename chat";
+}
+
+function editChatTitle() {
+  if (els.chatTitle.hidden) return;
+  const input = document.createElement("input");
+  input.id = "titleInput";
+  input.value = chat ? chat.title : pendingTitle;
+  input.placeholder = "New chat";
+  input.spellcheck = false;
+  input.setAttribute("aria-label", "Chat title");
+  els.chatTitle.hidden = true;
+  els.chatTitle.after(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (commit, refocus) => {
+    if (done) return;
+    done = true;
+    const title = input.value.trim();
+    input.remove();
+    els.chatTitle.hidden = false;
+    if (commit && title) {
+      if (!chat) pendingTitle = title;
+      else if (title !== chat.title) {
+        chat.title = title;
+        const c = chats.find((x) => x.id === chat.id);
+        if (c) {
+          c.title = title;
+          renderChats();
+          store.rename(chat.id, title).catch((e) => add("error", `Rename failed: ${e.message}`));
+        } else saveChat();
+      }
+    }
+    setChatTitle();
+    if (refocus) els.chatTitle.focus();
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true, true); }
+    else if (e.key === "Escape") { e.stopPropagation(); finish(false, true); }
+  };
+  input.onblur = () => finish(true, false);
+}
+
+function startNewChat() {
+  if (running) return;
+  messages = [];
+  chat = null;
+  pendingTitle = "";
+  setChatTitle();
+  agentPage = "";
+  showContext();
+  chipSetIdle(false);
+  els.log.replaceChildren();
+  welcome();
+  renderChats();
+  closeChats();
+  els.prompt.focus();
+}
+
+async function openChat(id) {
+  if (running) return;
+  closeChats();
+  try {
+    const record = await store.load(id);
+    chat = { id: record.id, title: record.title || "Untitled", createdAt: record.createdAt };
+    messages = Array.isArray(record.messages) ? record.messages : [];
+    if (record.model && models.some((m) => m.id === record.model)) modelId = record.model;
+    if (record.effort) effort = record.effort;
+    showModel();
+    chipSetIdle(messages.length > 0);
+    setChatTitle();
+    renderTranscript();
+    renderChats();
+  } catch (error) {
+    add("error", `Couldn't open that chat: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------- nav
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Only <mark> survives from the bridge's FTS snippet.
+function snippetHtml(s) {
+  return escapeHtml(s).replace(/&lt;(\/?)mark&gt;/g, "<$1mark>");
+}
+
+function toMs(t) {
+  return typeof t === "number" ? t : Date.parse(t || "") || 0;
+}
+
+const RTF = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+function ago(t) {
+  const ms = toMs(t);
+  if (!ms) return "";
+  const s = (ms - Date.now()) / 1000;
+  const a = Math.abs(s);
+  if (a < 45) return "just now";
+  const [v, unit] = a < 3600 ? [s / 60, "minute"] : a < 86400 ? [s / 3600, "hour"]
+    : a < 86400 * 30 ? [s / 86400, "day"] : a < 86400 * 365 ? [s / (86400 * 30), "month"] : [s / (86400 * 365), "year"];
+  return RTF.format(Math.round(v) || -1, unit);
+}
+
+let renamingId = null;
+
+function renderChats() {
+  const list = searchResults || chats;
+  els.navLabel.textContent = searchResults ? `${list.length} result${list.length === 1 ? "" : "s"}` : "";
+  els.navLabel.hidden = !searchResults;
+  els.chatList.replaceChildren();
+  if (list.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "nav-empty";
+    empty.textContent = searchResults ? "No matching chats." : "No chats yet.";
+    els.chatList.append(empty);
+    return;
+  }
+  for (const c of list) {
+    const row = document.createElement("div");
+    row.className = `chat-row${chat && chat.id === c.id ? " active" : ""}`;
+    if (renamingId === c.id) {
+      const input = document.createElement("input");
+      input.value = c.title || "";
+      input.setAttribute("aria-label", "Chat title");
+      let done = false;
+      const finish = (commit) => {
+        if (done) return;
+        done = true;
+        renamingId = null;
+        const title = input.value.trim();
+        if (commit && title && title !== c.title) {
+          c.title = title;
+          if (chat && chat.id === c.id) { chat.title = title; setChatTitle(); }
+          store.rename(c.id, title).catch((e) => add("error", `Rename failed: ${e.message}`));
+        }
+        renderChats();
+      };
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") finish(true);
+        else if (e.key === "Escape") finish(false);
+      };
+      input.onblur = () => finish(true);
+      row.append(input);
+      els.chatList.append(row);
+      setTimeout(() => { input.focus(); input.select(); });
+      continue;
+    }
+    const open = document.createElement("button");
+    open.className = "open";
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = c.title || "Untitled";
+    const s = document.createElement("span");
+    s.className = "s";
+    if (c.snippet) s.innerHTML = snippetHtml(c.snippet);
+    else s.textContent = ago(c.updatedAt);
+    open.append(t, s);
+    open.title = c.title || "";
+    open.onclick = () => openChat(c.id);
+    const more = document.createElement("button");
+    more.className = "icon more";
+    more.setAttribute("aria-label", "Chat actions");
+    more.setAttribute("aria-haspopup", "menu");
+    more.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="12" cy="8" r="1"/></svg>';
+    more.onclick = (e) => { e.stopPropagation(); openRowMenu(c, more); };
+    row.append(open, more);
+    els.chatList.append(row);
+  }
+}
+
+let rowMenuChat = null;
+let rowMenuAnchor = null;
+let deleteArmed = false;
+
+function openRowMenu(c, anchor) {
+  closePops();
+  rowMenuChat = c;
+  rowMenuAnchor = anchor;
+  deleteArmed = false;
+  $("rowDelete").textContent = "Delete";
+  anchor.setAttribute("aria-expanded", "true");
+  popOpener = anchor;
+  placePop(els.rowMenu, anchor, "below");
+  focusFirst(els.rowMenu);
+}
+
+$("rowRename").onclick = () => {
+  const c = rowMenuChat;
+  closePops();
+  if (!c) return;
+  renamingId = c.id;
+  renderChats();
+};
+// Figma blocks confirm(), so delete asks for a second click.
+$("rowDelete").onclick = (e) => {
+  e.stopPropagation();
+  const c = rowMenuChat;
+  if (!c) return;
+  if (!deleteArmed) {
+    deleteArmed = true;
+    $("rowDelete").textContent = "Click again to delete";
+    $("rowDelete").focus();
+    return;
+  }
+  closePops();
+  if (running && chat && chat.id === c.id) return;
+  store.remove(c.id).then(() => {
+    if (searchResults) searchResults = searchResults.filter((r) => r.id !== c.id);
+    if (chat && chat.id === c.id) startNewChat();
+    else renderChats();
+  }).catch((err) => add("error", `Delete failed: ${err.message}`));
+};
+
+let searchTimer = null;
+let searchSeq = 0;
+els.search.oninput = () => {
+  clearTimeout(searchTimer);
+  const q = els.search.value.trim();
+  if (!q) { searchResults = null; renderChats(); return; }
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq;
+    try {
+      const results = await store.search(q);
+      if (seq === searchSeq && els.search.value.trim()) { searchResults = results; renderChats(); }
+    } catch (error) {
+      if (seq === searchSeq) { searchResults = []; renderChats(); }
+    }
+  }, 250);
+};
+
+// ---------------------------------------------------------------- chats reveal
+//
+// Default: header / conversation / selection hint + input; the chats list
+// waits below the bottom edge. Scrolling down past the end of the
+// conversation (with a little resistance) slides the stack up until the
+// input sits under the header and the chats list fills the rest.
+
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const reveal = { open: false, off: 0, pull: 0, idle: null };
+const PULL_DEAD = 48; // px of wheel delta ignored before anything moves
+const PULL_DAMP = 0.55;
+const PULL_SNAP = 72; // visual px past which a release opens (or closes)
+
+function revealMax() {
+  return els.log.offsetHeight;
+}
+
+// Wheel delta → visual offset: dead zone, then damped, then 1:1.
+function damped(pull, dead) {
+  const r = pull - dead;
+  if (r <= 0) return 0;
+  if (r * PULL_DAMP <= PULL_SNAP) return r * PULL_DAMP;
+  return PULL_SNAP + (r - PULL_SNAP / PULL_DAMP);
+}
+
+function setOff(px, animate) {
+  reveal.off = Math.max(0, Math.min(revealMax(), px));
+  els.stack.style.transition = animate && !reduceMotion.matches ? "transform 280ms var(--ease-out)" : "none";
+  els.stack.style.transform = reveal.off ? `translateY(${-reveal.off}px)` : "";
+}
+
+function openChats(animate = true) {
+  clearTimeout(reveal.idle);
+  reveal.open = true;
+  reveal.pull = 0;
+  els.chats.inert = false;
+  els.chatsHandle.setAttribute("aria-expanded", "true");
+  els.chatsHandle.setAttribute("aria-label", "Hide chats");
+  setOff(revealMax(), animate);
+}
+
+function closeChats(animate = true) {
+  clearTimeout(reveal.idle);
+  const was = reveal.open || reveal.off > 0;
+  reveal.open = false;
+  reveal.pull = 0;
+  // Focus inside the list would be lost when it goes inert: hand it to the handle.
+  if (els.chats.contains(document.activeElement)) els.chatsHandle.focus({ preventScroll: true });
+  els.chats.inert = true;
+  els.chatsHandle.setAttribute("aria-expanded", "false");
+  els.chatsHandle.setAttribute("aria-label", "Show chats");
+  if (was) setOff(0, animate);
+}
+
+function settleSoon(fn) {
+  clearTimeout(reveal.idle);
+  reveal.idle = setTimeout(fn, 160);
+}
+
+// Friction: only a scroll gesture that STARTS with the conversation already
+// at its end (or with nothing to scroll) may pull the chats up. A gesture that
+// scrolls the conversation down to its end stops there; the user lets it come
+// to rest and scrolls again. A gesture is a run of wheel events (trackpad
+// momentum included) without a pause longer than GESTURE_GAP.
+const GESTURE_GAP = 250;
+const gesture = { last: 0, mayPull: false };
+
+function noteGesture() {
+  const now = performance.now();
+  if (now - gesture.last > GESTURE_GAP) {
+    const log = els.log;
+    const scrollable = log.scrollHeight > log.clientHeight + 2;
+    const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 2;
+    gesture.mayPull = !scrollable || atEnd;
+  }
+  gesture.last = now;
+}
+
+els.stage.addEventListener("wheel", (e) => {
+  if (document.body.classList.contains("compact") || e.ctrlKey) return;
+  noteGesture();
+  const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+  const max = revealMax();
+  if (!reveal.open) {
+    const log = els.log;
+    const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 2;
+    if (reveal.pull === 0 && (dy <= 0 || !atBottom || !gesture.mayPull)) return;
+    e.preventDefault();
+    reveal.pull = Math.max(0, reveal.pull + dy);
+    setOff(damped(reveal.pull, PULL_DEAD), false);
+    if (reveal.off >= max) return openChats(false);
+    settleSoon(() => (reveal.off > PULL_SNAP ? openChats() : closeChats()));
+    return;
+  }
+  // Open: the list scrolls normally; scrolling up past its top heads back.
+  const inList = e.target.closest && e.target.closest("#chatList");
+  const listAtTop = !inList || els.chatList.scrollTop <= 0;
+  if (reveal.pull === 0 && (dy >= 0 || !listAtTop)) return;
+  e.preventDefault();
+  reveal.pull = Math.max(0, reveal.pull - dy);
+  setOff(max - damped(reveal.pull, PULL_DEAD / 2), false);
+  if (reveal.off <= 0) return closeChats(false);
+  settleSoon(() => (max - reveal.off > PULL_SNAP ? closeChats() : openChats()));
+}, { passive: false });
+
+els.chatsHandle.onclick = () => (reveal.open ? closeChats() : openChats());
+
+// Keep the input pinned under the header when it grows or the window resizes.
+new ResizeObserver(() => {
+  els.stage.style.setProperty("--composer-h", `${els.composer.offsetHeight}px`);
+  if (reveal.open) setOff(revealMax(), false);
+}).observe(els.composer);
+new ResizeObserver(() => { if (reveal.open) setOff(revealMax(), false); }).observe(els.stage);
+
+// Scrollbar thumbs show while scrolling (and on hover, in CSS).
+for (const el of [els.log, els.chatList]) {
+  let t = null;
+  el.addEventListener("scroll", () => {
+    el.classList.add("scrolling");
+    clearTimeout(t);
+    t = setTimeout(() => el.classList.remove("scrolling"), 900);
+  }, { passive: true });
+}
+
+// ---------------------------------------------------------------- popovers
+
+function placePop(pop, anchor, where) {
+  pop.hidden = false;
+  const app = $("app").getBoundingClientRect();
+  const a = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth;
+  const h = pop.offsetHeight;
+  let left = Math.min(Math.max(8, a.right - w), app.width - w - 8);
+  let top = where === "above" ? a.top - h - 4 : a.bottom + 4;
+  if (top + h > app.height - 8) top = Math.max(8, a.top - h - 4);
+  if (top < 8) top = 8;
+  pop.style.left = `${Math.max(8, left)}px`;
+  pop.style.top = `${top}px`;
+}
+
+// The control that opened the current popover; focus goes back to it on close.
+let popOpener = null;
+const POPS = () => [els.modelMenu, els.rowMenu, els.settingsPop, els.mainMenu];
+const popOpen = () => POPS().some((p) => !p.hidden);
+
+function focusFirst(menu) {
+  const item = menu.querySelector("[aria-checked=\"true\"]:not(:disabled)") || menu.querySelector("[role^=\"menuitem\"]:not(:disabled)");
+  if (item) item.focus();
+}
+
+// restore: put focus back on the opener (keyboard close, item chosen); a
+// click elsewhere passes false so focus lands where the user clicked.
+function closePops(restore = true) {
+  const wasOpen = popOpen();
+  const focusInside = POPS().some((p) => p.contains(document.activeElement));
+  const modelWasOpen = !els.modelMenu.hidden;
+  for (const p of POPS()) p.hidden = true;
+  if (modelWasOpen) chipRelease();
+  els.menuBtn.setAttribute("aria-expanded", "false");
+  els.modelBtn.setAttribute("aria-expanded", "false");
+  if (rowMenuAnchor) rowMenuAnchor.setAttribute("aria-expanded", "false");
+  rowMenuAnchor = null;
+  const opener = popOpener;
+  popOpener = null;
+  if (wasOpen && restore && (focusInside || document.activeElement === document.body) && opener) {
+    if (opener.isConnected && opener.offsetParent) opener.focus();
+    else els.prompt.focus();
+  }
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (e.target.closest(".pop, #menuBtn, #modelBtn, .more")) return;
+  closePops(false);
+});
+document.addEventListener("keydown", (e) => {
+  const menu = e.target.closest && e.target.closest(".pop[role=\"menu\"]");
+  if (menu && ["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+    const items = [...menu.querySelectorAll("[role^=\"menuitem\"]:not(:disabled)")];
+    if (!items.length) return;
+    e.preventDefault();
+    const i = items.indexOf(document.activeElement);
+    const n = items.length;
+    const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : e.key === "ArrowDown" ? (i + 1) % n : (i - 1 + n) % n;
+    items[next].focus();
+    return;
+  }
+  // Tab leaves a menu: close it and continue from the opener.
+  if (menu && e.key === "Tab") { closePops(true); return; }
+  if (e.key === "Escape") {
+    if (popOpen()) { e.preventDefault(); closePops(true); return; }
+    if (reveal.open && !e.target.closest("input, textarea")) closeChats();
+  }
+});
+
+els.chatTitle.onclick = editChatTitle;
+
+els.menuBtn.onclick = () => {
+  const open = els.mainMenu.hidden;
+  closePops();
+  if (!open) return;
+  els.newChat.disabled = running;
+  placePop(els.mainMenu, els.menuBtn, "below");
+  els.menuBtn.setAttribute("aria-expanded", "true");
+  popOpener = els.menuBtn;
+  focusFirst(els.mainMenu);
+};
+els.menuChats.onclick = () => { closePops(); openChats(); els.search.focus({ preventScroll: true }); };
+// Settings is a non-modal dialog: focus moves in; Escape, Save or a click
+// outside closes it and focus returns to whatever opened it.
+function openSettings(field, opener) {
+  closePops(false);
+  els.settingsPop.hidden = false;
+  popOpener = opener || els.menuBtn;
+  (field || els.baseUrl).focus();
+}
+els.menuSettings.onclick = () => openSettings();
+
+// ---------------------------------------------------------------- connection
+// One model for both links (Maximal and the bridge). Every transition goes
+// through setNet -> renderNet, which paints the state into the input itself
+// (placeholder, enabled, send/Reconnect button), Settings' bridge line, and
+// announces state changes (not countdowns) in the #netLive status region.
+//   maximal: checking | ok | down {hint, attempt, nextAt}
+//   bridge:  off | connecting {attempt} | pending {name, expiresAt} | connected
+//            | retrying {attempt, nextAt, why} | denied | expired | unpaired
+//            | replaced | blocked {error}
+const BACKOFF = [1000, 2000, 4000, 8000, 15000];
+const backoff = (attempt) => BACKOFF[Math.min(Math.max(attempt, 1), BACKOFF.length) - 1];
+const NET_DEBOUNCE = 1500; // bridge blips shorter than this never reach the input
+const net = { maximal: { s: "checking" }, bridge: { s: "off" } };
+let netSince = 0; // when the current bridge trouble started; 0 = healthy
+let netTimer = null;
+let netShown = null; // the bridge issue the input is showing, if any
+let netSaid = ""; // key of the last state announced
+const BRIDGE_IDLE = "Connects to the bridge on localhost:4150";
+
+function setNet(part, s, extra) {
+  net[part] = Object.assign({}, extra, { s });
+  renderNet();
+}
+
+const secsTo = (at) => Math.max(0, Math.ceil((at - Date.now()) / 1000));
+const countdown = (p) => (p.nextAt && secsTo(p.nextAt) > 0 ? `retrying in ${secsTo(p.nextAt)}s` : "retrying…");
+const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+const mmss = (at) => { const s = secsTo(at); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+
+// Maximal down or still connecting: the input can't be used and says why.
+function maximalIssue() {
+  const m = net.maximal;
+  if (m.s === "down") return { text: `${clip(m.hint, 24)} · ${countdown(m)}`, say: `${m.hint}. Retrying automatically.`, key: `m:${m.hint}` };
+  if (m.s === "checking") return { text: "Connecting to Maximal…", say: "", key: "m:checking" };
+  return null;
+}
+
+// Bridge trouble while Maximal works: the agent still runs, only the
+// placeholder changes (short, no countdown; Settings has the detail).
+function bridgeIssue() {
+  if (!settings.remote) return null;
+  const b = net.bridge;
+  const offline = { text: "Bridge offline · chats saved locally", say: "Bridge offline. Chats are saved locally.", key: "b:offline" };
+  switch (b.s) {
+    case "connecting":
+      return b.attempt ? offline : { text: "Connecting to the bridge…", say: "", key: "b:connecting" };
+    case "pending":
+      return { text: clip(`Waiting for approval · ${b.name || SESSION}`, 40), say: `Claude Code control is waiting for approval of ${b.name || SESSION}.`, key: "b:pending" };
+    case "denied":
+      return { text: "Bridge denied this panel", say: "The bridge denied this panel. Chats are saved locally.", key: "b:denied" };
+    case "expired":
+      return { text: "Approval timed out · see Settings", say: "Bridge approval timed out. Ask again in Settings.", key: "b:expired" };
+    case "unpaired":
+      return { text: "Panel unpaired · see Settings", say: "This panel was unpaired from the bridge.", key: "b:unpaired" };
+    case "retrying":
+      if (b.why === "pair-name-in-use") return { text: "Bridge: name in use · retrying", say: "Another panel is using this name. Retrying.", key: "b:name" };
+      if (b.why === "pair-busy") return { text: "Bridge busy · retrying", say: "The bridge has too many requests. Retrying.", key: "b:busy" };
+      return offline;
+    case "blocked":
+      return offline;
+    default:
+      return null;
+  }
+}
+
+const APPROVE_HINT = (name) => `Approve in Maximal or run: bun figjam.ts approve ${name}`;
+
+// Settings' bridge line + its one action button.
+function bridgeStatus() {
+  const b = net.bridge;
+  const paired = { text: "Paired with this computer ✓", act: "forget" };
+  if (!settings.remote) return settings.bridgeToken ? paired : { text: BRIDGE_IDLE, act: "" };
+  switch (b.s) {
+    case "connected": return { text: `Paired with this computer ✓ · ${SESSION}`, act: "forget" };
+    case "connecting": return { text: `${b.attempt ? "Reconnecting" : "Connecting"} to the bridge on localhost:4150…`, act: "" };
+    case "pending": return { text: `Waiting for approval${b.expiresAt ? ` (${mmss(b.expiresAt)})` : ""}. ${APPROVE_HINT(b.name || SESSION)}`, act: "ask" };
+    case "denied": return { text: "Pairing was denied.", act: "ask" };
+    case "expired": return { text: "The approval request timed out.", act: "ask" };
+    case "unpaired": return { text: "This panel was unpaired.", act: "ask" };
+    case "replaced": return { text: "Another panel for this board took over the bridge connection.", act: "ask" };
+    case "retrying": {
+      const why = b.why === "pair-name-in-use" ? `Another request already uses the name ${SESSION}`
+        : b.why === "pair-busy" ? "The bridge has too many pending requests"
+        : "Bridge isn't running on localhost:4150";
+      return { text: `${why} · ${countdown(b)} (attempt ${b.attempt})`, act: "retry" };
+    }
+    case "blocked": return { text: `Bridge blocked: ${b.error}`, act: "retry" };
+    default: return { text: BRIDGE_IDLE, act: "" };
+  }
+}
+
+const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+
+function renderNet() {
+  clearTimeout(netTimer);
+  netTimer = null;
+  const issue = bridgeIssue();
+  const now = Date.now();
+  if (!issue) netSince = 0;
+  else if (!netSince) netSince = now;
+  const waiting = Boolean(issue) && now - netSince < NET_DEBOUNCE;
+  netShown = issue && !waiting ? issue : null;
+
+  const st = bridgeStatus();
+  setText(els.bridgeStatus, st.text);
+  els.bridgeAct.hidden = !st.act;
+  els.bridgeAct.dataset.act = st.act;
+  setText(els.bridgeAct, st.act === "forget" ? "Forget" : st.act === "retry" ? "Retry now" : "Ask again");
+  paintInput();
+  announceNet();
+
+  const b = net.bridge;
+  if (waiting) netTimer = setTimeout(renderNet, NET_DEBOUNCE - (now - netSince));
+  else if (net.maximal.s === "down" || b.s === "retrying" || (b.s === "pending" && b.expiresAt)) netTimer = setTimeout(renderNet, 500);
+}
+
+// Placeholders aren't announced reliably: say each state change once.
+function announceNet() {
+  const m = maximalIssue();
+  const cur = m && m.key !== "m:checking" ? m : netShown;
+  const key = cur ? cur.key : "ok";
+  if (key === netSaid) return;
+  const was = netSaid;
+  netSaid = key;
+  const say = cur ? cur.say : was && was !== "b:connecting" ? "Connected." : "";
+  if (say) setText(els.netLive, say);
+}
+
+// Skip the wait: retry whatever is down right now.
+function retryNow() {
+  if (net.maximal.s === "down" && net.maximal.nextAt) connect();
+  if (settings.remote && !bridge && (net.bridge.s === "retrying" || net.bridge.s === "blocked")) { clearTimeout(bridgeRetry); openBridge(); }
+}
+
+els.bridgeAct.onclick = () => {
+  const act = els.bridgeAct.dataset.act;
+  if (act === "forget") forgetBridge();
+  else if (act === "retry") retryNow();
+  else askAgain();
+};
+window.addEventListener("focus", retryNow);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) retryNow(); });
+
+// ---------------------------------------------------------------- Maximal
+
+function headers() {
+  const h = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
+  if (settings.apiKey) h["x-api-key"] = settings.apiKey;
+  return h;
+}
+
+function setStatus(text, state, short) {
+  connState = { text, state: state || "", short: short || text };
+  paintInput();
+}
+
+// State lives in the input: placeholder + enabled, and the send/stop or
+// Reconnect button. Maximal trouble disables the input; bridge trouble only
+// changes the placeholder (the agent still works).
+function placeholderFor(compact) {
+  if (running) return compact ? "Working…" : "Working… add a message or press Stop";
+  if (connState.state !== "ok") { const m = maximalIssue(); return m ? m.text : connState.short; }
+  if (netShown) return netShown.text;
+  if (compact && compactNote) return compactNote;
+  return compact ? "Ask the agent…" : "Ask the agent to work on this board…";
+}
+
+function paintInput() {
+  const ok = connState.state === "ok";
+  els.prompt.disabled = !ok && !running;
+  const p = placeholderFor(false);
+  if (els.prompt.placeholder !== p) els.prompt.placeholder = p;
+  els.prompt.title = ok || running ? "" : connState.text;
+  els.cprompt.disabled = !ok && !running;
+  const cp = placeholderFor(true);
+  if (els.cprompt.placeholder !== cp) els.cprompt.placeholder = cp;
+  els.cprompt.title = ok ? "" : connState.text;
+  paintGo();
+}
+
+const ICON_RECONNECT = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.5 7a4.5 4.5 0 1 1-1.3-3.2"/><path d="M11.5 2v3h-3"/></svg>';
+const setIcon = (b, key, html) => { if (b.dataset.icon !== key) { b.dataset.icon = key; b.innerHTML = html; } };
+
+// Maximal is down and nothing runs: the round button reconnects instead.
+const reconnectMode = () => !running && connState.state !== "ok";
+
+function paintGo() {
+  if (reconnectMode()) {
+    const busy = net.maximal.s === "checking" || (net.maximal.s === "down" && !net.maximal.nextAt);
+    for (const b of [els.go, els.cgo]) {
+      b.classList.remove("stop");
+      b.classList.add("reconnect");
+      setIcon(b, busy ? "dots" : "reconnect", busy ? DOTS : ICON_RECONNECT);
+      // aria-disabled keeps focus on the button while it retries.
+      b.disabled = false;
+      b.setAttribute("aria-disabled", String(busy));
+      b.title = busy ? "Reconnecting…" : "Reconnect now";
+      b.setAttribute("aria-label", busy ? "Reconnecting" : "Reconnect now");
+    }
+    return;
+  }
+  for (const b of [els.go, els.cgo]) { b.classList.remove("reconnect"); b.removeAttribute("aria-disabled"); }
+  const stop = running && !els.prompt.value.trim();
+  const label = stop ? "Stop" : running ? "Queue message (↩)" : "Send (↩)";
+  setIcon(els.go, stop ? "stop" : "send", stop ? ICON_STOP : ICON_SEND);
+  els.go.classList.toggle("stop", stop);
+  els.go.title = label;
+  els.go.setAttribute("aria-label", stop ? "Stop" : running ? "Queue message" : "Send");
+  els.go.disabled = false;
+  setIcon(els.cgo, running ? "stop" : "send", running ? ICON_STOP : ICON_SEND);
+  els.cgo.classList.toggle("stop", running);
+  els.cgo.title = running ? "Stop" : "Send";
+  els.cgo.setAttribute("aria-label", running ? "Stop" : "Send");
+  els.cgo.disabled = false;
+}
+
+function onRound(source) {
+  const b = source === "compact" ? els.cgo : els.go;
+  if (b.classList.contains("reconnect")) {
+    if (b.getAttribute("aria-disabled") !== "true") retryNow();
+    return;
+  }
+  send(source);
+}
+
+function modelName(id) {
+  const m = models.find((x) => x.id === id);
+  return m ? m.name : id || "No model";
+}
+
+function effortName(e) {
+  const hit = EFFORTS.find((x) => x[0] === e);
+  return hit ? hit[1] : e;
+}
+
+// "Claude Sonnet 5.5" → "Sonnet 5.5"; other vendors keep their display name.
+function chipLabel() {
+  return modelId ? `${modelName(modelId).replace(/^Claude\s+/, "")} · ${effortName(effort)}` : "No model";
+}
+
+function showModel() {
+  const label = chipLabel();
+  els.modelLabel.textContent = label;
+  els.modelBtn.setAttribute("aria-label", modelId ? `Model: ${label}` : "Model: none");
+  els.modelBtn.title = modelId ? `Model: ${label}\n${modelId}` : connState.text;
+}
+
+// ---- chip ⇄ sparkles. Idle (first message sent in this chat, or 15 s since
+// the last model/effort interaction) shows the icon; hover (150 ms rest),
+// keyboard focus, a click or the open menu bring the label back until 1.5 s
+// after the pointer/focus leaves.
+const CHIP_IDLE_MS = 15000;
+const CHIP_REST_MS = 150;
+const CHIP_LINGER_MS = 1500;
+const chip = { idle: false, idleTimer: null, enterTimer: null, leaveTimer: null };
+
+function paintChip(icon, animate = true) {
+  const b = els.modelBtn;
+  if (b.classList.contains("iconic") === icon) return;
+  const from = b.getBoundingClientRect().width;
+  const text = b.querySelector(".chip-text");
+  const glyph = b.querySelector(".chip-icon");
+  for (const el of [b, text, glyph]) for (const a of el.getAnimations()) a.cancel();
+  b.classList.toggle("iconic", icon);
+  if (!animate || reduceMotion.matches || !b.offsetParent) return;
+  const to = b.getBoundingClientRect().width;
+  const opts = { duration: 220, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)" };
+  b.animate([{ width: `${from}px` }, { width: `${to}px` }], opts);
+  // Cross-fade over the same span: never both solid, never both gone.
+  text.animate([{ opacity: icon ? 1 : 0 }, { opacity: icon ? 0 : 1 }], opts);
+  glyph.animate([{ opacity: icon ? 0 : 1 }, { opacity: icon ? 1 : 0 }], opts);
+}
+
+function chipEngaged() {
+  return !els.modelMenu.hidden || els.modelBtn.matches(":hover") || els.modelMenu.matches(":hover")
+    || els.modelBtn.matches(":focus-visible") || els.modelMenu.contains(document.activeElement);
+}
+
+function chipPeek() {
+  clearTimeout(chip.leaveTimer);
+  clearTimeout(chip.enterTimer);
+  paintChip(false);
+}
+
+// Collapse back to the icon (if idle) once nothing holds the chip open.
+function chipRelease(delay = CHIP_LINGER_MS) {
+  clearTimeout(chip.enterTimer);
+  clearTimeout(chip.leaveTimer);
+  chip.leaveTimer = setTimeout(() => { if (chip.idle && !chipEngaged()) paintChip(true); }, delay);
+}
+
+function chipSetIdle(idle) {
+  clearTimeout(chip.idleTimer);
+  chip.idle = idle;
+  if (!idle) { clearTimeout(chip.leaveTimer); paintChip(false); }
+  else if (!chipEngaged()) paintChip(true);
+}
+
+// Any model/effort interaction restarts the 15 s idle clock.
+function chipTouch() {
+  clearTimeout(chip.idleTimer);
+  chip.idleTimer = setTimeout(() => { chip.idle = true; chipRelease(0); }, CHIP_IDLE_MS);
+}
+
+els.modelBtn.addEventListener("pointerenter", () => {
+  clearTimeout(chip.leaveTimer);
+  if (!els.modelBtn.classList.contains("iconic")) return;
+  clearTimeout(chip.enterTimer);
+  chip.enterTimer = setTimeout(chipPeek, CHIP_REST_MS);
+});
+els.modelBtn.addEventListener("pointerleave", () => chipRelease());
+els.modelMenu.addEventListener("pointerenter", () => clearTimeout(chip.leaveTimer));
+els.modelMenu.addEventListener("pointerleave", () => chipRelease());
+els.modelMenu.addEventListener("pointerdown", chipTouch);
+els.modelMenu.addEventListener("keydown", chipTouch);
+els.modelBtn.addEventListener("focus", () => { if (els.modelBtn.matches(":focus-visible")) chipPeek(); });
+els.modelBtn.addEventListener("blur", () => chipRelease());
+// Escape with the menu closed: collapse after the same delay even though focus stays.
+els.modelBtn.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !els.modelMenu.hidden || !chip.idle) return;
+  clearTimeout(chip.leaveTimer);
+  chip.leaveTimer = setTimeout(() => { if (chip.idle && els.modelMenu.hidden) paintChip(true); }, CHIP_LINGER_MS);
+});
+
+let connectRetry = null;
+let connectFails = 0;
+let connectGen = 0;
+
+// Maximal's origin rebuilt from checked parts: http(s), a loopback host and a
+// numeric port, with no path, query or credentials. "" for anything else.
+function maximalOrigin(value) {
+  let url;
+  try { url = new URL(String(value)); } catch { return ""; }
+  const scheme = ["http:", "https:"].find((s) => s === url.protocol);
+  const host = LOOPBACK_HOSTS.find((h) => h === url.hostname);
+  const port = url.port ? Number(url.port) : scheme === "https:" ? 443 : 80;
+  if (!scheme || !host || !Number.isInteger(port) || port < 1 || port > 65535) return "";
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) return "";
+  return `${scheme}//${host}:${port}`;
+}
+
+function maximalUrl(path) {
+  const origin = maximalOrigin(settings.baseUrl);
+  if (origin) return origin + path;
+  const error = new Error(`Maximal's address has to be on this computer, like ${DEFAULT_BASE}. Check it in Settings.`);
+  error.name = "AddressError";
+  throw error;
+}
+
+async function connect() {
+  clearTimeout(connectRetry);
+  const gen = ++connectGen;
+  // Retries keep the last error showing instead of flickering to "Connecting…".
+  if (net.maximal.s === "down") setNet("maximal", "down", Object.assign({}, net.maximal, { nextAt: 0 }));
+  else {
+    setNet("maximal", "checking");
+    setStatus("Connecting to Maximal…");
+  }
+  try {
+    const res = await fetch(maximalUrl("/v1/models"), { headers: headers(), signal: AbortSignal.timeout(8000) });
+    if (gen !== connectGen) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json();
+    if (gen !== connectGen) return;
+    const list = (body.data || []).filter((m) => m && m.id && !/embedding/i.test(m.id));
+    if (list.length === 0) throw new Error("no models");
+    const rank = (id) => {
+      const i = PREFERRED_MODELS.findIndex((p) => id.startsWith(p));
+      return i < 0 ? PREFERRED_MODELS.length : i;
+    };
+    list.sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
+    models = list.map((m) => ({ id: m.id, name: m.display_name || m.id }));
+    if (!models.some((m) => m.id === modelId)) modelId = models.some((m) => m.id === settings.model) ? settings.model : models[0].id;
+    showModel();
+    connectFails = 0;
+    setStatus(`Maximal · ${fileInfo.name || "this board"}`, "ok");
+    setNet("maximal", "ok");
+  } catch (error) {
+    if (gen !== connectGen) return;
+    models = [];
+    modelId = "";
+    showModel();
+    const host = settings.baseUrl.replace(/^https?:\/\//, "");
+    const why = error.name === "TimeoutError" ? "no answer in 8s" : error.message;
+    const unreachable = error.name === "TimeoutError" || error instanceof TypeError;
+    const badAddress = error.name === "AddressError";
+    let short;
+    if (badAddress) short = "Maximal's address isn't on this computer — check Settings";
+    else if (unreachable) short = `Maximal isn't running on ${host} · retrying…`;
+    else if (/^HTTP 40[13]/.test(error.message)) short = `Maximal refused the API key (${error.message}) — check Settings`;
+    else if (error.message === "no models") short = `Maximal on ${host} has no models`;
+    else short = `Maximal on ${host} answered ${error.message}`;
+    // The hint line above the input says this (and counts down), so no log note.
+    connectFails++;
+    const delay = backoff(connectFails);
+    setStatus(badAddress ? error.message : `Can't reach Maximal at ${settings.baseUrl} (${why}). Is it running?`, "bad", short);
+    setNet("maximal", "down", { hint: badAddress ? "Maximal's address isn't local" : unreachable ? "Can't reach Maximal" : /^HTTP 40[13]/.test(error.message) ? "Maximal refused the API key" : error.message === "no models" ? "Maximal has no models" : `Maximal answered ${error.message}`, attempt: connectFails, nextAt: Date.now() + delay });
+    connectRetry = setTimeout(connect, delay);
+  }
+}
+
+function renderModelMenu(showEffort) {
+  const menu = els.modelMenu;
+  menu.replaceChildren();
+  // radio: true for model / effort choices; Back and Effort are plain items.
+  const item = (label, checked, onclick, sub, radio = true) => {
+    const b = document.createElement("button");
+    b.className = "item";
+    b.setAttribute("role", radio ? "menuitemradio" : "menuitem");
+    if (radio) b.setAttribute("aria-checked", String(Boolean(checked)));
+    b.innerHTML = `<span class="check" aria-hidden="true">${checked ? "✓" : ""}</span>`;
+    const l = document.createElement("span");
+    l.textContent = label;
+    b.append(l);
+    if (sub) {
+      const s = document.createElement("span");
+      s.className = "sub";
+      s.textContent = sub;
+      b.append(s);
+    }
+    b.onclick = onclick;
+    menu.append(b);
+    return b;
+  };
+  const sep = () => { const d = document.createElement("div"); d.className = "sep"; d.setAttribute("role", "separator"); menu.append(d); };
+  if (showEffort) {
+    item("Back", false, (e) => { e.stopPropagation(); renderModelMenu(false); placePop(menu, els.modelBtn, "above"); focusFirst(menu); }, "", false).querySelector(".check").textContent = "‹";
+    sep();
+    for (const [value, label] of EFFORTS) {
+      item(label, value === effort, () => { effort = value; settings.effort = value; saveSettings(); showModel(); closePops(); });
+    }
+    return;
+  }
+  if (models.length === 0) {
+    const l = document.createElement("div");
+    l.className = "label";
+    l.setAttribute("role", "none");
+    l.textContent = "No models — is Maximal running?";
+    menu.append(l);
+  }
+  for (const m of models) {
+    item(m.name, m.id === modelId, () => { modelId = m.id; settings.model = m.id; saveSettings(); showModel(); closePops(); });
+  }
+  sep();
+  item("Effort", false, (e) => { e.stopPropagation(); renderModelMenu(true); placePop(menu, els.modelBtn, "above"); focusFirst(menu); }, `${effortName(effort)} ›`, false);
+}
+
+els.modelBtn.onclick = () => {
+  // The icon only eases the chip back in; the full chip opens the menu.
+  if (els.modelBtn.classList.contains("iconic")) { chipPeek(); chipRelease(); return; }
+  chipTouch();
+  const open = els.modelMenu.hidden;
+  closePops();
+  if (!open) return;
+  renderModelMenu(false);
+  els.modelMenu.style.maxHeight = "";
+  placePop(els.modelMenu, els.modelBtn, "above");
+  els.modelBtn.setAttribute("aria-expanded", "true");
+  popOpener = els.modelBtn;
+  focusFirst(els.modelMenu);
+};
+
+async function callModel(signal) {
+  const body = { model: modelId, max_tokens: 4096, system: SYSTEM, tools: TOOLS, messages };
+  if (effort) body.output_config = { effort };
+  const res = await fetch(maximalUrl("/v1/messages"), {
+    method: "POST",
+    headers: headers(),
+    signal,
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { parsed = undefined; }
+  if (!res.ok) {
+    const message = parsed && parsed.error && parsed.error.message ? parsed.error.message : text.slice(0, 400);
+    throw new Error(`Maximal answered ${res.status}: ${message}`);
+  }
+  return parsed;
+}
+
+// ---------------------------------------------------------------- transcript UI
+
+function scrollDown() {
+  els.log.scrollTop = els.log.scrollHeight;
+}
+
+// Everything goes above the live status line, which stays last.
+function place(el) {
+  clearHint();
+  if (live.el && live.el.parentNode === els.log) els.log.insertBefore(el, live.el);
+  else els.log.append(el);
+  scrollDown();
+}
+
+function add(kind, text) {
+  const div = document.createElement("div");
+  div.className = `msg ${kind}`;
+  if (kind === "error") {
+    // Icon + spoken "Error:" so it never relies on color alone.
+    div.innerHTML = `${ICON_ALERT}<span><span class="sr">Error: </span></span>`;
+    div.lastChild.append(text);
+  } else div.textContent = text;
+  place(div);
+  return div;
+}
+
+// "create_stickies" → "Create stickies".
+function humanize(name) {
+  const s = String(name).replace(/_/g, " ").trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+const ICON_COPY = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><path d="M8.5 1.5h-5a2 2 0 0 0-2 2v5"/></svg>';
+const ICON_CHECK = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2.5 6.5l2.5 2.5 4.5-5.5"/></svg>';
+const ICON_ERR = '<svg class="dz-err" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" role="img" aria-label="Failed"><circle cx="6" cy="6" r="4.75"/><path d="M6 3.5v3M6 8.25v.25"/></svg>';
+const ICON_ALERT = '<svg class="dz-err" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><circle cx="6" cy="6" r="4.75"/><path d="M6 3.5v3M6 8.25v.25"/></svg>';
+const DOTS = '<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>';
+
+// One 1s clock for every ticking label (live line, running rows).
+const tickers = new Set();
+let tickTimer = null;
+function tick(fn, on) {
+  if (on) tickers.add(fn);
+  else tickers.delete(fn);
+  if (tickers.size && !tickTimer) tickTimer = setInterval(() => { for (const f of tickers) f(); }, 1000);
+  else if (!tickers.size && tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+}
+const secs = (t0) => `${Math.max(0, Math.floor((Date.now() - t0) / 1000))}s`;
+setInterval(() => {
+  for (const t of els.log.querySelectorAll("time[data-t] > [aria-hidden]")) t.textContent = ago(Number(t.parentNode.dataset.t));
+}, 30000);
+
+// ---- live status: dots + present-tense label + seconds since it changed.
+const live = { el: null, label: "", since: 0 };
+const STALL_MS = 20000;
+
+function liveTick() {
+  if (!live.el) return;
+  live.el.querySelector(".live-t").textContent = secs(live.since);
+  live.el.querySelector(".live-hint").textContent = Date.now() - live.since > STALL_MS ? "still working…" : "";
+}
+
+function liveSet(label) {
+  if (!label) return liveStop();
+  if (!live.el) {
+    live.el = document.createElement("div");
+    live.el.className = "live";
+    live.el.innerHTML = `${DOTS}<span class="live-label"></span><span class="live-t" aria-hidden="true"></span><span class="live-hint"></span>`;
+    tick(liveTick, true);
+  }
+  if (live.el.parentNode !== els.log) { clearHint(); els.log.append(live.el); }
+  if (label !== live.label) {
+    live.label = label;
+    live.since = Date.now();
+    live.el.querySelector(".live-label").textContent = label;
+  }
+  liveTick();
+  scrollDown();
+}
+
+function liveStop() {
+  tick(liveTick, false);
+  if (live.el) live.el.remove();
+  live.el = null;
+  live.label = "";
+}
+
+// ---- tool labels: present while running, past when done, "Couldn't …" on error.
+const VERB_FORMS = Object.fromEntries(("create Creating Created|update Updating Updated|delete Deleting Deleted|set Setting Set|get Getting Got|find Finding Found|search Searching Searched|list Listing Listed|switch Switching Switched|rename Renaming Renamed|edit Editing Edited|connect Connecting Connected|draw Drawing Drew|stamp Stamping Stamped|review Reviewing Reviewed|fit Fitting Fitted|style Styling Styled|duplicate Duplicating Duplicated|group Grouping Grouped|ungroup Ungrouping Ungrouped|move Moving Moved|unlock Unlocking Unlocked|calibrate Calibrating Calibrated|reorder Reordering Reordered|align Aligning Aligned|distribute Distributing Distributed|arrange Arranging Arranged|focus Focusing Focused|select Selecting Selected|export Exporting Exported|convert Converting Converted|copy Copying Copied|sort Sorting Sorted|run Running Ran|read Reading Read")
+  .split("|").map((s) => { const [v, ing, ed] = s.split(" "); return [v, [ing, ed]]; }));
+const TOOL_VERB = { get_board: "read", get_selection: "read", get_node: "read", find_nodes: "search", board_tree: "read", viewport: "set", batch: "run" };
+const TOOL_OBJECT = {
+  get_board: "the board", get_selection: "the selection", get_node: "a node", find_nodes: "the board", list_pages: "pages",
+  get_link: "a link", set_link: "a link", set_board_url: "the board link", export_png: "a PNG", review_layout: "the layout",
+  connect: "shapes", draw: "", stamp: "", batch: "a batch", run_code: "code", read_markup: "markup", board_tree: "the board tree",
+  viewport: "the viewport", focus: "the view", calibrate_fonts: "fonts", unlock_all: "everything", move_to: "nodes", fit_section: "a section",
+};
+
+function countOf(input) {
+  for (const v of Object.values(input || {})) if (Array.isArray(v)) return v.length;
+  return 0;
+}
+
+function toolLabel(name, input, phase) {
+  const parts = String(name).split("_");
+  const verb = TOOL_VERB[name] || parts[0];
+  const forms = VERB_FORMS[verb];
+  if (!forms) return phase === "fail" ? `${humanize(name)} failed` : humanize(name);
+  let obj = name in TOOL_OBJECT ? TOOL_OBJECT[name] : parts.slice(1).join(" ");
+  if (!(name in TOOL_OBJECT) && obj) {
+    const n = countOf(input);
+    if (n > 1) obj = `${n} ${obj}`;
+    else if (!/s$/.test(obj)) obj = `${/^[aeiou]/.test(obj) ? "an" : "a"} ${obj}`;
+  }
+  const head = phase === "fail" ? `Couldn't ${verb}` : forms[phase === "ing" ? 0 : 1];
+  return obj ? `${head} ${obj}` : head;
+}
+
+// ---- disclosure rows: a button head + a lazily built, height-animated body.
+// Open state is remembered per key while the panel is open.
+const openRows = new Set();
+let rowSeq = 0;
+
+function animateBody(body, open) {
+  for (const a of body.getAnimations()) a.cancel();
+  body.style.overflow = "";
+  if (reduceMotion.matches) { body.hidden = !open; return; }
+  body.hidden = false;
+  const h = `${body.scrollHeight}px`;
+  body.style.overflow = "hidden";
+  const frames = [{ height: "0px", opacity: 0 }, { height: h, opacity: 1 }];
+  const a = body.animate(open ? frames : frames.reverse(), { duration: 180, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)" });
+  a.onfinish = () => { body.style.overflow = ""; if (!open) body.hidden = true; };
+}
+
+function disclosure(cls, key, build) {
+  const wrap = document.createElement("div");
+  wrap.className = `dz ${cls}`;
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "dz-head";
+  head.setAttribute("aria-expanded", "false");
+  const body = document.createElement("div");
+  body.className = "dz-body";
+  body.id = `dz${++rowSeq}`;
+  body.hidden = true;
+  head.setAttribute("aria-controls", body.id);
+  wrap.append(head, body);
+  let built = false;
+  const d = {
+    wrap, head, body, open: false,
+    set(open, animate) {
+      d.open = open;
+      if (key) { if (open) openRows.add(key); else openRows.delete(key); }
+      head.setAttribute("aria-expanded", String(open));
+      wrap.classList.toggle("open", open);
+      if (open && !built) { body.replaceChildren(); build(body); built = true; }
+      if (animate) animateBody(body, open);
+      else body.hidden = !open;
+    },
+    // Content changed (e.g. a result arrived): rebuild now if open, else on next open.
+    rebuild() {
+      if (d.open) { body.replaceChildren(); build(body); } else built = false;
+    },
+    restore() { if (key && openRows.has(key)) d.set(true, false); },
+  };
+  head.onclick = () => d.set(!d.open, true);
+  return d;
+}
+
+// Pretty JSON with theme-colored keys/strings/numbers/literals.
+function highlightJson(text) {
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    out += escapeHtml(text.slice(last, m.index));
+    const cls = m[1] ? (m[2] ? "j-k" : "j-s") : m[3] ? "j-b" : "j-n";
+    out += `<span class="${cls}">${escapeHtml(m[1] || m[0])}</span>${m[2] ? escapeHtml(m[2]) : ""}`;
+    last = re.lastIndex;
+  }
+  return out + escapeHtml(text.slice(last));
+}
+
+const IO_LINES = 40;
+function ioBlock(title, value, images) {
+  const wrap = document.createElement("div");
+  wrap.className = "io";
+  const h = document.createElement("div");
+  h.className = "io-title";
+  h.textContent = title;
+  wrap.append(h);
+  const isJson = typeof value !== "string";
+  const text = isJson ? forDisplay(value === undefined ? null : value) : value;
+  const lines = text.split("\n");
+  const pre = document.createElement("pre");
+  const render = (all) => {
+    const shown = all ? text : lines.slice(0, IO_LINES).join("\n");
+    if (isJson) pre.innerHTML = highlightJson(shown);
+    else pre.textContent = shown;
+  };
+  render(false);
+  wrap.append(pre);
+  if (lines.length > IO_LINES) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "more";
+    more.textContent = `Show more (${lines.length - IO_LINES} lines)`;
+    pre.tabIndex = -1;
+    more.onclick = () => { render(true); more.remove(); pre.focus(); };
+    wrap.append(more);
+  }
+  for (const img of images || []) {
+    const el = document.createElement("img");
+    el.alt = `Export${img.id ? ` of ${img.id}` : ""}`;
+    el.src = `data:${img.format === "JPG" ? "image/jpeg" : "image/png"};base64,${img.base64}`;
+    wrap.append(el);
+  }
+  return wrap;
+}
+
+// One tool call: running → dots + elapsed; done → past-tense label.
+// opts (a step with only this call): prefix for the label, and the step's
+// pre-tool text shown first in the body.
+function callRow(call, onChange, opts = {}) {
+  const r = { status: "queued", started: 0, result: undefined, images: [] };
+  const d = disclosure("call", call.id ? `c:${call.id}` : "", (body) => {
+    if (opts.text) body.append(thoughtRow(opts.text, opts.textKey || ""));
+    body.append(ioBlock("Request", call.input || {}));
+    if (r.status === "ok" || r.status === "failed") body.append(ioBlock(r.status === "ok" ? "Response" : "Error", r.result, r.images));
+    else {
+      const w = document.createElement("div");
+      w.className = "io-title";
+      w.textContent = "Waiting for the response…";
+      body.append(w);
+    }
+  });
+  const ticker = () => { const t = d.head.querySelector(".dz-t"); if (t) t.textContent = secs(r.started); };
+  r.present = toolLabel(call.name, call.input, "ing");
+  r.paint = () => {
+    const label = r.status === "ok" ? toolLabel(call.name, call.input, "ed")
+      : r.status === "failed" ? toolLabel(call.name, call.input, "fail") : r.present;
+    d.wrap.classList.toggle("failed", r.status === "failed");
+    d.wrap.classList.toggle("pending", r.status === "queued");
+    d.head.innerHTML = `${r.status === "failed" ? ICON_ERR : ""}<span class="dz-label"></span>${r.status === "running" ? `${DOTS}<span class="dz-t" aria-hidden="true"></span>` : ICON_CARET}`;
+    d.head.querySelector(".dz-label").textContent = opts.prefix ? `${opts.prefix} · ${label}` : label;
+    d.head.title = call.name;
+    if (r.status === "running") ticker();
+  };
+  r.start = () => {
+    r.status = "running";
+    r.started = Date.now();
+    tick(ticker, true);
+    r.paint();
+    onChange();
+  };
+  r.done = (ok, result, images) => {
+    tick(ticker, false);
+    r.status = ok ? "ok" : "failed";
+    r.result = result;
+    r.images = images && images.length ? images : ok ? imagesOf(result) : [];
+    r.paint();
+    d.rebuild();
+    onChange();
+  };
+  r.d = d;
+  r.paint();
+  return r;
+}
+
+// Pre-tool text: one truncated line; its own caret shows it all.
+// Open, the full text renders as markdown beside the caret (links and copy
+// buttons can't live inside the toggle button).
+function thoughtRow(text, key) {
+  const wrap = document.createElement("div");
+  wrap.className = "thought-wrap";
+  const full = document.createElement("div");
+  full.className = "thought-md";
+  setMarkdown(full, text);
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "thought";
+  const t = document.createElement("span");
+  t.className = "thought-text";
+  t.textContent = text.replace(/[`*_~#>|]+/g, "").replace(/\s+/g, " ").trim();
+  b.append(t);
+  b.insertAdjacentHTML("beforeend", ICON_CARET);
+  wrap.append(full, b);
+  const set = (open) => {
+    b.setAttribute("aria-expanded", String(open));
+    if (open) b.setAttribute("aria-label", "Collapse note"); else b.removeAttribute("aria-label");
+    b.classList.toggle("open", open);
+    wrap.classList.toggle("open", open);
+    full.hidden = !open;
+    if (key) { if (open) openRows.add(key); else openRows.delete(key); }
+  };
+  b.onclick = () => set(b.getAttribute("aria-expanded") !== "true");
+  set(Boolean(key && openRows.has(key)));
+  return wrap;
+}
+
+// One agent step: its tool calls behind a summary twirldown.
+function addStep({ text, calls, prefix, key }) {
+  const rows = [];
+  // Stopped mid-step: calls that never ran say so.
+  const cancel = () => {
+    for (const r of rows) if (r.status === "queued" || r.status === "running") r.done(false, "Not run: the user stopped the agent.");
+  };
+  // One call is its own row (one twirldown), not a group holding a same-named row.
+  if (calls.length === 1) {
+    const r = callRow(calls[0], () => {}, { prefix, text, textKey: key ? `t:${key}` : "" });
+    rows.push(r);
+    place(r.d.wrap);
+    r.d.restore();
+    return { rows, cancel };
+  }
+  let started = 0;
+  const g = disclosure("step", key ? `g:${key}` : "", (body) => {
+    if (text) body.append(thoughtRow(text, key ? `t:${key}` : ""));
+    for (const r of rows) body.append(r.d.wrap);
+  });
+  const ticker = () => { const t = g.head.querySelector(".dz-t"); if (t) t.textContent = secs(started); };
+  const paint = () => {
+    const n = rows.length;
+    if (n < calls.length) return;
+    const done = rows.filter((r) => r.status === "ok" || r.status === "failed").length;
+    const failed = rows.filter((r) => r.status === "failed").length;
+    const runningNow = rows.some((r) => r.status === "running");
+    if (runningNow && !started) { started = Date.now(); tick(ticker, true); }
+    if (!runningNow) tick(ticker, false);
+    let label;
+    if (runningNow) label = n === 1 ? rows[0].present : `Running ${done + 1} of ${n} actions…`;
+    else if (done < n) label = n === 1 ? rows[0].present : `${n} actions`;
+    else if (n === 1) label = toolLabel(calls[0].name, calls[0].input, failed ? "fail" : "ed");
+    else label = `Ran ${n} actions${failed ? ` · ${failed} failed` : ""}`;
+    if (prefix) label = `${prefix} · ${label}`;
+    g.wrap.classList.toggle("failed", failed > 0);
+    g.head.innerHTML = `${failed ? ICON_ERR : ""}<span class="dz-label"></span>${runningNow ? `${DOTS}<span class="dz-t" aria-hidden="true"></span>` : ICON_CARET}`;
+    g.head.querySelector(".dz-label").textContent = label;
+    if (runningNow) ticker();
+  };
+  for (const c of calls) rows.push(callRow(c, paint));
+  paint();
+  place(g.wrap);
+  g.restore();
+  for (const r of rows) r.d.restore();
+  return { rows, cancel };
+}
+
+// Bridge-relayed calls: a one-call step.
+function addTool(name, input, prefix) {
+  const step = addStep({ calls: [{ name, input }], prefix });
+  step.rows[0].start();
+  return { done(ok, result) { step.rows[0].done(ok, result); } };
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* the iframe may block it */ }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;opacity:0";
+  document.body.append(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch { /* ignore */ }
+  ta.remove();
+  return ok;
+}
+
+// ---------- markdown (assistant prose): escape first, then a small safe subset.
+const MD_ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const mdEsc = (s) => String(s).replace(/[&<>"']/g, (c) => MD_ESC[c]);
+const mdSafeUrl = (u) => /^(https?:\/\/|mailto:)/i.test(u) && !/[\s<>"]/.test(u);
+const mdLink = (url, label) => `<a class="md-link" href="${mdEsc(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+
+function mdInline(src, noAuto) {
+  const held = [];
+  const hold = (html) => `\u0001${held.push(html) - 1}\u0002`;
+  let s = String(src).replace(/[\u0001\u0002]/g, "");
+  // Code spans, then links, then bare URLs are held out so emphasis can't touch them.
+  s = s.replace(/(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g, (_, __, code) => hold(`<code>${mdEsc(code.trim() || code)}</code>`));
+  s = s.replace(/\[([^\]\n]+)\]\(\s*<?([^\s)<>]+)>?(?:\s+"[^"]*")?\s*\)/g, (m, label, url) =>
+    mdSafeUrl(url) ? hold(mdLink(url, mdInline(label, true))) : m);
+  s = s.replace(/<((?:https?:\/\/|mailto:)[^\s<>]+)>/gi, (_, url) => hold(mdLink(url, mdEsc(url))));
+  if (!noAuto) s = s.replace(/\bhttps?:\/\/[^\s<>"'`]+/gi, (url) => {
+    const trail = url.match(/[.,;:!?)\]]+$/);
+    let cut = trail ? trail[0] : "";
+    // Keep a closing paren that balances one inside the URL (e.g. wikipedia links).
+    if (cut.startsWith(")") && (url.split("(").length > url.split(")").length - 1)) cut = cut.slice(1);
+    const u = cut ? url.slice(0, -cut.length) : url;
+    return hold(mdLink(u, mdEsc(u))) + cut;
+  });
+  s = mdEsc(s)
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "<strong>$2</strong>")
+    .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "<del>$1</del>")
+    .replace(/\*(?=[^\s*])([^*]*?[^\s*])\*/g, "<em>$1</em>")
+    .replace(/(^|[^\w])_(?=[^\s_])([^_]*?[^\s_])_(?!\w)/g, "$1<em>$2</em>");
+  return s.replace(/\u0001(\d+)\u0002/g, (_, i) => held[i]);
+}
+
+const MD_FENCE = /^ {0,3}(`{3,}|~{3,})\s*([\w+#.-]*)/;
+const MD_HEAD = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
+const MD_HR = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
+const MD_QUOTE = /^ {0,3}>/;
+const MD_ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+const MD_TSEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const mdIsTable = (lines, i) => lines[i].includes("|") && i + 1 < lines.length && MD_TSEP.test(lines[i + 1]) && lines[i + 1].includes("-");
+const mdStarts = (lines, i) => MD_FENCE.test(lines[i]) || MD_HEAD.test(lines[i]) || MD_HR.test(lines[i]) || MD_QUOTE.test(lines[i]) || MD_ITEM.test(lines[i]) || mdIsTable(lines, i);
+const mdCells = (row) => row.trim().replace(/^\|/, "").replace(/(^|[^\\])\|$/, "$1").split(/(?<!\\)\|/).map((c) => mdInline(c.trim().replace(/\\\|/g, "|")));
+const mdIndent = (ws) => ws.replace(/\t/g, "    ").length;
+
+function mdList(lines, i) {
+  let html = "";
+  const stack = []; // { indent, tag }
+  const close = () => { html += `</li></${stack.pop().tag}>`; };
+  let blank = false;
+  for (; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) { blank = true; continue; }
+    const m = line.match(MD_ITEM);
+    if (m && !MD_HR.test(line)) {
+      const indent = mdIndent(m[1]);
+      const ordered = /\d/.test(m[2]);
+      const tag = ordered ? "ol" : "ul";
+      while (stack.length && indent < stack[stack.length - 1].indent) close();
+      const top = stack[stack.length - 1];
+      if (!top || indent > top.indent + 1) {
+        html += `<${tag}${ordered && parseInt(m[2], 10) !== 1 ? ` start="${parseInt(m[2], 10)}"` : ""}><li>`;
+        stack.push({ indent, tag });
+      } else if (top.tag !== tag) {
+        close();
+        html += `<${tag}><li>`;
+        stack.push({ indent, tag });
+      } else html += "</li><li>";
+      html += mdInline(m[3]);
+      blank = false;
+      continue;
+    }
+    // Continuation text: indented, or a lazy line straight after an item.
+    const indented = /^\s{2,}/.test(line);
+    if ((!indented && (blank || mdStarts(lines, i))) || MD_FENCE.test(line)) break;
+    html += `${blank ? "<br><br>" : "<br>"}${mdInline(line.trim())}`;
+    blank = false;
+  }
+  while (stack.length) close();
+  return { html, next: i };
+}
+
+function renderMarkdown(src) {
+  const lines = String(src ?? "").replace(/\r\n?/g, "\n").split("\n");
+  let out = "";
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    let m;
+    if ((m = line.match(MD_FENCE))) {
+      const fence = m[1];
+      const body = [];
+      for (i++; i < lines.length && !new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(lines[i]); i++) body.push(lines[i]);
+      i++;
+      const lang = m[2] ? ` data-lang="${mdEsc(m[2])}"` : "";
+      out += `<div class="md-code"${lang}><pre tabindex="0"><code>${mdEsc(body.join("\n"))}</code></pre><button type="button" class="md-copy" title="Copy code" aria-label="Copy code">${ICON_COPY}</button></div>`;
+    } else if ((m = line.match(MD_HEAD))) {
+      out += `<${m[1].length <= 2 ? "h3" : "h4"}>${mdInline(m[2])}</${m[1].length <= 2 ? "h3" : "h4"}>`;
+      i++;
+    } else if (MD_HR.test(line)) {
+      out += "<hr>";
+      i++;
+    } else if (MD_QUOTE.test(line)) {
+      const body = [];
+      for (; i < lines.length && MD_QUOTE.test(lines[i]); i++) body.push(lines[i].replace(/^ {0,3}> ?/, ""));
+      out += `<blockquote>${renderMarkdown(body.join("\n"))}</blockquote>`;
+    } else if (mdIsTable(lines, i)) {
+      const head = mdCells(line);
+      let rows = "";
+      for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes("|"); i++) {
+        rows += `<tr>${mdCells(lines[i]).map((c) => `<td>${c}</td>`).join("")}</tr>`;
+      }
+      out += `<div class="md-table" tabindex="0"><table><thead><tr>${head.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    } else if (MD_ITEM.test(line)) {
+      const r = mdList(lines, i);
+      out += r.html;
+      i = r.next;
+    } else {
+      const para = [line.trim()];
+      for (i++; i < lines.length && lines[i].trim() && !mdStarts(lines, i); i++) para.push(lines[i].trim());
+      out += `<p>${para.map(mdInline).join("<br>")}</p>`;
+    }
+  }
+  return out;
+}
+
+// Render into an element; links open via the sandbox (figma.openExternal), code blocks copy.
+function setMarkdown(el, text) {
+  el.classList.add("md");
+  el.innerHTML = renderMarkdown(text);
+}
+document.addEventListener("click", async (e) => {
+  const a = e.target.closest && e.target.closest(".md a.md-link");
+  if (a) {
+    e.preventDefault();
+    const url = a.getAttribute("href");
+    if (mdSafeUrl(url)) post({ type: "open-external", url });
+    return;
+  }
+  const b = e.target.closest && e.target.closest(".md-copy");
+  if (!b) return;
+  if (!(await copyText(b.parentNode.querySelector("code").textContent))) return;
+  b.innerHTML = ICON_CHECK;
+  setTimeout(() => { b.innerHTML = ICON_COPY; }, 1200);
+});
+
+// The agent's final prose, with a muted copy + relative-time footer.
+function addAssistant(text, at) {
+  const wrap = document.createElement("div");
+  wrap.className = "answer";
+  const div = document.createElement("div");
+  div.className = "msg assistant";
+  setMarkdown(div, text);
+  const foot = document.createElement("div");
+  foot.className = "msg-foot";
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.title = "Copy";
+  copy.setAttribute("aria-label", "Copy message");
+  copy.innerHTML = ICON_COPY;
+  copy.onclick = async () => {
+    if (!(await copyText(text))) return;
+    copy.innerHTML = ICON_CHECK;
+    setTimeout(() => { copy.innerHTML = ICON_COPY; }, 1200);
+  };
+  foot.append(copy);
+  if (at) {
+    const t = document.createElement("time");
+    t.dataset.t = String(at);
+    t.dateTime = new Date(at).toISOString();
+    // The relative label re-ticks every 30 s; keep it out of the live log.
+    const rel = document.createElement("span");
+    rel.setAttribute("aria-hidden", "true");
+    rel.textContent = ago(at);
+    const abs = document.createElement("span");
+    abs.className = "sr";
+    abs.textContent = new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    t.append(rel, abs);
+    foot.append(t);
+  }
+  wrap.append(div, foot);
+  place(wrap);
+  return div;
+}
+
+const CONTEXT_RE = /\n\n\[Current selection: [\s\S]*\]$/;
+
+function blockText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.filter((b) => b && b.type === "text").map((b) => b.text).join("\n");
+}
+
+function blockImages(content) {
+  if (!Array.isArray(content)) return [];
+  return content.filter((b) => b && b.type === "image" && b.source && b.source.data)
+    .map((b) => ({ format: b.source.media_type === "image/jpeg" ? "JPG" : "PNG", base64: b.source.data }));
+}
+
+// Rebuild the transcript from a saved Messages API array.
+function renderTranscript() {
+  liveStop();
+  els.log.replaceChildren();
+  queue = [];
+  const results = new Map();
+  for (const m of messages) {
+    if (m.role === "user" && Array.isArray(m.content)) {
+      for (const b of m.content) if (b && b.type === "tool_result") results.set(b.tool_use_id, b);
+    }
+  }
+  for (const m of messages) {
+    if (m.role === "user") {
+      // Text blocks after tool results are messages queued while the agent ran.
+      const blocks = typeof m.content === "string" ? [{ type: "text", text: m.content }] : Array.isArray(m.content) ? m.content : [];
+      for (const b of blocks) {
+        if (!b || b.type !== "text") continue;
+        const text = String(b.text || "").replace(CONTEXT_RE, "").trim();
+        if (text) add("user", text);
+      }
+    } else if (m.role === "assistant" && Array.isArray(m.content)) {
+      const text = m.content.filter((b) => b && b.type === "text" && b.text.trim()).map((b) => b.text.trim()).join("\n\n");
+      const uses = m.content.filter((b) => b && b.type === "tool_use");
+      if (uses.length === 0) {
+        if (text) addAssistant(text);
+        continue;
+      }
+      const step = addStep({ text, calls: uses, key: uses[0].id });
+      uses.forEach((u, i) => {
+        const r = results.get(u.id);
+        if (!r) return step.rows[i].done(false, "No result");
+        const raw = blockText(r.content);
+        let value = raw;
+        try { value = JSON.parse(raw); } catch { /* keep text */ }
+        step.rows[i].done(!r.is_error, value, blockImages(r.content));
+      });
+    }
+  }
+  if (messages.length === 0) welcome();
+  setActivity("");
+  scrollDown();
+}
+
+const ICON_X = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 2l6 6M8 2L2 8"/></svg>';
+const ICON_PLUS = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 1.5v7M1.5 5h7"/></svg>';
+
+// The hint above the input says what the next message carries: the
+// selection (as JSON, see selectionContext) or just the page.
+// The page the agent last acted on (tool results' target.pageName).
+let agentPage = "";
+
+// Empty when there's nothing to say: the row folds to zero height.
+function showContext() {
+  const key = selection.map((n) => n.id || n.name || "").join(",");
+  if (key !== selKey) { selKey = key; ctxExcluded = false; }
+  const n = selection.length;
+  const away = agentPage && fileInfo.page && agentPage !== fileInfo.page ? `Agent is working on ${agentPage}` : "";
+  els.ctxRow.classList.toggle("on", n > 0 && !ctxExcluded);
+  els.ctxRow.classList.toggle("empty", n === 0 && !away);
+  els.ctxX.hidden = n === 0;
+  if (n === 0) {
+    els.ctx.textContent = away;
+    els.ctx.title = away ? `${away}; you're viewing ${fileInfo.page}.` : "";
+    return;
+  }
+  els.ctx.textContent = `${n} selected · ${ctxExcluded ? "not included" : "included with your message"}${away ? ` · ${away}` : ""}`;
+  const lines = selection.slice(0, 10).map((x) => {
+    const label = String(x.text || x.name || x.id || "").replace(/\s+/g, " ").slice(0, 60);
+    return `• ${x.type ? `${String(x.type).toLowerCase().replace(/_/g, " ")}: ` : ""}${label}`;
+  });
+  if (n > 10) lines.push(`…and ${n - 10} more`);
+  els.ctx.title = `${ctxExcluded ? "Not sent" : "Sent with your next message"}:\n${lines.join("\n")}`;
+  els.ctxX.innerHTML = ctxExcluded ? ICON_PLUS : ICON_X;
+  const action = ctxExcluded ? "Include the selection with your message" : "Don't include the selection";
+  els.ctxX.title = action;
+  els.ctxX.setAttribute("aria-label", action);
+}
+
+els.ctxX.onclick = () => {
+  ctxExcluded = !ctxExcluded;
+  showContext();
+};
+
+function selectionContext() {
+  return selection.length && !ctxExcluded
+    ? `\n\n[Current selection: ${JSON.stringify(selection).slice(0, 4000)}]`
+    : "";
+}
+
+function setActivity(text) {
+  els.cactivity.textContent = text ? `${text}…` : "Working…";
+  if (running) liveSet(text || "Thinking");
+}
+
+function setRunning(on) {
+  running = on;
+  els.cprompt.hidden = on;
+  els.cactivity.hidden = !on;
+  els.newChat.disabled = on;
+  if (on) setActivity("Thinking");
+  else liveStop();
+  paintInput();
+}
+
+// ---------------------------------------------------------------- queue
+//
+// Messages sent while the agent runs show right away marked "Queued" and are
+// delivered at the next step boundary (as text after the tool results), or
+// as a new turn if the agent finishes first.
+
+function queueMessage(text) {
+  const el = add("user", text);
+  el.classList.add("queued");
+  const tag = document.createElement("span");
+  tag.className = "queued-tag";
+  tag.textContent = "Queued";
+  el.append(tag);
+  queue.push({ text: text + selectionContext(), raw: text, el });
+}
+
+function deliverQueued() {
+  const items = queue.splice(0);
+  for (const q of items) {
+    q.el.classList.remove("queued");
+    const tag = q.el.querySelector(".queued-tag");
+    if (tag) tag.remove();
+  }
+  return items.map((q) => ({ type: "text", text: q.text }));
+}
+
+// The run ended before delivery: take the bubbles back, return the text to the input.
+function restoreQueued() {
+  const items = queue.splice(0);
+  if (items.length === 0) return;
+  for (const q of items) q.el.remove();
+  const back = items.map((q) => q.raw).join("\n\n");
+  els.prompt.value = els.prompt.value.trim() ? `${back}\n\n${els.prompt.value}` : back;
+  autosize();
+}
+
+// ---------------------------------------------------------------- agent loop
+
+async function runAgent(userText) {
+  if (!modelId) {
+    add("error", "No model — check that Maximal is running, then Save and reconnect in Settings.");
+    return;
+  }
+  if (!chat) {
+    chat = { id: newChatId(), title: pendingTitle || titleFrom(userText), createdAt: new Date().toISOString() };
+    pendingTitle = "";
+    setChatTitle();
+  }
+  const context = selectionContext();
+  messages.push({ role: "user", content: [{ type: "text", text: userText + context }] });
+  add("user", userText);
+  chipSetIdle(true);
+  setRunning(true);
+  abort = new AbortController();
+  let current = null;
+  try {
+    for (let step = 0; step < MAX_STEPS; step++) {
+      setActivity("Thinking");
+      const reply = await callModel(abort.signal);
+      const content = Array.isArray(reply.content) ? reply.content : [];
+      messages.push({ role: "assistant", content });
+      const text = content.filter((b) => b.type === "text" && b.text.trim()).map((b) => b.text.trim()).join("\n\n");
+      const calls = content.filter((b) => b.type === "tool_use");
+      if (calls.length === 0 || reply.stop_reason !== "tool_use") {
+        if (text) { addAssistant(text, Date.now()); compactNotify(text); }
+        if (queue.length === 0) return;
+        // Finished with messages waiting: they start the next turn.
+        repairHistory();
+        messages.push({ role: "user", content: deliverQueued() });
+        saveChat();
+        continue;
+      }
+      const results = [];
+      current = addStep({ text, calls, key: calls[0].id });
+      for (const [i, call] of calls.entries()) {
+        if (abort.signal.aborted) throw new DOMException("Stopped", "AbortError");
+        const row = current.rows[i];
+        row.start();
+        setActivity(row.present);
+        const out = await runTool(call.name, call.input || {});
+        row.done(out.ok, out.ok ? out.result : out.error);
+        results.push({
+          type: "tool_result",
+          tool_use_id: call.id,
+          content: toolResultContent(out),
+          is_error: !out.ok,
+        });
+      }
+      current = null;
+      messages.push({ role: "user", content: results.concat(deliverQueued()) });
+      saveChat();
+    }
+    add("note", `Stopped after ${MAX_STEPS} steps.`);
+  } catch (error) {
+    if (error.name === "AbortError") add("note", "Stopped.");
+    else add("error", error.message);
+    repairHistory();
+  } finally {
+    if (current) current.cancel();
+    abort = null;
+    restoreQueued();
+    setRunning(false);
+    saveChat();
+    if (document.body.classList.contains("compact")) els.cprompt.focus();
+    else els.prompt.focus();
+  }
+}
+
+// After a stop or error, make sure every tool_use has a tool_result so the
+// next request is valid.
+function repairHistory() {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant") return;
+  const calls = (last.content || []).filter((b) => b.type === "tool_use");
+  if (calls.length === 0) return;
+  messages.push({
+    role: "user",
+    content: calls.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: "Not run: the user stopped the agent.", is_error: true })),
+  });
+}
+
+// ---------------------------------------------------------------- remote control
+//
+// With the switch on, the panel connects to bridge.ts on this computer and
+// runs the tool calls it relays (from curl or Claude Code), showing each one
+// in the transcript.
+
+let bridge = null;
+let bridgeRetry = null;
+// Identifies this panel to the bridge, so several boards (or two windows on
+// one board) can be connected at once. Kept for the panel's lifetime, so a
+// reconnect after a bridge restart gets the same id back.
+// The sandbox picks the name (it's also in Figma's window title) and passes
+// it on <html data-session>; the fallback only runs if that's missing.
+const SESSION = document.documentElement.dataset.session || (() => {
+  const moods = ["giddy", "calm", "brave", "sleepy", "curious", "jolly", "grumpy", "proud", "shy", "eager",
+    "happy", "merry", "bold", "keen", "zany", "witty", "cheery", "plucky", "sunny", "chill",
+    "dreamy", "fierce", "gentle", "glad", "hasty", "humble", "jaunty", "kind", "lively", "lucky",
+    "mellow", "nimble", "perky", "quiet", "silly", "snappy", "spry", "upbeat", "wise", "zesty"];
+  const animals = ["otter", "lynx", "heron", "panda", "gecko", "moose", "koala", "falcon", "badger", "bison",
+    "crane", "dingo", "eagle", "ferret", "gibbon", "hare", "ibis", "jackal", "kiwi", "lemur",
+    "marten", "newt", "ocelot", "puffin", "quail", "raven", "seal", "tapir", "urchin", "vole",
+    "walrus", "yak", "zebra", "beaver", "camel", "dove", "egret", "fox", "goose", "llama"];
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  return `${pick(moods)}-${pick(animals)}`;
+})();
+
+function sendBoard() {
+  if (bridge && bridge.readyState === WebSocket.OPEN) bridge.send(JSON.stringify({ type: "board", board: fileInfo }));
+}
+
+// Pairing v2 (approve once): hello carries the instance name (SESSION) and
+// the stored client token, if any. Unknown panels wait for approval
+// ("bun figjam.ts approve <name>" or Maximal); the bridge then sends
+// {paired, token, clientId}, which is stored per Figma user via save-settings.
+let bridgeFails = 0;
+let bridgeToolsBusy = 0; // Claude Code tool calls running right now
+let bridgeDropNoted = false; // one log note per drop, at most
+let pairStop = false; // denied / expired / unpaired / replaced: wait for "Ask again"
+let expiredOnce = false; // an expired request is re-sent automatically once
+const PAIR_CLOSE = { 4401: "unpaired", 4403: "pair-denied", 4408: "pair-expired", 4409: "pair-name-in-use", 4429: "pair-busy" };
+
+function storeBridgeToken(token, clientId) {
+  settings.bridgeToken = token || "";
+  settings.bridgeClientId = clientId || "";
+  delete settings.pairingCode;
+  saveSettings();
+}
+
+function openBridge() {
+  clearTimeout(bridgeRetry);
+  if (!settings.remote) return setNet("bridge", "off");
+  if (bridge || pairStop) return;
+  let ws;
+  try {
+    ws = new WebSocket(BRIDGE_URL);
+  } catch (error) {
+    setNet("bridge", "blocked", { error: error.message });
+    return;
+  }
+  bridge = ws;
+  bridgePaired = false;
+  let ended = null; // the pair-* / unpaired message that precedes a close
+  setNet("bridge", "connecting", { attempt: bridgeFails });
+  ws.onopen = () => {
+    const hello = { type: "hello", session: SESSION, board: fileInfo, plugin: pluginInfo, tools: allTools };
+    if (settings.bridgeToken) hello.token = settings.bridgeToken;
+    if (pluginInfo.user) hello.user = pluginInfo.user;
+    ws.send(JSON.stringify(hello));
+  };
+  ws.onmessage = async (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch { return; }
+    if (bridge !== ws) return;
+    if (msg.type === "paired") {
+      if (msg.token) storeBridgeToken(msg.token, msg.clientId);
+      bridgePaired = true;
+      bridgeFails = 0;
+      expiredOnce = false;
+      bridgeDropNoted = false;
+      setNet("bridge", "connected");
+      if (!storeOnline) refreshChats();
+      return;
+    }
+    if (msg.type === "pair-pending") {
+      // A revoked token (or a new bridge data dir): drop it and wait as new.
+      if (msg.reason === "unknown-token" && settings.bridgeToken) storeBridgeToken("", "");
+      setNet("bridge", "pending", { name: msg.name || SESSION, expiresAt: msg.expiresInSec ? Date.now() + msg.expiresInSec * 1000 : 0 });
+      return;
+    }
+    if (/^pair-|^unpaired$/.test(msg.type)) { ended = msg; return; }
+    if (msg.type === "chats-reply") return settleChatReply(msg);
+    if (msg.type !== "tool" || !bridgePaired) return;
+    const view = addTool(msg.name, msg.input || {}, "Claude Code");
+    bridgeToolsBusy++;
+    let out;
+    try {
+      out = await runTool(msg.name, msg.input || {}, relayedActor(msg.actor));
+    } finally {
+      bridgeToolsBusy--;
+    }
+    view.done(out.ok, out.ok ? out.result : out.error);
+    compactNotify(`Claude Code · ${toolLabel(msg.name, msg.input || {}, out.ok ? "ed" : "fail")}`);
+    if (!running) setActivity("");
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "tool-result", id: msg.id, ok: out.ok, result: out.result, error: out.error }));
+    }
+  };
+  ws.onclose = (event) => {
+    if (bridge !== ws) return;
+    bridge = null;
+    bridgePaired = false;
+    storeOnline = false;
+    failChatReplies();
+    if (bridgeToolsBusy > 0 && !bridgeDropNoted) {
+      bridgeDropNoted = true;
+      add("note", "The bridge disconnected while a Claude Code tool call was running, so its result couldn't be sent back.");
+    }
+    if (!settings.remote) return setNet("bridge", "off");
+    const why = ended ? ended.type : PAIR_CLOSE[event.code];
+    // Replaced by a newer request from this board: stay quiet, don't fight it.
+    if (event.code === 4000) { pairStop = true; return setNet("bridge", "replaced"); }
+    if (why === "pair-denied") { pairStop = true; return setNet("bridge", "denied"); }
+    if (why === "unpaired") { storeBridgeToken("", ""); pairStop = true; return setNet("bridge", "unpaired"); }
+    if (why === "pair-expired") {
+      if (!expiredOnce) { expiredOnce = true; return openBridge(); }
+      pairStop = true;
+      return setNet("bridge", "expired");
+    }
+    bridgeFails++;
+    let delay = backoff(bridgeFails);
+    if (why === "pair-busy" && ended && ended.retryAfterSec) delay = Math.max(delay, ended.retryAfterSec * 1000);
+    setNet("bridge", "retrying", { attempt: bridgeFails, nextAt: Date.now() + delay, why: why || "" });
+    bridgeRetry = setTimeout(openBridge, delay);
+  };
+}
+
+function closeBridge() {
+  clearTimeout(bridgeRetry);
+  const ws = bridge;
+  bridge = null;
+  bridgePaired = false;
+  storeOnline = false;
+  failChatReplies();
+  if (ws) ws.close();
+  bridgeFails = 0;
+  setNet("bridge", "off");
+}
+
+// Settings → "Ask again": a fresh request after denied / expired / unpaired.
+function askAgain() {
+  pairStop = false;
+  expiredOnce = false;
+  bridgeFails = 0;
+  if (bridge) { const ws = bridge; bridge = null; bridgePaired = false; ws.close(); }
+  openBridge();
+}
+
+// Settings → "Forget": the bridge revokes this client (closes 4401) and the
+// stored token goes away.
+function forgetBridge() {
+  if (bridge && bridgePaired && bridge.readyState === WebSocket.OPEN) bridge.send(JSON.stringify({ type: "unpair" }));
+  storeBridgeToken("", "");
+  renderNet();
+}
+
+// ---------------------------------------------------------------- window
+
+function windowSize() {
+  const w = settings.window || {};
+  return {
+    width: Math.min(1400, Math.max(320, Number(w.width) || DEFAULT_WINDOW.width)),
+    height: Math.min(1200, Math.max(360, Number(w.height) || DEFAULT_WINDOW.height)),
+  };
+}
+
+function applyWindowMode(mode, resize) {
+  const size = windowSize();
+  settings.window = { mode, width: size.width, height: size.height };
+  document.body.classList.toggle("compact", mode === "compact");
+  if (mode !== "compact") compactClear();
+  closePops(false);
+  closeChats(false);
+  if (!resize) return;
+  post(Object.assign({ type: "resize", anchor: true }, mode === "compact" ? COMPACT : size));
+  saveSettings();
+  setTimeout(() => (mode === "compact" ? els.cprompt : els.prompt).focus(), 50);
+}
+
+els.collapse.onclick = () => {
+  els.cprompt.value = els.prompt.value.replace(/\s+/g, " ");
+  applyWindowMode("compact", true);
+};
+els.expand.onclick = () => {
+  if (els.cprompt.value.trim()) els.prompt.value = els.cprompt.value;
+  applyWindowMode("expanded", true);
+};
+
+// Corner grip: drag resizes the window (throttled), the size persists on release.
+(() => {
+  let start = null;
+  let pending = null;
+  let timer = null;
+  const flush = () => {
+    timer = null;
+    if (pending) post(Object.assign({ type: "resize" }, pending));
+  };
+  els.grip.onpointerdown = (e) => {
+    e.preventDefault();
+    els.grip.setPointerCapture(e.pointerId);
+    start = { x: e.screenX, y: e.screenY, w: window.innerWidth, h: window.innerHeight };
+  };
+  els.grip.onpointermove = (e) => {
+    if (!start) return;
+    pending = {
+      width: Math.round(Math.min(1400, Math.max(320, start.w + e.screenX - start.x))),
+      height: Math.round(Math.min(1200, Math.max(360, start.h + e.screenY - start.y))),
+    };
+    if (!timer) timer = setTimeout(flush, 33);
+  };
+  const end = () => {
+    if (!start) return;
+    start = null;
+    clearTimeout(timer);
+    flush();
+    if (pending) {
+      settings.window = { mode: "expanded", width: pending.width, height: pending.height };
+      saveSettings();
+    }
+    pending = null;
+  };
+  els.grip.onpointerup = end;
+  els.grip.onpointercancel = end;
+})();
+
+// ---------------------------------------------------------------- events
+
+function send(source, fromKey) {
+  const input = source === "compact" ? els.cprompt : els.prompt;
+  const text = input.value.trim();
+  if (running) {
+    if (source === "main" && text) {
+      input.value = "";
+      autosize();
+      queueMessage(text);
+      closeChats();
+      paintGo();
+    } else if (!fromKey && abort) abort.abort();
+    return;
+  }
+  if (!text || connState.state !== "ok") return;
+  input.value = "";
+  autosize();
+  closeChats();
+  // From the bar: open the panel so the conversation and live line show.
+  if (source === "compact") applyWindowMode("expanded", true);
+  runAgent(text);
+}
+
+// Something happened while collapsed (a reply, Claude Code activity): the
+// bar's text area says it and the Expand button gets an unread dot.
+let compactNote = "";
+function compactNotify(text) {
+  if (!document.body.classList.contains("compact")) return;
+  compactNote = String(text || "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!compactNote) return;
+  els.expand.classList.add("unread");
+  els.expand.setAttribute("aria-label", "Expand · new activity");
+  if (running) els.cactivity.textContent = compactNote;
+  paintInput();
+}
+function compactClear() {
+  compactNote = "";
+  els.expand.classList.remove("unread");
+  els.expand.setAttribute("aria-label", "Expand");
+}
+
+// Grows by whole lines (UI3 multi-line field), up to 160px.
+function autosize() {
+  const ta = els.prompt;
+  ta.style.height = "auto";
+  const cs = getComputedStyle(ta);
+  const lh = parseFloat(cs.lineHeight) || 20;
+  const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const maxLines = Math.max(1, Math.floor((160 - pad) / lh));
+  const lines = Math.min(maxLines, Math.max(2, Math.ceil((ta.scrollHeight - pad - 0.5) / lh)));
+  ta.style.height = `${pad + lines * lh}px`;
+}
+
+els.go.onclick = () => onRound("main");
+els.cgo.onclick = () => onRound("compact");
+els.prompt.oninput = () => { autosize(); paintGo(); };
+els.prompt.onkeydown = (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    send("main", true);
+  }
+};
+els.cprompt.onkeydown = (e) => {
+  if (e.key === "Enter" && !e.isComposing) {
+    e.preventDefault();
+    send("compact");
+  }
+};
+els.newChat.onclick = () => { closePops(); startNewChat(); };
+els.remote.onchange = () => {
+  settings.remote = els.remote.checked;
+  saveSettings();
+  if (settings.remote) { pairStop = false; expiredOnce = false; bridgeFails = 0; openBridge(); }
+  else closeBridge();
+};
+els.allowRunCode.onchange = () => {
+  settings.allowRunCode = els.allowRunCode.checked;
+  applyToolGate();
+  saveSettings();
+  add("note", settings.allowRunCode ? "run_code is on: agents may run Plugin API code on this board." : "run_code is off.");
+};
+// Figma access token (comment tools). Write-only: it goes to the sandbox once
+// on save and is never kept in `settings`, shown again, logged or sent to the
+// bridge; the sandbox answers with {hasToken, last4} only.
+function renderFigmaToken(status) {
+  const s = status || {};
+  els.figmaTokenStatus.textContent = s.error || (s.hasToken ? `Saved · ends in ${s.last4}` : "No token saved");
+  els.figmaTokenStatus.classList.toggle("error", Boolean(s.error));
+  els.figmaToken.placeholder = s.hasToken ? "Paste a new token to replace it" : "Paste a token";
+  const clearHadFocus = document.activeElement === els.figmaTokenClear;
+  els.figmaTokenClear.hidden = !s.hasToken;
+  if (clearHadFocus && !s.hasToken) els.figmaToken.focus();
+}
+function saveFigmaToken() {
+  const token = els.figmaToken.value.trim();
+  els.figmaToken.value = "";
+  if (!token) return renderFigmaToken({ error: "Paste a token first." });
+  post({ type: "figma-token-save", token });
+}
+els.figmaTokenSave.onclick = saveFigmaToken;
+els.figmaTokenClear.onclick = () => post({ type: "figma-token-clear" });
+els.figmaToken.onkeydown = (e) => {
+  if (e.key === "Enter" && !e.isComposing) {
+    e.preventDefault();
+    saveFigmaToken();
+  }
+};
+els.figmaTokenLink.onclick = (e) => {
+  e.preventDefault();
+  post({ type: "open-external", url: els.figmaTokenLink.href });
+};
+els.saveSettings.onclick = () => {
+  settings.baseUrl = els.baseUrl.value.trim().replace(/\/+$/, "") || DEFAULT_BASE;
+  settings.apiKey = els.apiKey.value.trim();
+  saveSettings();
+  if (els.figmaToken.value.trim()) saveFigmaToken();
+  closePops();
+  connectFails = 0;
+  connState.state = "";
+  net.maximal = { s: "checking" };
+  connect();
+  // A bridge that's waiting to retry gets an immediate attempt too.
+  if (settings.remote && !bridge) { bridgeFails = 0; openBridge(); }
+};
+
+setRunning(false);
+showModel();
+renderChats();
+post({ type: "init" });
+</script>
+</body>
+</html>

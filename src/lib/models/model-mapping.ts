@@ -3,7 +3,7 @@ import type { Model } from "~/services/copilot/get-models"
 
 export type InvalidModelMappingReason =
   | "missing"
-  | "disabled"
+  | "not-chat"
   | "unsupported-endpoint"
 
 export interface ModelMappingErrorBody {
@@ -105,10 +105,17 @@ export function resolveModelMapping({
       resolvedModel: rule.target,
     }
   }
-  if (!model.model_picker_enabled) {
+  // Picker visibility doesn't matter: the catalog only holds hidden chat
+  // models that serve a routable endpoint. Embeddings, image and decisions
+  // models are in the catalog too, but can't serve an inference route, and
+  // `/v1/messages` passes no endpoint to check them against. An entry with no
+  // declared type is treated as chat, as it was before.
+  const type = (model as { capabilities?: { type?: string } }).capabilities
+    ?.type
+  if (type && type !== "chat") {
     return {
       status: "invalid-target",
-      reason: "disabled",
+      reason: "not-chat",
       requestedModel,
       resolvedModel: rule.target,
     }

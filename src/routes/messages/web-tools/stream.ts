@@ -39,7 +39,6 @@ import type {
 } from "~/lib/models/anthropic-types"
 import type { CompactType } from "~/lib/models/compact"
 import type { SubagentMarker } from "~/lib/runtime-state/subagent"
-import type { Model } from "~/services/copilot/get-models"
 
 import { debugLazy } from "~/lib/platform/logger"
 import {
@@ -49,8 +48,6 @@ import {
 import { translateAnthropicMessagesToResponsesPayload } from "~/routes/messages/responses-translation"
 import { getResponsesRequestOptions } from "~/routes/responses/utils"
 import { isAsyncIterable, isNonStreaming } from "~/routes/streaming-predicates"
-import { createChatCompletions } from "~/services/copilot/create-chat-completions"
-import { createResponses } from "~/services/copilot/create-responses"
 
 import { translateToOpenAI } from "../non-stream-translation"
 import { translateChunkToAnthropicEvents } from "../stream-translation"
@@ -63,11 +60,17 @@ import {
 import { type Executor } from "./executor"
 import { isWebToolName, type WebToolPolicy } from "./rewriter"
 import { newRequestState, type RequestState } from "./state"
+import {
+  buildTurnUpstream,
+  type TurnTransport,
+  type TurnUpstream,
+  type WebToolsUpstreamDeps,
+} from "./transport"
 import { BLOCK_KIND, MAX_AGENT_TURNS, type ToolName } from "./vocab"
 
 /** The upstream chat-completions function. Exported so tests can
  *  type their stub without `as unknown as ...` casts. */
-export type UpstreamCall = typeof createChatCompletions
+export type UpstreamCall = WebToolsUpstreamDeps["createChatCompletions"]
 
 interface StreamingAgentArgs {
   initialPayload: AnthropicMessagesPayload
@@ -81,14 +84,16 @@ interface StreamingAgentArgs {
     subagentMarker?: SubagentMarker | null
     logger: ConsolaInstance
   }
-  /** Upstream-call dependency injection for tests. Defaults to the
-   *  real createChatCompletions; pass a stub to drive synthetic
-   *  chunk streams. */
-  upstreamCall?: UpstreamCall
+  /** How each turn reaches Copilot (`./transport`). Defaults to `chat`. */
+  transport?: TurnTransport
+  /** Upstream-call seam; missing entries are the real Copilot calls. Pass
+   *  stubs to drive synthetic upstream streams. */
+  deps?: Partial<WebToolsUpstreamDeps>
+  /** The client's `anthropic-beta`, sent only by the `messages` transport. */
+  anthropicBetaHeader?: string
   /** Keepalive-ping interval for silent gaps (tool execution, next upstream
    *  turn). Test seam; defaults to {@link HEARTBEAT_INTERVAL_MS}. */
   heartbeatIntervalMs?: number
-  selectedModel?: Model
 }
 
 export async function runStreamingAgent(
@@ -107,9 +112,14 @@ export async function runStreamingAgent(
   // the last turn's terminal events reach the client, so its lone usage count
   // would under-report the whole request. Sum every turn's usage and stamp the
   // total onto the terminal message_delta before it goes out.
-  type DeltaUsage = NonNullable<AnthropicMessageDeltaEvent["usage"]>
   const usageTotal: DeltaUsage = { input_tokens: 0, output_tokens: 0 }
   const heartbeatIntervalMs = args.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS
+  const upstream = buildTurnUpstream({
+    transport: args.transport,
+    options: args.options,
+    anthropicBetaHeader: args.anthropicBetaHeader,
+    deps: args.deps,
+  })
 
   debugLazy(logger, () => [
     "web-tools stream start",
@@ -138,9 +148,8 @@ export async function runStreamingAgent(
       messageStartEmitted,
       executor,
       state,
-      upstreamCall: args.upstreamCall ?? createChatCompletions,
+      upstream,
       heartbeatIntervalMs,
-      selectedModel: args.selectedModel,
     })
     messageStartEmitted = turnResult.messageStartEmitted
     bufferedFinalEvents = turnResult.bufferedFinal
@@ -226,9 +235,8 @@ interface TurnArgs {
   messageStartEmitted: boolean
   executor: Executor
   state: RequestState
-  upstreamCall: UpstreamCall
+  upstream: TurnUpstream
   heartbeatIntervalMs: number
-  selectedModel?: Model
 }
 
 interface OpenBlock {
@@ -243,6 +251,11 @@ interface OpenBlock {
   /** Accumulated text/thinking content for non-tool blocks. */
   text: string
   thinking: string
+  /** Accumulated `signature_delta` for a thinking block. */
+  signature: string
+  /** The block as `content_block_start` opened it (kept for blocks that are
+   *  replayed whole, e.g. `redacted_thinking`). */
+  startBlock: { type: string }
   blockKind: "text" | "tool_use" | "thinking" | "other"
 }
 
@@ -271,6 +284,7 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
       bufferedFinal,
       logger: args.options.logger,
       heartbeatIntervalMs: args.heartbeatIntervalMs,
+      replaysThinking: args.upstream.transport === "messages",
     })
     if (dispatched.stopReason !== undefined) {
       stopReason = dispatched.stopReason
@@ -290,11 +304,19 @@ async function runOneStreamingTurn(args: TurnArgs): Promise<TurnResult> {
 async function* createTurnEventStream(
   args: TurnArgs,
 ): AsyncGenerator<AnthropicStreamEventData> {
-  if (args.selectedModel?.supported_endpoints?.includes("/responses")) {
-    yield* createResponsesTurnEventStream(args)
-    return
+  switch (args.upstream.transport) {
+    case "messages": {
+      yield* createMessagesTurnEventStream(args)
+      return
+    }
+    case "responses": {
+      yield* createResponsesTurnEventStream(args)
+      return
+    }
+    default: {
+      yield* createChatTurnEventStream(args)
+    }
   }
-  yield* createChatTurnEventStream(args)
 }
 
 async function* createChatTurnEventStream(
@@ -309,12 +331,10 @@ async function* createChatTurnEventStream(
       intervalMs: args.heartbeatIntervalMs,
     },
     () =>
-      args.upstreamCall(openAIPayload, {
-        requestId: args.options.requestId,
-        sessionId: args.options.sessionId,
-        compactType: args.options.compactType,
-        subagentMarker: args.options.subagentMarker,
-      }),
+      args.upstream.deps.createChatCompletions(
+        openAIPayload,
+        args.upstream.callOptions,
+      ),
   )
 
   if (isNonStreaming(response)) {
@@ -355,13 +375,10 @@ async function* createResponsesTurnEventStream(
       intervalMs: args.heartbeatIntervalMs,
     },
     () =>
-      createResponses(responsesPayload, {
+      args.upstream.deps.createResponses(responsesPayload, {
         vision,
         initiator,
-        requestId: args.options.requestId,
-        sessionId: args.options.sessionId,
-        compactType: args.options.compactType,
-        subagentMarker: args.options.subagentMarker,
+        ...args.upstream.callOptions,
       }),
   )
 
@@ -385,6 +402,93 @@ async function* createResponsesTurnEventStream(
   }
 }
 
+/**
+ * Native `/v1/messages` turn: the upstream already speaks Anthropic events, so
+ * they're parsed, not translated. One adjustment: Copilot reports input and
+ * cache counts on `message_start` and output on `message_delta`, while the
+ * loop sums each turn's `message_delta` only. Fold the turn's start counts
+ * into its delta (the delta's own fields win, as in `mergeAnthropicUsage`).
+ */
+async function* createMessagesTurnEventStream(
+  args: TurnArgs,
+): AsyncGenerator<AnthropicStreamEventData> {
+  const { upstream } = args
+  const response = await withHeartbeat(
+    {
+      stream: args.stream,
+      messageStartEmitted: args.messageStartEmitted,
+      intervalMs: args.heartbeatIntervalMs,
+    },
+    () =>
+      upstream.deps.createMessages(
+        { ...args.payload, stream: true },
+        upstream.anthropicBetaHeader,
+        upstream.callOptions,
+      ),
+  )
+
+  if (!isAsyncIterable<{ data?: string }>(response)) {
+    throw new Error(
+      "web-tools stream: upstream returned non-streaming response despite stream=true",
+    )
+  }
+
+  let startUsage: StartUsage | undefined
+  for await (const rawEvent of response) {
+    if (rawEvent.data === "[DONE]") break
+    if (!rawEvent.data) continue
+    const event = parseMessagesEvent(rawEvent.data)
+    if (!event) continue
+    if (event.type === "message_start") {
+      startUsage = event.message.usage
+    } else if (event.type === "message_delta" && startUsage) {
+      event.usage = foldStartUsage(startUsage, event.usage)
+    }
+    yield event
+  }
+}
+
+type StartUsage = Extract<
+  AnthropicStreamEventData,
+  { type: "message_start" }
+>["message"]["usage"]
+type DeltaUsage = NonNullable<AnthropicMessageDeltaEvent["usage"]>
+
+function foldStartUsage(
+  start: StartUsage,
+  delta: DeltaUsage | undefined,
+): DeltaUsage {
+  return {
+    input_tokens: start.input_tokens,
+    ...(start.cache_creation_input_tokens === undefined ?
+      {}
+    : { cache_creation_input_tokens: start.cache_creation_input_tokens }),
+    ...(start.cache_read_input_tokens === undefined ?
+      {}
+    : { cache_read_input_tokens: start.cache_read_input_tokens }),
+    output_tokens: start.output_tokens,
+    ...delta,
+  }
+}
+
+/** One upstream frame as an Anthropic event; `null` for a frame that isn't
+ *  one (the loop has to read every event, so it can't forward raw bytes). */
+function parseMessagesEvent(data: string): AnthropicStreamEventData | null {
+  try {
+    const parsed: unknown = JSON.parse(data)
+    if (
+      typeof parsed === "object"
+      && parsed !== null
+      && typeof (parsed as { type?: unknown }).type === "string"
+    ) {
+      return parsed as AnthropicStreamEventData
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Dispatch one Anthropic event: remap, rewrite, forward, execute.
 // ────────────────────────────────────────────────────────────────────
@@ -402,6 +506,11 @@ interface DispatchArgs {
   bufferedFinal: Array<AnthropicStreamEventData>
   logger: ConsolaInstance
   heartbeatIntervalMs: number
+  /** Keep signed thinking (and redacted thinking) in the next turn's
+   *  assistant message. Only the native transport can: its signatures are
+   *  Anthropic's, and Claude requires the thinking that preceded a tool call
+   *  to come back with it. The translated transports drop thinking. */
+  replaysThinking: boolean
 }
 
 async function dispatchEvent(
@@ -485,6 +594,8 @@ async function handleBlockStart(
     partialJson: "",
     text: "",
     thinking: "",
+    signature: "",
+    startBlock: block,
     blockKind: classifyBlock(block),
     ...(isWebTool ?
       { toolUse: { id: block.id, name: block.name as ToolName } }
@@ -532,6 +643,11 @@ async function handleBlockDelta(
     && open.blockKind === "thinking"
   ) {
     open.thinking += ev.delta.thinking
+  } else if (
+    ev.delta.type === "signature_delta"
+    && open.blockKind === "thinking"
+  ) {
+    open.signature += ev.delta.signature
   }
   await writeEvent(d.stream, remapped)
 }
@@ -552,8 +668,24 @@ async function handleBlockStop(
   if (open.blockKind === "text") {
     d.assistantContent.push({ type: "text", text: open.text })
   } else if (open.blockKind === "thinking") {
-    // The accumulator can't synthesize a signature; on next turn
-    // Copilot would reject thinking blocks without one. Skip.
+    // A translated transport's signature isn't Anthropic's, and Copilot
+    // rejects thinking without a valid one on the next turn: drop it there.
+    // The native transport's is real, and Claude needs it back.
+    if (d.replaysThinking && open.signature) {
+      d.assistantContent.push({
+        type: "thinking",
+        thinking: open.thinking,
+        signature: open.signature,
+      })
+    }
+  } else if (
+    open.blockKind === "other"
+    && d.replaysThinking
+    && open.startBlock.type === "redacted_thinking"
+  ) {
+    d.assistantContent.push(
+      open.startBlock as unknown as AnthropicAssistantContentBlock,
+    )
   } else if (open.blockKind === "tool_use" && open.toolUse) {
     const input = parseToolInput(open.partialJson)
     const toolUseBlock: AnthropicToolUseBlock = {

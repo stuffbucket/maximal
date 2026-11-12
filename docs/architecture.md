@@ -1,6 +1,6 @@
 # Architecture
 
-This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-compatible and Anthropic-compatible HTTP service. It uses GitHub Copilot the same way Opencode's built-in Copilot provider does: authenticate with the user's own Copilot license, route requests to the Copilot endpoint, translate the response shape. The entry point is `src/main.ts` (CLI via `citty`), which dispatches to subcommands: `start`, `auth`, `setup`, `app`, `mcp`, `api`, `uninstall`, `check-usage`, `debug`.
+This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-compatible and Anthropic-compatible HTTP service. It uses GitHub Copilot the same way Opencode's built-in Copilot provider does: authenticate with the user's own Copilot license, route requests to the Copilot endpoint, translate the response shape. The entry point is `src/main.ts` (CLI via `citty`), which dispatches to subcommands: `start`, `auth`, `setup`, `app`, `api`, `uninstall`, `check-usage`, `debug`.
 
 ## Request flow for `/v1/messages` (Anthropic path)
 
@@ -20,7 +20,11 @@ This is a local proxy that exposes the GitHub Copilot API as both an OpenAI-comp
 
 ## Errors on the inference routes
 
-The inference route modules (`/v1/messages`, `/:provider/v1/messages`, `/chat/completions`, `/responses`) mount the GitHub-token gate themselves and register `proxyErrorHandler(wire)` (`src/lib/errors/proxy-errors.ts`) as their Hono `onError`; handlers throw. The handler turns the error (`HTTPError` from the upstream, `CopilotAuthFatalError`, `NoUpstreamError` from the gate, or our own) into a wire-neutral reply, runs the wire's ordered rewrites (`proxy-error-rewrites.ts`: not signed in, upstream advice, context-overflow rewording, transient 5xx to 529, retry-header relay) and renders Anthropic's envelope or OpenAI's error object; `retry: "never"` becomes `x-should-retry: false`. A reply is always 4xx/5xx and a throwing rewrite is skipped. Once a stream has started, `routes/messages/stream-error.ts` runs the same rewrites and writes an SSE `error` event. Other routes catch and call `forwardError`, which uses the same path. Wire details: [`spec/wire/auth-transport-wire-prd.md`](spec/wire/auth-transport-wire-prd.md).
+The inference route modules (`/v1/messages`, `/:provider/v1/messages`, `/chat/completions`, `/responses`) and the pass-through routes (below) mount the GitHub-token gate themselves and register `proxyErrorHandler(wire)` (`src/lib/errors/proxy-errors.ts`) as their Hono `onError`; handlers throw. The handler turns the error (`HTTPError` from the upstream, `CopilotAuthFatalError`, `NoUpstreamError` from the gate, or our own) into a wire-neutral reply, runs the wire's ordered rewrites (`proxy-error-rewrites.ts`: not signed in, upstream advice, context-overflow rewording, transient 5xx to 529, retry-header relay) and renders Anthropic's envelope or OpenAI's error object; `retry: "never"` becomes `x-should-retry: false`. A reply is always 4xx/5xx and a throwing rewrite is skipped. The upstream calls put the endpoint and model they sent on the `HTTPError` (`call`), so the advice can tell a model that doesn't serve the called endpoint (per the catalog's `supported_endpoints`) from one the plan lacks. Once a stream has started, `routes/messages/stream-error.ts` runs the same rewrites and writes an SSE `error` event. Other routes catch and call `forwardError`, which uses the same path plus one rewrite of its own (`upstreamTimeout`): a bounded GitHub read that times out answers `504` "GitHub didn't respond in time" instead of a generic 500. The inference routes keep their mapping. Wire details: [`spec/wire/auth-transport-wire-prd.md`](spec/wire/auth-transport-wire-prd.md).
+
+## Pass-through routes
+
+`/images/generations`, `/images/edits`, `/decisions` and `/systemone` (each also under `/v1`) relay a request to the Copilot endpoint of the same path under `/v1` and its JSON reply back unchanged: no translation, no streaming, no model mapping. They serve the catalog's `image` and `decisions` models. An image edit may be JSON or a multipart form; a form is re-sent as a form with a fresh boundary. Usage is recorded against the request's `model` (endpoints `images`, `decisions`, `systemone`), because the replies name a different model or none. Upstream errors take the inference routes' path above, in OpenAI's format.
 
 ## Key directories
 
@@ -30,26 +34,30 @@ The inference route modules (`/v1/messages`, `/:provider/v1/messages`, `/chat/co
 | `src/lib/` | Shared utilities: config, state, auth, tokens, rate-limit, models, tokenizer, trace |
 | `src/routes/` | Route handlers grouped by endpoint family |
 | `src/services/` | Upstream API clients (Copilot, GitHub, providers) |
+| `src/lib/plugins/` | Plugin integration: composition root, config, client sync (see *Plugins*) |
+| `packages/plugin-*` | Bun workspaces: plugin SDK, cordis-backed host, built-in plugins |
 | `tests/` | All test files (`*.test.ts`), Bun built-in runner |
 | `shell/` | Tauri menu-bar app (Bun-bundled UI + `src-tauri/` Rust shell) wrapping the proxy as a sidecar |
 
 ## Middleware stack (in order)
 
-`traceIdMiddleware` → `logger()` → `cors()` → `createAuthMiddleware` (API key validation via `x-api-key` or `Authorization: Bearer`; unauthenticated: `/`, `/status`, `/setup-status`, `/_debug/state`, the `/settings` and `/usage-viewer` redirects, and `/ui/*`; `/mcp/*` authenticates in its own route; `/settings/api/*` always requires a key; the dashboard's `/usage`, `/token-usage*` and `/_internal/*` endpoints trust loopback callers). The separate `requireGithubAuth` gate still protects `/usage` because it reads remote GitHub quota data; local `/token-usage*` history remains available while signed out. The list lives in `src/server.ts`.
+`traceIdMiddleware` → `logger()` → `cors()` → `createAuthMiddleware` (API key validation via `x-api-key` or `Authorization: Bearer`; unauthenticated: `/`, `/status`, `/setup-status`, `/_debug/state`, the `/settings` and `/usage-viewer` redirects, and `/ui/*`; `/settings/api/*` always requires a key and refuses requests carrying a browser `Origin` that isn't Maximal's own (`http://localhost|127.0.0.1|[::1]:<the request's port>`; no `Origin`, as from CLIs and the shell's Rust calls, passes: `src/lib/auth/origin.ts`); `/mcp/*` applies the same key rules itself, loopback only; the dashboard's `/usage`, `/token-usage*` and `/_internal/*` endpoints trust loopback callers). The separate `requireGithubAuth` gate still protects `/usage` because it reads remote GitHub quota data; local `/token-usage*` history remains available while signed out. The list lives in `src/server.ts`.
 
 ## Model routing
 
 `src/lib/models/models.ts` normalizes Claude model IDs via 5 regex patterns (handles variants like `claude-opus-4-6`, `claude-opus-4.6`). The `useMessagesApi` config flag (default `true`) controls whether Claude-family models use the native Messages API or fall back to Chat Completions.
 
+`GET /models` lists every catalog model in OpenAI's shape. The Anthropic shape (Claude Desktop, the anthropic SDK) lists only models with a routable endpoint (`/v1/messages`, `/responses` or `/chat/completions`), and Codex's catalog only `/responses` models, so image, decisions and embeddings models stay out of both.
+
 Root inference routes resolve the ordered, settings-driven `modelMappings` aliases after model-ID normalization and before live catalog lookup. See [`docs/dev/codex-integration.md`](dev/codex-integration.md) for exact/glob/regex semantics and the editable default alias.
 
-Claude Code exposes direct Haiku and Sonnet aliases; Maximal maps those aliases to concrete live-catalog IDs through `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `ANTHROPIC_DEFAULT_SONNET_MODEL`. These mappings are separate from Auto permission review. `CLAUDE_CODE_AUTO_MODE_MODEL` selects the client-side classifier that decides whether an action can run without asking. Automatic selection requires a picker-visible, non-variant, tool-calling, streaming model on a routable endpoint: the Haiku alias prefers Haiku, then small GPT, then another GPT; the Sonnet alias prefers Sonnet, then full-size GPT, then small GPT; the permission classifier prefers a currently supported Haiku, then the configured or mapped GPT session model, then other GPT models. A still-eligible automatic choice stays put across catalog refreshes. Stable and explicitly zero-priced entries win later ties; Maximal never guesses latency or compares nonzero rates. Settings → Models can override any of the three. A saved override that disappears stays visible but is not substituted. Alias mappings fall back to Claude Code's defaults when no automatic match exists; an explicitly reclaimed classifier stays fail-closed until a compatible model returns.
+Claude Code exposes direct Haiku and Sonnet aliases; Maximal maps those aliases to concrete live-catalog IDs through `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `ANTHROPIC_DEFAULT_SONNET_MODEL`. These mappings are separate from Auto permission review. `CLAUDE_CODE_AUTO_MODE_MODEL` selects the client-side classifier that decides whether an action can run without asking. Automatic selection requires a non-embeddings, non-variant, tool-calling, streaming model on a routable endpoint (`/v1/messages`, `/responses` or `/chat/completions`), whether or not Copilot shows it in its picker: the Haiku alias prefers Haiku, then small GPT, then another GPT; the Sonnet alias prefers Sonnet, then full-size GPT, then small GPT; the permission classifier prefers a currently supported Haiku, then the configured or mapped GPT session model, then other GPT models. A still-eligible automatic choice stays put across catalog refreshes. Stable and explicitly zero-priced entries win later ties; Maximal never guesses latency or compares nonzero rates. Settings → Models can override any of the three. A saved override that disappears stays visible but is not substituted. Alias mappings fall back to Claude Code's defaults when no automatic match exists; an explicitly reclaimed classifier stays fail-closed until a compatible model returns.
 
 ## App integrations
 
 `src/apps/` owns filesystem detection, narrowly scoped configuration, durable intent, and boot/shutdown reconciliation for supported local clients. A new client implements `ClientApp` (`src/apps/index.ts`) and registers in `src/apps/registry.ts`; routes, the CLI and the shell stay app-agnostic. The Codex CLI and Desktop share one conservative user-level provider integration; its exact ownership and recovery contract is documented in [`docs/dev/codex-integration.md`](dev/codex-integration.md).
 
-Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyHelper` in `~/.claude/settings.json` (`src/apps/claude-code/`), reverted on shutdown and on the process `exit` event (`src/lib/start/shutdown.ts`). Its Haiku/Sonnet alias mappings and Auto permission classifier use the same snapshot-and-marker ownership: pre-existing values and direct user edits (including deleting a setting) win until the person deliberately selects that setting in Maximal; that selection snapshots the latest external state and takes ownership. Maximal-owned values follow successful catalog refreshes. Shutdown restores the latest external values and suspends model ownership in a dormant journal so Automatic stickiness, explicit choices, and external divergence survive restart; explicit disable restores the same values and clears the journal. Don't reintroduce a PATH shim for `claude`.
+Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyHelper` in `~/.claude/settings.json` (`src/apps/claude-code/`), reverted on shutdown and on the process `exit` event (`src/lib/start/shutdown.ts`). Its Haiku/Sonnet alias mappings and Auto permission classifier use the same snapshot-and-marker ownership: pre-existing values and direct user edits (including deleting a setting) win until the person deliberately selects that setting in Maximal; that selection snapshots the latest external state and takes ownership. Maximal-owned values follow successful catalog refreshes. Shutdown restores the latest external values and suspends model ownership in a dormant journal so Automatic stickiness, explicit choices, and external divergence survive restart; explicit disable restores the same values and clears the journal. Don't reintroduce a PATH shim for `claude`. Turning the integration on or off also adds or removes the plugin MCP endpoints chosen for Claude Code (see *Plugins*).
 
 ## Config and state
 
@@ -62,18 +70,17 @@ Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyH
 
 ## Diagnostic surfaces
 
-- **`maximal debug`** (and `--json`) — effective config, executor selection (which `Executor` `selectExecutor()` would pick), secret sources (env/file/config/unset, never values), paths.
-- **`GET /_debug/state`** — live equivalent on a running proxy. 404 by default; gated on `state.verbose`. Useful when restart isn't an option.
+- **`maximal debug`** (and `--json`) — effective config (including `plugins_enabled`), executor selection (which `Executor` `selectExecutor()` would pick), secret sources (env/file/config/unset, never values), paths.
+- **`GET /_debug/state`** — live equivalent on a running proxy, plus each plugin's lifecycle, status code and tool count. 404 by default; gated on `state.verbose`. Useful when restart isn't an option.
 - **Daily log** at `~/.local/share/maximal/logs/messages-handler-<date>.log` — request payloads, translated SSE events, web-tools agent traces. 7-day retention.
-- **MCP server log** at `~/.local/share/maximal/logs/mcp-broker-<date>.log` — the broker's own codes and each MCP server's stderr, prefixed with the endpoint id (`src/lib/mcp-broker/server-log.ts`). Rate-limited; same retention.
 
 ## Token-usage sessions
 
-The Dashboard keeps remote quota state separate from local observability state. `GET /usage` requires GitHub authentication and returns the shared `401 { error: "not_authenticated" }` contract while signed out; the Dashboard maps that code to an intentional account state rather than presenting transport text. Local `GET /token-usage*` history and sessions continue loading independently.
+The Dashboard keeps remote quota state separate from local observability state. `GET /usage` requires GitHub authentication and returns the shared `401 { error: "not_authenticated" }` contract while signed out; the Dashboard maps that code to an intentional account state rather than presenting transport text. Any other failure is "not available yet", never an error: the last good quotas stay on screen in muted ink under a quiet "Updated N minutes ago · reconnecting to GitHub" line, or, before the first good read, the usual layout shows placeholders under "Waiting for GitHub usage…". Every reason to re-read `/usage` goes through one refresher (`shell/src/dashboard/usage-refresh.ts`): showing the Dashboard view (always, at most every 15 s, since sign-in, sign-out and account switches happen in Settings and leave no other trace), the window coming back into view and new requests in the live token feed (each when the quotas aren't ready, are over 10 minutes old or belong to an ended period; at most every 15 s and 30 s), a quota period ending, and, after a failure while the Dashboard is in view, a backoff timer (30 s, 1, 2, then every 5 minutes; reset by a success or sign-out). One request is in flight at a time. Local `GET /token-usage*` history and sessions continue loading independently.
 
 The Dashboard's live-flow graph and compact metrics, plus the peer Sessions view's table, share one frontend controller and one `GET /token-usage/sessions` poll (`src/routes/token-usage/route.ts`). The response shape is the zod schema in `src/lib/token-usage/sessions-schema.ts`, which the route parses before serving and the Dashboard parses on reading. It covers the last 24 hours of recorded requests whatever period the summary shows, plus the requests in flight now. Nothing is stored per session: `buildSessionsView` (`sessions.ts`) groups the stored rows by `session_id` on every call. Requests with no session id fold into one `other:<client>` group per client; they have no graph position or context meter.
 
-**Stored per request.** Each `token_usage_events` row also records the client (`claude-code`, `claude-desktop`, `codex` or `other`, from the provisioned API key label, else the user agent: `client.ts`), the cache lifetime and whether the client asked for it (`cache_ttl_s`, `cache_ttl_requested`), whether it was a compaction, the context window numbers with their source, and when the request started (`request_started_at_ms`, the request context's `startTime`; `created_at_ms` is when its usage was recorded, at the end of the response). Migration step 2 adds these columns; the store also adds any of them missing on every open, so a database that ran step 2 before a column joined it catches up. Older rows read as client `other`, no cache, unknown window and no start time. The handlers fill them through `setRequestUsage` (`src/lib/http/request-context.ts`), using the helpers in `request-meta.ts`.
+**Stored per request.** Each `token_usage_events` row also records the client (`claude-code`, `claude-desktop`, `codex` or `other`, from the provisioned API key label, else the user agent: `client.ts`), the cache lifetime and whether the client asked for it (`cache_ttl_s`, `cache_ttl_requested`), whether it was a compaction, the context window numbers with their source, and when the request started (`request_started_at_ms`, the request context's `startTime`; `created_at_ms` is when its usage was recorded, at the end of the response). Migration step 2 adds these columns; the store also adds any of them missing on every open, so a database that ran step 2 before a column joined it catches up. Older rows read as client `other`, no cache, unknown window and no start time. Migration step 3 adds `plugin_id` for budget scopes (see *Budget limits*). The handlers fill them through `setRequestUsage` (`src/lib/http/request-context.ts`), using the helpers in `request-meta.ts`.
 
 **Session id.** The affinity header wins, then the client's own id, then a fallback: `prompt_cache_key` for Responses (a Codex conversation stays one row), none for chat completions (no row per prompt).
 
@@ -97,14 +104,26 @@ The Dashboard's live-flow graph and compact metrics, plus the peer Sessions view
 
 **Table** (`table.ts`, `rows.ts`). Columns: client, session (model, start time, short id), state (streaming, warm with a countdown, or cold with the time its cache ran out; a downgraded model names the lifetime that didn't hold), tokens/min, context (a meter plus percent, the quota meter's 75% warning and 90% error steps, and when it last compacted), last request, total. Countdowns read m:ss under 10 minutes, whole minutes under an hour, then whole hours. Times from a day other than today carry a short day name. Streaming and warm sessions come first, busiest first, then a "Cache cold" divider and the 20 most recent cold ones, with a "Show N more" button for the rest. A row is refilled only when its session or locale changed, or when it shows something that reads the clock (a warm countdown every second; "compacted N min ago" and day names every minute).
 
+## Budget limits
+
+Spend limits are plain caps on Copilot spend, configured in `config.json`'s `budget` block (`src/lib/budget/schema.ts`, validated as part of `AppConfig`). Nothing enforces them yet: they are reported, and no inference request is admitted, held or refused because of one.
+
+- **A limit** has an `id`, an optional `label`, a `scope`, a `limit` in nano-AIU, a `limitReset`, a `warnAt` fraction (default 0.8) and an `action` (`block` or `warn`). There is no limit until someone creates one; no rows exist per model.
+- **Scope.** `global` covers every recorded request. `key` covers one client key: the API key's label, else the client recognised from the user agent (`claude-code`, `claude-desktop`, `codex`), else `unidentified`. `plugin` covers a plugin or built-in capability through the usage row's `plugin_id`; the `/images`, `/decisions` and `/systemone` routes record their endpoint as their capability. `provider` covers `copilot`, or a configured provider by name.
+- **Spend** is `SUM(total_nano_aiu)` from `token_usage_events` over the scope's rows in the period (`src/lib/token-usage/spend.ts`), so a limit counts spend recorded before it existed. Migration step 3 adds `plugin_id` (back-filled for the capability endpoints).
+- **Periods** (`src/lib/budget/periods.ts`). `daily` and `weekly` reset at 00:00 UTC, weeks starting Monday; `never` is a lifetime cap. `{ "follow": "<provider>:<window>" }` runs from the window's previous reset to the `resetsAt` the provider last reported, so a reset that moves forward starts a new period. A rolling window runs its `durationMs` back from the reset. With no earlier reset on record, a fixed window's period starts one calendar month before its reset. A reset that has passed with no newer report rolls forward by the last cycle length. Each of those guesses is flagged `reset_estimated`, and a window with no usable reset, or none reported yet, falls back to `daily` (`reset_basis: "fallback"`).
+- **Provider quota windows** (`src/lib/budget/provider-windows.ts`). A provider reports zero or more windows, normalised to `ProviderQuotaWindow`. The registry keeps the latest per `provider:id` and the reset before it, in the token-usage database's `provider_quota_windows` table (migration step 4), so both survive a restart; reports that arrive before the stored windows load wait for them. The Copilot adapter (`copilot-windows.ts`) reads one window per `x-quota-snapshot-<id>` header in `finishUpstreamResponse` (every Copilot reply, errors included) and one per `quota_snapshots` entry when `GET /usage` fetches `/copilot_internal/user`. Window counters lag real spend and are shown for context only; limits count local `total_nano_aiu`.
+- **Units** (`src/lib/budget/units.ts`, the only place costs change unit). Amounts are stored as integer nano-AIU (10⁻⁹ AI credit). They are shown in US dollars by default at $0.01 per AI credit, or in AI credits (`budget.display.unit`). `budget.display.creditUsd` overrides the rate and changes only what is shown.
+- **API** (`src/routes/settings/budget.ts`, contracts in `settings-types.ts`). `GET /settings/api/budget` returns `BudgetStatusResponse`: each limit, widest scope first, with OpenRouter's `/api/v1/key` field names (`limit`, `limit_remaining`, `limit_reset`, `usage` for the current period, `usage_daily`, `usage_weekly`), `period_start`, `resets_at`, `state` (`ok`, `warning` at `warnAt`, `exhausted` at the limit), the same amounts in the display unit, the `effective_budget` (the blocking limit already spent, else the one with the least room), and the provider windows. `PUT /settings/api/budget/limits/:id` creates or replaces a limit from `limit` (nano-AIU) or `amount` (display unit); `DELETE` removes one. Both reply with the new status; a bad id or body is a 400 `validation_error`, an unknown id on delete a 404.
+
 ## Never block the event loop
 
-The proxy is one Bun process with one event loop. A synchronous child process (`execSync`, `execFileSync`, `spawnSync`, `Bun.spawnSync`) holds every in-flight request until the child exits, streaming `/v1/messages` responses included. Settings once ran `npm prefix -g`, `claude --version`, and several `claude mcp add-json` calls this way, inside request handlers, which stalled live traffic for seconds per MCP toggle.
+The proxy is one Bun process with one event loop. A synchronous child process (`execSync`, `execFileSync`, `spawnSync`, `Bun.spawnSync`) holds every in-flight request until the child exits, streaming `/v1/messages` responses included. Settings once ran `npm prefix -g`, `claude --version`, and several `claude mcp add-json` calls this way, inside request handlers, which stalled live traffic for seconds per toggle.
 
 - **Run programs with `runFile()`** (`src/lib/system/run-file.ts`). It never rejects: exit code, output, and `notFound` come back in the result. The `blockingSpawnGuard` lint rule (`eslint.config.js`) bans the synchronous forms in `src/`, except three files that run only before the server listens or in a CLI command.
-- **Cache what detection learns.** `npmGlobalPrefix()` shares one spawn across concurrent callers and keeps the answer (a miss is retried after a minute). Synchronous detection (the MCP catalog's `locate()`) reads `cachedNpmGlobalPrefix()` and `cachedNpmLoginConfig()` and never spawns; await `warmNpmDetection()` once before calling it. `readClaudeVersion()` caches by binary path and modification time. Settings polls these lists, so a repeat call must be file probes and cache hits.
-- **Async work that used to be serialized by blocking still needs serializing.** `syncMcpClient()` queues passes per client, so two toggles can't interleave `claude mcp remove`/`add-json` for one entry. Each pass reads config when it starts, so it sees what the pass before it recorded.
-- **Shutdown is the one synchronous exception.** The `exit` safety net can't await, so `releaseMcpClientOffline()` removes Maximal's client entries by editing files only (`McpClientConfigurator.releaseOffline`).
+- **Cache what detection learns.** `npmGlobalPrefix()` shares one spawn across concurrent callers and keeps the answer (a miss is retried after a minute). Synchronous detection reads `cachedNpmGlobalPrefix()` and never spawns. `readClaudeVersion()` caches by binary path and modification time. Settings polls these lists, so a repeat call must be file probes and cache hits.
+- **Async work that used to be serialized by blocking still needs serializing.** Queue passes per target so two toggles can't interleave external CLI calls for one entry, and have each pass read config when it starts.
+- **Shutdown is the one synchronous exception.** The `exit` safety net can't await, so cleanup there edits files only.
 - **Synchronous file reads can block too.** With endpoint security that scans on open (e.g. Microsoft Defender), the first read of a recently written file can take hundreds of milliseconds. The request hot path is clear (config is cached, logs use streams); Settings code still reads client configs synchronously.
 
 ## Parallel-agent convention
@@ -216,267 +235,37 @@ This repo can collide on a shared working tree (lint-staged stash + concurrent m
 
 ## Tauri shell
 
-`shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. Rust ownership is split once along the process/presentation boundary: `shell/src-tauri/src/sidecar_runtime.rs` owns profile and app-data policy, ports, authenticated readiness, process generations, lifecycle, sidecar-managed status, dynamic capabilities, and presentation-neutral HTTP transport; `shell/src-tauri/src/lib.rs` composes that runtime into Tauri and owns plugins, commands, polling-driven native presentation, tray/windows/splash/notifications, and updater presentation. Runtime outcomes cross that boundary as neutral events, so the sidecar module never calls native presentation helpers. `bun run app:sidecar` builds the UI (`bun run build:ui`), regenerates the embed manifest, and compiles both the standalone proxy and isolated MCP broker into `shell/src-tauri/binaries/`. The shell always forces its sidecar to `127.0.0.1`; production keeps the compatibility port 4141, while `bun run app:dev` asks the OS for a port on first launch, persists it in the profile, and reuses it so the webview origin and local storage stay stable. A nonce-bound stdout readiness record gives Rust the actual port before it registers an exact runtime capability or opens a remote webview. Each worktree has a stable profile ID in its Git admin directory, producing a D-Bus-safe Tauri identifier and platform-native app-data directory; an explicit `COPILOT_API_HOME` is resolved and used instead. Before launch, the runner uses that profile's session sentinel to stop its prior sidecar and wait for both the sidecar and parent shell, without scanning ports. `bun run app:build:test` uses the fixed non-production identifier and product name from `tauri.test.conf.json`; development and test profiles do not register or query production updater surfaces. The standalone CLI still owns `HOST` when it starts the proxy directly. The proxy supervises the packaged broker. The Settings shell (React, Bun-bundled) and observability UI (vanilla) live in `shell/ui/{settings,dashboard}` and are **embedded in the sidecar binary**, served by the proxy at `/ui/settings` and `/ui/dashboard` (`src/routes/ui/route.ts`); `/ui/sessions` selects the same observability bundle's Sessions view. Dev reads `shell/dist` from disk and production reads `$bunfs`. The single webview switches among those three surfaces while preserving observability state. The outer `WebviewWindow` is the one-webview construction wrapper; its underlying native `Window` owns geometry and constraints, while the Dashboard/Sessions surface remains an HTML iframe rather than another Tauri webview. The official `tauri-plugin-window-state` plugin tracks only its `settings` label and only inner size, outer position, and maximized state; the `1100×720` builder size is a centered first-launch fallback. Automatic restoration is skipped in favor of a controlled hidden restore after the plugin's window-ready hook; restoration and physical work-area repair run off the main event loop and keep inner and outer dimensions distinct. Constraints remain logical and surface-aware: Settings bounds only useful width, Dashboard/Sessions remove maxima, and maximized windows defer constraint mutation until they return to normal size. Visibility is platform-owned: macOS/Linux close managed windows back to the menu bar/tray. Windows creates the restored unified window only after the sidecar origin is authorized, shows it minimized with `SW_SHOWMINNOACTIVE` so the default taskbar button exists without stealing focus, and lets explicit actions or first-run account setup present that same window. Windows X asks for confirmation before starting bounded sidecar/configurator shutdown and quitting the app. Decorations and fullscreen are not restored. macOS status items use black-and-alpha AppKit template images so the system supplies the current appearance and selection color. Windows uses a contrast-safe full-color notification-area icon and publishes stable Dashboard, Sessions, Settings, update-check, logs, and config actions in the taskbar Jump List; those links route through the single-instance process just like native tray actions. Legacy `/settings` and `/usage-viewer` 301-redirect to the embedded UI. No Vite — Bun is the bundler.
+`shell/` is a Tauri 2 menu-bar app that wraps the proxy for non-CLI users. Rust ownership is split once along the process/presentation boundary: `shell/src-tauri/src/sidecar_runtime.rs` owns profile and app-data policy, ports, authenticated readiness, process generations, lifecycle, sidecar-managed status, dynamic capabilities, and presentation-neutral HTTP transport; `shell/src-tauri/src/lib.rs` composes that runtime into Tauri and owns plugins, commands, polling-driven native presentation, tray/windows/splash/notifications, and updater presentation. Runtime outcomes cross that boundary as neutral events, so the sidecar module never calls native presentation helpers. `bun run app:sidecar` builds the UI (`bun run build:ui`), regenerates the embed manifest, and compiles the standalone proxy into `shell/src-tauri/binaries/`. The shell always forces its sidecar to `127.0.0.1`; production keeps the compatibility port 4141, while `bun run app:dev` asks the OS for a port on first launch, persists it in the profile, and reuses it so the webview origin and local storage stay stable. A nonce-bound stdout readiness record gives Rust the actual port before it registers an exact runtime capability or opens a remote webview. Each worktree has a stable profile ID in its Git admin directory, producing a D-Bus-safe Tauri identifier and platform-native app-data directory; an explicit `COPILOT_API_HOME` is resolved and used instead. Before launch, the runner uses that profile's session sentinel to stop its prior sidecar and wait for both the sidecar and parent shell, without scanning ports. `bun run app:build:test` uses the fixed non-production identifier and product name from `tauri.test.conf.json`; development and test profiles do not register or query production updater surfaces. The standalone CLI still owns `HOST` when it starts the proxy directly. The Settings shell (React, Bun-bundled) and observability UI (vanilla) live in `shell/ui/{settings,dashboard}` and are **embedded in the sidecar binary**, served by the proxy at `/ui/settings` and `/ui/dashboard` (`src/routes/ui/route.ts`); `/ui/sessions` selects the same observability bundle's Sessions view. Dev reads `shell/dist` from disk and production reads `$bunfs`. The single webview switches among those three surfaces while preserving observability state. The outer `WebviewWindow` is the one-webview construction wrapper; its underlying native `Window` owns geometry and constraints, while the Dashboard/Sessions surface remains an HTML iframe rather than another Tauri webview. The official `tauri-plugin-window-state` plugin tracks only its `settings` label and only inner size, outer position, and maximized state; the `1100×720` builder size is a centered first-launch fallback. Automatic restoration is skipped in favor of a controlled hidden restore after the plugin's window-ready hook; restoration and physical work-area repair run off the main event loop and keep inner and outer dimensions distinct. Constraints remain logical and surface-aware: Settings bounds only useful width, Dashboard/Sessions remove maxima, and maximized windows defer constraint mutation until they return to normal size. Visibility is platform-owned: macOS/Linux close managed windows back to the menu bar/tray. Windows creates the restored unified window only after the sidecar origin is authorized, shows it minimized with `SW_SHOWMINNOACTIVE` so the default taskbar button exists without stealing focus, and lets explicit actions or first-run account setup present that same window. Windows X asks for confirmation before starting bounded sidecar/configurator shutdown and quitting the app. Decorations and fullscreen are not restored. macOS status items use black-and-alpha AppKit template images so the system supplies the current appearance and selection color. Windows uses a contrast-safe full-color notification-area icon and publishes stable Dashboard, Sessions, Settings, update-check, logs, and config actions in the taskbar Jump List; those links route through the single-instance process just like native tray actions. Legacy `/settings` and `/usage-viewer` 301-redirect to the embedded UI. No Vite — Bun is the bundler.
 
 - **Windows sidecar containment.** Maximal owns a local path patch of `tauri-plugin-shell` 2.6.0 under `shell/src-tauri/patches/`. Its Windows spawn remains race-free: the child is created suspended, its Job Object is configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, the child is assigned, and only then is it resumed. The shell holds the Job Object handle, so normal exit, updater `exit(0)`, and forced shell termination all close the lifetime boundary and the kernel ends the sidecar's non-breakaway process tree. The native Windows shell tests compile the exact patched module and verify that closing the Job Object terminates a synthetic child and its descendant; they never discover or signal an installed Maximal process. The GitHub-hosted packaged-app smoke seeds isolated Claude Code and Codex files, verifies boot applies both configurators, reinstalls while the app is running and requires the exact old shell and sidecar to exit, then verifies a replacement reaches `/status`. Its primary shutdown first proves ordinary startup creates a minimized, non-activating taskbar window, then routes a Dashboard task through the single-instance process and confirms the same window is restored. It sends `WM_CLOSE`, requires the shell and sidecar to remain alive behind the app-styled confirmation, accepts that prompt through Windows UI Automation, and then proves Windows X-close performs scoped configurator cleanup, preserves routing intent, and exits the exact shell and sidecar processes. A separate abrupt test force-terminates only its captured shell PID and requires the exact sidecar PID and listeners to disappear before any installer hook can perform image-wide cleanup.
 - **New settings sections are React islands:** `shell/src/ui/islands/<name>-island.tsx` mounting `shell/src/ui/features/<name>/`; hash-nav section routing stays in `shell/src/main.ts`.
-- **Updates.** The sidecar decides whether to offer one (`src/lib/update/update-check.ts` reads `https://mxml.sh/updates/manifest.json`; never github.com), which shows the topbar "Update to X.Y.Z" button and the tray item. On Windows and macOS both install in place (`IN_PLACE_UPDATE` in `shell/src-tauri/src/lib.rs`): the shell checks `https://mxml.sh/updates/desktop/<channel>.json` with `tauri-plugin-updater` (the channel comes from the app's version: `X.Y.Z` is `stable`, `X.Y.Z-rc.N` is `rc`), asks the user with a native confirm naming the version, downloads the update and verifies its signature against `plugins.updater.pubkey` and the signed version, then installs and relaunches. On Windows it stops the sidecar first, ends every `maximal-mcp-broker.exe` (the broker, and Claude Desktop's stdio adapters, which run the same file), and runs the NSIS installer, which relaunches Maximal. The NSIS installer and uninstaller end them again first (`shell/src-tauri/windows/hooks.nsh`), as the MSI and `install.ps1` do. On macOS the plugin swaps the `.app` bundle (asking for an administrator password if its folder isn't writable), then the shell stops the sidecar and relaunches. A macOS app that can't replace itself (run from the disk image, from App Translocation, or outside a bundle) skips straight to the fallback. Any failure says so in a native dialog and opens mxml.sh. Linux never installs in place: the Debian/Ubuntu packages update with apt. An apt install (`/usr/bin/maximal` with the package's `/usr/lib/maximal/installed-by-apt` marker; `src/lib/update/install-source.ts`) gets `update_command` in the update status, so the button and the tray item read "Update with apt" and open Settings → Diagnostics, which shows the command to copy; Maximal never runs apt. The shell's background poll shows its "update available" OS notification once per version, across restarts: the last version announced is written to `update-notified` beside the `locale` file (before the notification fires; a failed write is logged and the notification still shows), so launching again while still behind doesn't repeat it. **Check for updates.** The sidecar caches its check for 6 hours; the tray's "Check for updates" item and Settings → Diagnostics' "Check now" button ask for a fresh one with `GET /settings/api/update-status?force=1` (same response shape). The check rate-limits itself: at most one real fetch per 30 s (`FORCE_MIN_INTERVAL_MS` in `update-check.ts`), and a forced check inside that window returns the last result. A real fetch is still a conditional request (ETag), so it costs a 304 when nothing changed. The tray item (always shown beside "Update to X.Y.Z") runs the check through the shell's update-status path (`parse_update_status`), updates the tray item, tells the Settings window to re-read (`update:status` event), and shows a native dialog: "Maximal is up to date (X.Y.Z)", a plain failure message (an answer with `last_error` is a failure even if an older result is known), or that update checks are off. "Check now" calls the same URL from the page, then `refresh_update_status` has the shell re-read the cached result so the tray agrees. `maximal start` also logs one line when a newer version is out (with the apt command for an apt install), and `/status` reports the last check. Release signing, the manifests and the apt repository: [`release-runbook.md`](release-runbook.md), [`decisions/site-runtime-version-manifest.md`](decisions/site-runtime-version-manifest.md), [`linux.md`](linux.md).
-- **Linux packages.** `maximal` installs the bun-compiled `maximal` and `maximal-mcp-broker` in `/usr/bin` plus a user systemd unit; `maximal-desktop` is the Tauri app built with `tauri.linux.conf.json` (binary `maximal-desktop`) and `bundle.externalBin: []`. The shell's `sidecar("maximal")` resolves to the file next to its own (canonicalized) executable, so the tray app runs the `maximal` package's `/usr/bin/maximal`, and `maximal-desktop` depends on exactly that version. The shell sets `HOST=127.0.0.1` on Linux as it does on every desktop platform, so the proxy listens on loopback only. Packaging and the apt repository live in `build/linux/`.
+- **Updates.** The sidecar decides whether to offer one (`src/lib/update/update-check.ts` reads `https://mxml.sh/updates/manifest.json`; never github.com), which shows the topbar "Update to X.Y.Z" button and the tray item. On Windows and macOS both install in place (`IN_PLACE_UPDATE` in `shell/src-tauri/src/lib.rs`): the shell checks `https://mxml.sh/updates/desktop/<channel>.json` with `tauri-plugin-updater` (the channel comes from the app's version: `X.Y.Z` is `stable`, `X.Y.Z-rc.N` is `rc`), asks the user with a native confirm naming the version, downloads the update and verifies its signature against `plugins.updater.pubkey` and the signed version, then installs and relaunches. On Windows it stops the sidecar first, ends any `maximal-mcp-broker.exe` an older version left running, and runs the NSIS installer, which relaunches Maximal. The NSIS installer and uninstaller end them again first (`shell/src-tauri/windows/hooks.nsh`), as the MSI and `install.ps1` do; no current build ships that file. On macOS the plugin swaps the `.app` bundle (asking for an administrator password if its folder isn't writable), then the shell stops the sidecar and relaunches. A macOS app that can't replace itself (run from the disk image, from App Translocation, or outside a bundle) skips straight to the fallback. Any failure says so in a native dialog and opens mxml.sh. Linux never installs in place: the Debian/Ubuntu packages update with apt. An apt install (`/usr/bin/maximal` with the package's `/usr/lib/maximal/installed-by-apt` marker; `src/lib/update/install-source.ts`) gets `update_command` in the update status, so the button and the tray item read "Update with apt" and open Settings → Diagnostics, which shows the command to copy; Maximal never runs apt. The shell's background poll shows its "update available" OS notification once per version, across restarts: the last version announced is written to `update-notified` beside the `locale` file (before the notification fires; a failed write is logged and the notification still shows), so launching again while still behind doesn't repeat it. **Check for updates.** The sidecar caches its check for 6 hours; the tray's "Check for updates" item and Settings → Diagnostics' "Check now" button ask for a fresh one with `GET /settings/api/update-status?force=1` (same response shape). The check rate-limits itself: at most one real fetch per 30 s (`FORCE_MIN_INTERVAL_MS` in `update-check.ts`), and a forced check inside that window returns the last result. A real fetch is still a conditional request (ETag), so it costs a 304 when nothing changed. The tray item (always shown beside "Update to X.Y.Z") runs the check through the shell's update-status path (`parse_update_status`), updates the tray item, tells the Settings window to re-read (`update:status` event), and shows a native dialog: "Maximal is up to date (X.Y.Z)", a plain failure message (an answer with `last_error` is a failure even if an older result is known), or that update checks are off. "Check now" calls the same URL from the page, then `refresh_update_status` has the shell re-read the cached result so the tray agrees. `maximal start` also logs one line when a newer version is out (with the apt command for an apt install), and `/status` reports the last check. Release signing, the manifests and the apt repository: [`release-runbook.md`](release-runbook.md), [`decisions/site-runtime-version-manifest.md`](decisions/site-runtime-version-manifest.md), [`linux.md`](linux.md).
+- **Linux packages.** `maximal` installs the bun-compiled `maximal` in `/usr/bin` plus a user systemd unit; `maximal-desktop` is the Tauri app built with `tauri.linux.conf.json` (binary `maximal-desktop`) and `bundle.externalBin: []`. The shell's `sidecar("maximal")` resolves to the file next to its own (canonicalized) executable, so the tray app runs the `maximal` package's `/usr/bin/maximal`, and `maximal-desktop` depends on exactly that version. The shell sets `HOST=127.0.0.1` on Linux as it does on every desktop platform, so the proxy listens on loopback only. Packaging and the apt repository live in `build/linux/`.
 - **Shell-visible wire types live in `src/lib/config/settings-types.ts`** (zod) and the shell imports them (`shell/src/proxy/client.ts`). Don't hand-copy types into the shell.
 
-## Isolated MCP broker
+## Plugins
 
-The optional MCP broker is a separate compiled process under
-`packages/mcp-broker/`. The Bun/Hono sidecar remains the only supervisor; Tauri
-continues to supervise only the sidecar. `runServer` starts the broker supervisor
-after the ordinary HTTP listener is bound and never awaits broker readiness, so
-broker startup failure, restart backoff, malformed IPC, and heartbeat timeout do
-not gate or terminate normal Maximal service.
+Built-in plugins extend Maximal in-process. A plugin is a **connector** (it exposes tools to MCP clients at `/mcp/<id>` and gets host-managed tool permissions) an **extension** (no MCP endpoint, no client connections; Settings doesn't list it) or a **model** plugin (`kind: "model"`: no MCP endpoint and no client connections like an extension, but Settings lists it with its enable toggle and config form). Work IQ (`packages/plugin-workiq`, user guide [`workiq.md`](workiq.md)) is the first connector. Plugins are trusted in-process ESM modules run under [cordis](https://www.npmjs.com/package/@deepseek-ai/cordis) (`@deepseek-ai/cordis@4.0.2`); cordis scopes what a plugin registers to its lifetime but does not sandbox it.
 
-The sidecar and broker use versioned 4-byte big-endian length-prefixed JSON over
-the broker's stdin/stdout. Frames, UTF-8, JSON, operations, generations, and
-sequences are bounded and validated. A ready generation listens on a private
-kernel-selected `127.0.0.1` port and requires a random per-generation key that
-it receives over IPC. The key is never put on a command line or written to
-disk; the sidecar keeps the port and key in memory and withdraws them before
-restart or shutdown.
+- **Packages** (Bun workspaces, each with its own `test` and `typecheck`; `bun run plugins:test` / `plugins:typecheck` run them all). `packages/plugin-sdk` is the contract: the module shape, the manifest, the service interfaces on `ctx`, tool/status/permission types, and test helpers (`/testing`); its `./gateway` subpath is the cordis-free seam the app core uses. `packages/plugin-host` implements that gateway on cordis. Each plugin is its own package. `packages/connector-kit` turns a remote MCP server into a connector plugin from a manifest (`defineRemoteMcpConnector`): sign-in strategies (`entra`, `mcp-oauth`, `none`), upstream sessions with MCP version negotiation, a terms gate, setup status, and tool mirroring; its `./testing` export has a fake remote MCP server and an instant fake sign-in. Work IQ is built on it. See the SDK, host and kit READMEs.
+- **Contract.** A plugin module exports `name` (the id: `/^[a-z][a-z0-9-]{1,31}$/`, also its MCP server name and storage directory), `manifest` (static JSON: `id` = `name`, `kind`, `displayName`, `description`, `homepage?`, `settingsVersion`, `configSchema?` for the Settings form, and for connectors `connector: { transport, endpoint, auth: { type, … }, terms? }` — public identifiers only, never secrets), `inject` (which of `tools`, `surface`, `storage`, `host` it uses), `Config` (a Standard Schema, zod 4 here, for which `{}` is valid), `apply(ctx, config)`, and optionally `migrateSettings(fromVersion, config)` and `defaultToolPermission(tool)`. `ctx.tools` registers MCP-shaped tools, `ctx.surface` sets the Settings status and backs its action buttons, `ctx.storage` is a private `<app dir>/plugins/<id>/` (0700, files written atomically with 0600; `settings.json` is reserved for the host), and `ctx.host` opens the system browser, logs through consola and reports the app version. The host can provide more services: `createPluginHost({ services: { extra } })` takes `PluginServiceFactory` functions, `(root: Context, runtime: PluginRuntime) => Service`, each building a cordis `Service` on the root (`runtime.slotOf(this.ctx, "<name>")` identifies the calling plugin). Their names join the built-in four as valid `inject` entries (a name nobody provides is still refused with `missing-service`), and the SDK's `AppServices` interface is the declaration-merging hook that types them on `ctx` (`Context extends AppServices`).
+- **Credentials.** A connector's sign-in (Entra / MCP OAuth tokens, accepted terms) lives in that connector's own `ctx.storage`, separate from Maximal's GitHub/Copilot credentials and from every other connector, and is never sent to MCP clients or Settings. The Settings API shows only the auth *type*. Entra's MSAL token cache is sealed (`packages/connector-kit/src/auth/sealed-cache.ts`): AES-256-GCM ciphertext in `msal-token-cache.sealed.json`, its key in the OS credential store via `Bun.secrets` (Keychain, Credential Manager, Secret Service; service `Maximal connectors`, entry `<id>/msal-token-cache/<key id>`). Only the 32-byte key goes there because Credential Manager caps a value at 2.5 KB. Store calls run off the event loop and wait at most 60 s; only that connector's token lookups wait on them, never plugin start-up, client sync, Settings or model traffic. Without a usable store the newest sign-in is kept in memory for the rest of the process, keyed by connector and data directory so turning the connector off and on keeps it, and the `ready` status says so; the sealed file is never deleted because the store failed. A refused call is retried after 5 minutes and the in-memory sign-in sealed once the store works; a call that gets no answer stops store use until restart and raises a `sign-in-not-saved` notice. MCP OAuth's state is sealed the same way (`oauth.sealed.json`, entry `<id>/mcp-oauth/<key id>`).
+- **Notices.** `ctx.surface.notify({ code, message, params? })` raises a one-off message (gateway `notice` event). The serving process queues it with the plugin's name (`src/lib/plugins/notices.ts`, at most 20), the menu-bar shell takes the queue on its 5 s poll (`POST /settings/api/notices/plugins`) and shows one native notification each, worded by `code` in the user's language (`connected`, `sign-in-not-saved`) or else the plugin's English `message`. The connector kit raises `connected` when a connector reaches `ready` from signed out or `error` (at most every 5 minutes; not on a start with a saved sign-in, nor on token refreshes).
+- **Composition and boundary.** `src/lib/plugins/compose.ts` is the only `src/` module that imports the host, plugin packages, the connector kit, the SDK root or cordis (dependency-cruiser rule `plugins-only-via-composition-root`). It builds the host services and lists the built-ins; `composePluginGateway({ plugins, storageRoot, host })` is the override seam for tests and the connectors bench, which hand the result to `startPlugins({ gateway })` / `runServer({ pluginGateway })`. Nothing in production reads an override. Everything else in `src/` imports only `@stuffbucket/maximal-plugin-sdk/gateway` and reaches the running gateway through `src/lib/plugins/gateway.ts`; CLI commands have none.
+- **Lifecycle** (`src/lib/plugins/runtime.ts`). After the listener binds, boot migrates `config.json`, cleans up old Claude Desktop entries, creates the gateway, moves legacy configs into settings files (below), runs `reconcile(config.plugins)` and syncs clients, detached from serving. `reconcile` gives each enabled plugin its own fiber: an unreadable settings file, an invalid config or a throwing `apply` marks only that plugin `failed`; disabling disposes the fiber and with it the plugin's tools, actions and status; a changed config reloads it; an unchanged failed one is retried only after toggling it off and on. Settings changes and `POST /_internal/reload` reconcile again. Shutdown closes the MCP sessions (`onPluginsStopping` hooks), then disposes the gateway within 1.5 s of the 2.5 s budget.
+- **Config.** `config.json` → `plugins.<id>` is `{ enabled?, clients? }` (absent means off; `clients` is `["claude-code"]` or empty, connectors only). The plugin's own config lives in its **settings file** `<app dir>/plugins/<id>/settings.json` (host-owned, 0600, atomic writes): `{ "$schema": "maximal-plugin-settings/1", plugin, version, config, tools: { permissions, catalog } }`. On every start the host checks the envelope, runs `migrateSettings` when the stored `version` is older than `manifest.settingsVersion`, validates `config` with `Config` (failure ⇒ `failed` with a path-qualified error such as `workiq.endpoint: Invalid URL`) and writes back only after a successful migration; an unreadable, foreign or newer file fails that plugin and is never overwritten. Settings edits go through `gateway.updateConfig` (validate → write → reload). Migrations at boot: a legacy `plugins.<id>.config` in `config.json` is moved into the settings file once (`gateway.importLegacyConfig`; a file that already has a config wins) and then removed from `config.json` (kept when the settings file is unreadable, for the next boot); a missing `plugins.workiq` is migrated once from the parked broker's Work IQ endpoint (`mcpBroker.servers[]` with `catalog: "workiq"`): on only if the broker and the endpoint were, with its Claude Code choice. The `mcpBroker` block itself is accepted and left alone.
+- **Tool permissions** (connectors). Each tool is `allow`, `ask` or `block`. Effective permission: the user's choice in the settings file (`tools.permissions`) > the plugin's `defaultToolPermission` > the host default (`allow` for read-only tools, `ask` for the rest). Choices are kept by name for tools that disappear and re-apply when they return. Changing them never reloads the plugin. Settings groups tools by annotations: `readOnlyHint` ⇒ read-only, else `destructiveHint` ⇒ write/delete, else other. The gateway's `callTool` refuses a blocked tool, and an `ask` tool unless the call carries `approved` (set by the MCP layer below); both refusals are `isError` results naming the place in Settings to change it (`blockedToolText` / `unapprovedToolText` in the SDK's gateway module).
+- **Catalog cache.** Whenever a plugin's registered tool set becomes non-empty, the host stores it with a timestamp in `tools.catalog`. Settings shows live tools when the plugin is active with tools (`toolsSource: "live"`), else the cached catalog (`"cache"`, with `catalogUpdatedAt`), else nothing (`"none"`), so permissions can be set while a connector is off or signed out. MCP listing always uses live tools only.
+- **MCP projection** (`src/routes/plugins/`). `/mcp/<id>` serves an enabled connector's tools over Streamable HTTP with the MCP SDK's low-level server (`@modelcontextprotocol/server`). Sessions are stateful and in-process: one server per `initialize`, closed on `DELETE`, when the plugin is turned off, or after 30 minutes with no request or open stream (at most 64 at once; the oldest idle one makes room). `tools/list` reads the gateway: every live tool (empty while a connector is starting or needs setup). A blocked tool stays listed with its description prefixed by "… is turned off in Maximal. To use it, turn it on in Maximal → Settings → … → Tool permissions.", so the model can tell the person why; an `ask` tool carries `_meta["anthropic/requiresUserInteraction"]: true`, which makes Claude Code confirm every call; `notifications/tools/list_changed` follows the gateway's `tools` (registrations and permission changes) and `lifecycle` events, debounced 100 ms. `tools/call` passes the request's abort signal, the session id, progress (when the client sent a progress token) and elicitation (when the client declared it, 2025-era push requests). A call to an `ask` tool needs approval first: Claude Code's own per-call prompt counts (client `claude-code`); any other client that declared elicitation gets a field-less form ("Maximal: allow <connector> to run <tool>?" with the arguments), and only *accept* runs the tool (decline, cancel or a failed elicitation is an `isError` result saying it wasn't run); a client without elicitation is refused with the `unapprovedToolText`. A blocked tool answers with the `blockedToolText`; a tool that throws is an `isError` result; a connector that isn't running, or a tool called while the connector needs setup or is in error, answers an `isError` result naming its status; otherwise an unknown tool is a JSON-RPC invalid-params error. Auth: loopback only, no foreign `Origin` (403), then the main port's key rules; unknown or disabled plugins, extensions and model plugins are 404 `MCP_ENDPOINT_NOT_FOUND`.
+- **Client sync** (`src/lib/plugins/clients/`). A connector's endpoint is registered with Claude Code while it is on, the user chose Claude Code for it, the Claude Code routing intent is on (`apps.claudeCode.enabled`), and Claude Code doesn't already have its own: a server or enabled plugin named `<id>` (`standalone` on the Settings client view, shown as a notice on the connector). Entries go into Claude Code's user scope (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`) as `maximal-<id>` → `{ type: "http", url: "http://127.0.0.1:<port>/mcp/<id>", headers }` with the real key, so Work IQ's tools are `mcp__maximal-workiq__*`. Maximal writes the file itself (no `claude` CLI): one verified atomic write per pass, retried because Claude Code rewrites the file, and only when something differs. An entry is Maximal's when its name is `maximal-<id>` and it points at `/mcp/<id>` on 127.0.0.1, any port; nothing else is touched, and an unreadable file is never replaced. `syncPluginClients()` is the only way in, synchronous and idempotent, and acts only in the serving process: boot, plugin settings changes, the Claude Code toggle, API key changes and Settings reads (which catch up with edits made in Claude Code) all call it. Entries stay while Maximal is stopped (Claude Code shows `maximal-<id>` failing to connect); `maximal uninstall` removes them. Names an older version recorded in `apps.claudeCode.mcpServers` (it named entries `<id>`) are removed on the first pass, then the record. Claude Desktop is not synced (its MCP entries needed the parked broker's stdio adapter): at boot Maximal removes the Desktop entries it recorded (`apps.claudeDesktop.mcpServers`) that run `maximal-mcp-broker[.exe]`, then clears that record.
+- **Settings API** (`src/routes/settings/plugins.ts`; wire schemas in `src/lib/config/settings-types.ts`). `GET /settings/api/plugins` → `{ plugins: PluginView[] }`: id, kind, `source: "built-in"`, display fields, the public manifest subset (for connectors `connector: { transport, endpoint in effect, auth: { type }, terms? }`), `enabled`, `lifecycle`, `error?`, `status?`, `toolCounts: { total, byGroup }`, `toolsSource`, `clients` and `endpoint` (both empty for non-connectors). `GET /settings/api/plugins/:id` → `PluginDetailView`: the list item plus `settingsVersion`, `config?`, `configSchema?`, `tools` (full schemas, `group`, `permission`, `permissionSource`) and `catalogUpdatedAt?`. `PATCH /settings/api/plugins/:id` `{ enabled?, clients?, config? }` writes `config` first (rejected ⇒ 400 with `issues: [{ path: "config.<field>", message }]`, nothing changed), then persists `enabled`/`clients`, reconciles, syncs clients and returns the detail. `PUT /settings/api/plugins/:id/tool-permissions` `{ permissions: { <tool>: "allow" | "ask" | "block" | null } }` (`null` clears) → detail; a malformed body is a 400 with `issues`. `POST /settings/api/plugins/:id/actions/:actionId` answers `202 { ok: true }` once the plugin accepts the action (404 unknown plugin or action, 409 not running); the action runs on and reports through status. 404 for an unknown plugin everywhere, 409 when its settings file can't be read. Views are built field by field, so auth client ids, authorities and scopes never leave the server. The events stream sends `plugins.changed` (same shape as the list) on connect and, debounced, on every gateway event (lifecycle, status, tools, settings) and settings change.
+- **Status.** `/status` → `subsystems.plugins: { active, failed }` (counts only).
+- **Bench.** `bun run bench:connectors` (`scripts/bench/`) runs the real server (`runServer`) with the real Work IQ connector against the kit's fake MCP server seeded with the Work IQ fixture and a fake sign-in, in a throwaway user environment; `--drive` scripts an MCP client session and prints a pass/fail table. `tests/bench-connectors.test.ts` runs the same drive in-process. See [`commands.md`](commands.md).
+- **Testing.** `@stuffbucket/maximal-plugin-host/testing`: a lifecycle harness (real host, temp settings files, an ordered transcript of everything crossing the plugin boundary) and `runPluginConformance`, which every plugin package runs. `tests/e2e-plugin-lifecycle.test.ts` walks Work IQ through its whole lifecycle in the real app against a golden transcript. See the SDK README and [`dev/testing-strategy.md`](dev/testing-strategy.md).
 
-Clients use the stable main-port address `http://127.0.0.1:<port>/mcp/<id>`
-(`src/routes/mcp/route.ts`). The route accepts loopback peers only, rejects a
-foreign `Origin`, and authenticates with the endpoint's own `apiKey` when one is
-configured, otherwise with the normal main-port rules (`auth.enforce`,
-`auth.apiKeys`, `auth.apiKeyEntries`). It then streams the request to the
-broker with the internal key. Every MCP session runs its own instance of the
-endpoint's server (spawned on `initialize`, stopped when the session ends), so
-parallel clients behave as if each ran it themselves; `limits.sessions`
-(default 8) caps them. At the cap, a new session closes the least recently
-used session with no request in flight (a client that exits without a DELETE
-leaves one behind, and under Bun the broker never sees its event stream go
-away); only when every session is busy does it get a 503 that says so. A
-missing or restarting broker returns 503; an unreachable one 502. Concurrency and declared body size are bounded, and only
-the wait for response headers is timed, so SSE streams stay open.
+## Parked MCP broker
 
-`maximal-mcp-broker stdio-adapter --url http://127.0.0.1:<port>/mcp/<id>` lets a
-local stdio MCP client reach one endpoint; it reads an optional key from
-`MAXIMAL_MCP_API_KEY`.
-
-Endpoints are added, toggled, and removed from Settings → MCP servers or
-`maximal mcp <id> --add/--enable/--disable/--remove` (`src/apps/mcp.ts`).
-
-Known servers come from a small catalog (`src/lib/mcp-broker/catalog.ts`;
-Work IQ first). Each entry finds the server's own executable and offers it
-under "Available to add", or shows its install command when it isn't
-found. A GUI-launched sidecar has launchd's minimal PATH, so detection
-records an absolute path to the native executable inside the npm package,
-not a bare name, a mise shim, or an npm launcher that needs `node`. It
-can't run npm or pnpm either, so it looks where they put global packages
-without starting a process: mise installs, a PATH symlink, `npm prefix -g`,
-npm's `prefix` from the environment or `~/.npmrc`, Homebrew and other fixed
-prefixes, `~/.npm-global`, `%APPDATA%\npm`, every nvm, fnm, asdf, and
-mise-managed Node, Volta's package image, and pnpm's global projects
-(`global/5`, and `global/v11/*` behind hash symlinks, resolved into the
-store). The install hint pins `@microsoft/workiq@1` (detection relies on
-the package layout) and uses mise when it manages tools, else pnpm when it
-has global installs and no npm is found, else npm. It also names the
-registry host the command downloads from. A GUI-launched Maximal lacks
-the terminal's environment, so npm itself is asked through the user's login
-shell (`"$SHELL" -lic 'npm config get registry; …; npm prefix -g'`; interactive so a
-registry exported from `~/.zshrc` is seen, cmd.exe
-on Windows; `src/lib/system/npm-login-config.ts`; async, cached,
-refreshed in the background every ten minutes). The order is:
-`mcpBroker.catalog.npmRegistry` (it adds `--registry`, or `NPM_CONFIG_REGISTRY=`
-for mise, to the command, so it is authoritative), npm's
-`@microsoft:registry`, npm's `registry`, then npm's own order read from this
-process's environment and npmrc files as a fallback. When none of them
-confirms a registry the host is `null` and the card says "It downloads from
-your npm registry." rather than naming npmjs.org. npm's reported global prefix
-likewise takes precedence over the file-based prefix probes. On Windows,
-the Arm build (`bin/win-arm64`) is chosen on an Arm PC even though x64
-Maximal runs emulated there and `process.arch` says x64
-(`windowsMachineArch` reads `PROCESSOR_ARCHITEW6432`, then
-`PROCESSOR_ARCHITECTURE`), falling back to `win-x64`. And
-npm's `workiq.cmd` launcher on PATH also leads to the package in the
-`node_modules` folder beside it. When
-several installs exist, the highest version wins. Adding asks the user to
-confirm and writes the
-endpoint off, with `catalog` set. The path contains the package version and
-package managers keep old versions after an upgrade, so Maximal re-reads
-where the newest install is before every request that opens a session (no
-`mcp-session-id`) on a catalog endpoint, as well as at boot, on every
-Settings list, and on every `maximal mcp` run. The next instance (say, after
-an idle session was closed) therefore runs the upgrade; an uninstalled
-server keeps its last path. The CLI can also add any stdio
-server given after `--`, as an absolute path. Removing deletes the
-endpoint from `config.json` first and then syncs clients: the desired
-entries come from `servers`, while what Maximal owns stays recorded per
-app, so exactly Maximal's entries come out. Turning one on asks which client apps
-should get it; the choice is kept in `mcpBroker.servers[].clients` even while
-the endpoint is off, so turning it back on pre-selects it. Each Claude
-integration exposes an MCP configurator on its `ClientApp` (`mcp`), and the
-shared sync (`src/lib/mcp-broker/client-sync.ts`) decides what each client
-should have: endpoints that are on, chose that client, while Maximal's
-integration for it is on. What Maximal actually wrote is recorded in
-`apps.<client>.mcpServers`, so every change reverts exactly:
-
-- endpoint off → removed from every client;
-- client integration off → its MCP entries removed; back on → restored;
-- a same-name entry the user already had is never touched (reported as
-  skipped), and an owned entry the user edited is forgotten, not deleted.
-
-Entries are generated by Maximal, not copied from the MCP server:
-
-- **Claude Desktop** (`src/apps/claude-desktop/mcp.ts`): a stdio adapter entry
-  in the Claude-3p `claude_desktop_config.json`, key in `env`.
-- **Claude Code** (`src/apps/claude-code/mcp.ts`): a user-scope HTTP entry to
-  `/mcp/<id>`. Added and removed with the `claude` CLI so Claude Code writes its
-  own `~/.claude.json`; the CLI only ever sees a SHA-256 placeholder header, and
-  Maximal then swaps in the real key with one verified atomic edit of that
-  header. Keys stay out of process arguments; the client files hold them under
-  normal filesystem protection, like their other credentials.
-
-Entry URLs use the port the proxy is listening on (`src/lib/start/proxy-port.ts`):
-the server records it at boot, in-process and in its session sentinel, so the
-CLI addresses the same instance. Ownership matches Maximal's `/mcp/<id>` URL on
-any loopback port, so after a port change the entry is rewritten rather than
-mistaken for the user's; `/_internal/reload` also re-syncs entries from the
-server.
-
-Claude Code's Maximal-written entries exist only while Maximal runs: each
-session reads `~/.claude.json` when it starts, so shutdown (and the `exit`
-safety net) removes them with direct file edits, since spawning `claude`
-doesn't fit the 2.5s shutdown budget, and boot re-adds them from the recorded
-choices. Claude Desktop's entries stay across shutdown
-(`McpClientConfigurator.removeOnShutdown`): Desktop reads its config only at
-launch, like its routing profile, so removing them would only make its next
-launch come up without the server. Boot sync runs when `config.json` has an
-`mcpBroker` section, after the broker is ready (`waitForBrokerReady`, bounded
-at 45s and detached from the HTTP listener), so an app that connects right
-away isn't turned away with 503 while the broker probes its servers. Turning
-an endpoint on in Settings waits the same way before updating the apps, and
-reports the broker's state (`ready` / `starting` / `failed`) in the response.
-
-When an endpoint is turned on and an app already has its own stdio entry with
-that id (Claude Code user scope, or Claude Desktop's Claude-3p or regular
-config; on Windows the regular one is in `%APPDATA%\Claude`, or for the
-Microsoft Store app in `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`),
-Maximal copies that entry's command, args, working directory, and
-non-secret environment into the endpoint once, so the broker runs the same
-server. The app's own entry stays untouched; secret-looking environment names
-are not copied and are reported. Maximal's own adapter is never adopted.
-
-Config changes reach the in-process broker one of three ways
-(`reconfigureBroker`): nothing, when only endpoints that are off or the
-apps an endpoint goes to changed; a live `update` control message, when
-only how a new session's instance starts changed (command, args, working
-directory, environment, timeouts, session cap), which new sessions pick up
-while running ones keep their instance; otherwise a restart. The broker
-re-checks an `update` and answers `RESTART_REQUIRED` if the endpoints or
-how they're served (protocol, interaction, ownership, body limit) differ,
-and the supervisor then restarts it. The control protocol is versioned
-(`CONTROL_PROTOCOL_VERSION`, 4 since endpoint observations carry tool
-names); a sidecar and broker from
-different builds fail the first frame rather than half-work. The CLI, which has no broker, calls the
-running server's loopback-only `POST /_internal/reload`, which re-reads
-`config.json` and restarts the broker if needed, so no restart is required. External MCP commands,
-including Work IQ when configured, remain separately installed programs;
-Maximal does not redistribute them or own their authentication state.
-
-When a broker generation stops or dies, it and everything it started end
-with it. On POSIX, each broker generation is a detached process group.
-Graceful shutdown is bounded and followed by exact-group `SIGKILL`, including
-descendants. On Windows, `serve` first puts itself in a Job Object with
-`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (kernel32 through `bun:ffi`,
-`packages/mcp-broker/src/windows-job.ts`) and holds the only handle until it
-exits. Breakaway isn't allowed, so the MCP servers it starts and their
-children are in the job too, and when the broker exits or is terminated,
-Windows ends all of them. The supervisor's bounded graceful stop is followed
-by `TerminateProcess` on the broker. If Windows refuses any step, the broker
-starts nothing and exits with `BROKER_CONTAINMENT_EXIT_CODE` (78); the
-supervisor reports `unavailable` with the problem `containment-unavailable`
-instead of restarting it, and Settings says the servers couldn't start. A
-crashed sidecar is covered twice: the broker's stdin closes, and
-`--parent-pid` has the broker check every second whether its parent is gone.
-However `serve` stops (a `shutdown` frame, stdin closing, the parent gone, a
-signal, or an error), the broker closes its servers and then exits, at most 3
-seconds after it began closing, even if an open session holds its HTTP
-server. A `serve` that fails exits as soon as it has written its error code. Stdio servers are started with
-`cross-spawn` (inside the MCP SDK), which runs a `.cmd` or `.bat` command
-through `cmd.exe /d /s /c` with its arguments escaped, rather than
-refusing it the way Node does without a shell. The Windows behavior is
-tested on a Windows runner by `packages/mcp-broker/test/windows-containment.test.ts`
-(the CI `windows-broker` job). Public `/status` exposes only coarse broker
-state and enabled-endpoint count.
-
-The broker's startup probe records the tool names each endpoint lists and
-reports them in its `ready` frame (`getBrokerEndpointTools`). Each server's
-stderr, which the broker used to discard, goes up the broker's stderr as
-`[endpoint:<id>] <line>`: control characters stripped, lines shortened, and
-limited per endpoint per minute (`packages/mcp-broker/src/server-stderr.ts`).
-The supervisor writes it to the MCP server log and keeps each endpoint's last
-line that reads like a problem for Settings. Dependencies' own console output
-still reaches stderr only as sanitized codes.
-
-### Work IQ sign-in
-
-For a Work IQ endpoint that is on, `GET /settings/api/mcp` adds a `workiq`
-status (`src/lib/mcp-broker/workiq.ts`): `not-installed`, `eula-needed`,
-`signin-needed`, `starting`, `ready`, or `consent-needed`. It comes from
-`workiq config show` (`I-accept-EULA`, `defaultAccount`,
-`disableBrokeredAuth`) and the tools the broker saw: Work IQ lists
-`accept_eula`, `ask` and `list_agents` before a working sign-in and its
-Microsoft 365 tools after, so signed in with only those three is
-`consent-needed`. Routes under `/settings/api/mcp/:id/workiq` run, each only
-when the user confirms that step: `accept-eula`; `sign-in` (optionally
-`config set disableBrokeredAuth=true` first, then `auth login` in the
-background, 5 minutes, cancellable with `DELETE`, then a broker restart so the
-probe looks again). The commands are a closed set (`src/lib/system/workiq-cli.ts`)
-and get the endpoint's environment allowlist, never Maximal's credentials.
-User-facing guide: [`workiq.md`](workiq.md).
-
-A Work IQ endpoint that is on isn't handed to the broker until its setup is
-done: installed, `I-accept-EULA`, and `defaultAccount` set. On Windows,
-`workiq mcp` opens Microsoft's sign-in window by itself as soon as it
-starts, outside the card's steps. The server registers
-`holdBackWorkIqUntilSetUp` with `setBrokerConfigFilter`, so every start,
-reconfigure and restart gives the broker a copy with such an endpoint turned
-off. Not read yet counts as not done. Each `workiq config show` (a status,
-a step, or `reconfigureBrokerAfterSetupCheck`, which boot, turning an
-endpoint on and `/_internal/reload` use) updates what is known, and the
-Settings list reconfigures after reading the statuses, so a Work IQ set up
-from Terminal starts on the next list. Turning one on that is held back
-reports `broker: "setup-needed"` without waiting for the broker, and
-`/mcp/<id>` answers it with 503 `MCP_ENDPOINT_SETUP_NEEDED`.
-
-### Requests for user input (elicitation)
-
-An MCP server can ask the user for input: a form to fill in, or a URL to
-open. The broker advertises that it can take these and routes each one by
-the endpoint's `elicitation` policy (`packages/mcp-broker/src/elicitation.ts`):
-
-- `passthrough` (the default): the session's own client, if its `initialize`
-  said it can show that kind of request; otherwise Maximal. Claude Desktop
-  advertises none, so its requests always come to Maximal.
-- `maximal`: always Maximal.
-- `deny`: decline without asking.
-
-Rules (first match wins) narrow this by tool, mechanism, mode, field types,
-URL host and form size. Forms asking for credentials or payment details are
-declined, as are requests too large for Maximal to show. An unanswered
-request is cancelled after the policy's timeout (5 minutes by default), and
-the tool call waiting on it gets that time on top of its own.
-
-To ask Maximal, the broker sends `elicit` on the control channel; the
-sidecar's `elicitResult` answers it, and the broker's `elicitWithdrawn` takes
-it back (timeout, server cancel, session closed). The sidecar keeps waiting
-requests in memory only (`src/lib/mcp-broker/pending-requests.ts`): each
-belongs to a live session inside the broker, its child, so none can outlive
-a restart, and a generation's requests are dropped when it ends. Forms are
-normalized to the field kinds Maximal can show and answers are validated
-before they reach the server; only the first answer counts. Settings reads
-them from `/settings/api/requests` (also pushed as `requests.changed` on the
-events stream), and the shell polls `/settings/api/requests/summary` to
-notice new ones. None of this is on the public `/status`, since requests
-carry server text.
+The generic MCP broker (broker binary, supervisor, stdio adapter, its client sync, elicitation Requests, Claude Desktop sync, Work IQ via the `workiq` CLI) is parked under `parked/mcp/`: kept in git, excluded from build, typecheck, lint, tests, CI and packaging. See [`parked/mcp/README.md`](../parked/mcp/README.md). Installers and the updater still stop and remove a `maximal-mcp-broker` left by an older version.
 
 ## Token counting
 

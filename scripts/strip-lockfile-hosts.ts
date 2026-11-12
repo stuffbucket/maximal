@@ -21,7 +21,6 @@ const { SHARD_HOST } = shardHosts as { SHARD_HOST: RegExp }
 const ROOT = path.resolve(import.meta.dir, "..")
 /** Every committed pnpm lockfile (one per isolated package). */
 export const LOCKFILES = [
-  "packages/mcp-broker/pnpm-lock.yaml",
   "packages/storybook/pnpm-lock.yaml",
 ]
 

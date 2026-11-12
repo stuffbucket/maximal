@@ -17,7 +17,7 @@ updates:
 
   # pnpm-managed packages (npm ecosystem reads pnpm-lock.yaml).
   - package-ecosystem: npm
-    directories: ["/packages/mcp-broker", "/packages/storybook"]
+    directories: ["/packages/storybook"]
     schedule:
       interval: weekly
     open-pull-requests-limit: 0

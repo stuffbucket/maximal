@@ -238,206 +238,43 @@ describe("validateAppConfig — Claude Code model settings", () => {
   })
 })
 
-describe("validateAppConfig — MCP broker", () => {
-  it("accepts a generic MCP broker endpoint", () => {
+describe("validateAppConfig — parked mcpBroker", () => {
+  it("accepts an old mcpBroker section silently and keeps it as-is", () => {
     const config = {
       mcpBroker: {
         enabled: true,
-        supervision: {
-          heartbeatIntervalMs: 2_000,
-          heartbeatDeadlineMs: 6_000,
-        },
         servers: [
           {
             id: "workiq",
             label: "Work IQ",
             enabled: true,
-            transport: {
-              type: "stdio" as const,
-              command: "workiq",
-              args: ["mcp"],
-            },
-            versionProbe: {
-              args: ["--version"],
-              timeoutMs: 5_000,
-            },
-            classification: {
-              protocol: "legacy" as const,
-              interaction: "interactive" as const,
-              ownership: "exclusive" as const,
-            },
-            environment: {
-              inherit: ["HOME", "PATH"],
-            },
-            elicitation: {
-              defaultAction: "passthrough" as const,
-              rules: [
-                {
-                  match: {
-                    mechanisms: ["legacy-url" as const],
-                    toolNames: ["get_debug_link"],
-                  },
-                  action: "maximal" as const,
-                },
-              ],
-            },
+            clients: ["claude-code"],
+            catalog: "workiq",
+            transport: { type: "stdio", command: "workiq", args: ["mcp"] },
           },
         ],
       },
     }
+    expect(validateAppConfig(config)).toEqual(config)
+    expect(detectUnknownKeys(config)).toEqual([])
+  })
 
+  it("does not validate the parked section's contents", () => {
+    const config = { mcpBroker: { servers: "not-an-array" } }
     expect(validateAppConfig(config)).toEqual(config)
   })
 
-  it("rejects duplicate MCP server ids", () => {
-    expect(() =>
-      validateAppConfig({
-        mcpBroker: {
-          servers: [
-            {
-              id: "duplicate",
-              label: "One",
-              transport: { type: "stdio", command: "one" },
-            },
-            {
-              id: "duplicate",
-              label: "Two",
-              transport: { type: "stdio", command: "two" },
-            },
-          ],
-        },
-      }),
-    ).toThrow(ConfigValidationError)
-  })
-
-  it("rejects unsafe legacy sharing", () => {
-    let thrown: ConfigValidationError | null = null
-    try {
-      validateAppConfig({
-        mcpBroker: {
-          servers: [
-            {
-              id: "legacy-shared",
-              label: "Legacy shared",
-              transport: { type: "stdio", command: "legacy" },
-              classification: {
-                protocol: "legacy",
-                ownership: "shareable",
-              },
-            },
-          ],
-        },
-      })
-    } catch (error) {
-      if (error instanceof ConfigValidationError) thrown = error
-    }
-
-    expect(thrown?.issues[0]?.path).toBe(
-      "mcpBroker.servers.0.classification.ownership",
-    )
-  })
-
-  it("rejects an MCP elicitation rule without match criteria", () => {
-    expect(() =>
-      validateAppConfig({
-        mcpBroker: {
-          servers: [
-            {
-              id: "ambiguous-rule",
-              label: "Ambiguous rule",
-              transport: { type: "stdio", command: "server" },
-              elicitation: {
-                rules: [{ match: {}, action: "maximal" }],
-              },
-            },
-          ],
-        },
-      }),
-    ).toThrow(ConfigValidationError)
-  })
-
-  it("rejects an MCP heartbeat deadline at or below its interval", () => {
-    expect(() =>
-      validateAppConfig({
-        mcpBroker: {
-          supervision: {
-            heartbeatIntervalMs: 5_000,
-            heartbeatDeadlineMs: 5_000,
-          },
-        },
-      }),
-    ).toThrow(ConfigValidationError)
-  })
-
-  it("checks MCP supervision overrides against effective defaults", () => {
-    expect(() =>
-      validateAppConfig({
-        mcpBroker: {
-          supervision: { heartbeatIntervalMs: 20_000 },
-        },
-      }),
-    ).toThrow(ConfigValidationError)
-    expect(() =>
-      validateAppConfig({
-        mcpBroker: {
-          supervision: { restartBackoffMinMs: 60_000 },
-        },
-      }),
-    ).toThrow(ConfigValidationError)
-  })
-
-  it("accepts named MCP secret references", () => {
+  it("still validates the client ownership arrays", () => {
     const config = {
-      mcpBroker: {
-        servers: [
-          {
-            id: "secret-ref",
-            label: "Secret ref",
-            transport: { type: "stdio" as const, command: "server" },
-            environment: {
-              secretRefs: { SERVICE_TOKEN: "stored-token.v1" },
-            },
-          },
-        ],
+      apps: {
+        claudeCode: { mcpServers: ["workiq"] },
+        claudeDesktop: { mcpServers: ["workiq"] },
       },
     }
-
     expect(validateAppConfig(config)).toEqual(config)
-  })
-
-  it("rejects invalid MCP environment names", () => {
     expect(() =>
       validateAppConfig({
-        mcpBroker: {
-          servers: [
-            {
-              id: "invalid-env",
-              label: "Invalid environment",
-              transport: { type: "stdio", command: "server" },
-              environment: { inherit: ["NOT-AN-ENV-NAME"] },
-            },
-          ],
-        },
-      }),
-    ).toThrow(ConfigValidationError)
-  })
-
-  it("accepts an endpoint-specific MCP key and rejects a blank one", () => {
-    const server = {
-      id: "keyed",
-      label: "Keyed",
-      transport: { type: "stdio" as const, command: "server" },
-    }
-    expect(
-      validateAppConfig({
-        mcpBroker: { servers: [{ ...server, apiKey: "mcp-endpoint-key" }] },
-      }),
-    ).toEqual({
-      mcpBroker: { servers: [{ ...server, apiKey: "mcp-endpoint-key" }] },
-    })
-    expect(() =>
-      validateAppConfig({
-        mcpBroker: { servers: [{ ...server, apiKey: "   " }] },
+        apps: { claudeCode: { mcpServers: ["Not Valid"] } },
       }),
     ).toThrow(ConfigValidationError)
   })
@@ -467,20 +304,89 @@ describe("detectUnknownKeys", () => {
   })
 })
 
-describe("mcpBroker.catalog", () => {
-  it("accepts an http(s) npm registry for install hints, nothing else", () => {
-    const config = {
-      mcpBroker: { catalog: { npmRegistry: "https://npm.example.test/npm/" } },
+function issuePaths(raw: unknown): Array<string> {
+  try {
+    validateAppConfig(raw)
+  } catch (error) {
+    if (error instanceof ConfigValidationError) {
+      return error.issues.map((issue) => issue.path)
     }
-    expect(validateAppConfig(config)).toEqual(config)
-    for (const npmRegistry of ["npm.example.test", "ftp://npm.example.test/"]) {
-      let thrown: ConfigValidationError | null = null
-      try {
-        validateAppConfig({ mcpBroker: { catalog: { npmRegistry } } })
-      } catch (e) {
-        if (e instanceof ConfigValidationError) thrown = e
-      }
-      expect(thrown?.issues[0]?.path).toBe("mcpBroker.catalog.npmRegistry")
+    throw error
+  }
+  return []
+}
+
+describe("budget", () => {
+  const budget = {
+    display: { unit: "usd", creditUsd: 0.01 },
+    limits: [
+      {
+        id: "everything",
+        scope: { kind: "global" },
+        limit: 200_000_000_000,
+        limitReset: { follow: "copilot:premium_interactions" },
+        warnAt: 0.8,
+        action: "warn",
+      },
+      {
+        id: "codex",
+        scope: { kind: "key", id: "codex" },
+        limit: 50_000_000_000,
+        limitReset: "weekly",
+        action: "block",
+      },
+      {
+        id: "images-daily",
+        label: "Images",
+        scope: { kind: "plugin", id: "images" },
+        limit: 30_000_000_000,
+        limitReset: "daily",
+        warnAt: 0.8,
+        action: "block",
+      },
+    ],
+  }
+
+  it("accepts limits, the display unit and the conversion override", () => {
+    const parsed: unknown = validateAppConfig({ budget })
+    expect(parsed).toEqual({ budget })
+    const empty: unknown = validateAppConfig({ budget: {} })
+    expect(empty).toEqual({ budget: {} })
+  })
+
+  it("keeps keys a newer version wrote", () => {
+    const newer = {
+      budget: {
+        ...budget,
+        notify: true,
+        limits: [{ ...budget.limits[1], holdTimeoutMs: 5 }],
+      },
     }
+    const parsed: unknown = validateAppConfig(newer)
+    expect(parsed).toEqual(newer)
+  })
+
+  it("rejects bad limits with the offending path", () => {
+    const limit = budget.limits[1]
+    expect(
+      issuePaths({ budget: { limits: [limit, { ...limit, limit: 1 }] } }),
+    ).toEqual(["budget.limits.1.id"])
+    expect(
+      issuePaths({
+        budget: { limits: [{ ...limit, scope: { kind: "key" } }] },
+      }),
+    ).toEqual(["budget.limits.0.scope.id"])
+    expect(
+      issuePaths({ budget: { limits: [{ ...limit, limitReset: "monthly" }] } }),
+    ).toEqual(["budget.limits.0.limitReset"])
+    expect(
+      issuePaths({ budget: { limits: [{ ...limit, limit: -1 }] } }),
+    ).toEqual(["budget.limits.0.limit"])
+    expect(
+      issuePaths({ budget: { display: { unit: "premium_requests" } } }),
+    ).toEqual(["budget.display.unit"])
+    expect(issuePaths({ budget: { display: { creditUsd: 0 } } })).toEqual([
+      "budget.display.creditUsd",
+    ])
   })
 })

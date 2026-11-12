@@ -1438,6 +1438,13 @@ html[data-os="macos"] .topbar {
   border-color: var(--accent);
 }
 
+/* A caution label (e.g. a tool that can change things): error-colored text
+   and hairline on the same chip, never a fill. */
+.chip--danger {
+  color: var(--status-error);
+  border-color: var(--status-error);
+}
+
 /* ---- Status dot ---- */
 .status {
   display: inline-block;
@@ -2607,30 +2614,314 @@ html[data-os="macos"] .topbar {
   color: var(--text-muted);
 }
 
-/* ---- MCP endpoint card ----
-   Name on the left; on the right, Refresh and Remove as icon buttons, the
-   on/off switch, then the twirldown. Below, every app that can get the
-   endpoint as one checkbox row — no prompt. "All apps" heads the list; app
-   rows indent under it. Changes save as made; Remove asks first. */
-.mcp-card__title {
-  flex: 1 1 auto;
+/* ---- Connectors (features/connectors) ----
+   Settings → Integrations → Connectors. The list is a .table of rows (name,
+   type, status) whose name is the row's button. A connector's page replaces
+   the list in place: back link, head (tile, name, switch), what the
+   connector says about itself, then typographic sections divided by
+   hairlines — never cards (the page is the entity). */
+.connectors-panel {
   min-width: 0;
-  display: flex;
+}
+
+/* The tile behind a connector's glyph. */
+.connector-tile {
+  flex: 0 0 auto;
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: center;
+  width: var(--size-xl);
+  height: var(--size-xl);
+  color: var(--text-strong);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.connector-tile svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.connector-tile--lg {
+  width: var(--size-2xl);
+  height: var(--size-2xl);
+  border-radius: var(--radius-card);
+}
+
+.connector-tile--lg svg {
+  width: var(--size-md);
+  height: var(--size-md);
+}
+
+/* List */
+.connector-table th:last-child,
+.connector-table td:last-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.connector-table td {
+  vertical-align: middle;
+}
+
+.connector-row {
+  cursor: pointer;
+  transition: background-color 150ms ease-out;
+}
+
+.connector-row:hover {
+  background: var(--surface-card);
+}
+
+.connector-row__open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.connector-row__open:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.connector-row__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.connector-row__type {
+  color: var(--text-base-color);
+}
+
+.connector-row__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-base-color);
+}
+
+.connector-row__ok {
+  display: inline-flex;
+  color: var(--status-success);
+}
+
+.connector-row__ok svg,
+.connector-row__chevron svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+/* Worth knowing, nothing wrong: an app already runs this connector itself
+   (see the Claude Code row on its page). The text says why; the mark
+   never stands alone. */
+.connector-notice__mark {
+  display: inline-flex;
+  flex: none;
+  color: var(--status-info);
+}
+
+.connector-notice__mark svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.connector-row__open .connector-notice__mark {
+  margin-inline-start: var(--space-1);
+}
+
+.connector-notice {
+  display: inline-flex;
+  flex-basis: 100%;
+  align-items: flex-start;
   gap: var(--space-2);
 }
 
-.mcp-card__title .app-card__name {
-  flex: 0 1 auto;
+.connector-row__chevron {
+  display: inline-flex;
+  margin-inline-start: var(--space-2);
+  color: var(--text-muted);
 }
 
-.mcp-card__saving {
+/* The state's dot. Color is never the only signal: the list names the
+   state beside it, the page's line names it for screen readers and says it
+   in words. Tones are the status tokens; off is muted. */
+.connector-dot {
+  flex: 0 0 auto;
+  width: var(--size-xs);
+  height: var(--size-xs);
+  border-radius: var(--radius-pill);
+  background: var(--text-muted);
+}
+
+.connector-dot--ready {
+  background: var(--status-success);
+}
+
+.connector-dot--needs-setup {
+  background: var(--status-warning);
+}
+
+.connector-dot--working {
+  background: var(--status-info);
+}
+
+.connector-dot--error {
+  background: var(--status-error);
+}
+
+/* Page */
+.connector-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.connector-detail__back {
+  gap: var(--space-2);
+  margin-inline-start: calc(-1 * var(--space-3));
+}
+
+.connector-detail__back svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.connector-detail__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.connector-detail__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-chip);
+}
+
+/* Focus lands here when the page opens (it isn't in the tab order); the
+   ring shows only when that came from the keyboard. */
+.connector-detail__name:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.connector-detail__control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.connector-detail__saving {
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
-.mcp-card__apps {
+.connector-detail__desc {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  max-width: 65ch;
+}
+
+/* What the connector says about itself. */
+.connector-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.connector-status__line {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+/* The dot sits on the first line of text. */
+.connector-status__line .connector-dot {
+  margin-block-start: calc((var(--text-base) * var(--leading-lg) - var(--size-xs)) / 2);
+}
+
+.connector-status__detail {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  /* The connector's own text; keep the line breaks it wrote. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.connector-status__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.connector-status__confirm {
+  white-space: pre-line;
+}
+
+/* A section of the page: a title, a quiet line, its content. */
+.connector-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+  min-width: 0;
+}
+
+.connector-section__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.connector-section__title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+}
+
+.connector-section__sub,
+.connector-section__hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.connector-clients {
   margin: 0;
   padding: 0;
   border: 0;
@@ -2639,49 +2930,498 @@ html[data-os="macos"] .topbar {
   flex-direction: column;
 }
 
-.mcp-card__row {
+.connector-clients__row {
   display: flex;
-  align-items: center;
-  padding: var(--space-2) 0;
-}
-
-.mcp-card__row + .mcp-card__row {
-  border-top: var(--border-width-hairline) solid var(--border-subtle);
-}
-
-.mcp-card__row--app {
-  padding-inline-start: var(--space-5);
-  /* Why an app can't be chosen sits beside it, and wraps under it when
-     the card is narrow. */
   flex-wrap: wrap;
+  align-items: center;
   column-gap: var(--space-3);
   row-gap: var(--space-1);
+  padding-block: var(--space-1);
 }
 
-.mcp-card .app-card__control {
+.connector-endpoint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
 }
 
-/* Accordion: the twirldown sits at the far right of the head, after the
-   switch. Open follows the switch (McpEndpointCard.tsx); disabled while
-   off. 200ms is the card-collapse timing (motion.md); the global
-   reduced-motion block zeroes it. */
-.mcp-card__twirl svg {
+.connector-endpoint__url {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  overflow-wrap: anywhere;
+}
+
+.connector-about__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A twirldown: chevron + text, no button chrome. The chevron turns down
+   when open (200ms, the accordion timing; zeroed by reduced motion). */
+.twirl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.twirl:hover {
+  color: var(--text-strong);
+}
+
+.twirl:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.twirl__chevron {
+  flex: 0 0 auto;
+  width: var(--size-sm);
+  height: var(--size-sm);
+  color: var(--text-muted);
   transition: transform 200ms ease-out;
 }
 
-.mcp-card__twirl[aria-expanded="true"] svg {
-  transform: rotate(180deg);
+.twirl[aria-expanded="true"] .twirl__chevron {
+  transform: rotate(90deg);
 }
 
-.mcp-card__body {
+/* Tool groups */
+.tool-group {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+
+.tool-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+}
+
+.tool-group__title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+}
+
+.tool-group__toggle {
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-md);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-base-color);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+}
+
+.tool-group__list {
+  margin: 0;
+  padding: 0 0 0 var(--space-5);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-group__list[hidden] {
+  display: none;
+}
+
+/* The group's menu: a ghost button that opens a small popover. */
+.group-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.group-menu__trigger {
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.group-menu__glyph,
+.group-menu__chevron,
+.group-menu__check {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.group-menu__glyph svg,
+.group-menu__chevron svg,
+.group-menu__check svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.group-menu__chevron {
+  color: var(--text-muted);
+}
+
+.group-menu__list {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 20;
+  min-width: max-content;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  box-shadow: var(--elevation-tooltip);
+}
+
+.group-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-xl);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.group-menu__item:focus-visible,
+.group-menu__item:hover {
+  background: var(--surface-control);
+}
+
+.group-menu__item:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+}
+
+.group-menu__item--inert {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.group-menu__label {
+  flex: 1 1 auto;
+}
+
+.group-menu__check {
+  width: var(--size-sm);
+  margin-inline-start: var(--space-3);
+  color: var(--link);
+}
+
+/* One tool. */
+.tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-3);
+  min-width: 0;
+}
+
+.tool + .tool {
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+/* The control drops under a title too long to share the line with it. */
+.tool__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: var(--space-3);
 }
 
-.mcp-card__body[hidden] {
+.tool__title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.tool__desc {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  overflow-wrap: anywhere;
+}
+
+.tool__desc--clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.tool__more {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--link);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.tool__more:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+
+.tool__more:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.tool__twirls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin-block-start: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tool__inputs {
+  margin: 0;
+  padding: 0 0 0 var(--space-5);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tool__inputs[hidden] {
   display: none;
+}
+
+.tool__input {
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  overflow-wrap: anywhere;
+}
+
+.tool__input > * + * {
+  margin-inline-start: var(--space-2);
+}
+
+.tool__input-name {
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+}
+
+.tool__input-type {
+  font-size: var(--text-sm);
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.tool__input-required {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.tool__schema-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.tool__schema-wrap--nested {
+  padding-inline-start: var(--space-5);
+}
+
+.tool__schema {
+  align-self: stretch;
+  margin: 0;
+  max-height: var(--code-block-max);
+  overflow: auto;
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  white-space: pre;
+}
+
+.tool__schema:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.tool__schema[hidden] {
+  display: none;
+}
+
+/* Two-state permission control (Allowed / Blocked): a segmented pair on a
+   control surface; the chosen option steps forward onto the card surface. */
+.perm-seg {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.perm-seg__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-lg);
+  height: var(--size-lg);
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+.perm-seg__option svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.perm-seg__option:hover {
+  color: var(--text-strong);
+}
+
+.perm-seg__option[aria-checked="true"] {
+  background: var(--surface-card);
+  border-color: var(--border-strong);
+  box-shadow: var(--elevation-card);
+}
+
+.perm-seg__option--allow[aria-checked="true"] {
+  color: var(--status-success);
+}
+
+.perm-seg__option--ask[aria-checked="true"] {
+  color: var(--status-warning);
+}
+
+.perm-seg__option--block[aria-checked="true"] {
+  color: var(--status-error);
+}
+
+.perm-seg__option:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.perm-seg__option:disabled {
+  cursor: not-allowed;
+}
+
+/* Configuration form: the shared .form rows. */
+.connector-config__fields {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.connector-config__control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.connector-config__control .switch {
+  align-self: flex-start;
+}
+
+.connector-config__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.connector-config__json {
+  margin: 0;
+  max-height: var(--code-block-max);
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.connector-config__advanced {
+  display: flex;
+  flex-direction: column;
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.connector-config__advanced-toggle {
+  align-self: flex-start;
+  margin-block: var(--space-2);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.connector-config__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.connector-config__saved {
+  font-size: var(--text-sm);
+  color: var(--link);
 }
 
 /* ---- Link checkbox (components/LinkCheckbox.tsx) ----

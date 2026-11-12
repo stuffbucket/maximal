@@ -66,11 +66,11 @@ prefix itself or anything under `<prefix>/`.
 |---|---|---|
 | **Unauthenticated (exact)** | `/`, `/status`, `/_debug/state`, `/setup-status`, and the legacy 301 redirects (`LEGACY_REDIRECTS` in `src/server.ts`: `/usage-viewer`, `/settings`, each with and without a trailing slash) | No key required. |
 | **Unauthenticated prefix** | `/ui/*` | The settings + dashboard UI shells and their assets load without a key. |
-| **Own-route auth** | `/mcp/*` | Skips the global middleware; `src/routes/mcp/route.ts` authenticates itself. An endpoint with its own `apiKey` accepts exactly that key; otherwise the same main-port rules apply. Requests must also come from loopback with no foreign `Origin`. No GitHub token required. |
+| **Own-route auth** | `/mcp/*` | Skips the global middleware; the plugin MCP endpoint route authenticates itself with the same main-port rules. No GitHub token required. |
 | **Require-auth prefix** | `/settings/api/*` | Data endpoints require a key (overrides any unauthenticated prefix). |
 | **Loopback-exempt** | `/usage`, `/token-usage`, `/token-usage/events` | Auth is **skipped for loopback callers**; a remote caller still needs a valid key. |
 | **Loopback-only** | `/_internal/shutdown`, `/_internal/reload` | Auth is skipped for loopback callers, and the handlers in `src/routes/internal/route.ts` reject any non-loopback caller with `404`, even one holding a valid key. |
-| **Everything else** | completion, model, embeddings, provider routes, etc. | Normal client authentication. |
+| **Everything else** | completion, model, embeddings, images, decisions, SystemOne, provider routes, etc. | Normal client authentication. |
 
 Loopback is determined by peer IP ∈ {`127.0.0.1`, `::1`,
 `::ffff:127.0.0.1`} via `isLoopbackAddress()`. The rationale: the local
@@ -84,13 +84,14 @@ without exposing those endpoints to remote callers.
 |---|---|---|
 | Missing/invalid API key (enforce on) | `401` | `{ "error": { "message": "Unauthorized", "type": "authentication_error" } }` + `WWW-Authenticate: Bearer realm="copilot-api"` |
 | No GitHub token, inference route (`/v1/messages`, `/:provider/v1/messages` and their `count_tokens`) | `503` | `{ "type": "error", "error": { "type": "api_error", "message": "Maximal isn't signed in to GitHub, … Settings → Account …" } }` + `x-should-retry: false` |
-| No GitHub token, inference route (`/chat/completions`, `/responses`, with or without `/v1`) | `503` | `{ "error": { "message": "Maximal isn't signed in to GitHub, …", "type": "service_unavailable", "code": "maximal_not_signed_in" } }` + `x-should-retry: false` |
+| No GitHub token, inference or pass-through route (`/chat/completions`, `/responses`, `/images/*`, `/decisions`, `/systemone`, with or without `/v1`) | `503` | `{ "error": { "message": "Maximal isn't signed in to GitHub, …", "type": "service_unavailable", "code": "maximal_not_signed_in" } }` + `x-should-retry: false` |
 | No GitHub token, other gated route (`/usage`, `/models`, `/embeddings`, with or without `/v1`; `/:provider/v1/models`) | `401` | `{ "error": "not_authenticated", "hint": "Open Settings → Account to sign in, or run \`maximal auth\`." }` |
 
 ## GitHub token gate (`requireGithubAuth`)
 
 Mounted by the inference route modules themselves (messages, provider
-messages, chat completions, responses), and in `src/server.ts` on
+messages, chat completions, responses) and the pass-through route modules
+(images, decisions, SystemOne), and in `src/server.ts` on
 `/models(*)`, `/embeddings(*)`, `/usage(*)`, their `/v1` forms and
 `/:provider/v1/models(*)`.
 
@@ -98,7 +99,7 @@ When the sidecar boots **without** a GitHub token, the HTTP server still
 listens (so the desktop shell can load Settings and trigger auth on
 demand), but every upstream-touching endpoint refuses instead of
 crashing or firing the device-code flow. The gate throws
-`NoUpstreamError`. On the inference routes it reaches the route's error
+`NoUpstreamError`. On the inference and pass-through routes it reaches the route's error
 handler (`src/lib/errors/proxy-errors.ts`), which answers `503` in the
 client's format with a sign-in instruction and `x-should-retry: false`:
 the person sees what to do at once, and the client doesn't retry. A `401`
@@ -210,6 +211,8 @@ The opencode OAuth app skips the interaction headers.
 | `/responses` | — |
 | `/models` | `copilotModelsHeaders()`: `x-interaction-type: model-access`, `openai-intent: model-access`; `x-interaction-id` and `content-type` removed |
 | `/embeddings` | base headers only |
+| `/v1/images/generations`, `/v1/decisions`, `/v1/systemone` | base headers only |
+| `/v1/images/edits` | base headers only; a multipart request drops `content-type` so `fetch` writes the multipart type with the boundary of the re-encoded form |
 
 ### Messages context-editing compatibility
 
@@ -262,6 +265,14 @@ on every upstream response (`logCopilotRateLimits()` in
 `src/lib/errors/copilot-rate-limit.ts`); it does not surface them to the
 client except when relaying a 429 (below).
 
+Copilot also returns one `x-quota-snapshot-<id>` header per quota
+(`premium_interactions`, …), formatted as a query string with `ent`,
+`crUsed`, `rem`, `rst`, `ov` and `ovPerm`. `finishUpstreamResponse()`
+records each as a provider quota window for budget periods
+(`observeCopilotQuotaHeaders()` in `src/lib/budget/copilot-windows.ts`);
+like the rate-limit headers, they are not surfaced to the client except
+when relaying a 429.
+
 ## Upstream error contract
 
 `finishUpstreamResponse()` (`src/services/copilot/upstream-request.ts`)
@@ -285,7 +296,8 @@ provider-scoped messages route), both in `src/lib/errors/error.ts`:
 | Class | Client status | `forwardError()` body | `forwardAnthropicError()` body | Side effect |
 |---|---|---|---|---|
 | **Auth-fatal** | upstream status (401/403) | `{ "error": { "message", "type": "auth_fatal", "remediation_url"? } }` | Anthropic error envelope; remediation URL appended to the message | `markAuthDegraded()` stops the refresh loop, drops the live tokens, and flags the account `needsReauth` on disk. The saved credential is **retained**, so a restart retries it. |
-| **HTTP error** | upstream status, except that `forwardAnthropicError()` turns transient `500`/`502`/`503`/`504` into `529 overloaded_error` and a 4xx (not 429) context overflow into a `400` with a `prompt is too long: …` message | `{ "error": { "message", "type": "error" } }` | `{ "type": "error", "error": { "type", "message" } }` | On `429` (and, for Anthropic routes, transient 5xx), `retry-after` and all `x-*` upstream headers are copied to the client response. Recognizable errors get advice text from `adviseUpstreamError()`. Token **not** cleared. |
+| **HTTP error** | upstream status, except that `forwardAnthropicError()` turns transient `500`/`502`/`503`/`504` into `529 overloaded_error` and a 4xx (not 429) context overflow into a `400` with a `prompt is too long: …` message | `{ "error": { "message", "type": "error" } }` | `{ "type": "error", "error": { "type", "message" } }` | On `429` (and, for Anthropic routes, transient 5xx), `retry-after` and all `x-*` upstream headers are copied to the client response. Recognizable errors get advice text from `adviseUpstreamError()`: a `400 model_not_supported` for a catalog model whose `supported_endpoints` lacks the called endpoint names that endpoint and the catalog models that serve it; for any other model it lists the plan's picker models. Token **not** cleared. |
+| **Timed out** (a bounded GitHub read hit its `AbortSignal.timeout`, below) | `forwardError()`: `504`; `forwardAnthropicError()` and the inference routes' `onError`: `500` (generic) | `{ "error": { "message": "GitHub didn't respond in time. Try again in a moment.", "type": "upstream_timeout" } }` | generic `api_error` envelope | — |
 | **Generic** (any other exception, e.g. missing Copilot token) | `500` | `{ "error": { "message", "type": "error" } }` | `api_error` envelope | — |
 
 ## Timeouts
@@ -304,9 +316,9 @@ responses are held open for the duration of the stream.
 1. A request to `/v1/messages` with no `x-api-key` while
    `auth.enforce=true` → `401` `authentication_error` +
    `WWW-Authenticate`.
-2. A request to an inference endpoint while the sidecar has no GitHub
-   token → `503` with `x-should-retry: false` and the sign-in message in
-   the client's format; to any other upstream endpoint → `401`
+2. A request to an inference or pass-through endpoint while the sidecar
+   has no GitHub token → `503` with `x-should-retry: false` and the
+   sign-in message in the client's format; to any other upstream endpoint → `401`
    `not_authenticated` with the Settings hint. The server stays up.
 3. A remote (non-loopback) `GET /usage` with a valid key succeeds; with
    no/invalid key → `401`. The same path from loopback succeeds without a

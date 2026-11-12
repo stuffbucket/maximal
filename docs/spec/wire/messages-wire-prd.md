@@ -131,6 +131,16 @@ else                            ──▶ handleWithChatCompletions (Copilot /ch
   selected model advertises that endpoint; otherwise the agent retains its
   Chat Completions fallback. This applies to both buffered and streaming
   turns, which are normalized to the same Anthropic response/event shapes.
+- The agent loop also has a native `/v1/messages` turn transport
+  (`web-tools/transport.ts`), used only when the caller allows it
+  (`transportPolicy.nativeMessages`) and `shouldUseMessagesApi` holds.
+  `web_search`/`web_fetch` requests don't allow it, so their output is
+  unchanged. On that transport the loop runs `prepareMessagesApiPayload`
+  once before the first turn (every later turn only appends messages, so
+  the cached prefix stays the same bytes), drops the `server_tool_use` /
+  `web_*_tool_result` blocks a client echoes back, sends signed and
+  redacted thinking back with each tool call, and counts each turn's
+  `message_start` input and cache tokens in the summed usage.
 - `shouldUseMessagesApi` requires the `useMessagesApi` config flag
   (default `true`) **and** `supported_endpoints` ∋ `/v1/messages`.
 - `shouldUseResponsesApi` requires `supported_endpoints` ∋ `/responses`.

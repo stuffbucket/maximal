@@ -40,6 +40,7 @@ in a doc or commit message, use its name — never inline the value.
 | `--border-width-hairline` / `-thin` / `-thick` / `-heavy` | Border widths | Reference by name | Off-scale borders |
 | `--sidebar-width` | Settings sidebar width | Settings sidebar only | Anything else |
 | `--content-max` | Settings content pane max-width | Settings content max-width | Dashboard (uses its own max) |
+| `--code-block-max` | Tallest a scrolling code block grows before it scrolls inside | Raw JSON shown in place (a connector tool's full schema) | Prose, forms, anything that should push the page instead of scrolling |
 
 ## Elevation
 

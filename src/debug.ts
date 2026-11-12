@@ -51,6 +51,8 @@ export interface DebugInfo {
     log_retention_days: number
     api_keys_configured: boolean
     providers_declared: Array<string>
+    /** Plugin ids turned on in config.json (`plugins.<id>.enabled`). */
+    plugins_enabled: Array<string>
   }
   executor: {
     web_tools: string
@@ -173,6 +175,9 @@ export function summarizeConfig(config: AppConfig): DebugInfo["config"] {
     log_retention_days: config.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS,
     api_keys_configured: (config.auth?.apiKeys?.length ?? 0) > 0,
     providers_declared: Object.keys(config.providers ?? {}),
+    plugins_enabled: Object.entries(config.plugins ?? {})
+      .filter(([, entry]) => entry.enabled === true)
+      .map(([id]) => id),
   }
 }
 
@@ -269,6 +274,12 @@ function printDebugInfoPlain(info: DebugInfo): void {
       "providers_declared",
       info.config.providers_declared.length > 0 ?
         info.config.providers_declared.join(", ")
+      : "<none>",
+    ),
+    formatField(
+      "plugins_enabled",
+      info.config.plugins_enabled.length > 0 ?
+        info.config.plugins_enabled.join(", ")
       : "<none>",
     ),
     ``,

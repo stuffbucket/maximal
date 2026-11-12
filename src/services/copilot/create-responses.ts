@@ -425,6 +425,7 @@ export const createResponses = async (
   return finishUpstreamResponse<ResponsesResult>(response, {
     stream: Boolean(payload.stream),
     errorMessage: "Failed to create responses",
+    call: { endpoint: "/responses", model: payload.model },
   })
 }
 

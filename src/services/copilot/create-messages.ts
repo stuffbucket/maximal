@@ -255,5 +255,6 @@ export const createMessages = async (
   return finishUpstreamResponse<AnthropicResponse>(response, {
     stream: Boolean(requestPayload.stream),
     errorMessage: "Failed to create messages",
+    call: { endpoint: "/v1/messages", model: requestPayload.model },
   })
 }

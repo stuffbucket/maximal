@@ -1,0 +1,2713 @@
+{
+ "name": "fixture",
+ "sections": [
+  {
+   "id": "8:480",
+   "name": "Read & understand",
+   "rect": {
+    "x": 0,
+    "y": 2640,
+    "w": 2160,
+    "h": 2560
+   },
+   "style": {
+    "color": "light blue"
+   }
+  },
+  {
+   "id": "8:481",
+   "name": "Create",
+   "rect": {
+    "x": 2400,
+    "y": 0,
+    "w": 3120,
+    "h": 1520
+   },
+   "style": {
+    "color": "light green"
+   }
+  },
+  {
+   "id": "8:482",
+   "name": "Guard & coordinate",
+   "rect": {
+    "x": 2400,
+    "y": 1760,
+    "w": 3120,
+    "h": 1680
+   },
+   "style": {
+    "color": "light red"
+   }
+  },
+  {
+   "id": "8:483",
+   "name": "Edit",
+   "rect": {
+    "x": 2400,
+    "y": 3680,
+    "w": 3120,
+    "h": 1520
+   },
+   "style": {
+    "color": "light orange"
+   }
+  },
+  {
+   "id": "8:484",
+   "name": "Organize & navigate",
+   "rect": {
+    "x": 5760,
+    "y": 0,
+    "w": 2160,
+    "h": 2480
+   },
+   "style": {
+    "color": "light violet"
+   }
+  },
+  {
+   "id": "8:485",
+   "name": "Check",
+   "rect": {
+    "x": 5760,
+    "y": 2720,
+    "w": 2160,
+    "h": 2480
+   },
+   "style": {
+    "color": "light teal"
+   }
+  }
+ ],
+ "nodes": [
+  {
+   "id": "8:579",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "list_pages\nPages with ids, names, counts",
+   "obstacle": true,
+   "rect": {
+    "x": 160,
+    "y": 2880,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:583",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "get_board\nLists nodes, selection, view, board link",
+   "obstacle": true,
+   "rect": {
+    "x": 640,
+    "y": 2880,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:587",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "get_selection\nWhat the person has selected",
+   "obstacle": true,
+   "rect": {
+    "x": 1120,
+    "y": 2880,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:591",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "find_nodes\nSearch by type, name or text",
+   "obstacle": true,
+   "rect": {
+    "x": 1600,
+    "y": 2880,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:595",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "board_tree\nPage as a tree: roles, text, edges, markup",
+   "obstacle": true,
+   "rect": {
+    "x": 160,
+    "y": 3440,
+    "w": 880,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:599",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "get_node\nFull detail: fills, text, ends, paths",
+   "obstacle": true,
+   "rect": {
+    "x": 1120,
+    "y": 3440,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:603",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "read_markup\nWhat people circled, crossed, highlighted",
+   "obstacle": true,
+   "rect": {
+    "x": 1600,
+    "y": 3440,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:607",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "rev\nEvery read returns each node's fingerprint",
+   "obstacle": true,
+   "rect": {
+    "x": 160,
+    "y": 4000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:611",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "target\nEvery result names file, board, page",
+   "obstacle": true,
+   "rect": {
+    "x": 640,
+    "y": 4000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:615",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "gestures\nunderline, strike, circle, cross, arrow, check",
+   "obstacle": true,
+   "rect": {
+    "x": 1600,
+    "y": 4000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:619",
+   "section": "8:480",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Decide what to change\nfrom what you read",
+   "obstacle": true,
+   "rect": {
+    "x": 640,
+    "y": 4560,
+    "w": 880,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light blue",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:623",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_stickies\nIdeas in any color, size, font, wide",
+   "obstacle": true,
+   "rect": {
+    "x": 2560,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:627",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_shape\n30 shape types, fill and line modes",
+   "obstacle": true,
+   "rect": {
+    "x": 3040,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:631",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_text\nHeadings and body text in toolbar fonts",
+   "obstacle": true,
+   "rect": {
+    "x": 3520,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:635",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_label\nNumbered or lettered markers on corners",
+   "obstacle": true,
+   "rect": {
+    "x": 4000,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:639",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_section\nNamed, colored areas",
+   "obstacle": true,
+   "rect": {
+    "x": 4480,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:643",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_table\nGrids with a header row",
+   "obstacle": true,
+   "rect": {
+    "x": 4960,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:647",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_mind_map\nTopic trees: right, both or radial",
+   "obstacle": true,
+   "rect": {
+    "x": 2560,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:651",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_code_block\nCode with a language",
+   "obstacle": true,
+   "rect": {
+    "x": 3040,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:655",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_link\nLink previews and embeds",
+   "obstacle": true,
+   "rect": {
+    "x": 3520,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:659",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_image\nPictures from a URL or bytes",
+   "obstacle": true,
+   "rect": {
+    "x": 4000,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:663",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "connect\nArrows between nodes, labeled, many at once",
+   "obstacle": true,
+   "rect": {
+    "x": 4480,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:667",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "draw\nPen and highlighter strokes",
+   "obstacle": true,
+   "rect": {
+    "x": 4960,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:671",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Toolbar styles\n20 swatches + hex; simple, bookish, technical, scribbled; small to huge",
+   "obstacle": true,
+   "rect": {
+    "x": 3040,
+    "y": 1200,
+    "w": 880,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:675",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Smart defaults\nFacing sides, elbows, auto-wide stickies",
+   "obstacle": true,
+   "rect": {
+    "x": 4480,
+    "y": 1200,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:679",
+   "section": "8:481",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "stamp\nVotes and reactions",
+   "obstacle": true,
+   "rect": {
+    "x": 4960,
+    "y": 1200,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light green",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:491",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Read the board",
+   "obstacle": true,
+   "rect": {
+    "x": 2560,
+    "y": 2000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "CHEVRON",
+    "color": "dark gray",
+    "fontSize": 24
+   }
+  },
+  {
+   "id": "8:495",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Check the target",
+   "obstacle": true,
+   "rect": {
+    "x": 3040,
+    "y": 2000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "CHEVRON",
+    "color": "dark gray",
+    "fontSize": 24
+   }
+  },
+  {
+   "id": "8:499",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Write with expect and clientId",
+   "obstacle": true,
+   "rect": {
+    "x": 3520,
+    "y": 2000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "CHEVRON",
+    "color": "dark gray",
+    "fontSize": 24
+   }
+  },
+  {
+   "id": "8:503",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Run review_layout",
+   "obstacle": true,
+   "rect": {
+    "x": 4000,
+    "y": 2000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "CHEVRON",
+    "color": "dark gray",
+    "fontSize": 24
+   }
+  },
+  {
+   "id": "8:507",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Export and look",
+   "obstacle": true,
+   "rect": {
+    "x": 4480,
+    "y": 2000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "CHEVRON",
+    "color": "dark gray",
+    "fontSize": 24
+   }
+  },
+  {
+   "id": "8:511",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Fix, then read again",
+   "obstacle": true,
+   "rect": {
+    "x": 4960,
+    "y": 2000,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "CHEVRON",
+    "color": "dark gray",
+    "fontSize": 24
+   }
+  },
+  {
+   "id": "8:515",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "expect\npageId, revs, names, absent checked first",
+   "obstacle": true,
+   "rect": {
+    "x": 2560,
+    "y": 2560,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:519",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "precondition_failed\nNothing changed: re-read, decide again",
+   "obstacle": true,
+   "rect": {
+    "x": 3040,
+    "y": 2560,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:523",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "clientId\nRetries return the same node",
+   "obstacle": true,
+   "rect": {
+    "x": 3520,
+    "y": 2560,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:527",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "confirm\nDeletes and conversions need expect or consent",
+   "obstacle": true,
+   "rect": {
+    "x": 4000,
+    "y": 2560,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:531",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "batch\nMany calls, one undo step",
+   "obstacle": true,
+   "rect": {
+    "x": 4480,
+    "y": 2560,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:535",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "run_code\nAnything the plugin API allows",
+   "obstacle": true,
+   "rect": {
+    "x": 4960,
+    "y": 2560,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:539",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Agent name\nX-Agent tags every change",
+   "obstacle": true,
+   "rect": {
+    "x": 2560,
+    "y": 3120,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:543",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "One write at a time\nper board, in arrival order",
+   "obstacle": true,
+   "rect": {
+    "x": 3040,
+    "y": 3120,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:547",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Change feed\n/changes: who changed what, long-poll",
+   "obstacle": true,
+   "rect": {
+    "x": 3520,
+    "y": 3120,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:551",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Claims\nReserve nodes or an area before long edits",
+   "obstacle": true,
+   "rect": {
+    "x": 4000,
+    "y": 3120,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:555",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "pageId on every call\nAct on a page without switching",
+   "obstacle": true,
+   "rect": {
+    "x": 4480,
+    "y": 3120,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:559",
+   "section": "8:482",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "People are never blocked\nClaims only gate agents",
+   "obstacle": true,
+   "rect": {
+    "x": 4960,
+    "y": 3120,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light red",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:683",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "update_node\nText, colors, size, rotation, flip, lock, connector ends",
+   "obstacle": true,
+   "rect": {
+    "x": 2560,
+    "y": 3920,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:687",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "style_text\nFonts, bold, links, bullets per range",
+   "obstacle": true,
+   "rect": {
+    "x": 3040,
+    "y": 3920,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:691",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "edit_table\nAdd, move, delete, sort rows and columns",
+   "obstacle": true,
+   "rect": {
+    "x": 3520,
+    "y": 3920,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:695",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "set_link\nLink text to a URL or any node",
+   "obstacle": true,
+   "rect": {
+    "x": 4000,
+    "y": 3920,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:699",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "duplicate\nCopies with connectors re-attached",
+   "obstacle": true,
+   "rect": {
+    "x": 4480,
+    "y": 3920,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:703",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "delete_nodes\nRemove, guarded",
+   "obstacle": true,
+   "rect": {
+    "x": 4960,
+    "y": 3920,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:707",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "convert_node\nSticky \u2194 shape \u2194 text, stickies \u2194 table, link \u2194 text",
+   "obstacle": true,
+   "rect": {
+    "x": 2560,
+    "y": 4400,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:711",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "copy_style\nCopy the look from one node to others",
+   "obstacle": true,
+   "rect": {
+    "x": 3040,
+    "y": 4400,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:715",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Transforms\nFlip, rotate, lock, opacity, hide",
+   "obstacle": true,
+   "rect": {
+    "x": 4000,
+    "y": 4400,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:719",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Table sort\nNumbers, names, empty last",
+   "obstacle": true,
+   "rect": {
+    "x": 4480,
+    "y": 4400,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:723",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Connector edits\nReverse, re-route, caps, curve",
+   "obstacle": true,
+   "rect": {
+    "x": 2560,
+    "y": 4880,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:727",
+   "section": "8:483",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Context-menu actions\nRebuilt where FigJam has no plugin API",
+   "obstacle": true,
+   "rect": {
+    "x": 3520,
+    "y": 4880,
+    "w": 880,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light orange",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:731",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "create_page\nNew named page, returns its link",
+   "obstacle": true,
+   "rect": {
+    "x": 5920,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:735",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "switch_page\nChange the current page",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:739",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "rename_page\nRename, guarded and idempotent",
+   "obstacle": true,
+   "rect": {
+    "x": 6880,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:743",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "set_board_url\nStore the share link",
+   "obstacle": true,
+   "rect": {
+    "x": 7360,
+    "y": 240,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:747",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "get_link\nLinks to nodes and pages",
+   "obstacle": true,
+   "rect": {
+    "x": 5920,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:751",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "focus\nSelect and zoom",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:755",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "select\nBy ids or matching type, color, author",
+   "obstacle": true,
+   "rect": {
+    "x": 6880,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:759",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "viewport\nRead or set the view",
+   "obstacle": true,
+   "rect": {
+    "x": 7360,
+    "y": 720,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:763",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "group\nGroup nodes",
+   "obstacle": true,
+   "rect": {
+    "x": 5920,
+    "y": 1200,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:767",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "ungroup\nUngroup, or remove a section and keep contents",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 1200,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:771",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "move_to\nInto a section, out, or to another page",
+   "obstacle": true,
+   "rect": {
+    "x": 6880,
+    "y": 1200,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:775",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "unlock_all\nUnlock a page or section",
+   "obstacle": true,
+   "rect": {
+    "x": 7360,
+    "y": 1200,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:779",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "align\nLine up edges or centers",
+   "obstacle": true,
+   "rect": {
+    "x": 5920,
+    "y": 1680,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:783",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "distribute\nEven gaps",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 1680,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:787",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "arrange_grid\nLay out in a grid",
+   "obstacle": true,
+   "rect": {
+    "x": 6880,
+    "y": 1680,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:791",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "reorder\nFront, back, forward, backward",
+   "obstacle": true,
+   "rect": {
+    "x": 7360,
+    "y": 1680,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:795",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "sort_stickies\nColumns by color, author, text or theme",
+   "obstacle": true,
+   "rect": {
+    "x": 5920,
+    "y": 2160,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:799",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "fit_section\nWrap contents with even padding",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 2160,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:803",
+   "section": "8:484",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Theme clusters\nThe model groups, the tool lays out",
+   "obstacle": true,
+   "rect": {
+    "x": 7360,
+    "y": 2160,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light violet",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:807",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "review_layout\nFinds layout problems, each with a fix",
+   "obstacle": true,
+   "rect": {
+    "x": 5920,
+    "y": 2960,
+    "w": 880,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:811",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "calibrate_fonts\nLearn sizes from what people set",
+   "obstacle": true,
+   "rect": {
+    "x": 7360,
+    "y": 2960,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:815",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Overlaps\nNodes on top of each other",
+   "obstacle": true,
+   "rect": {
+    "x": 5920,
+    "y": 3440,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:819",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Text problems\nSmall, overflowing or low contrast",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 3440,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:823",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Spacing\nUneven gaps, near-misses, crowding",
+   "obstacle": true,
+   "rect": {
+    "x": 6880,
+    "y": 3440,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:827",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Connectors\nStubs, crossings, through nodes",
+   "obstacle": true,
+   "rect": {
+    "x": 7360,
+    "y": 3440,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:831",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Fix every issue\nthen review again",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 3920,
+    "w": 880,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:835",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "export_png\nPNG, JPG or SVG of nodes, areas, pages",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 4400,
+    "w": 880,
+    "h": 160
+   },
+   "style": {
+    "shape": "ROUNDED_RECTANGLE",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:839",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "Saved to exports/\nThe agent looks at it",
+   "obstacle": true,
+   "rect": {
+    "x": 6400,
+    "y": 4880,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  },
+  {
+   "id": "8:843",
+   "section": "8:485",
+   "type": "SHAPE_WITH_TEXT",
+   "role": "card",
+   "text": "SVG\nReturned inline as text",
+   "obstacle": true,
+   "rect": {
+    "x": 6880,
+    "y": 4880,
+    "w": 400,
+    "h": 160
+   },
+   "style": {
+    "shape": "HEXAGON",
+    "color": "light teal",
+    "fontSize": 16
+   }
+  }
+ ],
+ "edges": [
+  {
+   "id": "e4",
+   "from": "8:583",
+   "to": "8:595",
+   "kind": "flow",
+   "label": "ids, revs",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e5",
+   "from": "8:579",
+   "to": "8:595",
+   "kind": "flow",
+   "label": "pageId",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e6",
+   "from": "8:587",
+   "to": "8:599",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e7",
+   "from": "8:591",
+   "to": "8:599",
+   "kind": "flow",
+   "label": "matches",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e8",
+   "from": "8:603",
+   "to": "8:615",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e9",
+   "from": "8:595",
+   "to": "8:607",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e10",
+   "from": "8:595",
+   "to": "8:611",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e11",
+   "from": "8:595",
+   "to": "8:619",
+   "kind": "flow",
+   "label": "structure",
+   "fromMagnet": "BOTTOM",
+   "toMagnet": "LEFT",
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e12",
+   "from": "8:599",
+   "to": "8:619",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": "BOTTOM",
+   "toMagnet": "TOP",
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e13",
+   "from": "8:615",
+   "to": "8:619",
+   "kind": "flow",
+   "label": "what people marked",
+   "fromMagnet": "BOTTOM",
+   "toMagnet": "RIGHT",
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e14",
+   "from": "8:491",
+   "to": "8:495",
+   "kind": "loop",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "STRAIGHT"
+  },
+  {
+   "id": "e15",
+   "from": "8:495",
+   "to": "8:499",
+   "kind": "loop",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "STRAIGHT"
+  },
+  {
+   "id": "e16",
+   "from": "8:499",
+   "to": "8:503",
+   "kind": "loop",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "STRAIGHT"
+  },
+  {
+   "id": "e17",
+   "from": "8:503",
+   "to": "8:507",
+   "kind": "loop",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "STRAIGHT"
+  },
+  {
+   "id": "e18",
+   "from": "8:507",
+   "to": "8:511",
+   "kind": "loop",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "STRAIGHT"
+  },
+  {
+   "id": "e19",
+   "from": "8:511",
+   "to": "8:491",
+   "kind": "loop",
+   "label": null,
+   "fromMagnet": "BOTTOM",
+   "toMagnet": "BOTTOM",
+   "lineType": "STRAIGHT"
+  },
+  {
+   "id": "e20",
+   "from": "8:619",
+   "to": "8:499",
+   "kind": "dep",
+   "label": "then write",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e21",
+   "from": "8:595",
+   "to": "8:491",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e22",
+   "from": "8:607",
+   "to": "8:515",
+   "kind": "flow",
+   "label": "revs",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e23",
+   "from": "8:611",
+   "to": "8:495",
+   "kind": "flow",
+   "label": "pageId",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e24",
+   "from": "8:611",
+   "to": "8:555",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e25",
+   "from": "8:515",
+   "to": "8:499",
+   "kind": "dep",
+   "label": "checked first",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e26",
+   "from": "8:519",
+   "to": "8:491",
+   "kind": "dep",
+   "label": "re-read",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e27",
+   "from": "8:523",
+   "to": "8:499",
+   "kind": "dep",
+   "label": "safe retries",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e28",
+   "from": "8:543",
+   "to": "8:499",
+   "kind": "dep",
+   "label": "one at a time",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e29",
+   "from": "8:551",
+   "to": "8:543",
+   "kind": "dep",
+   "label": "checked before queue",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e30",
+   "from": "8:559",
+   "to": "8:551",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e31",
+   "from": "8:555",
+   "to": "8:499",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e32",
+   "from": "8:527",
+   "to": "8:703",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e33",
+   "from": "8:527",
+   "to": "8:707",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e34",
+   "from": "8:527",
+   "to": "8:767",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e35",
+   "from": "8:527",
+   "to": "8:739",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e36",
+   "from": "8:527",
+   "to": "8:775",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e37",
+   "from": "8:527",
+   "to": "8:535",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e38",
+   "from": "8:515",
+   "to": "8:519",
+   "kind": "flow",
+   "label": "on mismatch",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e39",
+   "from": "8:531",
+   "to": "8:499",
+   "kind": "flow",
+   "label": "one undo step",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e40",
+   "from": "8:539",
+   "to": "8:547",
+   "kind": "flow",
+   "label": "actor",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e41",
+   "from": "8:547",
+   "to": "8:595",
+   "kind": "flow",
+   "label": "re-read what changed",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e42",
+   "from": "8:547",
+   "to": "8:551",
+   "kind": "flow",
+   "label": "see who is working",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e43",
+   "from": "8:499",
+   "to": "8:623",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e44",
+   "from": "8:499",
+   "to": "8:627",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e45",
+   "from": "8:499",
+   "to": "8:663",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e46",
+   "from": "8:499",
+   "to": "8:683",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e47",
+   "from": "8:499",
+   "to": "8:771",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e48",
+   "from": "8:503",
+   "to": "8:807",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e49",
+   "from": "8:507",
+   "to": "8:835",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e50",
+   "from": "8:639",
+   "to": "8:623",
+   "kind": "dep",
+   "label": "sectionId",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e51",
+   "from": "8:671",
+   "to": "8:623",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e52",
+   "from": "8:671",
+   "to": "8:627",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e53",
+   "from": "8:671",
+   "to": "8:631",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e54",
+   "from": "8:675",
+   "to": "8:663",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e55",
+   "from": "8:647",
+   "to": "8:663",
+   "kind": "dep",
+   "label": "uses curved connectors",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e56",
+   "from": "8:627",
+   "to": "8:663",
+   "kind": "flow",
+   "label": "node ids",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e57",
+   "from": "8:623",
+   "to": "8:663",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e58",
+   "from": "8:635",
+   "to": "8:627",
+   "kind": "flow",
+   "label": "pins to a corner",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e59",
+   "from": "8:679",
+   "to": "8:623",
+   "kind": "flow",
+   "label": "votes on",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e60",
+   "from": "8:667",
+   "to": "8:603",
+   "kind": "flow",
+   "label": "read back as gestures",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e61",
+   "from": "8:643",
+   "to": "8:691",
+   "kind": "flow",
+   "label": "table id",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e62",
+   "from": "8:623",
+   "to": "8:707",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e63",
+   "from": "8:623",
+   "to": "8:795",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e64",
+   "from": "8:631",
+   "to": "8:687",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e65",
+   "from": "8:655",
+   "to": "8:707",
+   "kind": "flow",
+   "label": "link \u2194 text",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e66",
+   "from": "8:651",
+   "to": "8:683",
+   "kind": "flow",
+   "label": "code, language",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e67",
+   "from": "8:683",
+   "to": "8:715",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e68",
+   "from": "8:683",
+   "to": "8:723",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e69",
+   "from": "8:691",
+   "to": "8:719",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e70",
+   "from": "8:707",
+   "to": "8:727",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e71",
+   "from": "8:711",
+   "to": "8:727",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e72",
+   "from": "8:699",
+   "to": "8:663",
+   "kind": "flow",
+   "label": "re-attaches connectors",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e73",
+   "from": "8:687",
+   "to": "8:695",
+   "kind": "flow",
+   "label": "linked ranges",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e74",
+   "from": "8:731",
+   "to": "8:735",
+   "kind": "flow",
+   "label": "pageId",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e75",
+   "from": "8:731",
+   "to": "8:747",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e76",
+   "from": "8:747",
+   "to": "8:695",
+   "kind": "flow",
+   "label": "node links",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e77",
+   "from": "8:755",
+   "to": "8:751",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e78",
+   "from": "8:751",
+   "to": "8:759",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e79",
+   "from": "8:763",
+   "to": "8:767",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e80",
+   "from": "8:771",
+   "to": "8:555",
+   "kind": "flow",
+   "label": "to another page",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e81",
+   "from": "8:803",
+   "to": "8:795",
+   "kind": "flow",
+   "label": "groups",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e82",
+   "from": "8:775",
+   "to": "8:683",
+   "kind": "flow",
+   "label": "then edit",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e83",
+   "from": "8:743",
+   "to": "8:747",
+   "kind": "dep",
+   "label": "needed for URLs",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e84",
+   "from": "8:779",
+   "to": "8:799",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e85",
+   "from": "8:783",
+   "to": "8:799",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e86",
+   "from": "8:787",
+   "to": "8:799",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e87",
+   "from": "8:795",
+   "to": "8:799",
+   "kind": "dep",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e88",
+   "from": "8:807",
+   "to": "8:815",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e89",
+   "from": "8:815",
+   "to": "8:831",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e90",
+   "from": "8:807",
+   "to": "8:819",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e91",
+   "from": "8:819",
+   "to": "8:831",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e92",
+   "from": "8:807",
+   "to": "8:823",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e93",
+   "from": "8:823",
+   "to": "8:831",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e94",
+   "from": "8:807",
+   "to": "8:827",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e95",
+   "from": "8:827",
+   "to": "8:831",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e96",
+   "from": "8:835",
+   "to": "8:839",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e97",
+   "from": "8:835",
+   "to": "8:843",
+   "kind": "flow",
+   "label": null,
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e98",
+   "from": "8:835",
+   "to": "8:659",
+   "kind": "flow",
+   "label": "exported picture back on the board",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e99",
+   "from": "8:811",
+   "to": "8:671",
+   "kind": "flow",
+   "label": "real sizes",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "CURVED"
+  },
+  {
+   "id": "e100",
+   "from": "8:831",
+   "to": "8:799",
+   "kind": "verify",
+   "label": "rewrap",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e101",
+   "from": "8:831",
+   "to": "8:783",
+   "kind": "verify",
+   "label": "even gaps",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e102",
+   "from": "8:831",
+   "to": "8:683",
+   "kind": "verify",
+   "label": "move, resize",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e103",
+   "from": "8:839",
+   "to": "8:511",
+   "kind": "verify",
+   "label": "look critically",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  },
+  {
+   "id": "e104",
+   "from": "8:807",
+   "to": "8:623",
+   "kind": "verify",
+   "label": "checks what was made",
+   "fromMagnet": null,
+   "toMagnet": null,
+   "lineType": "ELBOWED"
+  }
+ ],
+ "routes": []
+}

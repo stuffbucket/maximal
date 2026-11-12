@@ -17,12 +17,17 @@ import type {
   AppsListResponse,
   AuthStatus,
   DiagnosticsResponse,
-  McpEndpointsListResponse,
   ModelsListResponse,
-  PendingRequestsResponse,
   UpdateStatusResponse,
 } from "../src/lib/config/settings-types"
 import type { SessionView, SessionsResponse } from "../src/lib/token-usage/sessions-schema"
+import type {
+  PluginDetailView,
+  PluginStatus,
+  PluginToolView,
+  PluginView,
+  ToolGroup,
+} from "../src/lib/config/settings-types"
 
 // gh-status isn't a settings-types export (it's typed in shell/src/proxy/client.ts),
 // so it's a plain shape here. installed:false hides the gh-reuse list.
@@ -100,10 +105,9 @@ export interface Scenario {
   diagnostics: DiagnosticsResponse
   updateStatus: UpdateStatusResponse
   ghStatus: GhStatusFixture
-  /** Optional on each scenario; `resolveScenario` fills the shared default. */
-  mcp?: McpEndpointsListResponse
-  /** MCP servers' requests waiting for an answer (Settings → Requests). */
-  requests?: PendingRequestsResponse
+  /** Optional on each scenario; `resolveScenario` fills the shared default.
+   *  Each connector's full detail; the mock derives the list from it. */
+  connectors?: Array<PluginDetailView>
   clients?: ActiveClientsFixture
   dashboard?: DashboardFixture
 }
@@ -369,53 +373,459 @@ const ghAvailable: GhStatusFixture = {
   ],
 }
 
-const workiqFound: McpEndpointsListResponse["available"][number] = {
-  id: "workiq",
-  label: "Work IQ",
-  status: "ready",
-  command:
-    "/Users/alex/.local/share/mise/installs/npm-microsoft-workiq/1.0.1/node_modules/@microsoft/workiq/bin/osx-arm64/workiq",
-  version: "1.0.1",
-  install: {
-    command: "npm install -g @microsoft/workiq@1",
-    url: "https://www.npmjs.com/package/@microsoft/workiq",
-    registry: "registry.npmjs.org",
+// ---- connectors (plugins of kind "connector") -------------------------------
+// Work IQ is the first connector. Its status text is the connector's own
+// English (the UI renders it as written); the mock API (ui-harness-api.ts)
+// walks it through these stages as the user accepts terms, signs in and out.
+// Tool names, descriptions and inputs follow Work IQ's real tool list; the
+// two marked "synthetic" were invented to complete the 6 / 5 / 3 grouping.
+export type WorkiqStage = "terms-needed" | "signin-needed" | "working" | "ready" | "error"
+
+export const WORKIQ_CONSENT_URL =
+  "https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md"
+
+const WORKIQ_ENDPOINT = "https://workiq.svc.cloud.microsoft/mcp"
+const WORKIQ_AUTHORITY = "https://login.microsoftonline.com/organizations"
+
+type ToolSeed = Omit<PluginToolView, "group" | "permission" | "permissionSource">
+
+const str = (description: string): Record<string, unknown> => ({ type: "string", description })
+const agentId = str("Optional agent ID to target a specific agent.")
+const jsonBody = {
+  description:
+    "Structured JSON for the request. Supply as a JSON object or a JSON-encoded string.",
+  anyOf: [{ type: "object", additionalProperties: true }, { type: "string" }],
+}
+const headers = {
+  type: "object",
+  description: "Optional extra HTTP headers, e.g. If-Match for an etag.",
+  additionalProperties: { type: "string" },
+}
+const schema = (properties: Record<string, unknown>, required: Array<string> = []): ToolSeed["inputSchema"] => ({
+  type: "object",
+  properties,
+  ...(required.length > 0 ? { required } : {}),
+})
+
+const readOnly = { readOnlyHint: true }
+const destructive = { readOnlyHint: false, destructiveHint: true }
+
+export const workiqToolSeeds: Array<ToolSeed> = [
+  {
+    name: "retrieve",
+    description:
+      "Search the user's M365 data (emails, files, meetings, Teams messages, people) and connected enterprise sources, returning raw per-source retrieval hits plus a model-friendly grounding markdown with inline [^id] citations that map back to each hit.",
+    inputSchema: schema(
+      {
+        query: str("What to search for, in natural language."),
+        includeDeveloperCard: { type: "boolean", description: "Also return the raw per-source developer card." },
+        agentId,
+        sources: { type: ["array", "null"], items: { type: "string" }, description: "Limit the search to these sources (mail, files, meetings, chats, people)." },
+        maxResults: { type: "integer", minimum: 1, maximum: 50, description: "Most hits to return per source." },
+      },
+      ["query"],
+    ),
+    annotations: readOnly,
   },
+  {
+    name: "fetch_blob",
+    description:
+      "Fetch a binary file (document, image, photo) from a WorkIQ path — PDFs, Office files, profile photos, etc. Up to 4 MB for the raw file. Returns the file's bytes base64-encoded plus metadata. To read the file, decode the bytes with a tool that understands the format.",
+    inputSchema: schema(
+      {
+        path: str("WorkIQ path of the file, e.g. /me/drive/items/{id}/content."),
+        format: { type: "string", enum: ["base64", "text"], description: "How to return the bytes." },
+        agentId,
+      },
+      ["path"],
+    ),
+    annotations: readOnly,
+  },
+  {
+    name: "get_schema",
+    description:
+      "Get the request/response schema for a WorkIQ path and operation (CDDL by default; 'jsonschema' or 'typescript' on request). Only needed when you do not know the fields for a write, or a write returned 400. Standard Graph payloads don't need it.",
+    inputSchema: schema(
+      {
+        path: str("WorkIQ path, e.g. /me/events."),
+        operationType: { type: "string", enum: ["get", "create", "update", "delete", "action"], description: "The operation to describe." },
+        format: { type: "string", enum: ["cddl", "jsonschema", "typescript"], description: "Schema language. Defaults to cddl." },
+        agentId,
+      },
+      ["path", "operationType"],
+    ),
+    annotations: readOnly,
+  },
+  {
+    name: "call_function",
+    description:
+      "Call a read-only WorkIQ function. Graph functions use HTTP GET; provider functions may accept structured JSON parameters. Functions compute or synthesize data rather than simply reading entities — e.g., delta queries, search, reminder views and free/busy lookups.",
+    inputSchema: schema(
+      {
+        functionUrl: str(
+          "WorkIQ function path to call (e.g., /me/messages/delta(), /me/drive/root/search(q='budget'), /me/reminderView(startDateTime='...',endDateTime='...')). Must be a relative path — do not include a base URL.",
+        ),
+        agentId,
+        jsonBody: {
+          ...jsonBody,
+          description:
+            "OPTIONAL — structured parameters for a provider function. Available only when enabled for the caller. Supply as a JSON object or JSON-encoded string.",
+        },
+      },
+      ["functionUrl"],
+    ),
+    annotations: readOnly,
+  },
+  {
+    name: "fetch",
+    description:
+      "Fetch one or more WorkIQ entities by path. Use well-known Microsoft Graph paths directly, e.g. /me/messages, /me/events/{id}, /me/calendarView?startDateTime=...&endDateTime=..., /me/manager, /me/drive/recent.",
+    inputSchema: schema(
+      {
+        entityUrls: { type: "array", items: { type: "string" }, description: "Relative WorkIQ paths to fetch." },
+        agentId,
+      },
+      ["entityUrls"],
+    ),
+    annotations: readOnly,
+  },
+  {
+    // synthetic
+    name: "list_entities",
+    description:
+      "List a WorkIQ collection by path, a page at a time, e.g. /me/mailFolders/inbox/messages or /me/joinedTeams. Returns the items and a cursor for the next page.",
+    inputSchema: schema(
+      {
+        collectionUrl: str("Relative WorkIQ path of the collection."),
+        top: { type: "integer", minimum: 1, maximum: 100, description: "Page size." },
+        cursor: str("Cursor from the previous page."),
+        agentId,
+      },
+      ["collectionUrl"],
+    ),
+    annotations: readOnly,
+  },
+  {
+    name: "accept_eula",
+    description:
+      "Accept the End User License Agreement (EULA) to enable full access to WorkIQ tools. The EULA URL should be https://github.com/microsoft/work-iq. This action requires explicit user confirmation and cannot be undone from here.",
+    inputSchema: schema({ eulaUrl: str("The EULA URL being accepted.") }, ["eulaUrl"]),
+    annotations: destructive,
+  },
+  {
+    name: "delete_entity",
+    description:
+      "Delete a WorkIQ entity by path. Sends HTTP DELETE to the entity path. Returns confirmation with status code on success. WorkIQ entity paths borrow from the conventions of Microsoft Graph. If the path or ID is wrong the call fails with 404 and nothing is deleted.",
+    inputSchema: schema(
+      { entityUrl: str("Relative WorkIQ path of the entity to delete."), headers, agentId },
+      ["entityUrl"],
+    ),
+    annotations: destructive,
+  },
+  {
+    // synthetic
+    name: "invoke_action",
+    description:
+      "Invoke a WorkIQ action by POSTing to its path, e.g. /me/sendMail, /me/events/{id}/accept or /me/messages/{id}/move. Actions change data or send things on the user's behalf.",
+    inputSchema: schema(
+      { actionUrl: str("Relative WorkIQ path of the action."), jsonBody, agentId },
+      ["actionUrl"],
+    ),
+    annotations: destructive,
+  },
+  {
+    name: "create_entity",
+    description:
+      "Create a new WorkIQ entity by POSTing JSON to a parent collection path. Call it directly for standard Graph payloads (e.g. event subject/start/end, message subject/body/toRecipients, mailFolder displayName, contact names and emails); use get_schema only if a create returned 400.",
+    inputSchema: schema(
+      { parentUrl: str("Relative WorkIQ path of the parent collection."), jsonBody, agentId },
+      ["parentUrl", "jsonBody"],
+    ),
+    annotations: destructive,
+  },
+  {
+    name: "update_entity",
+    description:
+      "Update an existing WorkIQ entity by writing JSON to its path. Call it directly for standard fields (e.g. isRead, flag, subject, location, start/end, displayName); use get_schema only if you do not know the fields or the update returned 400.",
+    inputSchema: schema(
+      { entityUrl: str("Relative WorkIQ path of the entity."), jsonBody, headers, agentId },
+      ["entityUrl", "jsonBody"],
+    ),
+    annotations: destructive,
+  },
+  {
+    name: "ask",
+    description:
+      "Ask a question to Microsoft 365 Copilot for information about emails, meetings, files, and other M365 data. Returns the answer as text content, with conversationId in structured content for multi-turn conversations.",
+    inputSchema: schema(
+      {
+        question: str("The question to ask"),
+        fileUrls: {
+          description: "Optional list of OneDrive or SharePoint file URLs to use as context",
+          type: ["array", "null"],
+          items: { type: ["string"] },
+        },
+        conversationId: str("Optional conversation ID to continue an existing conversation"),
+        agentId: str("Optional agent ID to target a specific agent. Defaults to M365 Copilot."),
+      },
+      ["question"],
+    ),
+    outputSchema: {
+      type: "object",
+      properties: { conversationId: { type: "string" } },
+    },
+  },
+  {
+    name: "list_agents",
+    description:
+      "List available Microsoft 365 Copilot agents. Returns agent IDs that can be passed to ask's agentId parameter.",
+    inputSchema: schema({}),
+  },
+  {
+    name: "get_debug_link",
+    description:
+      "Generates a share or debug link for a Work IQ conversation after requesting explicit user confirmation through the MCP host. Requires a host that supports form elicitation and obtains the human's response; without one, the call fails.",
+    inputSchema: schema(
+      {
+        linkType: { type: "string", enum: ["share", "debug"], description: "Which link to create." },
+        conversationId: str("The conversation to link to."),
+      },
+      ["linkType", "conversationId"],
+    ),
+  },
+]
+
+/** Annotation grouping, as the host infers it. */
+function toolGroup(tool: Pick<ToolSeed, "annotations">): ToolGroup {
+  if (tool.annotations?.readOnlyHint === true) return "read-only"
+  if (tool.annotations?.destructiveHint === true) return "write-delete"
+  return "other"
 }
 
-/** Work IQ as npm installs it on Windows: a long path with no spaces. */
-const workiqFoundWindows: McpEndpointsListResponse["available"][number] = {
-  ...workiqFound,
-  command:
-    String.raw`C:\Users\Administrator\AppData\Roaming\npm\node_modules\@microsoft\workiq\bin\win-x64\workiq.exe`,
+/** The user's explicit choices in the fixtures: one other tool blocked, so
+ *  that group reads "Custom". */
+export const workiqBlocked: ReadonlyArray<string> = ["get_debug_link"]
+
+/** As the host resolves them: the user's choice, else Work IQ's own default
+ *  (delete_entity off), else read-only allowed and everything else asks. */
+function permissionOf(
+  seed: ToolSeed,
+  blocked: ReadonlyArray<string>,
+): Pick<PluginToolView, "permission" | "permissionSource"> {
+  if (blocked.includes(seed.name)) return { permission: "block", permissionSource: "user" }
+  return workiqDefaultPermission(seed)
 }
 
-const twoMcpEndpoints: McpEndpointsListResponse = {
-  broker: { state: "running", problem: null },
-  available: [],
-  endpoints: [
-    {
-      id: "workiq",
-      label: "Work IQ",
-      enabled: true,
-      clients: ["claude-code"],
-      offered: [
-        { id: "claude-code", name: "Claude Code", available: true, configured: true },
-        { id: "claude-desktop", name: "Claude Desktop", available: false, configured: false },
-      ],
-    },
-    {
-      id: "github",
-      label: "GitHub",
-      enabled: false,
-      clients: [],
-      offered: [
-        { id: "claude-code", name: "Claude Code", available: true, configured: false },
-        { id: "claude-desktop", name: "Claude Desktop", available: false, configured: false },
-      ],
-    },
-  ],
+/** Work IQ's permission when the user hasn't chosen one. */
+export function workiqDefaultPermission(
+  tool: Pick<ToolSeed, "name" | "annotations">,
+): Pick<PluginToolView, "permission" | "permissionSource"> {
+  if (tool.name === "delete_entity") return { permission: "block", permissionSource: "plugin" }
+  return {
+    permission: toolGroup(tool) === "read-only" ? "allow" : "ask",
+    permissionSource: "default",
+  }
 }
+
+export function workiqToolViews(blocked: ReadonlyArray<string> = workiqBlocked): Array<PluginToolView> {
+  return workiqToolSeeds.map((seed) => ({
+    ...seed,
+    group: toolGroup(seed),
+    ...permissionOf(seed, blocked),
+  }))
+}
+
+export function toolCounts(tools: ReadonlyArray<PluginToolView>): PluginView["toolCounts"] {
+  const count = (group: ToolGroup): number => tools.filter((tool) => tool.group === group).length
+  return {
+    total: tools.length,
+    byGroup: { "read-only": count("read-only"), "write-delete": count("write-delete"), other: count("other") },
+  }
+}
+
+export function workiqStatus(stage: WorkiqStage): PluginStatus {
+  switch (stage) {
+    case "terms-needed":
+      return {
+        state: "needs-setup",
+        code: "terms-needed",
+        summary: "Accept Microsoft’s Work IQ terms to continue",
+        detail:
+          "Work IQ reads your Microsoft 365 work data (mail, meetings, files) on your behalf. Read Microsoft’s terms at https://github.com/microsoft/work-iq, then accept them here.",
+        actions: [
+          {
+            id: "accept-terms",
+            label: "Accept terms",
+            kind: "primary",
+            confirm: "Record that you accept Microsoft’s terms for Work IQ (https://github.com/microsoft/work-iq)?",
+          },
+        ],
+      }
+    case "signin-needed":
+      return {
+        state: "needs-setup",
+        code: "signin-needed",
+        summary: "Sign in to Work IQ",
+        detail:
+          "Sign in with your Microsoft 365 work account. A browser window opens to finish; Maximal never sees your password.",
+        actions: [{ id: "sign-in", label: "Sign in", kind: "primary" }],
+      }
+    case "working":
+      return {
+        state: "working",
+        code: "signing-in",
+        summary: "Waiting for you to finish signing in…",
+        detail: "Finish signing in in your browser. Maximal waits up to five minutes.",
+        actions: [{ id: "cancel-sign-in", label: "Cancel sign-in", kind: "secondary" }],
+      }
+    case "ready":
+      return {
+        state: "ready",
+        code: "ready",
+        summary: "Signed in and ready",
+        facts: [
+          { label: "Account", value: "alex.rivera@contoso.com" },
+          { label: "Tenant", value: "Contoso Ltd" },
+          { label: "Protocol", value: "MCP 2025-11-25" },
+        ],
+        actions: [
+          {
+            id: "sign-out",
+            label: "Sign out",
+            kind: "destructive",
+            confirm: "Sign out of Work IQ? Maximal removes the saved sign-in from this computer.",
+          },
+        ],
+      }
+    case "error":
+      return {
+        state: "error",
+        code: "consent-needed",
+        summary: "Your organization hasn’t approved Work IQ yet",
+        detail:
+          "An admin must grant consent for the Work IQ app, and your account needs a Microsoft 365 Copilot license. Send your admin " +
+          WORKIQ_CONSENT_URL,
+        facts: [{ label: "Account", value: "alex.rivera@contoso.com" }],
+        actions: [
+          { id: "sign-in", label: "Sign in again", kind: "secondary" },
+          { id: "sign-out", label: "Sign out", kind: "destructive", confirm: "Sign out of Work IQ?" },
+        ],
+      }
+  }
+}
+
+/** The config schema Work IQ's connector kit publishes (z.toJSONSchema, input side). */
+export const workiqConfigSchema: PluginDetailView["configSchema"] = {
+  type: "object",
+  properties: {
+    endpoint: {
+      type: "string",
+      format: "uri",
+      default: WORKIQ_ENDPOINT,
+      title: "Endpoint",
+      description: "Work IQ MCP endpoint (Streamable HTTP).",
+      "x-maximal-advanced": true,
+    },
+    authority: {
+      type: "string",
+      format: "uri",
+      default: WORKIQ_AUTHORITY,
+      title: "Sign-in authority",
+      description: "Microsoft Entra authority used for sign-in.",
+      "x-maximal-advanced": true,
+    },
+  },
+  additionalProperties: false,
+}
+
+/** Tools last seen when the catalog was cached: three days before "now". */
+export const catalogSeenAt = (): string => new Date(Date.now() - 3 * 86_400_000).toISOString()
+
+interface WorkiqOptions {
+  /** Off when omitted. */
+  stage?: WorkiqStage
+  /** On, but it didn't start: `error` says why. */
+  failed?: string
+  /** Claude Code integration is off in Apps, so it can't be offered. */
+  claudeCodeUnavailable?: boolean
+  /** Whether Claude Code is ticked. */
+  selected?: boolean
+  /** Claude Code already runs its own Work IQ, so Maximal adds none. */
+  standalone?: { name: string; source: "server" | "plugin" }
+  /** Not running live, but a catalog from an earlier sign-in is cached. */
+  cached?: boolean
+  /** The stored config (defaults when omitted; `null`: the settings file
+   *  is unreadable, so there is none to show). */
+  config?: Record<string, unknown> | null
+}
+
+/** Work IQ's `GET /settings/api/plugins/:id`. */
+export function workiqDetail({
+  stage,
+  failed,
+  claudeCodeUnavailable = false,
+  selected = true,
+  standalone,
+  cached = false,
+  config = { endpoint: WORKIQ_ENDPOINT, authority: WORKIQ_AUTHORITY },
+}: WorkiqOptions = {}): PluginDetailView {
+  const enabled = stage !== undefined || failed !== undefined
+  const live = stage === "ready" && failed === undefined
+  const tools = live || cached ? workiqToolViews() : []
+  const manifest: PluginDetailView["manifest"] = {
+    id: "workiq",
+    kind: "connector",
+    displayName: "Work IQ",
+    description: "Lets your apps ask about your Microsoft 365 work: mail, meetings, files and people.",
+    homepage: "https://github.com/microsoft/work-iq",
+    connector: {
+      transport: "streamable-http",
+      endpoint: typeof config?.endpoint === "string" ? config.endpoint : WORKIQ_ENDPOINT,
+      auth: { type: "entra" },
+      terms: { url: "https://github.com/microsoft/work-iq", label: "Microsoft Work IQ terms" },
+    },
+  }
+  return {
+    id: manifest.id,
+    kind: manifest.kind,
+    source: "built-in",
+    displayName: manifest.displayName,
+    description: manifest.description,
+    homepage: manifest.homepage,
+    manifest,
+    enabled,
+    lifecycle: failed !== undefined ? "failed" : stage ? "active" : "disabled",
+    ...(failed !== undefined ? { error: failed } : {}),
+    ...(stage && failed === undefined ? { status: workiqStatus(stage) } : {}),
+    toolCounts: toolCounts(tools),
+    toolsSource: live ? "live" : tools.length > 0 ? "cache" : "none",
+    clients: [
+      {
+        id: "claude-code",
+        selected: enabled && selected,
+        available: !claudeCodeUnavailable,
+        ...(claudeCodeUnavailable
+          ? { reason: "Claude Code isn’t routed through Maximal. Turn it on in Apps to add Work IQ to it." }
+          : {}),
+        ...(standalone ? { standalone } : {}),
+      },
+    ],
+    endpoint: "http://localhost:4141/mcp/workiq",
+    settingsVersion: 1,
+    ...(config ? { config } : {}),
+    configSchema: workiqConfigSchema,
+    tools,
+    ...(tools.length > 0 ? { catalogUpdatedAt: live ? new Date().toISOString() : catalogSeenAt() } : {}),
+  }
+}
+
+/** The list item for a detail: the same object minus the detail-only keys. */
+export function listItem(detail: PluginDetailView): PluginView {
+  const { settingsVersion: _v, config: _c, configSchema: _s, tools: _t, catalogUpdatedAt: _u, ...item } = detail
+  return item
+}
+
+const workiqOff: Array<PluginDetailView> = [workiqDetail()]
 
 const recentClients: ActiveClientsFixture = {
   clients: [
@@ -841,52 +1251,6 @@ function healthy(label: string): Scenario {
 }
 
 // ---- the scenarios ---------------------------------------------------------
-// Relative to now (not ISO()), so "time left" reads naturally in the harness.
-const inMinutes = (minutes: number): string =>
-  new Date(Date.now() + minutes * 60_000).toISOString()
-
-const waitingRequests: PendingRequestsResponse = {
-  requests: [
-    {
-      id: "elicit-form",
-      endpointId: "workiq",
-      label: "Work IQ",
-      toolName: "get_debug_link",
-      mode: "form",
-      message:
-        "Create a shareable debug link for this conversation? Anyone with the link can see the conversation's diagnostic details for 7 days.",
-      fields: [
-        { name: "confirmed", kind: "boolean", title: "Create the link", required: true },
-        {
-          name: "audience",
-          kind: "enum",
-          title: "Who can open it",
-          required: true,
-          options: [
-            { value: "org", label: "People in my organization" },
-            { value: "me", label: "Only me" },
-          ],
-        },
-        { name: "note", kind: "string", title: "Note for support", required: false, maxLength: 200 },
-      ],
-      receivedAt: inMinutes(-1),
-      expiresAt: inMinutes(4),
-    },
-    {
-      id: "elicit-url",
-      endpointId: "workiq",
-      label: "Work IQ",
-      mode: "url",
-      message: "Sign in to Microsoft 365 to let Work IQ read your calendar.",
-      fields: [],
-      url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=example",
-      urlHost: "login.microsoftonline.com",
-      receivedAt: inMinutes(0),
-      expiresAt: inMinutes(5),
-    },
-  ],
-}
-
 export const SCENARIOS = {
   "signed-in": {
     label: "Signed in · healthy",
@@ -1140,7 +1504,6 @@ export const SCENARIOS = {
     diagnostics: baseDiagnostics,
     updateStatus: upToDate,
     ghStatus: ghAvailable,
-    mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [] },
     clients: { clients: [], total: 0 },
     dashboard: emptyDashboard,
   },
@@ -1173,89 +1536,79 @@ export const SCENARIOS = {
     dashboard: { ...busyDashboard, sessions: liveSessions },
   },
 
-  "mcp-recovering": {
-    ...healthy("MCP · broker stopped, Maximal restarting it"),
-    mcp: { ...twoMcpEndpoints, broker: { state: "recovering", problem: null } },
+  "connectors-off": {
+    ...healthy("Connectors · Work IQ off, nothing seen yet"),
+    connectors: workiqOff,
   },
 
-  "mcp-stuck": {
-    ...healthy("MCP · broker keeps crashing (retries paused)"),
-    mcp: { ...twoMcpEndpoints, broker: { state: "stuck", problem: null } },
+  "connectors-list": {
+    ...healthy("Connectors · the list, Work IQ ready"),
+    connectors: [workiqDetail({ stage: "ready" })],
   },
 
-  "mcp-not-installed": {
-    ...healthy("MCP · broker missing from this install"),
-    mcp: { ...twoMcpEndpoints, broker: { state: "unavailable", problem: "not-installed" } },
+  "connectors-detail-ready": {
+    ...healthy("Connectors · Work IQ ready: 14 tools, two blocked"),
+    connectors: [workiqDetail({ stage: "ready" })],
   },
 
-  "mcp-containment-unavailable": {
-    ...healthy("MCP · Windows refused the job that contains the servers"),
-    mcp: {
-      ...twoMcpEndpoints,
-      broker: { state: "unavailable", problem: "containment-unavailable" },
-    },
+  "connectors-detail-terms-needed": {
+    ...healthy("Connectors · Work IQ on, Microsoft’s terms to accept"),
+    connectors: [workiqDetail({ stage: "terms-needed" })],
   },
 
-  "requests-waiting": {
-    ...healthy("Requests · a form and a link waiting for an answer"),
-    requests: waitingRequests,
+  "connectors-detail-signin-needed-cached": {
+    ...healthy("Connectors · Work IQ signed out, tools from the cached catalog"),
+    connectors: [workiqDetail({ stage: "signin-needed", cached: true })],
   },
 
-  "mcp-found": {
-    ...healthy("MCP · nothing added yet, Work IQ found on this machine"),
-    mcp: { endpoints: [], broker: { state: "off", problem: null }, available: [workiqFound] },
+  "connectors-detail-working": {
+    ...healthy("Connectors · Work IQ waiting for the browser sign-in"),
+    connectors: [workiqDetail({ stage: "working", cached: true })],
   },
 
-  "mcp-windows": {
-    ...healthy("MCP · Windows: a long server path, and Claude Code off in Apps"),
-    mcp: {
-      broker: { state: "running", problem: null },
-      available: [workiqFoundWindows],
-      endpoints: [
-        {
-          id: "everything",
-          label: "Everything",
-          enabled: true,
-          clients: ["claude-desktop"],
-          offered: [
-            { id: "claude-code", name: "Claude Code", available: false, configured: false },
-            { id: "claude-desktop", name: "Claude Desktop", available: true, configured: true },
-          ],
-        },
-      ],
-    },
+  "connectors-detail-error": {
+    ...healthy("Connectors · Work IQ signed in, but the organization hasn’t approved it"),
+    connectors: [workiqDetail({ stage: "error", cached: true })],
   },
 
-  "mcp-catalog-missing": {
-    ...healthy("MCP · nothing added yet, Work IQ not installed"),
-    mcp: {
-      endpoints: [],
-      broker: { state: "off", problem: null },
-      available: [
-        { id: "workiq", label: "Work IQ", status: "not-installed", install: workiqFound.install },
-      ],
-    },
+  "connectors-detail-failed": {
+    ...healthy("Connectors · Work IQ didn’t start (unreadable settings file)"),
+    connectors: [
+      workiqDetail({
+        failed:
+          "~/.local/share/copilot-api/plugins/workiq/settings.json isn’t valid JSON (Unexpected token } at line 9). Maximal left the file as it is.",
+        cached: true,
+        config: null,
+      }),
+    ],
   },
 
-  "mcp-catalog-mirror": {
-    ...healthy("MCP · Work IQ not installed, npm set to another registry"),
-    mcp: {
-      endpoints: [],
-      broker: { state: "off", problem: null },
-      available: [
-        {
-          id: "workiq",
-          label: "Work IQ",
-          status: "not-installed",
-          install: {
-            ...workiqFound.install,
-            command: "npm install -g @microsoft/workiq@1 --registry https://npm.example.test/",
-            registry: "npm.example.test",
-          },
-        },
-      ],
-    },
+  "connectors-detail-config-error": {
+    ...healthy("Connectors · Work IQ didn’t start (invalid endpoint in its configuration)"),
+    connectors: [
+      workiqDetail({
+        failed: "config.endpoint: Invalid URL",
+        cached: true,
+        config: { endpoint: "workiq.svc.cloud.microsoft/mcp", authority: "https://login.microsoftonline.com/organizations" },
+      }),
+    ],
   },
+
+  "connectors-claude-code-off": {
+    ...healthy("Connectors · Work IQ ready, Claude Code isn’t set up in Apps"),
+    connectors: [workiqDetail({ stage: "ready", claudeCodeUnavailable: true })],
+  },
+
+  "connectors-standalone-server": {
+    ...healthy("Connectors · Claude Code already has its own Work IQ server"),
+    connectors: [workiqDetail({ stage: "ready", standalone: { name: "workiq", source: "server" } })],
+  },
+
+  "connectors-standalone-plugin": {
+    ...healthy("Connectors · Claude Code already has Work IQ from Microsoft’s plugin"),
+    connectors: [workiqDetail({ stage: "ready", standalone: { name: "workiq@work-iq", source: "plugin" } })],
+  },
+
 } satisfies Record<string, Scenario>
 
 export type ScenarioId = keyof typeof SCENARIOS
@@ -1266,8 +1619,7 @@ export function resolveScenario(id: ScenarioId): ResolvedScenario {
   const s: Scenario = SCENARIOS[id]
   return {
     ...s,
-    mcp: s.mcp ?? twoMcpEndpoints,
-    requests: s.requests ?? { requests: [] },
+    connectors: s.connectors ?? workiqOff,
     clients: s.clients ?? recentClients,
     dashboard: s.dashboard ?? busyDashboard,
   }
