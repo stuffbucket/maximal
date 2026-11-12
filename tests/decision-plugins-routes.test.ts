@@ -246,7 +246,6 @@ for (const { plugin, path, model, endpoint, other } of cases) {
           catalogModel("gpt-6-luna-decisions", "decisions"),
           catalogModel("microsoft-decision-1", "decisions"),
           catalogModel("gpt-5.4", "chat"),
-          catalogModel("gpt-image-2.5-flare", "image"),
         ],
       })
       const ids = modelIds
@@ -255,20 +254,17 @@ for (const { plugin, path, model, endpoint, other } of cases) {
         "gpt-6-luna-decisions",
         "microsoft-decision-1",
         "gpt-5.4",
-        "gpt-image-2.5-flare",
       ])
 
       await enabled(plugin, false)
 
       const remaining = await ids()
       expect(remaining).not.toContain(model)
-      // The other plugin's model, chat models and (not yet pluginized) image
-      // models are untouched.
+      // The other plugin's model and chat models are untouched.
       expect(remaining).toContain(
         cases.find((entry) => entry.plugin === other)?.model ?? "",
       )
       expect(remaining).toContain("gpt-5.4")
-      expect(remaining).toContain("gpt-image-2.5-flare")
     })
   })
 }

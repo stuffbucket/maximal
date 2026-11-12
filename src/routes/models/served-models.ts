@@ -1,8 +1,8 @@
 /**
  * Which operation models `/models` lists. A model of an operation type
- * (`decisions`) that a capability plugin serves is listed only while some
- * enabled plugin serves it, so turning a plugin off takes its models out of
- * the list. Every other model is listed as the catalog has it.
+ * (`decisions`, `image`) that a capability plugin serves is listed only while
+ * some enabled plugin serves it, so turning a plugin off takes its models out
+ * of the list. Every other model is listed as the catalog has it.
  */
 
 import type { ServedModel } from "@stuffbucket/maximal-plugin-sdk/gateway"
@@ -12,7 +12,10 @@ import type { Model } from "~/services/copilot/get-models"
 import { COPILOT_PROVIDER_ID } from "~/services/copilot/upstream-request"
 
 /** Catalog model types whose models only a plugin's operation serves. */
-const OPERATION_MODEL_TYPES: ReadonlySet<string> = new Set(["decisions"])
+const OPERATION_MODEL_TYPES: ReadonlySet<string> = new Set([
+  "decisions",
+  "image",
+])
 
 /**
  * `models` without the operation-type models nothing serves right now.

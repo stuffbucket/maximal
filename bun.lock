@@ -9,6 +9,7 @@
         "@stuffbucket/maximal-plugin-decisions": "workspace:*",
         "@stuffbucket/maximal-plugin-figjam": "workspace:*",
         "@stuffbucket/maximal-plugin-host": "workspace:*",
+        "@stuffbucket/maximal-plugin-images": "workspace:*",
         "@stuffbucket/maximal-plugin-sdk": "workspace:*",
         "@stuffbucket/maximal-plugin-systemone": "workspace:*",
         "@stuffbucket/maximal-plugin-workiq": "workspace:*",
@@ -120,6 +121,20 @@
       "dependencies": {
         "@deepseek-ai/cordis": "4.0.2",
         "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+      },
+    },
+    "packages/plugin-images": {
+      "name": "@stuffbucket/maximal-plugin-images",
+      "version": "0.0.0",
+      "dependencies": {
+        "@stuffbucket/maximal-plugin-sdk": "workspace:*",
+        "zod": "4.6.7",
+      },
+      "devDependencies": {
+        "@stuffbucket/maximal-plugin-host": "workspace:*",
+      },
+      "peerDependencies": {
+        "@deepseek-ai/cordis": "4.0.2",
       },
     },
     "packages/plugin-sdk": {
@@ -457,6 +472,8 @@
     "@stuffbucket/maximal-plugin-figjam": ["@stuffbucket/maximal-plugin-figjam@workspace:packages/plugin-figjam"],
 
     "@stuffbucket/maximal-plugin-host": ["@stuffbucket/maximal-plugin-host@workspace:packages/plugin-host"],
+
+    "@stuffbucket/maximal-plugin-images": ["@stuffbucket/maximal-plugin-images@workspace:packages/plugin-images"],
 
     "@stuffbucket/maximal-plugin-sdk": ["@stuffbucket/maximal-plugin-sdk@workspace:packages/plugin-sdk"],
 

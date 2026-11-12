@@ -22,6 +22,7 @@ import {
   type PluginModule,
   providersService,
 } from "@stuffbucket/maximal-plugin-host"
+import * as images from "@stuffbucket/maximal-plugin-images"
 import * as systemone from "@stuffbucket/maximal-plugin-systemone"
 import * as workiq from "@stuffbucket/maximal-plugin-workiq"
 import consola from "consola"
@@ -43,6 +44,7 @@ const BUILTIN_PLUGINS: ReadonlyArray<PluginModule> = [
   figjam,
   decisions,
   systemone,
+  images,
 ]
 
 const OPEN_TIMEOUT_MS = 10_000
