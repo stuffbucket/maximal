@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.6.0](https://github.com/stuffbucket/maximal/compare/v0.5.2...v0.6.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **plugins:** the MCP broker (`maximal-mcp-broker`) and the `maximal mcp` command are removed; Maximal no longer brokers arbitrary stdio MCP servers or writes Claude Desktop MCP entries (it removes the broker entries it wrote). Connectors now run in-process as built-in plugins, served at `/mcp/<id>` and managed in Settings → Integrations → Connectors. Work IQ is the first connector: turn it on there (see docs/workiq.md). A Work IQ set up through the broker is carried over once on first start, with its Claude Code choice.
+
+### Features
+
+* **budget:** activity over any range at parity with the Dashboard, and a limit timeline ([#635](https://github.com/stuffbucket/maximal/issues/635)) ([ecbdf07](https://github.com/stuffbucket/maximal/commit/ecbdf073f227b71c83b2b90c571b0791334106b3))
+* **budget:** add budget limits config and spend status API ([#607](https://github.com/stuffbucket/maximal/issues/607)) ([265054f](https://github.com/stuffbucket/maximal/commit/265054fce185785f68817140ded1045f3009ff29))
+* **budget:** enforce spend limits with provider-scoped usage ([#626](https://github.com/stuffbucket/maximal/issues/626)) ([4411ee2](https://github.com/stuffbucket/maximal/commit/4411ee2f5dfc55c00462939c1ff0144950b4b536))
+* **budget:** pause sessions at a limit until it's cleared ([#643](https://github.com/stuffbucket/maximal/issues/643)) ([337973d](https://github.com/stuffbucket/maximal/commit/337973de71fa43a5356206aa5de8d5034b9a2e03))
+* **budget:** refresh provider allowances on demand and ask before going over ([#640](https://github.com/stuffbucket/maximal/issues/640)) ([7236f34](https://github.com/stuffbucket/maximal/commit/7236f341925d4ef0027253d3a9154258b40f9d6f))
+* **budget:** reusable filters and import/export of rules ([#637](https://github.com/stuffbucket/maximal/issues/637)) ([f1533e7](https://github.com/stuffbucket/maximal/commit/f1533e72a350f6b5791a3422028ebfb4c2df953b))
+* **budget:** rolling and every-N-hours resets with plan and persona presets ([#633](https://github.com/stuffbucket/maximal/issues/633)) ([cd5881c](https://github.com/stuffbucket/maximal/commit/cd5881c9c06d997fa7b5fe5a031c86955f925e7f))
+* **budget:** token-based limits and limits that apply only when you're away ([#641](https://github.com/stuffbucket/maximal/issues/641)) ([ed28db7](https://github.com/stuffbucket/maximal/commit/ed28db7d7498c164a09c43d7d72110c169108b68))
+* **budget:** what-if modelling and budgets from sessions ([#638](https://github.com/stuffbucket/maximal/issues/638)) ([1ab2cd2](https://github.com/stuffbucket/maximal/commit/1ab2cd23f4606fa006b7f472608ef61d8ddd6a18))
+* **connectors:** add app picker ([#647](https://github.com/stuffbucket/maximal/issues/647)) ([783a517](https://github.com/stuffbucket/maximal/commit/783a517a50d7ec010880f5df4ce91bfa06d34546))
+* **connectors:** ask permission and visible blocked tools ([ad962b8](https://github.com/stuffbucket/maximal/commit/ad962b8aa24b776b03f1a1efd28898adfc3e691c))
+* **connectors:** manifest-driven connectors with tool permissions ([8dfec47](https://github.com/stuffbucket/maximal/commit/8dfec47131fe3ce93267ee0caa54aa726892510a))
+* **connectors:** seal MCP OAuth sign-ins like Entra's token cache ([cfc7094](https://github.com/stuffbucket/maximal/commit/cfc7094c2e5be51ecb47f7ab6177c57e4c1a3028))
+* **connectors:** seal the Entra token cache with a key in the OS credential store ([77679a0](https://github.com/stuffbucket/maximal/commit/77679a0d601bc315cce1216b89edf7a40f7aab80))
+* **connectors:** write Claude Code entries directly as maximal-&lt;id&gt; ([14ca11d](https://github.com/stuffbucket/maximal/commit/14ca11dac6da41508ad6139958f9d3bcd5079181))
+* **figjam:** approve FigJam panels from the tray ([#621](https://github.com/stuffbucket/maximal/issues/621)) ([1eb542d](https://github.com/stuffbucket/maximal/commit/1eb542d6aec58a47d97fee923c7959ae2bcd8e5c))
+* **figjam:** bring the FigJam agent into packages ([a98af07](https://github.com/stuffbucket/maximal/commit/a98af07da22ce898b213e7ecfb662cf7044db1bb))
+* **figjam:** bring the FigJam agent into packages, with comments via a Figma token ([4a04370](https://github.com/stuffbucket/maximal/commit/4a0437039d1aba1fdc6301605021f62bb76ec5dd))
+* **figjam:** run the FigJam bridge from a built-in plugin with pairing in Integrations ([#617](https://github.com/stuffbucket/maximal/issues/617)) ([9a00a6c](https://github.com/stuffbucket/maximal/commit/9a00a6c76ed2b300ea9fa436dbfa2818f385d1fa))
+* **messages:** run plugin server tools in the /v1/messages loop ([#620](https://github.com/stuffbucket/maximal/issues/620)) ([16c28b0](https://github.com/stuffbucket/maximal/commit/16c28b0f495cc0802d9be7cdccb682637a082ac5))
+* **plugins:** add an operation registry service ([#616](https://github.com/stuffbucket/maximal/issues/616)) ([e27c4d0](https://github.com/stuffbucket/maximal/commit/e27c4d0ee3128a354b9f58ab230b726ef30d8660))
+* **plugins:** add an upstream provider registry with Copilot as the first provider ([#618](https://github.com/stuffbucket/maximal/issues/618)) ([74db571](https://github.com/stuffbucket/maximal/commit/74db571c914aaf0b17f0bac84d2432c686dce177))
+* **plugins:** add decide and classify server tools ([#627](https://github.com/stuffbucket/maximal/issues/627)) ([a656fe2](https://github.com/stuffbucket/maximal/commit/a656fe2557abe0a68b64d2bd80388844fb4f88c4))
+* **plugins:** add image generation and editing server tools ([#630](https://github.com/stuffbucket/maximal/issues/630)) ([bcd9cca](https://github.com/stuffbucket/maximal/commit/bcd9cca17ce726290982a6f2f2ec4285d17a1431))
+* **plugins:** add managed plugin generations ([ee7b410](https://github.com/stuffbucket/maximal/commit/ee7b41032ab700d1147b38c8b3eadcc9d9f9ad71))
+* **plugins:** add managed plugin generations ([#651](https://github.com/stuffbucket/maximal/issues/651)) ([cc777ac](https://github.com/stuffbucket/maximal/commit/cc777ac0ba3ebe144b136470ee78fa05d6eec2ed))
+* **plugins:** cordis plugin host with an in-process Work IQ plugin ([c3e276c](https://github.com/stuffbucket/maximal/commit/c3e276cebcb9e42ea924613fdae98324d79c5314))
+* **plugins:** let the host provide app services and list model plugins ([#614](https://github.com/stuffbucket/maximal/issues/614)) ([09f7fc4](https://github.com/stuffbucket/maximal/commit/09f7fc4bf78cacf01e79557a45a34bee991ad314))
+* **plugins:** native notifications from plugins ([e1a4bea](https://github.com/stuffbucket/maximal/commit/e1a4bea5bed952ecadad17d6a9f4e7f605a16057))
+* **plugins:** retire the MCP broker and `maximal mcp` for in-process plugins ([91c4311](https://github.com/stuffbucket/maximal/commit/91c43115e19610ecc28ca45c09d148fb3bb92baa))
+* **plugins:** serve decisions and systemone through capability plugins ([#624](https://github.com/stuffbucket/maximal/issues/624)) ([5797126](https://github.com/stuffbucket/maximal/commit/579712666282722177188288ba5b4e72603775de))
+* **plugins:** serve image generation and edits through a capability plugin ([#625](https://github.com/stuffbucket/maximal/issues/625)) ([94b718e](https://github.com/stuffbucket/maximal/commit/94b718ea1427354de75bd393dff7821f3f0cb52a))
+* **proxy:** serve Copilot image and decision models ([#604](https://github.com/stuffbucket/maximal/issues/604)) ([8c8d017](https://github.com/stuffbucket/maximal/commit/8c8d017cf2cad9c9b24ed0004f9d3119adabfe37))
+* **proxy:** tell signed-out clients to sign in instead of a bare 401 ([#595](https://github.com/stuffbucket/maximal/issues/595)) ([a128576](https://github.com/stuffbucket/maximal/commit/a128576a2bcefc60772097b645832f71dfd5484d))
+* redesign About dialog and add Windows developer tooling ([#596](https://github.com/stuffbucket/maximal/issues/596)) ([84c7def](https://github.com/stuffbucket/maximal/commit/84c7defd4f48b1a8dd65338e6414d4f1a1cf49d3))
+* **settings:** mark connectors an app already runs itself ([a9f4261](https://github.com/stuffbucket/maximal/commit/a9f42614877a4ee91c42de2d54a245b655ec715c))
+* **shell:** add a Budget window ([#631](https://github.com/stuffbucket/maximal/issues/631)) ([6415aec](https://github.com/stuffbucket/maximal/commit/6415aec0bad65bf5bd57e32e67f1d6b758acabaa))
+* **shell:** build rules from sessions and see rules on models ([#644](https://github.com/stuffbucket/maximal/issues/644)) ([f75a85e](https://github.com/stuffbucket/maximal/commit/f75a85e7fb6b3cf66ac207dfb87a7da49fd61630))
+* **shell:** report screen lock and idle time to the sidecar ([#632](https://github.com/stuffbucket/maximal/issues/632)) ([754e420](https://github.com/stuffbucket/maximal/commit/754e4202a367ecaf385c4886af183c83b96f3a3f))
+* **shell:** Rules activity over any range, at parity with the Dashboard ([#639](https://github.com/stuffbucket/maximal/issues/639)) ([97b2ccf](https://github.com/stuffbucket/maximal/commit/97b2ccfefe28806b88888168d58fb26e22fcae7b))
+* **shell:** see how each rule performs and model a rule before saving it ([#642](https://github.com/stuffbucket/maximal/issues/642)) ([1f3bacc](https://github.com/stuffbucket/maximal/commit/1f3bacc8934558daf51f2fd4b29fd4ec1dfab4dc))
+
+
+### Bug Fixes
+
+* **budget:** make provisional accounting crash-safe ([#645](https://github.com/stuffbucket/maximal/issues/645)) ([76a3136](https://github.com/stuffbucket/maximal/commit/76a3136f9b3781fc7ef654826bc8d4653c084985))
+* **connectors:** harden token handling, auth races and backpressure after review ([8164f33](https://github.com/stuffbucket/maximal/commit/8164f339d04f4812b0624303938873fbfb8596a5))
+* **connectors:** sealed sign-ins survive store trouble and connector rebuilds ([677ff2b](https://github.com/stuffbucket/maximal/commit/677ff2b5adbad29f53bae335128e67f722ee9397))
+* **copilot:** normalize catalog pricing metadata ([#594](https://github.com/stuffbucket/maximal/issues/594)) ([fb19d33](https://github.com/stuffbucket/maximal/commit/fb19d33d00a2dff08f99a2fa2f680a764aac9a03))
+* **dashboard:** recover usage after failures and show it as unavailable instead of an error ([#608](https://github.com/stuffbucket/maximal/issues/608)) ([a5743f5](https://github.com/stuffbucket/maximal/commit/a5743f5574407d98fcbed208c0662d51c20e6e44))
+* **deps:** update follow-redirects in the MCP broker for its security advisory ([#599](https://github.com/stuffbucket/maximal/issues/599)) ([a0b0ee0](https://github.com/stuffbucket/maximal/commit/a0b0ee0218adc75beca72da87739b48702851dd8))
+* **deps:** update ip-address, minimatch and rustls for their security advisories ([#603](https://github.com/stuffbucket/maximal/issues/603)) ([5cfbf22](https://github.com/stuffbucket/maximal/commit/5cfbf22a557795f0f16a54213b16564155e98aa3))
+* **figjam:** address CodeQL alerts from the FigJam packaging ([#610](https://github.com/stuffbucket/maximal/issues/610)) ([53c4c84](https://github.com/stuffbucket/maximal/commit/53c4c8460d3973bd8e05a1ced2655133ebb3a001))
+* **figjam:** guard run_code's tool calls and pin relayed calls to agent actors ([d978a71](https://github.com/stuffbucket/maximal/commit/d978a713f4f0d0e08525ea4c82cbbd36393e6952))
+* **models:** decouple aliases and clarify signed-out states ([#623](https://github.com/stuffbucket/maximal/issues/623)) ([4b59f10](https://github.com/stuffbucket/maximal/commit/4b59f1025975ca465189f8e4b57077346d73435d))
+* **plugins:** converge plugins in record order so registrations are deterministic ([#622](https://github.com/stuffbucket/maximal/issues/622)) ([40dc58d](https://github.com/stuffbucket/maximal/commit/40dc58d48c6481b2e6469f10c8375bb6d777eeba))
+* **plugins:** tell Settings when Claude Code routing turns on or off ([ec60d31](https://github.com/stuffbucket/maximal/commit/ec60d31c1981c990b061f7b0c267d8a297f08c55))
+* repair usage migration and connector picker ([#649](https://github.com/stuffbucket/maximal/issues/649)) ([5dd91df](https://github.com/stuffbucket/maximal/commit/5dd91dff268592578d922a4c7499515786463e14))
+* **responses:** send the vision header for images in tool results ([#648](https://github.com/stuffbucket/maximal/issues/648)) ([3d8c801](https://github.com/stuffbucket/maximal/commit/3d8c8019e7229c7426a04d109cb5a422d876d2d3))
+* **shell:** make the budget amount forgiving and keep the limit editor open on errors ([#634](https://github.com/stuffbucket/maximal/issues/634)) ([8feb37f](https://github.com/stuffbucket/maximal/commit/8feb37fd0dc77e4a8fc9e34e2c7a558e90991963))
+* **skills:** harden UI layout verification ([#650](https://github.com/stuffbucket/maximal/issues/650)) ([fcaec4d](https://github.com/stuffbucket/maximal/commit/fcaec4dc12a1259363fd00e6a6b3220770821c21))
+* **storybook:** handle occupied dev ports ([#646](https://github.com/stuffbucket/maximal/issues/646)) ([1dc6d55](https://github.com/stuffbucket/maximal/commit/1dc6d552d8a0378d98c93b2df3d66aabac63eefb))
+
 ## [0.5.2](https://github.com/stuffbucket/maximal/compare/v0.5.2-rc.4...v0.5.2) (2026-11-04)
 
 
