@@ -27,6 +27,7 @@
 import type { Context, ErrorHandler } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 
+import { isOperationUnavailableError } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import consola from "consola"
 import { HTTPException } from "hono/http-exception"
 
@@ -87,6 +88,14 @@ export type ProxyErrorRewrite = (
   event: ProxyErrorEvent,
 ) => ProxyErrorReply | undefined
 
+/** The route an operation answers, for the "not turned on" message. */
+const OPERATION_PATHS: Readonly<Record<string, string>> = {
+  systemone: "/v1/systemone",
+  decisions: "/v1/decisions",
+  "images.generations": "/v1/images/generations",
+  "images.edits": "/v1/images/edits",
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -120,6 +129,18 @@ function baseReply(event: ProxyErrorEvent): ProxyErrorReply {
           { extra: { remediation_url: error.remediationUrl } }
         : {}),
       },
+    }
+  }
+  if (isOperationUnavailableError(error)) {
+    // Nothing serves the model for this operation (its plugin is off, or the
+    // id is unknown or ambiguous). 404 says "not served here", which Copilot's
+    // own 400 `model_not_supported` can't be mistaken for.
+    return {
+      status: 404,
+      type: "not_found_error",
+      message: `\`${error.model}\` is not turned on in Maximal for ${OPERATION_PATHS[error.operation] ?? error.operation}. Turn on the plugin that serves it in Maximal → Settings, or name a model that is on.`,
+      retry: "never",
+      openai: { type: "invalid_request_error", code: "model_not_enabled" },
     }
   }
   if (upstream) {

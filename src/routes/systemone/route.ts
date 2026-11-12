@@ -1,30 +1,32 @@
 /**
- * `/v1/systemone`: relayed to Copilot's `/v1/systemone` and answered with its
- * JSON unchanged.
+ * `/v1/systemone`: dispatched to the `systemone` operation (today Copilot's
+ * `/v1/systemone`, through the built-in handler) and answered with the JSON
+ * unchanged.
  *
- * `createSystemOneRoutes(deps)` lets tests inject the upstream call without a
- * process-wide `mock.module` (docs/architecture.md § Testing gotchas).
+ * `createSystemOneRoutes(deps)` lets tests inject the operation dispatch (or
+ * the built-in upstream call) without a process-wide `mock.module`
+ * (docs/architecture.md § Testing gotchas).
  */
+
+import type { OperationDispatch } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { Hono } from "hono"
 
 import { requireGithubAuth } from "~/lib/auth/request-auth"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
-import { createCopilotTokenUsageRecorder } from "~/lib/token-usage"
-import { admitUpstreamRequest, requestedModel } from "~/routes/passthrough"
 import {
-  createSystemOne as defaultCreateSystemOne,
-  type DecisionsPayload,
-} from "~/services/copilot/create-decisions"
+  type BuiltinOperationDeps,
+  createBuiltinOperationDispatch,
+} from "~/lib/operations/builtin"
+import { runOperation } from "~/routes/passthrough"
 
-export interface SystemOneRoutesDeps {
-  createSystemOne: typeof defaultCreateSystemOne
+export type SystemOneRoutesDeps = Partial<BuiltinOperationDeps> & {
+  /** Serves the operation; the built-in Copilot handler by default. */
+  operations?: OperationDispatch
 }
 
-export function createSystemOneRoutes(
-  deps: Partial<SystemOneRoutesDeps> = {},
-): Hono {
-  const createSystemOne = deps.createSystemOne ?? defaultCreateSystemOne
+export function createSystemOneRoutes(deps: SystemOneRoutesDeps = {}): Hono {
+  const operations = deps.operations ?? createBuiltinOperationDispatch(deps)
 
   // Errors propagate to the error handler, which answers in OpenAI's format;
   // the token gate's "not signed in" goes the same way.
@@ -33,17 +35,15 @@ export function createSystemOneRoutes(
   routes.use(requireGithubAuth)
 
   routes.post("/", async (c) => {
-    const payload = await c.req.json<DecisionsPayload>()
-    await admitUpstreamRequest()
-    const result = await createSystemOne(payload, { signal: c.req.raw.signal })
-    createCopilotTokenUsageRecorder({
-      endpoint: "systemone",
-      model: requestedModel(payload.model),
-    })({
-      input_tokens: result.usage?.input_tokens,
-      output_tokens: result.usage?.output_tokens,
-    })
-    return c.json(result)
+    const payload = await c.req.json<Record<string, unknown>>()
+    return c.json(
+      await runOperation(operations, {
+        operation: "systemone",
+        model: payload.model,
+        body: payload,
+        signal: c.req.raw.signal,
+      }),
+    )
   })
 
   return routes

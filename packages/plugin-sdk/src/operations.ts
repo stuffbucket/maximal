@@ -60,6 +60,8 @@ export interface OperationResult {
     input_tokens?: number
     output_tokens?: number
     cache_read_input_tokens?: number
+    /** The upstream's own total, when it reports one. */
+    total_tokens?: number
   }
   cost?: ProviderCost
 }
