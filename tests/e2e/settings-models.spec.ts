@@ -279,6 +279,49 @@ test("reclaims an eligible external classifier without changing models first", a
   })
 })
 
+test("signed out shows one shared Account prerequisite", async ({
+  page,
+  request,
+}) => {
+  const response = await request.post(`${BASE}/__harness/scenario`, {
+    data: { id: "signed-out" },
+  })
+  expect(response.ok()).toBe(true)
+
+  await openModels(page)
+  const prerequisite = page.locator("#models-auto-account-prerequisite")
+  await expect(prerequisite).toHaveCount(1)
+  await expect(prerequisite).toContainText(
+    "Sign-in and account setup are handled in Settings.",
+  )
+  await expect(
+    prerequisite.getByRole("link", { name: "Open Account settings" }),
+  ).toBeVisible()
+  await expect(
+    page.getByText("No compatible model found—choose one"),
+  ).toHaveCount(0)
+  await expect(page.getByText("These settings apply when")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Refresh now" })).toBeDisabled()
+
+  for (const control of [
+    page.getByLabel("Haiku alias"),
+    page.getByLabel("Sonnet alias"),
+    page.getByLabel("Auto permission checks"),
+  ]) {
+    await expect(control).toHaveAttribute(
+      "aria-describedby",
+      "models-auto-account-prerequisite",
+    )
+  }
+  await expect(page.locator('[id$="-problem"]')).toHaveCount(0)
+
+  await prerequisite
+    .getByRole("link", { name: "Open Account settings" })
+    .click()
+  await expect(page).toHaveURL(/#account$/u)
+  await expect(page.locator('[data-section="account"]')).toBeVisible()
+})
+
 test("shows the no-match state without choosing an arbitrary model", async ({
   page,
 }) => {
@@ -325,11 +368,7 @@ test("shows the no-match state without choosing an arbitrary model", async ({
   await expect(
     page.getByText("No compatible model found—choose one"),
   ).toHaveCount(3)
-  await expect(
-    page.getByText(
-      "No compatible model is available. Refresh the catalog or select a model.",
-    ),
-  ).toHaveCount(3)
+  await expect(page.locator(".models-auto .callout__detail")).toHaveCount(0)
 })
 
 test("keeps the Auto controls separated, focused, and within the narrow window", async ({

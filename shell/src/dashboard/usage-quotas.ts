@@ -132,10 +132,10 @@ function renderUsageSignedOut(): string {
     <div class="usage-signed-out">
       <i data-lucide="settings" aria-hidden="true"></i>
       <div class="usage-signed-out__content">
-        <strong>${escapeHtml(t("dashboard-usage-account-title"))}</strong>
-        <p>${escapeHtml(t("dashboard-usage-account-body"))}</p>
+        <strong>${escapeHtml(t("account-setup-required-title"))}</strong>
+        <p>${escapeHtml(t("account-setup-required-body"))}</p>
         <button type="button" class="usage-signed-out__action" data-usage-action="open-account-settings">
-          ${escapeHtml(t("dashboard-usage-account-action"))}
+          ${escapeHtml(t("account-setup-required-action"))}
         </button>
       </div>
     </div>`;

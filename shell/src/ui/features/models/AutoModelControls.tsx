@@ -10,6 +10,7 @@ import { Callout } from "../../components/Callout";
 interface AutoModelControlsProps {
   state: ClaudeAutoModelsState;
   saving: boolean;
+  signedOut: boolean;
   onChange: (selection: ClaudeAutoModelsUpdateRequest) => Promise<void>;
 }
 
@@ -20,10 +21,12 @@ interface TierControlProps {
   state: ClaudeAutoTierState;
   models: ClaudeAutoModelsState;
   saving: boolean;
+  signedOut: boolean;
   onChange: (value: string | null) => void;
 }
 
 const EXTERNAL_DEFAULT_VALUE = "__claude-code-default__";
+const ACCOUNT_PREREQUISITE_ID = "models-auto-account-prerequisite";
 
 const COPY_KEYS: Record<
   ModelSetting,
@@ -99,12 +102,24 @@ function selectionValue(state: ClaudeAutoTierState): string {
   return state.effective ?? EXTERNAL_DEFAULT_VALUE;
 }
 
-function TierControl({ tier, state, models, saving, onChange }: TierControlProps) {
+function TierControl({
+  tier,
+  state,
+  models,
+  saving,
+  signedOut,
+  onChange,
+}: TierControlProps) {
   const copy = COPY_KEYS[tier];
   const status = statusText(state, models);
   const selectId = `models-auto-${tier}`;
   const problemId = `${selectId}-problem`;
-  const hasProblem = state.status !== "ready";
+  const usesAccountPrerequisite = signedOut && state.status === "unresolved";
+  const hasTierProblem = state.status !== "ready" && !usesAccountPrerequisite;
+  const describedBy =
+    usesAccountPrerequisite ? ACCOUNT_PREREQUISITE_ID
+    : hasTierProblem ? problemId
+    : undefined;
   const options = optionsForTier(models, tier);
   const value = selectionValue(state);
   const unavailableId =
@@ -134,7 +149,7 @@ function TierControl({ tier, state, models, saving, onChange }: TierControlProps
           className="select"
           value={value}
           disabled={saving}
-          aria-describedby={hasProblem ? problemId : undefined}
+          aria-describedby={describedBy}
           onChange={(event) => {
             const selected = event.currentTarget.value;
             if (selected !== EXTERNAL_DEFAULT_VALUE) {
@@ -158,7 +173,7 @@ function TierControl({ tier, state, models, saving, onChange }: TierControlProps
           ))}
         </select>
         {status && <p className="panel-status">{status}</p>}
-        {hasProblem && (
+        {hasTierProblem && (
           <div id={problemId}>
             <TierProblem tier={tier} state={state} />
           </div>
@@ -183,16 +198,13 @@ function TierProblem({
       </Callout>
     );
   }
-  return (
-    <Callout tone="notice" title={t("models-auto-unresolved-title")}>
-      <p>{t("models-auto-unresolved-detail")}</p>
-    </Callout>
-  );
+  return <Callout tone="notice" title={t("models-auto-unresolved-title")} />;
 }
 
 export function AutoModelControls({
   state,
   saving,
+  signedOut,
   onChange,
 }: AutoModelControlsProps): JSX.Element {
   const updateFast = (fast: string | null): void => {
@@ -213,12 +225,26 @@ export function AutoModelControls({
         </h3>
         <p className="models-auto__intro">{t("models-auto-intro")}</p>
       </div>
+      {signedOut && (
+        <div id={ACCOUNT_PREREQUISITE_ID}>
+          <Callout
+            tone="notice"
+            title={t("account-setup-required-body")}
+            action={
+              <a className="btn btn--secondary btn--sm" href="#account">
+                {t("account-setup-required-action")}
+              </a>
+            }
+          />
+        </div>
+      )}
       <div className="models-auto__rows">
         <TierControl
           tier="fast"
           state={state.fast}
           models={state}
           saving={saving}
+          signedOut={signedOut}
           onChange={updateFast}
         />
         <TierControl
@@ -226,6 +252,7 @@ export function AutoModelControls({
           state={state.capable}
           models={state}
           saving={saving}
+          signedOut={signedOut}
           onChange={updateCapable}
         />
         <TierControl
@@ -233,6 +260,7 @@ export function AutoModelControls({
           state={state.classifier}
           models={state}
           saving={saving}
+          signedOut={signedOut}
           onChange={updateClassifier}
         />
       </div>
@@ -240,9 +268,6 @@ export function AutoModelControls({
         <p className="panel-status" role="status">
           {t("models-auto-saving")}
         </p>
-      )}
-      {!state.applied && (
-        <p className="panel-status">{t("models-auto-not-applied")}</p>
       )}
     </section>
   );

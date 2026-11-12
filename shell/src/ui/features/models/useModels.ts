@@ -25,6 +25,7 @@ interface UseModels {
   isLoading: boolean;
   isRefreshing: boolean;
   isSavingAutoModels: boolean;
+  isSignedOut: boolean;
   /** Still failing after automatic retries. A failed refresh keeps the
    *  stale list visible underneath. */
   problem: Problem | null;
@@ -53,16 +54,27 @@ export function useModels(): UseModels {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSavingAutoModels, setIsSavingAutoModels] = useState(false);
+  const [isSignedOut, setIsSignedOut] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
 
   const load = useCallback(async () => {
-    const result = await withRetry(() =>
+    const [result, authResult] = await Promise.all([
+      withRetry(() =>
+        apiCall({
+          kind: "models-list",
+          method: "GET",
+          path: "/settings/api/models",
+        }),
+      ),
       apiCall({
-        kind: "models-list",
+        kind: "auth-status",
         method: "GET",
-        path: "/settings/api/models",
+        path: "/settings/api/auth/github/status",
       }),
-    );
+    ]);
+    if (authResult.ok) {
+      setIsSignedOut(authResult.data.state === "unauthenticated");
+    }
     if (result.ok) {
       applyResult(result.data, {
         setModels,
@@ -155,6 +167,7 @@ export function useModels(): UseModels {
     isLoading,
     isRefreshing,
     isSavingAutoModels,
+    isSignedOut,
     problem,
     refresh,
     setAutoModels,
