@@ -30,6 +30,21 @@ export const Config = z.object({
     description:
       "The models served on /v1/images/generations and /v1/images/edits, each bound to the provider model that answers it.",
   }),
+  generateImage: z.boolean().default(true).meta({
+    title: "Generate-image tool",
+    description:
+      "Offer the generate_image tool to Claude Code. Images are billed to the provider; spend limits apply.",
+  }),
+  editImage: z.boolean().default(true).meta({
+    title: "Edit-image tool",
+    description:
+      "Offer the edit_image tool to Claude Code. It reads image files you name and bills the provider; spend limits apply.",
+  }),
+  outputDir: z.string().min(1).optional().meta({
+    title: "Output folder",
+    description:
+      "Where the tools save images (an absolute path). Default: the images plugin's output folder in Maximal's app folder.",
+  }),
 })
 
 export type ImagesConfig = z.output<typeof Config>
@@ -43,7 +58,7 @@ export const IMAGES_MANIFEST: PluginManifest = {
   kind: "model",
   displayName: "Images",
   description:
-    "Serves image generation and edits (/v1/images/generations and /v1/images/edits), as JSON or a multipart form, from an image model.",
+    "Serves image generation and edits (/v1/images/generations and /v1/images/edits), as JSON or a multipart form, from an image model, and gives Claude Code generate_image and edit_image tools that save files.",
   settingsVersion: 1,
   configSchema: { ...configSchema, type: "object" },
 }
