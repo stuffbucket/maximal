@@ -14,13 +14,13 @@ declares no windows) — change them there and update this table.
 | ---------------------------------------------- | ------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Splash                                         | 440×240                        | —                                              | —                                                                     | no        | Frameless, transparent, centered; shown while the proxy starts, then dismissed                                                                                       |
 | About                                          | 680×360                        | —                                              | —                                                                     | no        | Frameless, transparent, centered; reuses the splash's branded surface with the app mark, version, and website                                                        |
-| Main (Unified Settings + Dashboard + Sessions + Budget) | 1100×720 first-launch fallback | Settings: 772×480; Dashboard/Sessions/Budget: 640×480 | Settings: 1100 width, unbounded height; Dashboard/Sessions/Budget: unbounded | yes       | Restores size, position, and maximized state; repairs invalid saved geometry before showing; single top bar with Settings tabs + a right-side four-surface switcher |
+| Main (Unified Settings + Dashboard + Sessions + Rules) | 1100×720 first-launch fallback | Settings: 772×480; Dashboard/Sessions/Rules: 640×480 | Settings: 1100 width, unbounded height; Dashboard/Sessions/Rules: unbounded | yes       | Restores size, position, and maximized state; repairs invalid saved geometry before showing; single top bar with Settings tabs + a right-side four-surface switcher |
 
 The unified window is single-instance: opening Settings, Dashboard, Sessions or
-Budget re-shows and focuses the existing window and switches the active view in place.
+Rules re-shows and focuses the existing window and switches the active view in place.
 The native policy is surface-aware: Settings clamps only its useful width, while
-Dashboard, Sessions and Budget explicitly remove both maxima (the first two so their
-tables and graphs can use additional space; Budget just centers its column). A valid current size is preserved; switching to
+Dashboard, Sessions and Rules explicitly remove both maxima (the first two so their
+tables and graphs can use additional space; Rules just centers its column). A valid current size is preserved; switching to
 Settings can narrow a wider observability window. Constraint changes are deferred
 while maximized because applying them can unmaximize or resize the window on
 supported platforms. Closing hides the window. Across process launches, Tauri's
@@ -33,7 +33,7 @@ presentation.
 
 **Desktop only.** The OS-enforced minimum is surface-aware: Settings stops at a
 `772×480` logical inner area so its complete one-row tab bar retains separation
-from the pinned utilities; Dashboard, Sessions and Budget can resize to `640×480`. These
+from the pinned utilities; Dashboard, Sessions and Rules can resize to `640×480`. These
 minimums are independent of the first-launch fallback and restored geometry.
 Native creation centers the
 fallback with breathing room inside the monitor's work area. Before the hidden
@@ -57,10 +57,10 @@ logical constraints and are never derived from `devicePixelRatio`.
 - **Settings**: `.topbar` header + centered single-column content pane.
   Section max-width = `--content-max`. Within the pane, form
   rows use a 33% label / 66% control split.
-- **Budget**: a section of the Settings pane, so the same `.topbar` and centered
+- **Rules**: a section of the Settings pane, so the same `.topbar` and centered
   column (`--content-max`), with the topbar center empty. A one-line
-  summary, then three typographic sections divided by `--space-7`: Limits (the
-  one Fraunces heading), Activity and Settings. Limits are hairline-divided rows, not cards; Activity is a chart
+  summary, then three typographic sections divided by `--space-7`: Rules (the
+  one Fraunces heading), Activity and Settings. Rules are hairline-divided rows, not cards; Activity is a chart
   over a table. Add and edit happen in a native dialog that scrolls on its own in
   a short window.
 

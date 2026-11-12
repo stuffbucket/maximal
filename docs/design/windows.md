@@ -1,9 +1,10 @@
-# Window family: Settings + Dashboard + Sessions + Budget
+# Window family: Settings + Dashboard + Sessions + Rules
 
 Settings (`shell/ui/settings/index.html` + `shell/src/`) is the outer shell for
 four peer surfaces. Dashboard and Sessions share one persistent observability
 iframe (`shell/ui/dashboard/` + `shell/src/dashboard/`) so their live state and
-polling survive surface switches. Budget is a React section of the Settings
+polling survive surface switches. Rules (called Budget before; the code keeps
+that name) is a React section of the Settings
 bundle (`shell/src/ui/features/budget/`, mounted by
 `shell/src/ui/islands/budget-island.tsx`) that main.ts shows and hides like any
 other section; it keeps its own live state (the `budget.changed` event stream)
@@ -18,21 +19,22 @@ while mounted.
   interactive surfaces.
 - Same Commissioner body face. Fraunces is rationed to the brand mark
   and **one** display heading per window; Dashboard and Sessions have no display
-  moment, so the observability bundle doesn't load Fraunces. Budget's one display
-  heading is its first section's (Overview), never the window name.
+  moment, so the observability bundle doesn't load Fraunces. Rules' one display
+  heading is its first section's (Rules), never the window name.
 - Same token vocabulary and values, generated from
   `shell/src/ui/styles/theme.ts` (see [`tokens.md`](tokens.md)). Same
   spacing scale, three surface levels, three elevation levels.
 - Both bundles are built by Bun (`scripts/build-ui.ts`) and served by the proxy
   under `/ui/settings/` and `/ui/dashboard/`; `/ui/sessions/` redirects to the
-  observability bundle's Sessions surface.
+  observability bundle's Sessions surface, and `/ui/rules/` (and the old
+  `/ui/budget/`) to the Rules section (`/ui/settings/#rules`).
 
 ## Where they diverge
 
-| Concern        | Dashboard                                                | Sessions                                         | Budget                                                                  | Settings                                                                          |
+| Concern        | Dashboard                                                | Sessions                                         | Rules                                                                   | Settings                                                                          |
 | -------------- | -------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Topbar center  | Period segmented control (`1d / 7d / 30d`) + range label | Empty                                            | Empty                                                                   | 5 consolidated tabs (`Account`, `Integrations`, `Models`, `Appearance`, `System`) |
-| Content        | Quotas, token totals and live-flow graph                 | Compact live and recent session list             | Overview (enforcement, display unit, provider allowances), Limits, Activity | Configuration sections and app integrations                                       |
+| Content        | Quotas, token totals and live-flow graph                 | Compact live and recent session list             | Rules, Activity, Settings (enforcement, display unit, provider allowances) | Configuration sections and app integrations                                       |
 | Layout         | Wide single column in the observability bundle           | Wide single column in the same persistent bundle | Single centered column (`--content-max` sections) below `.topbar`      | Single centered column (`--content-max` sections) below `.topbar`                 |
 | Build          | Hand-authored observability HTML + bundled `main.ts`     | Same Dashboard artifact and controllers          | React island in the Settings bundle                                     | Bun bundles `index.html` and its React + vanilla islands                          |
 | Tokens live in | Generated region of `shell/ui/dashboard/style.css`       | Same observability token set                     | `shell/src/ui/styles/tokens.css`, imported by `styles.css`              | `shell/src/ui/styles/tokens.css`, imported by `styles.css`                        |
@@ -40,7 +42,7 @@ while mounted.
 The desktop app has one single-instance window and one top bar (`.topbar` with
 `data-tauri-drag-region`, styled with `--surface-card` and
 `TitleBarStyle::Overlay` on macOS). Its far-right four-way surface switcher
-opens Settings, Dashboard, Sessions or Budget; the language control follows it. The
+opens Settings, Dashboard, Sessions or Rules; the language control follows it. The
 observability iframe stays mounted while its internal Dashboard/Sessions view
 changes, so graph selection, the session list and the single sessions polling
 loop persist. The window remembers the last surface (`maximal.lastTab`) and the
@@ -71,9 +73,9 @@ Constraints follow the active surface rather than one global rectangle. Settings
 has a minimum logical width that keeps all five tabs separated from the pinned
 utilities (the four-button surface switcher counts toward it), a maximum width
 matching its bounded readable layout, and no maximum height. Dashboard, Sessions
-and Budget use the smaller shared minimum (they show no tabs) and clear both
+and Rules use the smaller shared minimum (they show no tabs) and clear both
 maxima: the Dashboard and Sessions tables and graphs benefit from wider and
-taller windows, and Budget keeps its `--content-max` column centered in whatever
+taller windows, and Rules keeps its `--content-max` column centered in whatever
 room there is. The frontend
 remains responsive inside those native ranges: Settings sections are centered and
 fluid up to `--content-max`, Dashboard's wide container is centered and fluid, and

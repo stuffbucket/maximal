@@ -25,8 +25,8 @@ Storybook for that.
 | **Foundations / Tokens** | Every token in `shell/src/ui/styles/tokens.css`, read live, with computed values for the current theme | — |
 | **Components / …** | `shell/src/ui/components/*` (Button, Switch, Checkbox, ConfirmDialog, Stack, Table) | props |
 | **Settings / …** | The React islands — Apps, API clients, Models — as individual cards *and* as whole panels | props, or the mock sidecar |
-| **Budget / Budget** | The Budget surface (Overview, Limits, Activity) and its add, edit and delete dialogs, against the mock budget service | the mock sidecar |
-| **Windows / Settings, Dashboard, Budget** | The real built windows in an iframe at their Tauri default size, any section × scenario | the mock sidecar |
+| **Rules / Rules** | The Rules surface (summary, Rules, Activity, Settings) and its add, edit and delete dialogs, against the mock budget service | the mock sidecar |
+| **Windows / Settings, Dashboard, Rules** | The real built windows in an iframe at their Tauri default size, any section × scenario | the mock sidecar |
 
 The toolbar's **Theme** sets `data-theme` the way the app does; **Locale**
 applies to the window stories (the React islands aren't localized yet).

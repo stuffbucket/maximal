@@ -27,6 +27,7 @@ import type {
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
+import { canonicalHash, canonicalSection } from "./section-alias";
 import { mountBudget } from "./ui/islands/budget-island";
 import { mountModels } from "./ui/islands/models-island";
 import { mountConnectors } from "./ui/islands/connectors-island";
@@ -41,7 +42,7 @@ type SectionId =
   | "system"
   | "dashboard"
   | "sessions"
-  | "budget"
+  | "rules"
   | "apps"
   | "connectors"
   | "endpoint"
@@ -58,7 +59,7 @@ type TopTabId =
   | "system"
   | "dashboard"
   | "sessions"
-  | "budget";
+  | "rules";
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
@@ -68,7 +69,7 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "system",
   "dashboard",
   "sessions",
-  "budget",
+  "rules",
   "apps",
   "connectors",
   "endpoint",
@@ -86,7 +87,7 @@ const TAB_SECTIONS: Record<TopTabId, ReadonlyArray<string>> = {
   system: ["diagnostics", "logs"],
   dashboard: ["dashboard"],
   sessions: ["dashboard"],
-  budget: ["budget"],
+  rules: ["rules"],
 };
 
 const LAST_TAB_STORAGE_KEY = "maximal.lastTab";
@@ -121,15 +122,16 @@ function tabForSection(id: SectionId): TopTabId {
       return "dashboard";
     case "sessions":
       return "sessions";
-    case "budget":
-      return "budget";
+    case "rules":
+      return "rules";
   }
 }
 
 function getStoredTab(key: string): SectionId | null {
   try {
     const val = window.localStorage.getItem(key);
-    if (val && isSectionId(val)) return val;
+    const section = val ? canonicalSection(val) : null;
+    if (section && isSectionId(section)) return section;
   } catch {
     // ignore storage errors
   }
@@ -139,7 +141,7 @@ function getStoredTab(key: string): SectionId | null {
 function persistTabSelection(tab: TopTabId): void {
   try {
     window.localStorage.setItem(LAST_TAB_STORAGE_KEY, tab);
-    if (tab !== "dashboard" && tab !== "sessions" && tab !== "budget") {
+    if (tab !== "dashboard" && tab !== "sessions" && tab !== "rules") {
       window.localStorage.setItem(LAST_SETTINGS_TAB_STORAGE_KEY, tab);
     }
   } catch {
@@ -157,17 +159,17 @@ function hasAccountProblem(
   );
 }
 
-type Surface = "settings" | "dashboard" | "sessions" | "budget";
+type Surface = "settings" | "dashboard" | "sessions" | "rules";
 
 function surfaceForTab(tab: TopTabId): Surface {
-  if (tab === "dashboard" || tab === "sessions" || tab === "budget") return tab;
+  if (tab === "dashboard" || tab === "sessions" || tab === "rules") return tab;
   return "settings";
 }
 
 function surfaceTitle(surface: Surface): string {
   if (surface === "dashboard") return t("dashboard-title");
   if (surface === "sessions") return t("native-window-sessions-title");
-  if (surface === "budget") return t("native-window-budget-title");
+  if (surface === "rules") return t("native-window-budget-title");
   return t("native-window-settings-title");
 }
 
@@ -181,7 +183,7 @@ function updateSurfaceModeButtons(surface: Surface): void {
       shortcut: isMac ? "⌘D" : "Ctrl+D",
     }),
     sessions: t("nav-switch-to-sessions"),
-    budget: t("nav-switch-to-budget"),
+    rules: t("nav-switch-to-budget"),
   };
   for (const button of document.querySelectorAll<HTMLButtonElement>(
     "[data-surface-target]",
@@ -238,7 +240,7 @@ function showSection(id: SectionId, options: { persist?: boolean } = {}): void {
   updateSurfaceModeButtons(surface);
   void safeInvoke("set_main_surface", { surface });
   // What was spent while another surface was up is current on arrival.
-  if (surface === "budget") {
+  if (surface === "rules") {
     window.dispatchEvent(new CustomEvent("maximal:budget-refresh"));
   }
 
@@ -304,7 +306,19 @@ function availableSection(id: SectionId): SectionId {
 /** The section part of the hash. A section may own a sub-page after a
  *  slash (`#connectors/workiq` opens Work IQ's page in Connectors). */
 function hashSection(): string {
-  return window.location.hash.replace(/^#/, "").split("/", 1)[0] ?? "";
+  return canonicalSection(
+    window.location.hash.replace(/^#/, "").split("/", 1)[0] ?? "",
+  );
+}
+
+/** Rewrite a renamed section's hash in place (`#budget` to `#rules`) so the
+ *  address bar and history carry the current id. Quiet: no `hashchange`. */
+function canonicalizeLocationHash(): void {
+  const current = window.location.hash;
+  const canonical = canonicalHash(current);
+  if (current !== "" && canonical !== current) {
+    window.history.replaceState(null, "", canonical);
+  }
 }
 
 function readHashSection(): SectionId {
@@ -315,6 +329,7 @@ function readHashSection(): SectionId {
 }
 
 function syncFromHash(options: { persist?: boolean } = {}): void {
+  canonicalizeLocationHash();
   showSection(readHashSection(), options);
 }
 
@@ -448,7 +463,7 @@ function wireNav(): void {
     if (
       currentTab === "dashboard" ||
       currentTab === "sessions" ||
-      currentTab === "budget"
+      currentTab === "rules"
     ) {
       const target: SectionId = hasAccountProblem()
         ? "account"

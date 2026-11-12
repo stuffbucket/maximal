@@ -140,7 +140,8 @@ mod main_surface {
     pub const SETTINGS: &str = "settings";
     pub const DASHBOARD: &str = "dashboard";
     pub const SESSIONS: &str = "sessions";
-    pub const BUDGET: &str = "budget";
+    // The Rules surface (named Budget before; the identifier keeps that name).
+    pub const BUDGET: &str = "rules";
 }
 
 const MAIN_WINDOW_FALLBACK_WIDTH: f64 = 1100.0;
@@ -3177,10 +3178,11 @@ fn open_sessions_window(app: &AppHandle) {
     open_settings_window(app, Some(main_surface::SESSIONS));
 }
 
-/// Opens (or focuses) the unified window on its Budget surface: a React section of
-/// the Settings bundle, reached at `#budget` (`/ui/budget/` redirects there).
+/// Opens (or focuses) the unified window on its Rules surface (named Budget
+/// before): a React section of the Settings bundle, reached at `#rules`
+/// (`/ui/rules/` and the old `/ui/budget/` redirect there).
 fn open_budget_window(app: &AppHandle) {
-    const _BUDGET_ROUTE_CONTRACT: &str = "/ui/budget/";
+    const _RULES_ROUTE_CONTRACT: &str = "/ui/rules/";
     open_settings_window(app, Some(main_surface::BUDGET));
 }
 
@@ -3564,7 +3566,7 @@ fn set_main_surface(app: AppHandle, surface: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Tauri command: ask where to save `contents` (the Budget window's CSV export)
+/// Tauri command: ask where to save `contents` (the Rules window's CSV export)
 /// and write it there. `Ok(true)` when saved, `Ok(false)` when the person
 /// cancelled the dialog. Only the file name of `suggested_name` is used.
 #[tauri::command]

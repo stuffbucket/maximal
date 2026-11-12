@@ -3524,7 +3524,7 @@ html[data-os="macos"] .topbar {
 }
 
 /* ---- Budget (features/budget) ----
-   The Budget surface: a one-line summary, then Limits, Activity and Settings
+   The Rules surface: a one-line summary, then Rules, Activity and Settings
    as typographic sections in one column (no card grid). The first heading
    (Limits) is the one Fraunces moment
    (.section__title); the others step down to Commissioner like the stacked

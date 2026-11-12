@@ -67,11 +67,19 @@ describe("ui routes", () => {
     }
   })
 
-  test("redirects Budget to its section of the Settings bundle", async () => {
+  test("redirects Rules to its section of the Settings bundle", async () => {
+    for (const path of ["/ui/rules", "/ui/rules/"]) {
+      const res = await app.request(path)
+      expect(res.status).toBe(301)
+      expect(res.headers.get("location")).toBe("/ui/settings/#rules")
+    }
+  })
+
+  test("keeps the old /ui/budget links working by redirecting them to Rules", async () => {
     for (const path of ["/ui/budget", "/ui/budget/"]) {
       const res = await app.request(path)
       expect(res.status).toBe(301)
-      expect(res.headers.get("location")).toBe("/ui/settings/#budget")
+      expect(res.headers.get("location")).toBe("/ui/settings/#rules")
     }
   })
 

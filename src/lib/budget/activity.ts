@@ -1,6 +1,6 @@
 /**
  * Spend by model, plugin, key, provider or day over today, this week or this
- * month, for the Budget window's Activity view. Periods start at 00:00 UTC
+ * month, for the Rules window's Activity view. Periods start at 00:00 UTC
  * (weeks on Monday, months on the 1st), like the fixed limit resets.
  */
 

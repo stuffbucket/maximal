@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Budget } from "../features/budget/Budget";
 
 /**
- * Mounts the Budget React island into #budget-root.
+ * Mounts the Rules (formerly Budget) React island into #budget-root.
  * Idempotent: no-op if the mount point is absent. Mirrors `mountModels`.
  */
 export function mountBudget(): void {

@@ -108,9 +108,9 @@ label beside it says what:
   `--accent` below 75%, `--status-warning` from 75%, `--status-error`
   from 90%, each with the warning icon. The compaction point's tick is
   `--border-strong`.
-- **Budget** (`shell/src/ui/features/budget/`): the limit meter and the provider-allowance
+- **Rules** (`shell/src/ui/features/budget/`): the rule meter and the provider-allowance
   meter are the quota meter again (`--accent` while fine, `--status-warning`,
-  `--status-error`). A limit row adds an icon and a word when it is nearly spent or
+  `--status-error`). A rule row adds an icon and a word when it is nearly spent or
   spent, and an allowance prints its percent used, so state never rests on color
   alone. Activity's share bar
   gives the first five parts `--series-1` to `--series-5` and folds the rest into

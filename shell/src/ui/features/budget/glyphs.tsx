@@ -1,4 +1,4 @@
-/** Lucide glyphs for the Budget window (monochrome, currentColor, sized by CSS). */
+/** Lucide glyphs for the Rules window (monochrome, currentColor, sized by CSS). */
 
 function Glyph({ children }: { children: JSX.Element | Array<JSX.Element> }): JSX.Element {
   return (
