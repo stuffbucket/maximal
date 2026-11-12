@@ -6,10 +6,13 @@
 
 import { HTTPException } from "hono/http-exception"
 
-/** The Copilot call an upstream error answered: the endpoint path as the
+/** The call an upstream error answered: the provider, the endpoint path as the
  *  model catalog's `supported_endpoints` spells it (`/chat/completions`,
  *  `/v1/images/generations`, ...) and the model the request named. */
 export interface UpstreamCall {
+  /** The upstream provider that answered (`"copilot"`); set on every
+   *  Copilot call. */
+  provider?: string
   endpoint: string
   model?: string
 }

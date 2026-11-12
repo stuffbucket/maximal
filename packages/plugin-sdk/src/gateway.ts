@@ -271,6 +271,13 @@ export type {
   ServedModel,
 } from "./operations"
 export type {
+  ProviderCall,
+  ProviderModelInfo,
+  ProviderQuotaWindow,
+  ProviderRegistry,
+  UpstreamProvider,
+} from "./providers"
+export type {
   ConnectorAuth,
   ConnectorLaneLimits,
   ConnectorLimits,

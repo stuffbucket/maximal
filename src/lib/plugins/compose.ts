@@ -17,6 +17,7 @@ import {
   type HostServices,
   operationsService,
   type PluginModule,
+  providersService,
 } from "@stuffbucket/maximal-plugin-host"
 import * as workiq from "@stuffbucket/maximal-plugin-workiq"
 import consola from "consola"
@@ -24,6 +25,10 @@ import path from "node:path"
 
 import { openUrl } from "~/lib/platform/open-url"
 import { PATHS } from "~/lib/platform/paths"
+import {
+  type CopilotProviderDeps,
+  createCopilotProvider,
+} from "~/lib/plugins/providers/copilot"
 import { runFile } from "~/lib/system/run-file"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 
@@ -99,6 +104,9 @@ export interface ComposePluginsOptions {
   storageRoot?: string
   /** Replace individual host services (tests record `openExternal`). */
   host?: Partial<HostServices>
+  /** Replace parts of the Copilot upstream provider (tests inject a fake
+   *  `sendRequest`). */
+  copilot?: CopilotProviderDeps
 }
 
 /**
@@ -114,7 +122,10 @@ export function composePluginGateway(
     services: {
       host: { ...hostServices(), ...options.host },
       storageRoot: options.storageRoot ?? pluginStorageRoot(),
-      extra: [operationsService],
+      extra: [
+        operationsService,
+        providersService([createCopilotProvider(options.copilot)]),
+      ],
     },
   })
 }
