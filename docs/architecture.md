@@ -274,7 +274,7 @@ Every issue gets exactly one `playbook:*` label naming the workflow that will ha
 - `repro:inconclusive`. Someone tried and it didn't fire. The body says what was tried.
 - `repro:not-verified`. The repro ran and the claimed behavior didn't happen. Close it or ask the reporter.
 
-`needs-triage` means those labels are missing. The issue-triage workflow (`scripts/triage-issue.ts`) adds it while they're missing and removes it once they're complete, so don't set or clear it by hand. A milestone doesn't replace these labels. Area labels (`design-system`, `dependencies`) and repoman's state labels (`needs-bot`, `in-progress`, `queue:*`) work as before. repoman's poller treats any `playbook:*` label as routed.
+On an open issue, `needs-triage` means those labels are missing. The issue-triage workflow (`scripts/triage-issue.ts`) adds it while they're missing and removes it once they're complete, so don't set or clear it by hand. It skips closed issues, and issues carrying `needs-bot` or `repoman:internal`. Closed issues from before this scheme may have no playbook label, or a stale `needs-triage`. A milestone doesn't replace these labels. Area labels (`design-system`, `dependencies`) and repoman's state labels (`needs-bot`, `in-progress`, `queue:*`) work as before. repoman's poller treats any `playbook:*` label as routed.
 
 ## Tauri shell
 
