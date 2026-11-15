@@ -4,8 +4,10 @@ import { Hono } from "hono"
 import { __resetBudgetServiceForTests } from "../src/lib/budget/runtime"
 import { getConfig, writeConfig } from "../src/lib/config/config"
 import { state } from "../src/lib/runtime-state/state"
+import { closeUsageStore } from "../src/lib/token-usage"
 import { completionRoutes } from "../src/routes/chat-completions/route"
 
+const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 const originalFetch = globalThis.fetch
 const originalConfig = getConfig()
 const originalState = {
@@ -88,7 +90,9 @@ const createApp = () => {
   return app
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  process.env[DB_PATH_ENV] = ":memory:"
+  await closeUsageStore()
   __resetBudgetServiceForTests()
   writeConfig({ modelMappings: [] })
   state.accountType = "individual"
@@ -108,8 +112,10 @@ beforeEach(() => {
     fetchMock as unknown as typeof fetch
 })
 
-afterEach(() => {
+afterEach(async () => {
   __resetBudgetServiceForTests()
+  await closeUsageStore()
+  Reflect.deleteProperty(process.env, DB_PATH_ENV)
   state.accountType = originalState.accountType
   state.copilotToken = originalState.copilotToken
   state.githubToken = originalState.githubToken
