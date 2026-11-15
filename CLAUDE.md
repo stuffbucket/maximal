@@ -13,6 +13,7 @@ Always read the linked doc before acting in its area.
 | Touch routing, middleware, model dispatch, config, token store, diagnostics, or the Tauri sidecar | [`docs/architecture.md`](docs/architecture.md) |
 | Write or modify tests (especially mocks) | [`docs/architecture.md`](docs/architecture.md) → *Testing gotchas* |
 | Open a PR, change commit conventions, cut a release | [`docs/architecture.md`](docs/architecture.md) → *Release & PR conventions* + [`docs/release-runbook.md`](docs/release-runbook.md) |
+| File, label, or triage an issue | [`docs/architecture.md`](docs/architecture.md) → *Issue labels* |
 | Spawn parallel agents / use git stash | [`docs/architecture.md`](docs/architecture.md) → *Parallel-agent convention* |
 | Change `.bun-version` or CI's Bun pin | [`docs/bun-version-policy.md`](docs/bun-version-policy.md) |
 | Write any code | [`docs/code-style.md`](docs/code-style.md) |
