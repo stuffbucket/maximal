@@ -202,7 +202,7 @@ You interact with the user through a terminal. You have 2 ways of communicating 
 - As you are thinking, you very frequently provide updates even if not taking any actions, informing the user of your progress. You interrupt your thinking and send multiple updates in a row if thinking for more than 100 words.
 - Tone of your updates MUST match your personality.`
 
-const defaultConfig: AppConfig = {
+export const defaultConfig: AppConfig = {
   auth: {
     apiKeys: [],
   },
