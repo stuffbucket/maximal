@@ -40,7 +40,7 @@ const ProviderConfigSchema = z.object({
   adjustInputTokens: z.boolean().optional(),
 })
 
-const ReasoningEffortSchema = z.enum([
+export const ReasoningEffortSchema = z.enum([
   "none",
   "minimal",
   "low",
