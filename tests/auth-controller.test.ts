@@ -174,6 +174,7 @@ beforeEach(() => {
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
+  state.lastUpstreamRejection = undefined
   harness.getDeviceCodeImpl = () =>
     Promise.resolve({
       device_code: "device-xyz",
@@ -202,6 +203,7 @@ afterEach(() => {
   state.githubToken = undefined
   state.copilotToken = undefined
   state.userName = undefined
+  state.lastUpstreamRejection = undefined
 })
 
 // --- getAuthStatus branches ------------------------------------------------
