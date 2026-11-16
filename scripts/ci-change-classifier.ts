@@ -18,7 +18,7 @@ export interface DiffSpec {
 }
 
 export interface CiClassification {
-  mode: "full" | "paths"
+  mode: "docs" | "full" | "paths"
 }
 
 export interface CounterpartQuery {
@@ -88,6 +88,7 @@ export function diffSpecForEvent(
 
 export function classifyCiChanges(changed: ChangedPaths): CiClassification {
   if (changed === "all" || changed.length === 0) return { mode: "full" }
+  if (changed.every((path) => path.endsWith(".md"))) return { mode: "docs" }
   return { mode: "paths" }
 }
 
