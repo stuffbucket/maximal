@@ -51,6 +51,12 @@ describe("defaultConfig", () => {
       expect(ReasoningEffortSchema.options).toContain(effort)
     }
   })
+
+  it("does not prescribe narrated thinking or personality", () => {
+    const prompt = defaultConfig.extraPrompts?.["gpt-5.4"] ?? ""
+    expect(prompt).not.toContain("As you are thinking")
+    expect(prompt).not.toContain("Tone of your updates")
+  })
 })
 
 it("backfills and persists the default model mapping when absent", async () => {
