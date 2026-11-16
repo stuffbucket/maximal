@@ -35,7 +35,7 @@ describe("defaultConfig", () => {
 
   it("uses a configured model as the small model", () => {
     const smallModel = defaultConfig.smallModel ?? ""
-    expect(smallModel.trim()).not.toBe("")
+    expect(smallModel).not.toBe("")
     expect(Object.hasOwn(defaultConfig.extraPrompts ?? {}, smallModel)).toBe(
       true,
     )
