@@ -2,6 +2,7 @@
 import type { Fiber, Plugin } from "@deepseek-ai/cordis"
 import type {
   OperationDispatch,
+  PluginClientContribution,
   PluginGenerationLease,
   PluginGateway,
   PluginGatewayEvent,
@@ -55,6 +56,7 @@ import {
   parsePluginConfig,
   parseSettingsDocument,
   permissionChangesError,
+  pluginClientContributionsOf,
   providedServices,
   PluginRuntime,
   resolveToolPermission,
@@ -569,6 +571,10 @@ class PluginHost implements PluginHostGateway {
         live()
         return this.serverTools()
       },
+      pluginClientContributions: () => {
+        live()
+        return this.pluginClientContributions()
+      },
       operations: () => {
         live()
         return this.operations()
@@ -688,6 +694,10 @@ class PluginHost implements PluginHostGateway {
       .filter((record) => record.lifecycle === "active")
       .map((record) => record.id)
     return listServerToolViews(this.#runtime, active)
+  }
+
+  pluginClientContributions(): Array<PluginClientContribution> {
+    return pluginClientContributionsOf(this.#root)
   }
 
   // Async preserves the gateway contract by turning lookup failures into rejections.

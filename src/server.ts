@@ -149,9 +149,9 @@ server.route("/settings/api", settingsApiRoutes)
 // `/ui/*` serves the settings + dashboard UI (embedded in prod, from
 // shell/dist in dev). See src/routes/ui/route.ts.
 server.route("/ui", uiRoutes)
-// `/mcp/<plugin id>` serves a plugin's tools over MCP (Streamable HTTP). It
-// authenticates itself (the main-port rules, loopback only) and needs no
-// GitHub token.
+// `/mcp` aggregates every enabled connector; `/mcp/<plugin id>` serves one.
+// Both use MCP Streamable HTTP, authenticate themselves (the main-port rules,
+// loopback only), and need no GitHub token.
 server.route("/mcp", pluginMcpRoutes.app)
 // Close MCP sessions deterministically when the plugins stop.
 onPluginsStopping(() => pluginMcpRoutes.closeAll())

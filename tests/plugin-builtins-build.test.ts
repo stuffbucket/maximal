@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, stat } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -36,14 +36,23 @@ describe("packaged built-in plugin generation", () => {
       const selected = await selectPackagedBuiltInGeneration(output)
       expect(selected).toBeDefined()
       if (!selected) throw new Error("Expected a packaged generation.")
-      const manifest = (await Bun.file(
-        path.join(selected.directory, "manifest.json"),
-      ).json()) as {
-        modules: Array<{ pluginId: string }>
+      const manifestPath = path.join(selected.directory, "manifest.json")
+      const manifest = (await Bun.file(manifestPath).json()) as {
+        modules: Array<{ artifact: string; pluginId: string }>
       }
       expect(manifest.modules.map((module) => module.pluginId).sort()).toEqual(
         EXPECTED_PLUGINS,
       )
+      if (process.platform !== "win32") {
+        for (const sealedPath of [
+          manifestPath,
+          ...manifest.modules.map((module) =>
+            path.join(selected.directory, module.artifact),
+          ),
+        ]) {
+          expect((await stat(sealedPath)).mode & 0o222).toBe(0)
+        }
+      }
     } finally {
       await rm(root, { recursive: true, force: true })
     }

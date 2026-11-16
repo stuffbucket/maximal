@@ -1,6 +1,8 @@
 /**
- * MCP sessions for `/mcp/<pluginId>`: one low-level MCP `Server` and
- * Streamable HTTP transport per session, answering from the plugin gateway.
+ * MCP sessions for `/mcp` and `/mcp/<pluginId>`: one low-level MCP `Server`
+ * and Streamable HTTP transport per session, answering from the plugin gateway.
+ * The root endpoint aggregates every enabled connector and namespaces its tools
+ * as `<pluginId>__<toolName>`; a connector endpoint keeps its native names.
  *
  * The low-level `Server` (rather than `McpServer`) is deliberate: the tool
  * set is the gateway's, changes at runtime, and carries raw JSON Schemas;
@@ -29,15 +31,23 @@ import {
   type PluginGatewayEvent,
   type PluginToolListing,
   type ToolCallContext,
+  type ToolPermission,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import consola from "consola"
 import { randomUUID } from "node:crypto"
 
+import { getConfig } from "~/lib/config/config"
+import {
+  PLUGIN_UNIDENTIFIED_ACCESS_ID,
+  pluginAppAccessId,
+} from "~/lib/plugins/access"
+import { subscribePluginAccessChanges } from "~/lib/plugins/access-events"
 import {
   type AffinedGenerationCall,
   GenerationAffinityCoordinator,
   type GenerationAffinityDiagnostics,
 } from "~/lib/plugins/generation-affinity"
+import { pluginAccessPermission } from "~/lib/plugins/settings"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 
 // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
@@ -46,6 +56,22 @@ type LowLevelServer = Server
 const MAX_BODY_BYTES = 1024 * 1024
 /** How long a tool may wait for the user to answer an elicitation. */
 const ELICIT_TIMEOUT_MS = 10 * 60_000
+const AGGREGATE_SERVER_NAME = "maximal"
+const AGGREGATE_TOOL_SEPARATOR = "__"
+
+function aggregateToolName(pluginId: string, toolName: string): string {
+  return `${pluginId}${AGGREGATE_TOOL_SEPARATOR}${toolName}`
+}
+
+function parseAggregateToolName(
+  name: string,
+): { pluginId: string; toolName: string } | undefined {
+  const separator = name.indexOf(AGGREGATE_TOOL_SEPARATOR)
+  if (separator <= 0) return undefined
+  const pluginId = name.slice(0, separator)
+  const toolName = name.slice(separator + AGGREGATE_TOOL_SEPARATOR.length)
+  return toolName.length === 0 ? undefined : { pluginId, toolName }
+}
 
 export interface McpSessionOptions {
   getGateway: () => PluginGateway | undefined
@@ -62,15 +88,27 @@ export interface McpSessionOptions {
   ) => Promise<void>
 }
 
+export interface McpCaller {
+  /** Stable `app:<id>` or `connection:<id>` access target. */
+  accessId: string | undefined
+  /** Product or user-defined connection name for refusal text. */
+  name: string | undefined
+}
+
 interface Session {
   id: string | undefined
-  readonly pluginId: string
+  /** One connector, or undefined for the aggregate `/mcp` endpoint. */
+  readonly pluginId: string | undefined
+  readonly caller: McpCaller
   readonly server: LowLevelServer
   readonly transport: WebStandardStreamableHTTPServerTransport
   lastSeen: number
   /** Requests (and open SSE streams) not finished yet. */
   inflight: number
   closed: boolean
+  /** Tools the last `tools/list` marked `REQUIRES_USER_INTERACTION`: the
+   *  only calls Claude Code's own prompt is known to cover. */
+  promptedTools: ReadonlySet<string> | undefined
 }
 
 /**
@@ -79,7 +117,11 @@ interface Session {
  * own prompt on every call (`anthropic/requiresUserInteraction`, which
  * other clients ignore: Maximal asks them itself, see `#approve`).
  */
-function toMcpTool(tool: PluginToolListing, connector: string): Tool {
+function toMcpTool(
+  tool: PluginToolListing,
+  connector: string,
+  accessPermission: ToolPermission,
+): Tool {
   const description =
     tool.permission === "block" ?
       `${blockedToolText(connector, tool.name)}\n\n${tool.description}`
@@ -95,7 +137,7 @@ function toMcpTool(tool: PluginToolListing, connector: string): Tool {
     ...(tool.annotations === undefined ?
       {}
     : { annotations: tool.annotations }),
-    ...(tool.permission === "ask" ?
+    ...(tool.permission === "ask" || accessPermission === "ask" ?
       { _meta: { [REQUIRES_USER_INTERACTION]: true } }
     : {}),
   }
@@ -128,6 +170,28 @@ function notReady(displayName: string, reason: string): CallToolResult {
       },
     ],
   }
+}
+
+function accessBlocked(displayName: string, caller: McpCaller): CallToolResult {
+  if (caller.accessId === PLUGIN_UNIDENTIFIED_ACCESS_ID) {
+    return textResult(
+      `${displayName} is blocked in Maximal for this API key because Maximal doesn't recognize it (it may be turned off or deleted). Use a key from Maximal's Settings.`,
+    )
+  }
+  const target = caller.name ? ` for ${caller.name}` : " for this connection"
+  return textResult(
+    `${displayName} is blocked${target} in Maximal. Change App Permissions in Settings to use it.`,
+  )
+}
+
+function accessAskUnanswered(
+  displayName: string,
+  callerName: string | undefined,
+): CallToolResult {
+  const target = callerName ? ` for ${callerName}` : " for this connection"
+  return textResult(
+    `${displayName} asks before it runs${target} in Maximal, and this client can't show the question, so it wasn't run. Change App Permissions in Settings to allow it.`,
+  )
 }
 
 /**
@@ -238,6 +302,7 @@ export class McpSessions {
   readonly #listChangedTimers = new Map<string, ReturnType<typeof setTimeout>>()
   readonly #options: McpSessionOptions
   readonly #affinity: GenerationAffinityCoordinator
+  #unsubscribeAccess: (() => void) | undefined
   #watched: { gateway: PluginGateway; unsubscribe: () => void } | undefined
   #sweeper: ReturnType<typeof setInterval> | undefined
 
@@ -270,9 +335,18 @@ export class McpSessions {
     return this.#affinity.diagnostics()
   }
 
-  get(id: string, pluginId: string): Session | undefined {
+  get(
+    id: string,
+    pluginId: string | undefined,
+    accessId: string | undefined,
+  ): Session | undefined {
     const session = this.#sessions.get(id)
-    return session && session.pluginId === pluginId && !session.closed ?
+    return (
+        session
+          && session.pluginId === pluginId
+          && session.caller.accessId === accessId
+          && !session.closed
+      ) ?
         session
       : undefined
   }
@@ -286,6 +360,16 @@ export class McpSessions {
   /** Follow the gateway's events (plugin off ⇒ close its sessions; tools
    *  changed ⇒ `list_changed`). Re-subscribes when the gateway changes. */
   watch(gateway: PluginGateway): void {
+    // App Permission changes (Settings) re-list tools; `closeAll` drops this
+    // and the next request brings it back, like the gateway subscription.
+    this.#unsubscribeAccess ??= subscribePluginAccessChanges((pluginId) => {
+      for (const session of [
+        ...this.#forPlugin(pluginId),
+        ...this.#aggregateSessions(),
+      ]) {
+        this.#scheduleListChanged(session)
+      }
+    })
     if (this.#watched?.gateway === gateway) return
     this.#watched?.unsubscribe()
     this.#watched = {
@@ -312,10 +396,14 @@ export class McpSessions {
 
   /** Open a session for an `initialize` request. If the request turns out
    *  not to initialize, the caller closes it again. */
-  async open(pluginId: string): Promise<Session> {
+  async open(
+    pluginId: string | undefined,
+    caller: McpCaller,
+  ): Promise<Session> {
     const session: Session = {
       id: undefined,
       pluginId,
+      caller,
       server: this.#createServer(pluginId),
       transport: new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
@@ -328,6 +416,7 @@ export class McpSessions {
       lastSeen: Date.now(),
       inflight: 0,
       closed: false,
+      promptedTools: undefined,
     }
     session.server.setRequestHandler("tools/list", () =>
       this.#listTools(session),
@@ -402,16 +491,64 @@ export class McpSessions {
     this.#listChangedTimers.clear()
     this.#watched?.unsubscribe()
     this.#watched = undefined
+    this.#unsubscribeAccess?.()
+    this.#unsubscribeAccess = undefined
     await this.#affinity.closeAll()
   }
 
-  #createServer(pluginId: string): LowLevelServer {
+  #createServer(pluginId: string | undefined): LowLevelServer {
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
     const server = new Server(
-      { name: pluginId, version: BUILD_VERSION },
+      { name: pluginId ?? AGGREGATE_SERVER_NAME, version: BUILD_VERSION },
       { capabilities: { tools: { listChanged: true } } },
     )
     return server
+  }
+
+  #accessPermission(session: Session, pluginId: string): ToolPermission {
+    return pluginAccessPermission(
+      getConfig(),
+      pluginId,
+      session.caller.accessId,
+    )
+  }
+
+  #aggregatePluginIds(generation: PluginGenerationLease): Array<string> {
+    const gateway = this.#options.getGateway()
+    if (!gateway) return []
+    return gateway
+      .list()
+      .map((plugin) => plugin.id)
+      .filter((pluginId) => {
+        const plugin = generation.get(pluginId)
+        return plugin?.kind === "connector" && plugin.enabled
+      })
+      .sort((a, b) => a.localeCompare(b, "en"))
+  }
+
+  #listedToolsFor(
+    generation: PluginGenerationLease,
+    session: Session,
+    pluginId: string,
+  ): Array<Tool> {
+    const accessPermission = this.#accessPermission(session, pluginId)
+    if (accessPermission === "block") return []
+    const plugin = generation.get(pluginId)
+    const connector = plugin?.displayName ?? pluginId
+    let tools: Array<PluginToolListing>
+    try {
+      tools = generation.listTools(pluginId)
+    } catch (error) {
+      // One connector racing a reload must not blank the aggregate catalog.
+      if (isPluginGatewayError(error)) return []
+      throw error
+    }
+    return tools.map((tool) => {
+      const listed = toMcpTool(tool, connector, accessPermission)
+      return session.pluginId === undefined ?
+          { ...listed, name: aggregateToolName(pluginId, listed.name) }
+        : listed
+    })
   }
 
   async #listTools(session: Session): Promise<{ tools: Array<Tool> }> {
@@ -419,10 +556,20 @@ export class McpSessions {
     let call: AffinedGenerationCall | undefined
     try {
       call = await this.#affinity.acquire(session.id)
-      const plugin = call.generation.get(session.pluginId)
-      const tools = plugin ? call.generation.listTools(session.pluginId) : []
-      const connector = plugin?.displayName ?? session.pluginId
-      return { tools: tools.map((tool) => toMcpTool(tool, connector)) }
+      const generation = call.generation
+      const pluginIds =
+        session.pluginId === undefined ?
+          this.#aggregatePluginIds(generation)
+        : [session.pluginId]
+      const listed = pluginIds.flatMap((pluginId) =>
+        this.#listedToolsFor(generation, session, pluginId),
+      )
+      session.promptedTools = new Set(
+        listed
+          .filter((tool) => tool._meta?.[REQUIRES_USER_INTERACTION] === true)
+          .map((tool) => tool.name),
+      )
+      return { tools: listed }
     } catch (error) {
       // A lifecycle/cutover race is a temporarily empty catalog, not a server
       // crash or an escaping PluginGatewayError.
@@ -447,44 +594,76 @@ export class McpSessions {
     this.#sweeper.unref()
   }
 
+  #toolTarget(
+    generation: PluginGenerationLease,
+    session: Session,
+    publicTool: string,
+  ): { pluginId: string; toolName: string } {
+    const target =
+      session.pluginId === undefined ?
+        parseAggregateToolName(publicTool)
+      : { pluginId: session.pluginId, toolName: publicTool }
+    if (
+      !target
+      || (session.pluginId === undefined
+        && generation.get(target.pluginId)?.kind !== "connector")
+    ) {
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        `Unknown tool "${publicTool}".`,
+      )
+    }
+    return target
+  }
+
   async #callTool(
     session: Session,
     request: CallToolRequest,
     ctx: ServerContext,
   ): Promise<CallToolResult> {
-    const { pluginId } = session
     const gateway = this.#options.getGateway()
+    const endpointName = session.pluginId ?? AGGREGATE_SERVER_NAME
     if (!gateway || session.id === undefined)
-      return notReady(pluginId, "Maximal is stopping.")
+      return notReady(endpointName, "Maximal is stopping.")
     const affined = await this.#affinity.acquire(session.id)
     const generation = affined.generation
     try {
-      const { name } = request.params
+      const publicTool = request.params.name
+      const { pluginId, toolName } = this.#toolTarget(
+        generation,
+        session,
+        publicTool,
+      )
       const args = request.params.arguments ?? {}
       const call = callContext(session, request, ctx)
+      const connector = generation.get(pluginId)?.displayName ?? pluginId
+      const accessPermission = this.#accessPermission(session, pluginId)
+      if (accessPermission === "block") {
+        return accessBlocked(connector, session.caller)
+      }
       const listing = generation
         .listTools(pluginId)
-        .find((tool) => tool.name === name)
-      if (listing?.permission === "ask") {
-        const connector = generation.get(pluginId)?.displayName ?? pluginId
-        const decision = await this.#approve(session, ctx, {
-          connector,
-          tool: name,
-          args,
-        })
-        if (decision.refused) return decision.refused
-        if (decision.approved) call.approved = true
-      }
+        .find((tool) => tool.name === toolName)
+      const gated = await this.#gate(session, ctx, {
+        connector,
+        tool: toolName,
+        publicTool,
+        args,
+        accessPermission,
+        toolPermission: listing?.permission,
+      })
+      if (gated.refused) return gated.refused
+      if (gated.approved) call.approved = true
       let result
       try {
-        result = await generation.callTool(pluginId, name, args, call)
+        result = await generation.callTool(pluginId, toolName, args, call)
       } catch (error) {
         if (!isPluginGatewayError(error)) throw error
         return refusal(generation, pluginId, error)
       }
       const advertised = generation
         .listTools(pluginId)
-        .find((tool) => tool.name === name)?.outputSchema
+        .find((tool) => tool.name === toolName)?.outputSchema
       return session.server.projectCallToolResult(
         result as CallToolResult,
         advertised,
@@ -492,6 +671,39 @@ export class McpSessions {
     } finally {
       affined.release()
     }
+  }
+
+  /**
+   * Asks the person when the tool (or the caller's App Permission) says to.
+   * A refusal to return, else whether they approved (the call then carries
+   * `approved`).
+   */
+  async #gate(
+    session: Session,
+    ctx: ServerContext,
+    ask: {
+      connector: string
+      tool: string
+      publicTool: string
+      args: Record<string, unknown>
+      accessPermission: ToolPermission
+      toolPermission: ToolPermission | undefined
+    },
+  ): Promise<{ approved: boolean; refused?: CallToolResult }> {
+    // A blocked tool is refused by the gateway; nobody is asked about it.
+    const askedByApp =
+      ask.accessPermission === "ask" && ask.toolPermission !== "block"
+    if (ask.toolPermission !== "ask" && !askedByApp) return { approved: false }
+    const decision = await this.#approve(session, ctx, ask)
+    // The gateway only insists on approval for a tool that asks itself, so
+    // an app-level Ask the client can't answer is refused here.
+    if (!decision.approved && !decision.refused && askedByApp) {
+      return {
+        approved: false,
+        refused: accessAskUnanswered(ask.connector, session.caller.name),
+      }
+    }
+    return decision
   }
 
   /**
@@ -504,11 +716,25 @@ export class McpSessions {
   async #approve(
     session: Session,
     ctx: ServerContext,
-    ask: { connector: string; tool: string; args: Record<string, unknown> },
+    ask: {
+      connector: string
+      tool: string
+      publicTool: string
+      args: Record<string, unknown>
+    },
   ): Promise<{ approved: boolean; refused?: CallToolResult }> {
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
     const client = session.server.getClientVersion()?.name
-    if (client === CLAUDE_CODE_CLIENT) return { approved: true }
+    // Claude Code's prompt counts only for the Claude Code app (the name is
+    // client-asserted) and only for a tool its last list marked: after a
+    // policy change, until it re-lists, nobody has been asked.
+    if (
+      client === CLAUDE_CODE_CLIENT
+      && session.caller.accessId === pluginAppAccessId("claude-code")
+      && session.promptedTools?.has(ask.publicTool) === true
+    ) {
+      return { approved: true }
+    }
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
     if (session.server.getClientCapabilities()?.elicitation === undefined)
       return { approved: false }
@@ -550,29 +776,40 @@ export class McpSessions {
     )
   }
 
+  #aggregateSessions(): Array<Session> {
+    return [...this.#sessions.values()].filter(
+      (session) => session.pluginId === undefined,
+    )
+  }
+
   #onGatewayEvent(gateway: PluginGateway, event: PluginGatewayEvent): void {
     // `tools` covers registrations and permission changes; `settings` and
     // `status` never change the MCP-visible list on their own (a config
     // change reloads the plugin, which arrives as `lifecycle`).
     if (event.type !== "tools" && event.type !== "lifecycle") return
-    const sessions = this.#forPlugin(event.pluginId)
-    if (sessions.length === 0) return
+    const direct = this.#forPlugin(event.pluginId)
     if (gateway.get(event.pluginId)?.enabled !== true) {
-      for (const session of sessions) void this.close(session)
-      return
+      for (const session of direct) void this.close(session)
+    } else {
+      for (const session of direct) this.#scheduleListChanged(session)
     }
-    for (const session of sessions) this.#scheduleListChanged(session)
+    // The aggregate survives one connector stopping; its catalog just loses
+    // that connector's namespaced tools.
+    for (const session of this.#aggregateSessions()) {
+      this.#scheduleListChanged(session)
+    }
   }
 
   #scheduleListChanged(session: Session): void {
     if (session.id === undefined || this.#listChangedTimers.has(session.id))
       return
-    const { id, pluginId } = session
+    const { id } = session
+    const target = session.pluginId ?? AGGREGATE_SERVER_NAME
     const timer = setTimeout(() => {
       this.#listChangedTimers.delete(id)
       if (session.closed) return
       session.server.sendToolListChanged().catch((error: unknown) => {
-        consola.debug(`MCP ${pluginId}: list_changed not delivered`, error)
+        consola.debug(`MCP ${target}: list_changed not delivered`, error)
       })
     }, this.#options.listChangedDelayMs)
     timer.unref()

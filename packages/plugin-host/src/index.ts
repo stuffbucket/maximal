@@ -30,6 +30,7 @@ export {
 export {
   createFileStorage,
   operationsService,
+  pluginClientsService,
   type PluginServiceFactory,
   providersService,
   serverToolsService,

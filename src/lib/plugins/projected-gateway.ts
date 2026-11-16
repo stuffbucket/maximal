@@ -2,6 +2,7 @@ import type {
   ModelBinding,
   ModelOperation,
   OperationDispatch,
+  PluginClientContribution,
   PluginGateway,
   PluginGatewayEvent,
   PluginGenerationLease,
@@ -30,6 +31,7 @@ interface GatewayProjection {
   readonly listings: ReadonlyMap<string, ReadonlyArray<PluginToolListing>>
   readonly toolViews: ReadonlyMap<string, ReadonlyArray<PluginToolView>>
   readonly serverTools: ReadonlyArray<ServerToolView>
+  readonly pluginClients: ReadonlyArray<PluginClientContribution>
   readonly servedModels: ReadonlyArray<ServedModel>
   readonly operationTargets: ReadonlyMap<
     string,
@@ -109,6 +111,9 @@ function freezeProjection(gateway: PluginGateway): GatewayProjection {
     toolViews,
     serverTools: Object.freeze(
       gateway.serverTools().map((value) => clone(value)),
+    ),
+    pluginClients: Object.freeze(
+      gateway.pluginClientContributions().map((value) => clone(value)),
     ),
     servedModels: Object.freeze(servedModels),
     operationTargets,
@@ -299,6 +304,10 @@ export class ProjectedPluginGateway implements PluginGateway {
         live()
         return state.projection.serverTools.map((value) => clone(value))
       },
+      pluginClientContributions: () => {
+        live()
+        return state.projection.pluginClients.map((value) => clone(value))
+      },
       operations: () => {
         live()
         return this.#operationView(() => state)
@@ -363,6 +372,10 @@ export class ProjectedPluginGateway implements PluginGateway {
 
   serverTools(): Array<ServerToolView> {
     return this.#active.projection.serverTools.map((value) => clone(value))
+  }
+
+  pluginClientContributions(): Array<PluginClientContribution> {
+    return this.#active.projection.pluginClients.map((value) => clone(value))
   }
 
   async prepareServerTool(

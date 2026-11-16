@@ -135,11 +135,20 @@ back as an `isError` result while the connector stays ready, and prints a
 pass/fail table. `tests/bench-connectors.test.ts` runs the same drive
 in-process under `bun test`.
 
-## Parked MCP broker
+## MCP stdio adapter
 
-The MCP broker and its `maximal mcp` command are parked under `parked/mcp/`
-and are not built or tested. Work IQ is now a built-in plugin (Settings →
-Integrations → Connectors; see [`workiq.md`](workiq.md)).
+`maximal mcp stdio --url http://127.0.0.1:<port>/mcp` bridges an MCP
+client's stdio transport to Maximal's aggregate Streamable HTTP endpoint. The
+adapter is part of the packaged `maximal` executable; it uses the official MCP
+SDK transports and needs no `npx`, `bunx`, or separate broker executable. Set
+`MAXIMAL_MCP_API_KEY` in the child process environment when the endpoint
+requires an app identity. The URL must be the exact plain-HTTP aggregate
+`/mcp` path on loopback; connector-specific paths, redirects, credentials in
+the URL, query strings, and fragments are rejected.
+
+The older standalone broker remains parked under `parked/mcp/` and is not
+built or tested. Work IQ is a built-in plugin (Settings → Integrations →
+Connectors; see [`workiq.md`](workiq.md)).
 
 ## Fast UI iteration
 
@@ -172,6 +181,7 @@ It's an isolated package (`packages/storybook`, its own pnpm lockfile):
 bun run storybook:install   # once, or after packages/storybook/pnpm-lock.yaml changes
 bun run storybook           # dev server on :6006 (or the next free port); restages on save
 bun run storybook:build     # static build → packages/storybook/storybook-static
+bun run storybook:assets    # tagged SVG/WebP assets, light + dark → dist/storybook-assets
 bun run storybook:check     # fixtures vs. API schemas + stories vs. component props
 ```
 

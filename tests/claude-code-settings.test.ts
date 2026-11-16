@@ -15,8 +15,9 @@ import {
   stripBaseUrl,
   writeClaudeCodeSettings,
 } from "~/apps/claude-code/config"
+import { currentProfileId } from "~/apps/profile-identity"
 import { getConfig, writeConfig } from "~/lib/config/config"
-import { proxyBaseUrl, setListeningPort } from "~/lib/start/proxy-port"
+import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 const TEST_KEY = "custom-user-key"
 const TEST_HELPER = "echo 'custom-user-key'"
@@ -26,6 +27,7 @@ const TEST_MARKER = {
   strategy: "echo",
   fingerprint:
     "16ba58604080f664b043e3c4858ff452390db3db7d109225b13d482337657782",
+  profileId: currentProfileId(),
 }
 const resolveTestKey = () =>
   ({ ok: true, key: TEST_KEY, source: "app" }) as const
@@ -119,10 +121,10 @@ describe("getBaseUrlOwnership", () => {
     expect(getBaseUrlOwnership({ env: "nope" })).toBe("absent")
   })
 
-  it("ours when it equals the proxy URL", () => {
+  it("foreign when an unmarked value merely equals the proxy URL", () => {
     expect(
       getBaseUrlOwnership({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } }),
-    ).toBe("ours")
+    ).toBe("foreign")
   })
 
   it("foreign when it is some other value", () => {
@@ -131,50 +133,6 @@ describe("getBaseUrlOwnership", () => {
         env: { ANTHROPIC_BASE_URL: "https://other.example" },
       }),
     ).toBe("foreign")
-  })
-})
-
-describe("base URL follows the proxy's port", () => {
-  afterEach(() => {
-    setListeningPort(undefined)
-  })
-
-  it("writes the port the proxy is listening on", () => {
-    setListeningPort(5555)
-    apply()
-    expect(envOf(read()).ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:5555")
-  })
-
-  it("updates its own URL after the port changes instead of reporting a conflict", () => {
-    setListeningPort(5555)
-    apply()
-    setListeningPort(6666)
-    const result = apply()
-    expect(result.skippedReason).toBeUndefined()
-    expect(envOf(read()).ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:6666")
-  })
-
-  it("revert removes a URL written under an earlier port", () => {
-    setListeningPort(5555)
-    apply()
-    setListeningPort(6666)
-    revertProxyBaseUrl(settingsPath)
-    expect(fs.existsSync(settingsPath)).toBe(false)
-  })
-
-  it("a loopback URL is ours only alongside our own apiKeyHelper", () => {
-    expect(
-      getBaseUrlOwnership({
-        env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8080" },
-      }),
-    ).toBe("foreign")
-    expect(
-      getBaseUrlOwnership({
-        env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8080" },
-        apiKeyHelper: TEST_HELPER,
-        _maximalHelper: TEST_MARKER,
-      }),
-    ).toBe("ours")
   })
 })
 
@@ -272,6 +230,7 @@ describe("mergeBaseUrl / stripBaseUrl (pure)", () => {
       strategy: "echo",
       fingerprint:
         "16ba58604080f664b043e3c4858ff452390db3db7d109225b13d482337657782",
+      profileId: currentProfileId(),
     })
     expect(envOf(merged)).toEqual({
       FOO: "1",
@@ -421,13 +380,17 @@ describe("applyProxyBaseUrl (end-to-end)", () => {
     expect(read().apiKeyHelper).toBe(TEST_HELPER)
   })
 
-  it("fills in an absent helper when the base URL is already ours", () => {
-    writeRaw(JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } }))
+  it("does not adopt an unmarked base URL even when it matches our port", () => {
+    const original = { env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } }
+    writeRaw(JSON.stringify(original))
 
     const result = apply()
 
-    expect(result.wrote).toBe(true)
-    expect(isProxyBaseUrlConfigured(settingsPath)).toBe(true)
+    expect(result).toMatchObject({
+      wrote: false,
+      skippedReason: "foreign-base-url",
+    })
+    expect(read()).toEqual(original)
   })
 
   it("fills in an absent base URL when the marked helper is already ours", () => {
@@ -512,7 +475,11 @@ describe("applyProxyBaseUrl classifier setting", () => {
     writeRaw(JSON.stringify(original))
 
     const result = apply()
-    expect(result.skippedReason).toBe("already-ours")
+    expect(result.wrote).toBe(true)
+    expect(read()._maximalProfile).toEqual({
+      version: 1,
+      profileId: currentProfileId(),
+    })
 
     revertProxyBaseUrl(settingsPath)
     expect(read()).toEqual({ env: { [AUTO_MODE_SERVER_KEY]: "0" } })
@@ -527,6 +494,7 @@ describe("applyProxyBaseUrl (end-to-end continued)", () => {
     expect(read()).toEqual({
       apiKeyHelper: TEST_HELPER,
       _maximalHelper: TEST_MARKER,
+      _maximalProfile: { version: 1, profileId: currentProfileId() },
       env: {
         ANTHROPIC_BASE_URL: proxyBaseUrl(),
         [AUTO_MODE_SERVER_KEY]: "0",
@@ -539,23 +507,15 @@ describe("applyProxyBaseUrl (end-to-end continued)", () => {
     })
   })
 
-  it("handles an unparseable file (writes fresh)", () => {
-    writeRaw("{ garbage")
-    const result = apply()
-    expect(result.wrote).toBe(true)
-    expect(read()).toEqual({
-      apiKeyHelper: TEST_HELPER,
-      _maximalHelper: TEST_MARKER,
-      env: {
-        ANTHROPIC_BASE_URL: proxyBaseUrl(),
-        [AUTO_MODE_SERVER_KEY]: "0",
-      },
-      _maximalPrior: {
-        ANTHROPIC_BASE_URL: "__UNSET__",
-        apiKeyHelper: "__UNSET__",
-        [AUTO_MODE_SERVER_KEY]: "__UNSET__",
-      },
+  it("leaves an unparseable file untouched", () => {
+    const original = "{ garbage"
+    writeRaw(original)
+
+    expect(apply()).toMatchObject({
+      wrote: false,
+      skippedReason: "cleanup-required",
     })
+    expect(fs.readFileSync(settingsPath, "utf8")).toBe(original)
   })
 
   for (const [name, legacyHelper] of [

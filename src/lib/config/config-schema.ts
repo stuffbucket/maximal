@@ -120,6 +120,11 @@ const PluginClientIdSchema = z.enum([
   "copilot-cli",
 ])
 
+const PluginAccessIdSchema = z
+  .string()
+  .regex(/^(?:app|connection):[\w.-]{1,128}$/u)
+const PluginAccessPermissionSchema = z.enum(["allow", "ask", "block"])
+
 /** One `plugins.<id>` entry. Absent (or `enabled` not true) means off. */
 const PluginSettingsEntrySchema = z
   .object({
@@ -128,6 +133,9 @@ const PluginSettingsEntrySchema = z
      *  it starts, so a bad value fails that plugin, not Maximal. */
     config: z.unknown().optional(),
     clients: z.array(PluginClientIdSchema).max(8).optional(),
+    access: z
+      .record(PluginAccessIdSchema, PluginAccessPermissionSchema)
+      .optional(),
   })
   .loose()
 

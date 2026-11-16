@@ -2,24 +2,30 @@ import consola from "consola"
 
 import type { ClientApp } from "./index"
 
+import { chatGptApp } from "./chatgpt"
 import { claudeCodeApp } from "./claude-code"
 import { claudeDesktopApp } from "./claude-desktop"
 import { codexApp } from "./codex"
 import { copilotCliApp } from "./copilot-cli"
+import { piApp } from "./pi"
 
 const apps: Record<string, ClientApp> = {
+  chatgpt: chatGptApp,
   "claude-code": claudeCodeApp,
   "claude-desktop": claudeDesktopApp,
   codex: codexApp,
   "copilot-cli": copilotCliApp,
+  pi: piApp,
 }
 
 export function getAllApps(): Array<ClientApp> {
   return [
+    apps.chatgpt,
     apps["claude-code"],
     apps["claude-desktop"],
     apps.codex,
     apps["copilot-cli"],
+    apps.pi,
   ]
 }
 

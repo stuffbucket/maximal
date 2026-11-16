@@ -15,6 +15,9 @@ import {
   type PluginResourceLifecycle,
   type PluginResourceView,
 } from "@stuffbucket/maximal-plugin-sdk"
+import path from "node:path"
+
+import { PATHS } from "~/lib/platform/paths"
 
 import type { DurableExclusiveResourceManager } from "../exclusive-resource-cutover"
 import type {
@@ -39,6 +42,7 @@ import type {
 } from "./contracts"
 import type { PluginRunnerSupervisorConfig } from "./supervisor"
 
+import { GenerationSpoolStore } from "../spool/store"
 import { DuplexRpcDispatcher } from "../transport/dispatcher"
 import { GATEWAY_RPC } from "../transport/gateway-codec"
 import { BunIpcTransport } from "../transport/ipc"
@@ -253,6 +257,7 @@ export class ChildGeneration implements GenerationRunner<
   readonly generationId: string
   readonly artifactId: string
   readonly #deps: ChildGenerationDeps
+  readonly #spool: GenerationSpoolStore
   readonly #supervisor: PluginRunnerSupervisor
   readonly #listeners = new Set<(event: GenerationEvent) => void>()
   readonly #hooks: RemoteResourceHooks
@@ -278,6 +283,10 @@ export class ChildGeneration implements GenerationRunner<
     const { token } = deps.selection
     this.generationId = token.generationId
     this.artifactId = token.manifestSha256
+    this.#spool = new GenerationSpoolStore({
+      root: path.join(PATHS.APP_DIR, "plugin-spool"),
+      generation: this.generationId,
+    })
     this.#hooks = new RemoteResourceHooks(() => {
       if (!this.#dispatcher)
         throw new Error("Runner RPC transport is unavailable.")
@@ -343,6 +352,7 @@ export class ChildGeneration implements GenerationRunner<
           state: deps.state,
           provider: deps.provider,
           host: deps.host,
+          spool: this.#spool,
         })
         return {
           call: (method, params, options) => rpc.call(method, params, options),
@@ -551,11 +561,12 @@ export class ChildGeneration implements GenerationRunner<
   shutdown(reason: string): Promise<void> {
     if (this.#shutdown) return this.#shutdown
     const budget = this.#supervisor.shutdown(reason)
-    this.#shutdown = this.#supervisor.shutdownSettled().then(() => {
+    this.#shutdown = this.#supervisor.shutdownSettled().then(async () => {
       // A budget timeout does not prove the process tree is gone. Release the
-      // singleton leases only after authoritative termination and reaping.
+      // singleton leases and spool only after authoritative termination/reaping.
       this.#releaseResources()
-      return budget
+      await this.#spool.close()
+      await budget
     })
     return this.#shutdown
   }
@@ -615,6 +626,7 @@ export class ChildGeneration implements GenerationRunner<
         dispatcher,
         this.generationId,
         projection,
+        this.#spool,
         () => this.shutdown("plugin gateway disposed"),
       )
       return undefined

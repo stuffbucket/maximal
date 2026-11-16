@@ -433,7 +433,14 @@ export const ClaudeCodeInstallStatus = z.object({
 export type ClaudeCodeInstallStatus = z.infer<typeof ClaudeCodeInstallStatus>
 
 export const AppEntry = z.object({
-  id: z.enum(["claude-code", "claude-desktop", "codex", "copilot-cli"]),
+  id: z.enum([
+    "chatgpt",
+    "claude-code",
+    "claude-desktop",
+    "codex",
+    "copilot-cli",
+    "pi",
+  ]),
   name: z.string(),
   kind: z.enum(["config", "coming-soon"]),
   /** Whether the integration is currently active (proxy config applied). */
@@ -450,6 +457,7 @@ export const AppEntry = z.object({
       "foreign-base-url",
       "foreign-api-key-helper",
       "foreign-gateway-profile",
+      "other-maximal-config",
       "cleanup-required",
     ])
     .nullable(),
@@ -463,16 +471,19 @@ export type AppsListResponse = z.infer<typeof AppsListResponse>
 
 export const CodexToggleRequest = z.object({
   enabled: z.boolean(),
+  overrideOtherMaximal: z.boolean().optional(),
 })
 export type CodexToggleRequest = z.infer<typeof CodexToggleRequest>
 
 export const ClaudeCodeToggleRequest = z.object({
   enabled: z.boolean(),
+  overrideOtherMaximal: z.boolean().optional(),
 })
 export type ClaudeCodeToggleRequest = z.infer<typeof ClaudeCodeToggleRequest>
 
 export const ClaudeDesktopToggleRequest = z.object({
   enabled: z.boolean(),
+  overrideOtherMaximal: z.boolean().optional(),
 })
 export type ClaudeDesktopToggleRequest = z.infer<
   typeof ClaudeDesktopToggleRequest
@@ -600,6 +611,27 @@ export const PluginClientView = z.object({
 })
 export type PluginClientView = z.infer<typeof PluginClientView>
 
+export const PluginAccessTargetId = z
+  .string()
+  .regex(/^(?:app|connection):[\w.-]{1,128}$/u)
+export type PluginAccessTargetId = z.infer<typeof PluginAccessTargetId>
+
+/** One app integration or named API connection that can use a connector. */
+export const PluginAccessView = z.object({
+  id: PluginAccessTargetId,
+  kind: z.enum(["app", "connection"]),
+  /** Product name for an app, user-defined label for a connection. */
+  name: z.string(),
+  permission: ToolPermission,
+  /** Whether the target is enabled and usable right now. Its permission can
+   *  still be changed while unavailable. */
+  available: z.boolean(),
+  reason: z.string().optional(),
+  clientId: PluginClientId.optional(),
+  standalone: PluginClientView.shape.standalone,
+})
+export type PluginAccessView = z.infer<typeof PluginAccessView>
+
 /** A connector's upstream, from `manifest.connector`. Public facts only:
  *  the auth *type* is shown ("Signs in with Microsoft Entra ID"); client
  *  ids, authorities, scopes and redirect URIs are never sent. */
@@ -665,7 +697,10 @@ export const PluginView = z.object({
   /** Counts over the same tools the detail's `tools` lists (live or cached). */
   toolCounts: PluginToolCounts,
   toolsSource: PluginToolsSource,
+  /** Compatibility view of fixed app integrations. */
   clients: z.array(PluginClientView),
+  /** Every fixed app and named API connection, with its access policy. */
+  access: z.array(PluginAccessView),
   /** The plugin's MCP endpoint on this Maximal. */
   endpoint: z.string(),
 })
@@ -741,6 +776,12 @@ export const PluginUpdateRequest = z
   .object({
     enabled: z.boolean().optional(),
     clients: z.array(PluginClientId).max(8).optional(),
+    access: z
+      .record(PluginAccessTargetId, ToolPermission)
+      .refine((value) => Object.keys(value).length <= 256, {
+        message: "At most 256 app and connection permissions are allowed",
+      })
+      .optional(),
     config: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()

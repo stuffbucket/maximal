@@ -7,7 +7,7 @@ interface ConfirmDialogProps {
   title: string;
   body: ReactNode;
   confirmLabel?: string;
-  cancelLabel?: string;
+  cancelLabel?: string | null;
   tone?: "default" | "danger";
   busy?: boolean;
   onConfirm: () => void | Promise<void>;
@@ -34,6 +34,7 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps): JSX.Element {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
 
   const onCancelGuard = (): void => {
@@ -50,7 +51,7 @@ export function ConfirmDialog({
       open={open}
       className="confirm-dialog"
       ariaLabelledBy={titleId}
-      initialFocusRef={cancelRef}
+      initialFocusRef={cancelLabel === null ? confirmRef : cancelRef}
       onDismiss={onCancelGuard}
     >
       {open ? (
@@ -60,16 +61,19 @@ export function ConfirmDialog({
           </h2>
           <div className="confirm-dialog__body">{body}</div>
           <div className="confirm-dialog__actions">
+            {cancelLabel !== null && (
+              <button
+                ref={cancelRef}
+                type="button"
+                className="btn btn--ghost"
+                onClick={onCancelGuard}
+                disabled={busy}
+              >
+                {cancelLabel}
+              </button>
+            )}
             <button
-              ref={cancelRef}
-              type="button"
-              className="btn btn--ghost"
-              onClick={onCancelGuard}
-              disabled={busy}
-            >
-              {cancelLabel}
-            </button>
-            <button
+              ref={confirmRef}
               type="button"
               className={
                 tone === "danger" ? "btn btn--destructive" : "btn btn--primary"

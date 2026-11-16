@@ -5,6 +5,7 @@
     "": {
       "name": "@stuffbucket/maximal",
       "dependencies": {
+        "@modelcontextprotocol/client": "2.3.1",
         "@modelcontextprotocol/server": "2.3.1",
         "@stuffbucket/maximal-connector-kit": "workspace:*",
         "@stuffbucket/maximal-plugin-decisions": "workspace:*",
@@ -34,7 +35,6 @@
       },
       "devDependencies": {
         "@echristian/eslint-config": "^0.0.54",
-        "@modelcontextprotocol/client": "2.3.1",
         "@playwright/test": "1.56.1",
         "@stryker-mutator/core": "^9.6.1",
         "@types/bun": "^1.2.23",
@@ -1163,7 +1163,7 @@
 
     "path-exists": ["path-exists@4.0.0", "https://packagefeedproxy.microsoft.io/npm/path-exists/-/path-exists-4.0.0.tgz", {}, "sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w=="],
 
-    "path-key": ["path-key@3.1.1", "https://packagefeedproxy.microsoft.io/npm/path-key/-/path-key-3.1.1.tgz", {}, "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q=="],
+    "path-key": ["path-key@4.0.0", "https://packagefeedproxy.microsoft.io/npm/path-key/-/path-key-4.0.0.tgz", {}, "sha512-haREypq7xkM7ErfgIyA0z+Bj4AGKlMSdlQE2jvJo6huWD1EdkKYV+G/T4nq0YEF2vgTT8kqMFKo1uHn950r4SQ=="],
 
     "path-parse": ["path-parse@1.0.7", "https://packagefeedproxy.microsoft.io/npm/path-parse/-/path-parse-1.0.7.tgz", {}, "sha512-LDJzPVEEEPR+y48z93A0Ed0yXb8pAByGWo/k5YYdYgpY2/2EsOsksJrq7lOHxryrVOn1ejG6oAp8ahvOIQD8sw=="],
 
@@ -1487,6 +1487,8 @@
 
     "cliui/string-width": ["string-width@7.2.0", "https://packagefeedproxy.microsoft.io/npm/string-width/-/string-width-7.2.0.tgz", { "dependencies": { "emoji-regex": "^10.3.0", "get-east-asian-width": "^1.0.0", "strip-ansi": "^7.1.0" } }, "sha512-tsaTIkKW9b4N+AEj+SVA+WhJzV7/zMhcSu78mLKWSk7cXMOSHsBKFWUs0fWwq8QyK3MgJBQRX6Gbi4kYbdvGkQ=="],
 
+    "cross-spawn/path-key": ["path-key@3.1.1", "https://packagefeedproxy.microsoft.io/npm/path-key/-/path-key-3.1.1.tgz", {}, "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q=="],
+
     "crypto-random-string/type-fest": ["type-fest@1.4.0", "https://packagefeedproxy.microsoft.io/npm/type-fest/-/type-fest-1.4.0.tgz", {}, "sha512-yGSza74xk0UG8k+pLh5oeoYirvIiWo5t0/o3zHHAO2tRDiZcxWP7fywNlXhqb6/r6sWvwi+RsyQMWhVLe4BVuA=="],
 
     "eslint/ajv": ["ajv@6.15.0", "https://packagefeedproxy.microsoft.io/npm/ajv/-/ajv-6.15.0.tgz", { "dependencies": { "fast-deep-equal": "^3.1.1", "fast-json-stable-stringify": "^2.0.0", "json-schema-traverse": "^0.4.1", "uri-js": "^4.2.2" } }, "sha512-fgFx7Hfoq60ytK2c7DhnF8jIvzYgOMxfugjLOSMHjLIPgenqa7S7oaagATUq99mV6IYvN2tRmC0wnTYX6iPbMw=="],
@@ -1516,8 +1518,6 @@
     "micromatch/picomatch": ["picomatch@2.3.2", "https://packagefeedproxy.microsoft.io/npm/picomatch/-/picomatch-2.3.2.tgz", {}, "sha512-V7+vQEJ06Z+c5tSye8S+nHUfI51xoXIXjHQ99cQtKUkQqqO1kO/KCJUfZXuB47h/YBlDhah2H3hdUGXn8ie0oA=="],
 
     "mutation-server-protocol/zod": ["zod@4.4.3", "https://packagefeedproxy.microsoft.io/npm/zod/-/zod-4.4.3.tgz", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
-
-    "npm-run-path/path-key": ["path-key@4.0.0", "https://packagefeedproxy.microsoft.io/npm/path-key/-/path-key-4.0.0.tgz", {}, "sha512-haREypq7xkM7ErfgIyA0z+Bj4AGKlMSdlQE2jvJo6huWD1EdkKYV+G/T4nq0YEF2vgTT8kqMFKo1uHn950r4SQ=="],
 
     "regjsparser/jsesc": ["jsesc@3.0.2", "https://packagefeedproxy.microsoft.io/npm/jsesc/-/jsesc-3.0.2.tgz", { "bin": { "jsesc": "bin/jsesc" } }, "sha512-xKqzzWXDttJuOcawBt4KnKHHIf5oQ/Cxax+0PWFG+DFDgHNAdi+TXECADI+RYiFUMmx8792xsMbbgXj4CwnP4g=="],
 
@@ -1574,5 +1574,7 @@
     "eslint-plugin-jsx-a11y/minimatch/brace-expansion/balanced-match": ["balanced-match@1.0.2", "https://packagefeedproxy.microsoft.io/npm/balanced-match/-/balanced-match-1.0.2.tgz", {}, "sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw=="],
 
     "eslint/minimatch/brace-expansion/balanced-match": ["balanced-match@1.0.2", "https://packagefeedproxy.microsoft.io/npm/balanced-match/-/balanced-match-1.0.2.tgz", {}, "sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw=="],
+
+    "run-jxa/execa/npm-run-path/path-key": ["path-key@3.1.1", "https://packagefeedproxy.microsoft.io/npm/path-key/-/path-key-3.1.1.tgz", {}, "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q=="],
   }
 }

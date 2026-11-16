@@ -29,6 +29,7 @@ import { createRebuilder, inputSignature } from "./build-ui-watch"
 const REPO = resolve(import.meta.dir, "..")
 const SETTINGS_ENTRY = join(REPO, "shell/ui/settings/index.html")
 const SETTINGS_VENDOR = join(REPO, "shell/ui/settings/vendor")
+const SETTINGS_ICONS = join(REPO, "shell/src/ui/features/apps/icons")
 const DASHBOARD_SRC = join(REPO, "shell/ui/dashboard")
 const DASHBOARD_ENTRY_TS = join(REPO, "shell/src/dashboard/main.ts")
 const DASHBOARD_FLOW_WORKER_TS = join(REPO, "shell/src/dashboard/live/flow-worker.ts")
@@ -54,12 +55,13 @@ async function buildSettings(): Promise<void> {
     for (const log of result.logs) console.error(log)
     throw new Error("settings build failed")
   }
-  // Self-hosted web fonts. The @font-face rules in index.html reference
-  // ./vendor/fonts/*.woff2 with a bare relative URL, which Bun's HTML
-  // bundler leaves untouched (it neither inlines nor rewrites them). Copy
-  // the vendored woff2 verbatim next to the bundle, same as the dashboard
-  // serves its ./vendor/ assets, so the webview never hits a CDN.
-  await cp(SETTINGS_VENDOR, join(SETTINGS_OUT, "vendor"), { recursive: true })
+  // Bun's HTML bundler leaves bare relative URLs and `new URL(...,
+  // import.meta.url)` assets untouched. Copy both sets next to the bundle so
+  // fonts and harness icons resolve under /ui/settings/ in dev and production.
+  await Promise.all([
+    cp(SETTINGS_VENDOR, join(SETTINGS_OUT, "vendor"), { recursive: true }),
+    cp(SETTINGS_ICONS, join(SETTINGS_OUT, "icons"), { recursive: true }),
+  ])
 }
 
 async function buildDashboard(): Promise<void> {

@@ -22,12 +22,14 @@ import type {
 } from "../src/lib/config/settings-types"
 import type { SessionView, SessionsResponse } from "../src/lib/token-usage/sessions-schema"
 import type {
+  PluginClientId,
   PluginDetailView,
   PluginStatus,
   PluginToolView,
   PluginView,
   PluginsAttentionResponse,
   ToolGroup,
+  ToolPermission,
 } from "../src/lib/config/settings-types"
 import {
   type BudgetSeed,
@@ -362,7 +364,7 @@ const appsAllInstalled: AppsListResponse = {
     },
     {
       id: "codex",
-      name: "Codex",
+      name: "Codex CLI",
       kind: "config",
       enabled: true,
       status: "ready",
@@ -380,6 +382,26 @@ const appsAllInstalled: AppsListResponse = {
           source: "unknown",
         },
       ],
+      install: null,
+      conflict: null,
+    },
+    {
+      id: "chatgpt",
+      name: "ChatGPT",
+      kind: "coming-soon",
+      enabled: false,
+      status: "coming-soon",
+      installs: [],
+      install: null,
+      conflict: null,
+    },
+    {
+      id: "pi",
+      name: "Pi",
+      kind: "coming-soon",
+      enabled: false,
+      status: "coming-soon",
+      installs: [],
       install: null,
       conflict: null,
     },
@@ -806,6 +828,24 @@ interface WorkiqOptions {
   config?: Record<string, unknown> | null
 }
 
+/** The fixed apps besides Claude Code: none can receive an HTTP connector yet,
+ *  but each keeps a stored policy that applies once it can. */
+const CONNECTOR_APP_ACCESS: ReadonlyArray<{
+  clientId: PluginClientId
+  name: string
+  permission: ToolPermission
+  reason: string
+}> = [
+  {
+    clientId: "claude-desktop",
+    name: "Claude Desktop",
+    permission: "ask",
+    reason: "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+  },
+  { clientId: "codex", name: "Codex", permission: "block", reason: "Maximal doesn't add connectors to Codex yet." },
+  { clientId: "copilot-cli", name: "Copilot CLI", permission: "ask", reason: "Copilot CLI integration is coming soon." },
+]
+
 /** Work IQ's `GET /settings/api/plugins/:id`. */
 export function workiqDetail({
   stage,
@@ -832,6 +872,57 @@ export function workiqDetail({
       terms: { url: "https://github.com/microsoft/work-iq", label: "Microsoft Work IQ terms" },
     },
   }
+  const claudeCodeReason = "Claude Code isn’t routed through Maximal. Turn it on in Apps to add Work IQ to it."
+  const workiqClients: PluginDetailView["clients"] = [
+    {
+      id: "claude-code",
+      selected: enabled && selected,
+      available: !claudeCodeUnavailable,
+      ...(claudeCodeUnavailable ? { reason: claudeCodeReason } : {}),
+      ...(standalone ? { standalone } : {}),
+    },
+    ...CONNECTOR_APP_ACCESS.map(({ clientId, reason }) => ({
+      id: clientId,
+      selected: false,
+      available: false,
+      reason,
+    })),
+  ]
+  // Fixed apps first, then the named API connections (Laptop and CI are the
+  // two keys in `twoApiKeys`; CI is turned off). Claude Code's policy follows
+  // the old "selected" switch: not selected means blocked.
+  const workiqAccess: PluginDetailView["access"] = [
+    {
+      id: "app:claude-code",
+      kind: "app",
+      name: "Claude Code",
+      clientId: "claude-code",
+      permission: enabled && selected ? "allow" : "block",
+      available: !claudeCodeUnavailable,
+      ...(claudeCodeUnavailable ? { reason: claudeCodeReason } : {}),
+      ...(standalone ? { standalone } : {}),
+    },
+    ...CONNECTOR_APP_ACCESS.map(
+      ({ clientId, name, permission, reason }): PluginDetailView["access"][number] => ({
+        id: `app:${clientId}`,
+        kind: "app",
+        name,
+        clientId,
+        permission,
+        available: false,
+        reason,
+      }),
+    ),
+    { id: "connection:key_1", kind: "connection", name: "Laptop", permission: "allow", available: true },
+    {
+      id: "connection:key_2",
+      kind: "connection",
+      name: "CI",
+      permission: "block",
+      available: false,
+      reason: "This connection is turned off.",
+    },
+  ]
   return {
     id: manifest.id,
     kind: manifest.kind,
@@ -846,35 +937,8 @@ export function workiqDetail({
     ...(stage && failed === undefined ? { status: workiqStatus(stage) } : {}),
     toolCounts: toolCounts(tools),
     toolsSource: live ? "live" : tools.length > 0 ? "cache" : "none",
-    clients: [
-      {
-        id: "claude-code",
-        selected: enabled && selected,
-        available: !claudeCodeUnavailable,
-        ...(claudeCodeUnavailable
-          ? { reason: "Claude Code isn’t routed through Maximal. Turn it on in Apps to add Work IQ to it." }
-          : {}),
-        ...(standalone ? { standalone } : {}),
-      },
-      {
-        id: "claude-desktop",
-        selected: false,
-        available: false,
-        reason: "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
-      },
-      {
-        id: "codex",
-        selected: false,
-        available: false,
-        reason: "Maximal doesn't add connectors to Codex yet.",
-      },
-      {
-        id: "copilot-cli",
-        selected: false,
-        available: false,
-        reason: "Copilot CLI integration is coming soon.",
-      },
-    ],
+    clients: workiqClients,
+    access: workiqAccess,
     endpoint: "http://localhost:4141/mcp/workiq",
     settingsVersion: 1,
     ...(config ? { config } : {}),
@@ -893,7 +957,7 @@ export function listItem(detail: PluginDetailView): PluginView {
 // ---- the FigJam extension (plugin of kind "extension") ----------------------
 // Statuses mirror packages/plugin-figjam/src/status.ts (composeStatus): same
 // codes, summaries, facts and actions. An extension has no MCP endpoint,
-// clients or tools, so its page is only the status block and its settings.
+// access targets, or tools, so its page is only the status block and settings.
 // Off is `figjamDetail()` with no stage.
 export type FigjamStage =
   | "needs-setup"
@@ -1021,6 +1085,7 @@ export function figjamDetail(stage?: FigjamStage): PluginDetailView {
     toolCounts: toolCounts([]),
     toolsSource: "none",
     clients: [],
+    access: [],
     endpoint: "",
     settingsVersion: 1,
     config: { port: FIGJAM_PORT },
@@ -1162,10 +1227,46 @@ function session(o: SessionOverrides, buckets: Array<number>, nowMs: number): Se
   }
 }
 
+/** A real FigJam panel: a normal session id, but the client is "other" (not
+ *  one of the known coding apps) and the label names the board. */
+function figjamSession(now: number): SessionView {
+  return session(
+    {
+      id: "7a3f6c21-5e84-4d19-b0c7-91d2e4a8f536",
+      client: "other",
+      client_label: "FigJam · Roadmap workshop",
+      model: "claude-sonnet-4-5",
+      state: "warm",
+      started_at_ms: now - 38 * MIN,
+      last_request_at_ms: now - 110_000,
+      request_count: 17,
+      cache: {
+        ttl_s: 300,
+        expires_at_ms: now - 110_000 + 300_000,
+        confidence: "requested",
+        downgraded: false,
+        downgraded_from_s: null,
+        last_cache_read_tokens: 12_800,
+      },
+      context: {
+        used_tokens: 15_000,
+        window_tokens: null,
+        ceiling_tokens: null,
+        compact_at_tokens: null,
+        window_source: "model-listing",
+        compacted_at_ms: null,
+      },
+    },
+    [0, 0, 1_800, 0, 3_200, 2_600, 0, 4_100, 3_700, 0, 2_900, 5_300, 3_100, 1_400, 0],
+    now,
+  )
+}
+
 /** The live-sessions scenario: every state the Dashboard's sessions view draws.
  *  One streaming session, three warm ones with different cache confidence
  *  (observed, requested, estimated), one about to go cold, two cold (one
- *  downgraded), and the unattributed Claude Desktop row. Context fills: 30%, 78% and 93%. */
+ *  downgraded), a FigJam panel (client "other" with a real session id), and the
+ *  unattributed Claude Desktop row. Context fills: 30%, 78% and 93%. */
 function liveSessions(): SessionsResponse {
   const now = Date.now()
   const claude = { client: "claude-code" } as const
@@ -1295,6 +1396,7 @@ function liveSessions(): SessionsResponse {
         [0, 0, 0, 0, 0, 0, 2_800, 5_400, 8_100, 3_900, 6_700, 0, 4_500, 2_100, 0],
         now,
       ),
+      figjamSession(now),
       // Within 20 s of going cold.
       session(
         {
@@ -1575,6 +1677,59 @@ export const SCENARIOS = {
     ghStatus: ghAvailable,
   },
 
+  "apps-not-found": {
+    label: "Apps · installed apps not found",
+    auth: {
+      state: "authenticated",
+      account_login: "octocat",
+      connected_since: ISO(-7_265_000),
+    },
+    apps: {
+      apps: appsAllInstalled.apps.map((app) =>
+        app.kind === "config" ?
+          {
+            ...app,
+            enabled: false,
+            status: "not-installed" as const,
+            installs: [],
+          }
+        : app,
+      ),
+    },
+    apiKeys: twoApiKeys,
+    accounts: twoAccounts,
+    models: baseModels,
+    diagnostics: baseDiagnostics,
+    updateStatus: upToDate,
+    ghStatus: ghAvailable,
+  },
+
+  "apps-other-maximal": {
+    label: "Apps · configured by another Maximal profile",
+    auth: {
+      state: "authenticated",
+      account_login: "octocat",
+      connected_since: ISO(-7_265_000),
+    },
+    apps: {
+      apps: appsAllInstalled.apps.map((app) =>
+        app.id === "claude-code" ?
+          {
+            ...app,
+            enabled: false,
+            conflict: "other-maximal-config" as const,
+          }
+        : app,
+      ),
+    },
+    apiKeys: twoApiKeys,
+    accounts: twoAccounts,
+    models: baseModels,
+    diagnostics: baseDiagnostics,
+    updateStatus: upToDate,
+    ghStatus: ghAvailable,
+  },
+
   "apps-conflict": {
     label: "Apps · Claude Code base-URL conflict",
     auth: {
@@ -1747,6 +1902,14 @@ export const SCENARIOS = {
   "live-sessions": {
     ...healthy("Dashboard · live sessions: streaming, warm, about to go cold, cold"),
     dashboard: { ...busyDashboard, sessions: liveSessions },
+  },
+
+  "figjam-session": {
+    ...healthy("Dashboard · a FigJam panel session (client “other”, board in the label)"),
+    dashboard: {
+      ...busyDashboard,
+      sessions: () => ({ flow_per_min: 3_100, sessions: [figjamSession(Date.now())] }),
+    },
   },
 
   "connectors-off": {

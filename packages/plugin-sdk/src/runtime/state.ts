@@ -11,7 +11,7 @@ import type {
 
 import { PluginContractError } from "../errors"
 
-export type PluginRuntimeEventType = "status" | "tools" | "notice"
+export type PluginRuntimeEventType = "status" | "tools" | "clients" | "notice"
 
 export interface PluginRuntimeEvent {
   type: PluginRuntimeEventType
@@ -309,6 +309,12 @@ export class PluginRuntime {
       return
     slot.status = status
     this.#emit(slot, "status")
+  }
+
+  /** Tell the host that a fiber-bound client contribution changed. */
+  pluginClientsChanged(slot: PluginSlot): void {
+    if (!slot.attached || this.#slots.get(slot.id) !== slot) return
+    this.#notify({ type: "clients", pluginId: slot.id })
   }
 
   /** Pass a notice on (only from a plugin that is attached). */

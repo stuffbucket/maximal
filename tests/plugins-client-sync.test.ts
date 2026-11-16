@@ -11,8 +11,10 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { getConfig, writeConfig } from "~/lib/config/config"
+import { type ApiKeyEntry, getConfig, writeConfig } from "~/lib/config/config"
+import { pluginAccessIdForApiKey } from "~/lib/plugins/access"
 import { removeLegacyClaudeDesktopEntries } from "~/lib/plugins/clients/claude-desktop-cleanup"
+import { pluginClientDriver } from "~/lib/plugins/clients/drivers"
 import {
   type PluginClientConfigurator,
   type PluginClientEntry,
@@ -75,6 +77,29 @@ const KEY_ENTRY = {
   created_at: "2026-01-01T00:00:00Z",
 }
 
+describe("plugin client drivers", () => {
+  test("resolves only parent-owned driver ids", () => {
+    expect(
+      pluginClientDriver({
+        clientId: "claude-code",
+        driverId: "claude-code",
+      })?.clientId,
+    ).toBe("claude-code")
+    expect(
+      pluginClientDriver({
+        clientId: "claude-desktop",
+        driverId: "claude-desktop",
+      })?.clientId,
+    ).toBe("claude-desktop")
+    expect(
+      pluginClientDriver({
+        clientId: "codex",
+        driverId: "child-defined-driver",
+      }),
+    ).toBeUndefined()
+  })
+})
+
 describe("syncPluginClient", () => {
   beforeEach(async () => {
     plugins = await startTestGateway([
@@ -111,6 +136,104 @@ describe("syncPluginClient", () => {
     expect(desired[0].id).toBe("alpha")
     expect(desired[0].apiKey).toBe("claude-code-key-1")
     expect(desired[0].url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/alpha$/)
+  })
+
+  test("projects App Permissions: only Block removes the connector from the client", () => {
+    writeConfig({
+      plugins: {
+        // Ask keeps the entry (Maximal asks at call time).
+        alpha: { enabled: true, access: { "app:claude-code": "ask" } },
+        // Block wins over the legacy list.
+        beta: {
+          enabled: true,
+          clients: ["claude-code"],
+          access: { "app:claude-code": "block" },
+        },
+        // A permission for another app leaves this app on its legacy default.
+        epsilon: {
+          enabled: true,
+          clients: ["claude-code"],
+          access: { "app:codex": "block" },
+        },
+      },
+      auth: { apiKeyEntries: [KEY_ENTRY] },
+    })
+    const client = fakeClient()
+
+    syncPluginClient(client)
+
+    expect(client.calls[0].desired.map((entry) => entry.id)).toEqual([
+      "alpha",
+      "epsilon",
+    ])
+  })
+
+  test("entries carry the app's own key, never the default endpoint key, and one is provisioned when missing", () => {
+    writeConfig({
+      plugins: { alpha: { enabled: true, clients: ["claude-code"] } },
+      auth: {
+        // A generic connection key (also the default endpoint key) would
+        // make the app indistinguishable from any other caller.
+        apiKeyEntries: [
+          {
+            id: "k-default",
+            label: "Default",
+            key: "default-key-12345",
+            enabled: true,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        apiKeys: ["legacy-plain-key"],
+      },
+    })
+    const client = fakeClient()
+
+    syncPluginClient(client)
+
+    const entries = getConfig().auth?.apiKeyEntries ?? []
+    expect(entries).toHaveLength(2)
+    const provisioned = entries.find((entry) => entry.id !== "k-default")
+    expect(provisioned).toMatchObject({ label: "claude-code", enabled: true })
+    const [{ desired }] = client.calls
+    expect(desired).toHaveLength(1)
+    expect(desired[0].apiKey).toBe(provisioned?.key)
+    expect(desired[0].apiKey).not.toBe("default-key-12345")
+    // The key the entry presents resolves to the app, not a connection.
+    expect(pluginAccessIdForApiKey(provisioned as ApiKeyEntry)).toBe(
+      "app:claude-code",
+    )
+
+    // Idempotent: the same key is reused and nothing else is provisioned.
+    syncPluginClient(client)
+    expect(getConfig().auth?.apiKeyEntries).toHaveLength(2)
+    expect(client.calls[1].desired[0].apiKey).toBe(provisioned?.key)
+  })
+
+  test("a disabled app key is a revocation: no key is minted and the app gets no entries", () => {
+    writeConfig({
+      plugins: { alpha: { enabled: true, clients: ["claude-code"] } },
+      auth: { apiKeyEntries: [{ ...KEY_ENTRY, enabled: false }] },
+    })
+    const client = fakeClient()
+
+    syncPluginClient(client)
+    syncPluginClient(client)
+
+    // Never keyless either: an unkeyed caller is exempt from App Permissions.
+    expect(client.calls.map((call) => call.desired)).toEqual([[], []])
+    expect(getConfig().auth?.apiKeyEntries).toEqual([
+      { ...KEY_ENTRY, enabled: false },
+    ])
+  })
+
+  test("provisions no key when nothing is wanted", () => {
+    writeConfig({
+      plugins: {
+        alpha: { enabled: true, access: { "app:claude-code": "block" } },
+      },
+    })
+    syncPluginClient(fakeClient())
+    expect(getConfig().auth?.apiKeyEntries ?? []).toEqual([])
   })
 
   test("wants nothing when the integration is off", () => {

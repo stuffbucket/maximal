@@ -2,6 +2,7 @@
 import type {
   ModelOperation,
   OperationDispatch,
+  PluginClientContribution,
   PluginGateway,
   PluginGatewayEvent,
   PluginGenerationLease,
@@ -231,6 +232,11 @@ class FakeGateway implements PluginGateway {
     return [this.#serverTool()]
   }
 
+  pluginClientContributions(): Array<PluginClientContribution> {
+    this.#count("pluginClientContributions")
+    return [{ clientId: "codex", unavailableReason: this.#generation }]
+  }
+
   prepareServerTool(
     _pluginId: string,
     _name: string,
@@ -313,6 +319,7 @@ describe("projected plugin gateway", () => {
     const tools = gateway.listTools("plugin")
     const views = gateway.toolViews("plugin")
     const serverTools = gateway.serverTools()
+    const pluginClients = gateway.pluginClientContributions()
     const operations = gateway.operations()
     const resolved = operations.resolve("decisions", "model")
     const models = operations.servedModels()
@@ -323,6 +330,7 @@ describe("projected plugin gateway", () => {
     tools[0].description = "changed"
     views[0].description = "changed"
     serverTools[0].description = "changed"
+    pluginClients[0] = { clientId: "codex", unavailableReason: "changed" }
     models[0].model = "changed"
 
     expect(gateway.get("plugin")?.displayName).toBe("plugin n")
@@ -330,6 +338,9 @@ describe("projected plugin gateway", () => {
     expect(gateway.listTools("plugin")[0]?.description).toBe("n")
     expect(gateway.toolViews("plugin")[0]?.description).toBe("n")
     expect(gateway.serverTools()[0]?.description).toBe("n")
+    expect(gateway.pluginClientContributions()).toEqual([
+      { clientId: "codex", unavailableReason: "n" },
+    ])
     expect(gateway.operations()).toBe(operations)
     expect(resolved?.binding.provider).toBe("n")
     expect(gateway.operations().servedModels()[0]?.model).toBe("model")
@@ -421,7 +432,11 @@ describe("projected plugin gateway", () => {
     expect(gateway).toBe(facade)
     expect(oldTarget.disposed).toBe(false)
     expect(oldLease.get("plugin")?.description).toBe("n")
+    expect(oldLease.pluginClientContributions()[0]?.unavailableReason).toBe("n")
     expect(gateway.get("plugin")?.description).toBe("n+1")
+    expect(gateway.pluginClientContributions()[0]?.unavailableReason).toBe(
+      "n+1",
+    )
     const newLease = gateway.acquireGeneration()
     expect(newLease.generationId).toBe("n+1")
     newLease.release()

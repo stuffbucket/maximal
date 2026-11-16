@@ -27,6 +27,7 @@
 import type { Context, ErrorHandler } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 
+import { WireRemoteError } from "@stuffbucket/maximal-plugin-protocol"
 import { isOperationUnavailableError } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import consola from "consola"
 import { HTTPException } from "hono/http-exception"
@@ -208,6 +209,21 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function remoteReply(error: WireRemoteError): ProxyErrorReply {
+  const requestedStatus = error.wire.status ?? 500
+  const status = isErrorStatus(requestedStatus) ? requestedStatus : 500
+  return {
+    status,
+    type: anthropicErrorType(status),
+    message: error.wire.message,
+    ...(error.wire.retry === "never" ? { retry: "never" as const } : {}),
+    ...(error.wire.headers === undefined ?
+      {}
+    : { headers: error.wire.headers }),
+    openai: { code: error.wire.code },
+  }
+}
+
 /** The reply before any rewrite: the error as it is. */
 function baseReply(event: ProxyErrorEvent): ProxyErrorReply {
   const { error, upstream, wire } = event
@@ -240,6 +256,7 @@ function baseReply(event: ProxyErrorEvent): ProxyErrorReply {
     }
   }
   if (error instanceof BudgetExceededError) return budgetReply(error, wire)
+  if (error instanceof WireRemoteError) return remoteReply(error)
   if (isOperationUnavailableError(error)) {
     // Nothing serves the model for this operation (its plugin is off, or the
     // id is unknown or ambiguous). 404 says "not served here", which Copilot's

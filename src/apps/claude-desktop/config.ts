@@ -9,8 +9,13 @@ import os from "node:os"
 import path from "node:path"
 import { z } from "zod"
 
+import { currentProfileId } from "~/apps/profile-identity"
 import { resolveApiKey } from "~/lib/auth/api-key-helper"
-import { atomicWriteJson as atomicWriteJsonShared } from "~/lib/platform/atomic-json"
+import {
+  AtomicWriteConflictError,
+  atomicWriteJson as atomicWriteJsonShared,
+  readFileNoFollow,
+} from "~/lib/platform/atomic-json"
 import { parseJsonText } from "~/lib/platform/json-text"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
@@ -94,6 +99,9 @@ export function getClaude3pDir(
   )
 }
 
+/** Ids become file names; anything else is never ours and never touched. */
+const SAFE_PROFILE_ID = /^[\w-]+$/
+
 const MetaEntrySchema = z.looseObject({ id: z.string(), name: z.string() })
 type MetaEntry = z.infer<typeof MetaEntrySchema>
 
@@ -104,9 +112,6 @@ const MetaFileSchema = z.looseObject({
   entries: z.array(MetaEntrySchema),
 })
 type MetaFile = z.infer<typeof MetaFileSchema>
-
-/** Ids become file names; anything else is never ours and never touched. */
-const SAFE_PROFILE_ID = /^[\w-]+$/
 
 /** The `_meta.json` entry name that marks a profile as ours. Desktop shows
  *  it in its profile list, so it doubles as an honest label. */
@@ -129,7 +134,9 @@ const LEGACY_GATEWAY_KEY = "anything"
 const ROUTING_STATE_FILE = "maximal-routing.json"
 
 const RoutingStateSchema = z.object({
-  profileId: z.string(),
+  version: z.literal(2).optional(),
+  ownerProfileId: z.string().optional(),
+  profileId: z.string().regex(SAFE_PROFILE_ID),
   /** sha256 of the profile file as we wrote it — an edit means it's no
    *  longer ours to delete or overwrite. */
   fingerprint: z.string(),
@@ -150,7 +157,10 @@ const LEGACY_PRIOR: RoutingState["prior"] = {
   hadPreferences: true,
 }
 
-export type ConfigLibraryConflict = "foreign-gateway-profile"
+export type ConfigLibraryConflict =
+  | "cleanup-required"
+  | "foreign-gateway-profile"
+  | "other-maximal-config"
 
 function profileMatches(
   existing: Record<string, unknown> | null,
@@ -183,14 +193,16 @@ function isLegacyGatewayProfile(
   )
 }
 
-export function readJsonObject(file: string): Record<string, unknown> | null {
-  let raw: string
-  try {
-    raw = fs.readFileSync(file, "utf8")
-  } catch {
-    return null
-  }
+function readJsonText(file: string): string | null {
+  return readFileNoFollow(
+    file,
+    () => new Error("refusing to read Claude Desktop config: symbolic link"),
+  )
+}
 
+export function readJsonObject(file: string): Record<string, unknown> | null {
+  const raw = readJsonText(file)
+  if (raw === null) return null
   try {
     const parsed: unknown = parseJsonText(raw)
     if (
@@ -210,8 +222,15 @@ export function readJsonObject(file: string): Record<string, unknown> | null {
  *  every Claude Desktop write refuses to follow a pre-planted `<file>.tmp`
  *  symlink (EEXIST → clear error) — the guard that only Claude Code had
  *  before #231. */
-export function atomicWriteJson(file: string, value: unknown): void {
-  atomicWriteJsonShared(file, value, { label: "Claude Desktop config" })
+export function atomicWriteJson(
+  file: string,
+  value: unknown,
+  expectedContent?: string | null,
+): void {
+  atomicWriteJsonShared(file, value, {
+    label: "Claude Desktop config",
+    ...(expectedContent !== undefined ? { expectedContent } : {}),
+  })
 }
 
 function fileFingerprint(file: string): string | null {
@@ -229,10 +248,14 @@ class Library {
   readonly metaPath: string
   readonly topPath: string
   readonly statePath: string
+  readonly metaRaw: string | null
+  readonly topRaw: string | null
+  readonly stateRaw: string | null
   readonly meta: MetaFile
   /** `_meta.json` exists but isn't a library index we understand. Nothing
    *  is written then — rebuilding it would drop the user's entries. */
   readonly metaUnreadable: boolean
+  readonly stateUnreadable: boolean
   readonly state: RoutingState | null
 
   constructor(dir: string) {
@@ -241,17 +264,28 @@ class Library {
     this.metaPath = path.join(this.libDir, "_meta.json")
     this.topPath = path.join(dir, "claude_desktop_config.json")
     this.statePath = path.join(dir, ROUTING_STATE_FILE)
+    this.metaRaw = readJsonText(this.metaPath)
+    this.topRaw = readJsonText(this.topPath)
+    this.stateRaw = readJsonText(this.statePath)
     const meta =
-      fs.existsSync(this.metaPath) ?
+      this.metaRaw !== null ?
         MetaFileSchema.safeParse(readJsonObject(this.metaPath))
       : null
     this.metaUnreadable = meta !== null && !meta.success
     this.meta = meta?.success ? meta.data : { appliedId: "", entries: [] }
     const state = RoutingStateSchema.safeParse(readJsonObject(this.statePath))
-    this.state = state.success ? state.data : null
+    this.stateUnreadable =
+      this.stateRaw !== null
+      && (!state.success
+        || (state.data.version === 2
+          && typeof state.data.ownerProfileId !== "string"))
+    this.state = state.success && !this.stateUnreadable ? state.data : null
   }
 
   profilePath(id: string): string {
+    if (!SAFE_PROFILE_ID.test(id)) {
+      throw new Error("refusing to address an unsafe Claude Desktop profile id")
+    }
     return path.join(this.libDir, `${id}.json`)
   }
 
@@ -261,17 +295,72 @@ class Library {
       : null
   }
 
-  isOwned(entry: MetaEntry): boolean {
-    if (!SAFE_PROFILE_ID.test(entry.id)) return false
-    const profile = this.profile(entry.id)
-    if (entry.name === OWNED_ENTRY_NAME) {
-      return this.state?.profileId === entry.id || isOurGatewayShape(profile)
-    }
-    return entry.name === LEGACY_ENTRY_NAME && isLegacyGatewayProfile(profile)
+  routingStateOwnership(): "ours" | "other-maximal" | null {
+    const { state } = this
+    if (state?.version !== 2 || !state.ownerProfileId) return null
+    return state.ownerProfileId === currentProfileId() ?
+        "ours"
+      : "other-maximal"
   }
 
-  ownedEntries(): Array<MetaEntry> {
-    return this.meta.entries.filter((e) => this.isOwned(e))
+  stateEntryOwnership(
+    values: GatewayProfileValues,
+  ): "ours" | "other-maximal" | null {
+    const id = this.state?.profileId
+    if (!id || !SAFE_PROFILE_ID.test(id)) return null
+    const entry = this.meta.entries.find((item) => item.id === id)
+    return entry ? this.entryOwnership(entry, values) : null
+  }
+
+  stateOwnership(
+    entry: MetaEntry,
+    values: GatewayProfileValues,
+  ): "ours" | "other-maximal" | null {
+    if (!SAFE_PROFILE_ID.test(entry.id) || this.state?.profileId !== entry.id) {
+      return null
+    }
+    const stateOwner = this.routingStateOwnership()
+    if (stateOwner) return stateOwner
+    return (
+        this.profile(entry.id)?.inferenceGatewayBaseUrl
+          === values.inferenceGatewayBaseUrl
+      ) ?
+        "ours"
+      : "other-maximal"
+  }
+
+  entryOwnership(
+    entry: MetaEntry,
+    values: GatewayProfileValues,
+  ): "ours" | "other-maximal" | null {
+    if (!SAFE_PROFILE_ID.test(entry.id)) return null
+    const profile = this.profile(entry.id)
+    const stateOwnership = this.stateOwnership(entry, values)
+    if (stateOwnership) {
+      if (
+        fileFingerprint(this.profilePath(entry.id)) !== this.state?.fingerprint
+        || !isOurGatewayShape(profile)
+      ) {
+        return null
+      }
+      return stateOwnership
+    }
+    const legacyShape =
+      (entry.name === OWNED_ENTRY_NAME && isOurGatewayShape(profile))
+      || (entry.name === LEGACY_ENTRY_NAME && isLegacyGatewayProfile(profile))
+    if (!legacyShape) return null
+    return profile?.inferenceGatewayBaseUrl === values.inferenceGatewayBaseUrl ?
+        "ours"
+      : "other-maximal"
+  }
+
+  ownedEntries(
+    values: GatewayProfileValues,
+    ownership: "ours" | "other-maximal" = "ours",
+  ): Array<MetaEntry> {
+    return this.meta.entries.filter(
+      (entry) => this.entryOwnership(entry, values) === ownership,
+    )
   }
 
   /** Our applied profile already says exactly what we'd write. */
@@ -282,31 +371,47 @@ class Library {
   ): boolean {
     return (
       entry?.name === OWNED_ENTRY_NAME
+      && this.entryOwnership(entry, values) === "ours"
       && profileMatches(this.profile(entry.id), values)
       && top.deploymentMode === "3p"
     )
   }
 
-  /** Our entry to (re)write — the applied one if Desktop is on ours — but
-   *  never one the user edited since we wrote it. */
-  ourEntry(): MetaEntry | null {
-    const reusable = this.ownedEntries().filter((e) => this.isUnedited(e))
+  /** A safe profile entry to write. Another profile's entry is reusable only
+   *  during an explicit transfer, and only while its fingerprint still matches. */
+  reusableEntry(
+    values: GatewayProfileValues,
+    allowOtherMaximal: boolean,
+  ): MetaEntry | null {
+    const reusable = this.meta.entries.filter((entry) => {
+      const ownership = this.entryOwnership(entry, values)
+      return (
+        (ownership === "ours"
+          || (allowOtherMaximal && ownership === "other-maximal"))
+        && this.isUnedited(entry)
+      )
+    })
     return (
-      reusable.find((e) => e.id === this.meta.appliedId)
+      reusable.find((entry) => entry.id === this.meta.appliedId)
       ?? reusable.at(0)
       ?? null
     )
   }
 
-  appliedIsOurs(): boolean {
-    return this.ownedEntries().some((e) => e.id === this.meta.appliedId)
+  appliedOwnership(
+    values: GatewayProfileValues,
+  ): "ours" | "other-maximal" | null {
+    const entry = this.meta.entries.find(
+      (item) => item.id === this.meta.appliedId,
+    )
+    return entry ? this.entryOwnership(entry, values) : null
   }
 
   /** Someone else's selection we mustn't switch away from: a gateway, or
    *  a profile we can't read or safely address, so can't rule one out. */
-  appliedBlocksSwitch(): boolean {
+  appliedBlocksSwitch(values: GatewayProfileValues): boolean {
     const id = this.meta.appliedId
-    if (!id || this.appliedIsOurs()) return false
+    if (!id || this.appliedOwnership(values)) return false
     if (!SAFE_PROFILE_ID.test(id)) return true
     if (!fs.existsSync(this.profilePath(id))) return false
     const profile = this.profile(id)
@@ -317,6 +422,7 @@ class Library {
    *  it. A legacy profile predates fingerprints, so its exact shape stands
    *  in; any other profile without a matching fingerprint is left alone. */
   isUnedited(entry: MetaEntry): boolean {
+    if (!SAFE_PROFILE_ID.test(entry.id)) return false
     if (this.state?.profileId === entry.id) {
       return (
         fileFingerprint(this.profilePath(entry.id)) === this.state.fingerprint
@@ -329,8 +435,16 @@ class Library {
   }
 
   writeMeta(appliedId: string, entries: Array<MetaEntry>): void {
-    atomicWriteJson(this.metaPath, { ...this.meta, appliedId, entries })
+    atomicWriteJson(
+      this.metaPath,
+      { ...this.meta, appliedId, entries },
+      this.metaRaw,
+    )
   }
+}
+
+export interface ApplyConfigLibraryOptions {
+  overrideOtherMaximal?: boolean
 }
 
 export interface ApplyConfigLibraryResult {
@@ -342,9 +456,29 @@ export interface ApplyConfigLibraryResult {
   conflict: ConfigLibraryConflict | null
 }
 
+function applyConflict(
+  lib: Library,
+  values: GatewayProfileValues,
+  allowOtherMaximal: boolean,
+): ConfigLibraryConflict | null {
+  if (lib.stateUnreadable) return "cleanup-required"
+  const stateOwner = lib.routingStateOwnership()
+  if (
+    stateOwner === "other-maximal"
+    && lib.stateEntryOwnership(values) !== stateOwner
+  ) {
+    return "cleanup-required"
+  }
+  if (lib.appliedOwnership(values) === "other-maximal" && !allowOtherMaximal) {
+    return "other-maximal-config"
+  }
+  return lib.appliedBlocksSwitch(values) ? "foreign-gateway-profile" : null
+}
+
 export function applyConfigLibraryProfile(
   home: string = os.homedir(),
   values: GatewayProfileValues = gatewayProfile(home),
+  options: ApplyConfigLibraryOptions = {},
 ): ApplyConfigLibraryResult {
   const lib = new Library(getClaude3pDir(home))
   if (lib.metaUnreadable) {
@@ -354,41 +488,48 @@ export function applyConfigLibraryProfile(
     )
   }
   const { meta } = lib
-  const appliedIsOurs = lib.appliedIsOurs()
-
+  const appliedOwnership = lib.appliedOwnership(values)
   // Switching away from someone else's gateway would silently take over
   // their routing. Non-gateway profiles carry no routing, so switching from
   // one is safe — the snapshot below switches back on revert.
-  if (lib.appliedBlocksSwitch()) {
+  const conflict = applyConflict(
+    lib,
+    values,
+    options.overrideOtherMaximal === true,
+  )
+  if (conflict) {
     return {
       dir: lib.dir,
       profileId: "",
       wrote: false,
       ensuredWorkspaceFolders: [],
-      conflict: "foreign-gateway-profile",
+      conflict,
     }
   }
 
-  const ourEntry = lib.ourEntry()
+  const ourEntry = lib.reusableEntry(
+    values,
+    options.overrideOtherMaximal === true,
+  )
   const profileId = ourEntry?.id ?? randomUUID()
   const ensuredWorkspaceFolders = ensureWorkspaceFolders(
     values.allowedWorkspaceFolders,
   )
   const top = readJsonObject(lib.topPath) ?? {}
   const unchanged = { dir: lib.dir, profileId, ensuredWorkspaceFolders }
-  if (appliedIsOurs && lib.isCurrent(ourEntry, values, top)) {
+  if (appliedOwnership === "ours" && lib.isCurrent(ourEntry, values, top)) {
     return { ...unchanged, wrote: false, conflict: null }
   }
 
   // Snapshot what we're replacing on the switch to us; re-applying over our
   // own profile keeps the original snapshot.
   const prior =
-    appliedIsOurs ?
+    appliedOwnership ?
       (lib.state?.prior ?? LEGACY_PRIOR)
     : snapshotPrior(meta.appliedId, top)
 
   const profilePath = lib.profilePath(profileId)
-  atomicWriteJson(profilePath, values)
+  atomicWriteJson(profilePath, values, readJsonText(profilePath))
 
   const ours = { id: profileId, name: OWNED_ENTRY_NAME }
   const entries =
@@ -399,14 +540,16 @@ export function applyConfigLibraryProfile(
 
   top.deploymentMode = "3p"
   top.preferences = { ...readPreferences(top), coworkWebSearchEnabled: true }
-  atomicWriteJson(lib.topPath, top)
+  atomicWriteJson(lib.topPath, top, lib.topRaw)
 
   const state: RoutingState = {
+    version: 2,
+    ownerProfileId: currentProfileId(),
     profileId,
     fingerprint: fileFingerprint(profilePath) ?? "",
     prior,
   }
-  atomicWriteJson(lib.statePath, state)
+  atomicWriteJson(lib.statePath, state, lib.stateRaw)
 
   return { ...unchanged, wrote: true, conflict: null }
 }
@@ -438,10 +581,9 @@ function snapshotPrior(
  *  key) for an enable that won't take effect. */
 export function configLibraryConflict(
   home: string = os.homedir(),
+  values: GatewayProfileValues = gatewayProfile(home),
 ): ConfigLibraryConflict | null {
-  return new Library(getClaude3pDir(home)).appliedBlocksSwitch() ?
-      "foreign-gateway-profile"
-    : null
+  return applyConflict(new Library(getClaude3pDir(home)), values, false)
 }
 
 export function isConfigLibraryApplied(
@@ -449,9 +591,17 @@ export function isConfigLibraryApplied(
   values: GatewayProfileValues = gatewayProfile(home),
 ): boolean {
   const lib = new Library(getClaude3pDir(home))
-  if (!lib.appliedIsOurs()) return false
+  if (lib.stateUnreadable || lib.appliedOwnership(values) !== "ours") {
+    return false
+  }
   if (!profileMatches(lib.profile(lib.meta.appliedId), values)) return false
   return readJsonObject(lib.topPath)?.deploymentMode === "3p"
+}
+
+/** Whether this Maximal profile may update its Desktop MCP entry. */
+export function claudeDesktopMcpWritable(home: string = os.homedir()): boolean {
+  const lib = new Library(getClaude3pDir(home))
+  return !lib.stateUnreadable && lib.routingStateOwnership() !== "other-maximal"
 }
 
 export interface RevertResult {
@@ -459,6 +609,100 @@ export interface RevertResult {
   reverted: boolean
   /** Our profiles the user edited after we wrote them — left on disk. */
   kept: Array<string>
+}
+
+interface RevertOwnership {
+  protectedByOtherProfile: boolean
+  wasApplied: boolean
+  stateEntry: MetaEntry | null
+  stateIsOurs: boolean
+}
+
+function inspectRevertOwnership(
+  lib: Library,
+  values: GatewayProfileValues,
+): RevertOwnership {
+  const { meta, state } = lib
+  const appliedEntry =
+    meta.entries.find((entry) => entry.id === meta.appliedId) ?? null
+  const appliedStateOwnership =
+    appliedEntry ? lib.stateOwnership(appliedEntry, values) : null
+  const appliedOwnership = lib.appliedOwnership(values)
+  const stateEntry =
+    state && SAFE_PROFILE_ID.test(state.profileId) ?
+      (meta.entries.find((entry) => entry.id === state.profileId) ?? null)
+    : null
+  const stateIsOurs =
+    stateEntry !== null && lib.stateOwnership(stateEntry, values) === "ours"
+  return {
+    protectedByOtherProfile:
+      appliedOwnership === "other-maximal"
+      || appliedStateOwnership === "other-maximal",
+    wasApplied: appliedOwnership === "ours" || appliedStateOwnership === "ours",
+    stateEntry,
+    stateIsOurs,
+  }
+}
+
+function revertCandidates(
+  lib: Library,
+  values: GatewayProfileValues,
+  ownership: RevertOwnership,
+): Array<MetaEntry> {
+  const owned = lib.ownedEntries(values)
+  if (
+    ownership.stateIsOurs
+    && ownership.stateEntry
+    && SAFE_PROFILE_ID.test(ownership.stateEntry.id)
+    && !owned.some((entry) => entry.id === ownership.stateEntry?.id)
+  ) {
+    return [...owned, ownership.stateEntry]
+  }
+  return owned
+}
+
+function removeOwnedProfiles(
+  lib: Library,
+  candidates: Array<MetaEntry>,
+): { kept: Array<string>; removed: Set<string> } {
+  const kept: Array<string> = []
+  const removed = new Set<string>()
+  for (const entry of candidates) {
+    if (!SAFE_PROFILE_ID.test(entry.id)) continue
+    const profilePath = lib.profilePath(entry.id)
+    if (!lib.isUnedited(entry)) {
+      kept.push(profilePath)
+      continue
+    }
+    const expected = readJsonText(profilePath)
+    if (readJsonText(profilePath) !== expected) {
+      throw new AtomicWriteConflictError(
+        "Claude Desktop profile changed before it could be removed",
+      )
+    }
+    try {
+      fs.rmSync(profilePath, { force: true })
+    } catch {
+      /* best effort */
+    }
+    removed.add(entry.id)
+  }
+  return { kept, removed }
+}
+
+function removeOwnedRoutingState(lib: Library, stateIsOurs: boolean): boolean {
+  if (!stateIsOurs) return false
+  if (readJsonText(lib.statePath) !== lib.stateRaw) {
+    throw new AtomicWriteConflictError(
+      "Claude Desktop routing state changed before it could be removed",
+    )
+  }
+  try {
+    fs.rmSync(lib.statePath, { force: true })
+  } catch {
+    /* best effort */
+  }
+  return true
 }
 
 /**
@@ -475,53 +719,50 @@ export function revertConfigLibraryProfile(
   // later revert, once the index is fixed, can still restore from it.
   if (lib.metaUnreadable) return { dir: lib.dir, reverted: false, kept: [] }
   const { meta, state } = lib
-  const owned = lib.ownedEntries()
-  const wasApplied = lib.appliedIsOurs()
-  const kept: Array<string> = []
-
-  const removed = new Set<string>()
-  for (const entry of owned) {
-    if (lib.isUnedited(entry)) {
-      try {
-        fs.rmSync(lib.profilePath(entry.id), { force: true })
-      } catch {
-        /* best effort */
-      }
-      removed.add(entry.id)
-    } else {
-      kept.push(lib.profilePath(entry.id))
-    }
+  const values = gatewayProfile(home)
+  const ownership = inspectRevertOwnership(lib, values)
+  if (ownership.protectedByOtherProfile) {
+    return { dir: lib.dir, reverted: false, kept: [] }
   }
+  const { kept, removed } = removeOwnedProfiles(
+    lib,
+    revertCandidates(lib, values, ownership),
+  )
 
   const entries = meta.entries.filter((e) => !removed.has(e.id))
   let appliedId = meta.appliedId
-  if (wasApplied) {
+  if (ownership.wasApplied) {
     const priorId = state?.prior.appliedId ?? ""
     appliedId = entries.some((e) => e.id === priorId) ? priorId : ""
   }
   const metaChanged = removed.size > 0 || appliedId !== meta.appliedId
   if (metaChanged) lib.writeMeta(appliedId, entries)
 
-  const topChanged = wasApplied && restoreTop(lib.topPath, state)
+  const topChanged =
+    ownership.wasApplied && restoreTop(lib.topPath, state, lib.topRaw)
 
-  try {
-    fs.rmSync(lib.statePath, { force: true })
-  } catch {
-    /* best effort */
+  const removedState = removeOwnedRoutingState(lib, ownership.stateIsOurs)
+
+  return {
+    dir: lib.dir,
+    reverted: metaChanged || topChanged || removedState,
+    kept,
   }
-
-  return { dir: lib.dir, reverted: metaChanged || topChanged, kept }
 }
 
 /** Put back the top-level keys we set. Without a snapshot (written by an
  *  older build) only `deploymentMode` is known to be ours. */
-function restoreTop(topPath: string, state: RoutingState | null): boolean {
+function restoreTop(
+  topPath: string,
+  state: RoutingState | null,
+  expectedContent: string | null,
+): boolean {
   const top = readJsonObject(topPath)
   if (!top) return false
   if (!state) {
     if (!("deploymentMode" in top)) return false
     delete top.deploymentMode
-    atomicWriteJson(topPath, top)
+    atomicWriteJson(topPath, top, expectedContent)
     return true
   }
 
@@ -544,7 +785,7 @@ function restoreTop(topPath: string, state: RoutingState | null): boolean {
     top.preferences = prefs
   }
 
-  atomicWriteJson(topPath, top)
+  atomicWriteJson(topPath, top, expectedContent)
   return true
 }
 

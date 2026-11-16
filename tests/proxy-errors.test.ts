@@ -5,6 +5,7 @@
  * its handlers throw, including "not signed in" from the token gate.
  */
 
+import { WireRemoteError } from "@stuffbucket/maximal-plugin-protocol"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
@@ -167,6 +168,25 @@ describe("proxyErrorHandler on a route module", () => {
     expect(res.headers.get("retry-after")).toBe("3")
     expect(await res.json()).toEqual({
       error: { message: '{"error":{"message":"slow down"}}', type: "error" },
+    })
+  })
+
+  test("a non-retryable remote failure keeps its retry policy", async () => {
+    const error = new WireRemoteError({
+      kind: "indeterminate",
+      code: "terminal_send_failed",
+      message: "Provider completed before transport failed.",
+      retry: "never",
+    })
+    const res = await routes("openai", error).request("/", { method: "POST" })
+    expect(res.status).toBe(500)
+    expect(res.headers.get("x-should-retry")).toBe("false")
+    expect(await res.json()).toEqual({
+      error: {
+        message: "Provider completed before transport failed.",
+        type: "error",
+        code: "terminal_send_failed",
+      },
     })
   })
 

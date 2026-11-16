@@ -37,6 +37,7 @@ import {
   type ApiKeyEntry,
 } from "~/lib/config/settings-types"
 import { syncPluginClients } from "~/lib/plugins/runtime"
+import { pruneConnectionAccess } from "~/lib/plugins/settings"
 
 export const apiKeysRoutes = new Hono()
 
@@ -215,9 +216,12 @@ apiKeysRoutes.delete("/:id", (c) => {
       404,
     )
   }
+  // A deleted connection's App Permissions go with it (ids are never reused).
+  const plugins = pruneConnectionAccess(config, id)
   writeConfig({
     ...config,
     auth: { ...config.auth, apiKeyEntries: next },
+    ...(plugins ? { plugins } : {}),
   })
   refreshClaudeCodeApiKeyHelper()
   refreshCodexApiKeyHelper()

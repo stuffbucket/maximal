@@ -12,7 +12,11 @@ import {
 import { afterEach, describe, expect, test } from "bun:test"
 import { z } from "zod"
 
-import { createPluginHost, PluginContractError } from "../src/index"
+import {
+  createPluginHost,
+  pluginClientsService,
+  PluginContractError,
+} from "../src/index"
 import {
   createLifecycleHarness,
   type LifecycleHarness,
@@ -81,6 +85,41 @@ const greeted: PluginModule = {
   },
 }
 
+const clientContributor: PluginModule = {
+  name: "client-contributor",
+  manifest: {
+    id: "client-contributor",
+    kind: "extension",
+    displayName: "Client Contributor",
+    description: "Contributes a data-only client destination.",
+    settingsVersion: 1,
+  },
+  inject: ["pluginClients"],
+  Config: z.object({}),
+  apply(ctx) {
+    ctx.pluginClients.register({
+      clientId: "codex",
+      unavailableReason: "Registered by the fixture.",
+    })
+  },
+}
+
+function invalidClientContributor(
+  contribution: Parameters<Context["pluginClients"]["register"]>[0],
+): PluginModule {
+  return {
+    ...clientContributor,
+    name: "invalid-client-contributor",
+    manifest: {
+      ...clientContributor.manifest,
+      id: "invalid-client-contributor",
+    },
+    apply(ctx) {
+      ctx.pluginClients.register(contribution)
+    },
+  }
+}
+
 function hostWith(
   plugins: Array<PluginModule>,
   extra?: Array<PluginServiceFactory>,
@@ -103,6 +142,84 @@ afterEach(async () => {
   harness = undefined
   await current?.dispose()
   await runCleanups()
+})
+
+describe("plugin client registry", () => {
+  test("keeps host entries and withdraws a plugin entry with its fiber", async () => {
+    const gateway = hostWith(
+      [clientContributor],
+      [
+        pluginClientsService([
+          { clientId: "claude-code", driverId: "claude-code" },
+        ]),
+      ],
+    )
+    const events: Array<string> = []
+    const unsubscribe = gateway.subscribe((event) => events.push(event.type))
+    try {
+      expect(gateway.pluginClientContributions()).toEqual([
+        { clientId: "claude-code", driverId: "claude-code" },
+      ])
+      await gateway.reconcile({
+        "client-contributor": { enabled: true },
+      })
+      expect(gateway.pluginClientContributions()).toEqual([
+        { clientId: "claude-code", driverId: "claude-code" },
+        {
+          clientId: "codex",
+          unavailableReason: "Registered by the fixture.",
+        },
+      ])
+      await gateway.reconcile({
+        "client-contributor": { enabled: false },
+      })
+      expect(gateway.pluginClientContributions()).toEqual([
+        { clientId: "claude-code", driverId: "claude-code" },
+      ])
+      expect(events.filter((type) => type === "clients")).toHaveLength(2)
+    } finally {
+      unsubscribe()
+      await gateway.dispose()
+    }
+  })
+
+  test("rejects malformed and duplicate host catalog entries atomically", () => {
+    expect(() =>
+      hostWith(
+        [],
+        [
+          pluginClientsService([
+            { clientId: "codex", driverId: "not/a-driver" },
+          ]),
+        ],
+      ),
+    ).toThrow(/invalid driver id/)
+    expect(() =>
+      hostWith(
+        [],
+        [pluginClientsService([{ clientId: "codex" }, { clientId: "codex" }])],
+      ),
+    ).toThrow(/more than once/)
+  })
+
+  test("rejects invalid plugin registrations without retaining data", async () => {
+    const invalid = invalidClientContributor({
+      clientId: "codex",
+      unavailableReason: " ",
+    })
+    const gateway = hostWith([invalid], [pluginClientsService()])
+    try {
+      await gateway.reconcile({
+        "invalid-client-contributor": { enabled: true },
+      })
+      const snapshot = gateway.get("invalid-client-contributor")
+      expect(snapshot?.lifecycle).toBe("failed")
+      expect(snapshot?.error).toContain("invalid unavailable reason")
+      expect(gateway.pluginClientContributions()).toEqual([])
+    } finally {
+      await gateway.dispose()
+    }
+  })
 })
 
 describe("services.extra", () => {

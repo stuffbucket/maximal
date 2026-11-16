@@ -4,10 +4,15 @@ import { ensureApiKey } from "~/lib/auth/api-key-helper"
 
 import type { AppUninstallResult, ClientApp } from "../index"
 
-import { CODEX_KEY_LABEL, CodexConfigConflictError } from "./config"
+import {
+  CODEX_KEY_LABEL,
+  CodexConfigConflictError,
+  CodexOtherMaximalConfigError,
+} from "./config"
 import { detectCodexInstallations, type CodexInstallation } from "./detect"
 import {
   applyCodexProvider,
+  codexProviderConflict,
   getCodexConfigPath,
   isCodexProviderConfigured,
   revertCodexProvider,
@@ -26,9 +31,15 @@ export interface CreateCodexAppOptions {
   execPath?: string
 }
 
-type ProviderOptions = Parameters<typeof applyCodexProvider>[0]
+type ProviderOptions = NonNullable<Parameters<typeof applyCodexProvider>[0]>
 
 function conflictMutation(error: unknown) {
+  if (error instanceof CodexOtherMaximalConfigError) {
+    return Promise.resolve({
+      success: false,
+      conflict: "other-maximal-config" as const,
+    })
+  }
   if (error instanceof CodexConfigConflictError) {
     return Promise.resolve({
       success: false,
@@ -42,9 +53,16 @@ function inspectProvider(
   options: ProviderOptions,
 ): Pick<AppEntry, "enabled" | "conflict"> {
   try {
-    return { enabled: isCodexProviderConfigured(options), conflict: null }
+    const conflict = codexProviderConflict(options)
+    return {
+      enabled: conflict === null && isCodexProviderConfigured(options),
+      conflict,
+    }
   } catch (error) {
-    if (error instanceof CodexConfigConflictError) {
+    if (
+      error instanceof CodexConfigConflictError
+      || error instanceof CodexOtherMaximalConfigError
+    ) {
       return { enabled: false, conflict: "cleanup-required" }
     }
     throw error
@@ -52,8 +70,12 @@ function inspectProvider(
 }
 
 function enableProvider(options: ProviderOptions) {
-  ensureApiKey(CODEX_KEY_LABEL)
   try {
+    const conflict = codexProviderConflict(options)
+    if (conflict && !options.overrideOtherMaximal) {
+      return Promise.resolve({ success: false, conflict })
+    }
+    ensureApiKey(CODEX_KEY_LABEL)
     applyCodexProvider(options)
   } catch (error) {
     return conflictMutation(error)
@@ -67,6 +89,9 @@ function disableProvider(options: ProviderOptions) {
   try {
     result = revertCodexProvider(options)
   } catch (error) {
+    if (error instanceof CodexOtherMaximalConfigError) {
+      setCodexRoutingIntent(false)
+    }
     return conflictMutation(error)
   }
   setCodexRoutingIntent(false)
@@ -91,6 +116,12 @@ function uninstallProvider(
         result.status === "cleanup-required" ? "cleanup-required" : null,
     })
   } catch (error) {
+    if (error instanceof CodexOtherMaximalConfigError) {
+      return Promise.resolve({
+        reverted: [],
+        conflict: "other-maximal-config" as const,
+      })
+    }
     if (error instanceof CodexConfigConflictError) {
       return Promise.resolve({ reverted: [], conflict: "cleanup-required" })
     }
@@ -108,7 +139,7 @@ export function createCodexApp(options: CreateCodexAppOptions = {}): ClientApp {
 
   return {
     id: "codex",
-    name: "Codex",
+    name: "Codex CLI",
     kind: "config",
     apiKeyLabel: CODEX_KEY_LABEL,
 
@@ -121,7 +152,7 @@ export function createCodexApp(options: CreateCodexAppOptions = {}): ClientApp {
       const inspected = inspectProvider(providerOptions())
       return Promise.resolve({
         id: "codex",
-        name: "Codex",
+        name: "Codex CLI",
         kind: "config",
         enabled: inspected.enabled,
         status: installations.length > 0 ? "ready" : "not-installed",
@@ -139,8 +170,8 @@ export function createCodexApp(options: CreateCodexAppOptions = {}): ClientApp {
       })
     },
 
-    enable() {
-      return enableProvider(providerOptions())
+    enable(options) {
+      return enableProvider({ ...providerOptions(), ...options })
     },
 
     disable() {

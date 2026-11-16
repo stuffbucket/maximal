@@ -143,6 +143,7 @@ function serverToolFixture(): ServerToolFixture {
     listTools: unsupported,
     toolViews: unsupported,
     serverTools: () => [view],
+    pluginClientContributions: () => [],
     operations: unsupported,
     callTool: unsupported,
     prepareServerTool: () =>
@@ -192,6 +193,7 @@ function serverToolFixture(): ServerToolFixture {
     callTool: unsupported,
     operations: unsupported,
     serverTools: unsupported,
+    pluginClientContributions: () => [],
     prepareServerTool: unsupported,
     callServerTool: unsupported,
     runAction: unsupported,

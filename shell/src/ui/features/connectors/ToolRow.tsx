@@ -51,7 +51,11 @@ export function ToolRow({ tool, onPermission }: ToolRowProps): JSX.Element {
     <li className="tool">
       <div className="tool__head">
         <p className="tool__title">{title}</p>
-        <PermissionControl tool={title} value={tool.permission} onChange={onPermission} />
+        <PermissionControl
+          label={t("connectors-tool-perm-aria", { tool: title })}
+          value={tool.permission}
+          onChange={onPermission}
+        />
       </div>
 
       {tool.description && (

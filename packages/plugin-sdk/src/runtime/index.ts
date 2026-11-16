@@ -27,6 +27,10 @@ export {
 export { createFileStorage } from "./file-storage"
 export { nonJsonPath, normalizeManifest } from "./manifest"
 export { operationDispatchOf, operationsService } from "./operations"
+export {
+  pluginClientContributionsOf,
+  pluginClientsService,
+} from "./plugin-clients"
 export { providersService } from "./providers"
 export { serverToolsService } from "./server-tools"
 export {

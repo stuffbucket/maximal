@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun scripts/dev.ts",
+    "assets": "bun scripts/export-assets.ts",
     "build": "bun scripts/prepare-ui.ts && storybook build --output-dir storybook-static --quiet",
     "contrast": "bun scripts/contrast-audit.ts",
     "prepare-ui": "bun scripts/prepare-ui.ts",
@@ -16,6 +17,7 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
     "@storybook/addon-a11y": "10.6.3",
     "@storybook/addon-docs": "10.6.3",
     "@storybook/react-vite": "10.6.3",

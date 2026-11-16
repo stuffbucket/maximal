@@ -117,12 +117,21 @@ function abortError(reason?: unknown): Error {
   return error
 }
 
-function fallbackWireError(error: unknown): WireErrorDto {
+function fallbackWireError(
+  error: unknown,
+  handlerCompleted = false,
+): WireErrorDto {
   const aborted = error instanceof Error && error.name === "AbortError"
   return errorToWireError(error, {
-    kind: aborted ? "aborted" : "internal",
-    code: aborted ? "aborted" : "handler_failed",
-    retry: aborted ? "never" : "unknown",
+    kind:
+      aborted ? "aborted"
+      : handlerCompleted ? "indeterminate"
+      : "internal",
+    code:
+      aborted ? "aborted"
+      : handlerCompleted ? "terminal_send_failed"
+      : "handler_failed",
+    retry: aborted || handlerCompleted ? "never" : "unknown",
   })
 }
 
@@ -197,8 +206,12 @@ export class DuplexRpcDispatcher {
     return this.#startCall("provider", method, params, options)
   }
 
-  callHost(method: string, params: JsonValue): Promise<JsonValue> {
-    return this.#startCall("host", method, params)
+  callHost(
+    method: string,
+    params: JsonValue,
+    options: RpcCallOptions = {},
+  ): Promise<JsonValue> {
+    return this.#startCall("host", method, params, options)
   }
 
   dispose(reason = "Dispatcher disposed."): void {
@@ -422,16 +435,18 @@ export class DuplexRpcDispatcher {
     call: InboundCall,
     handler: RpcHandler | undefined,
   ): Promise<void> {
+    let handlerCompleted = false
     try {
       if (!handler) throw new Error(`No RPC handler for ${call.kind}.`)
       const value = await handler(params, this.#context(callId, call))
+      handlerCompleted = true
       await Promise.all(call.nested)
       await Promise.all(call.spends)
       if (call.cancelled) throw abortError(call.controller.signal.reason)
       await this.#sendInboundTerminal(callId, call, value)
     } catch (error) {
       await Promise.allSettled(call.spends)
-      await this.#sendInboundError(callId, call, error)
+      await this.#sendInboundError(callId, call, error, handlerCompleted)
     } finally {
       this.#inbound.delete(callId)
       this.#rememberTerminal(callId)
@@ -675,12 +690,13 @@ export class DuplexRpcDispatcher {
     callId: string,
     call: InboundCall,
     error: unknown,
+    handlerCompleted = false,
   ): Promise<void> {
     if (call.terminalSent || call.terminalPromise) {
       await call.terminalPromise
       return
     }
-    const wire = fallbackWireError(error)
+    const wire = fallbackWireError(error, handlerCompleted)
     let draft: FrameDraft
     switch (call.kind) {
       case "elicitation": {

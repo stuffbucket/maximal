@@ -73,6 +73,16 @@ export function MixedGlyph(): JSX.Element {
   );
 }
 
+/** More information: a ring with a lowercase i. */
+export function InformationGlyph(): JSX.Element {
+  return (
+    <Glyph>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 10.75v5M12 7.5h.01" />
+    </Glyph>
+  );
+}
+
 /** Worth knowing: a ring with an exclamation mark. */
 export function NoticeGlyph(): JSX.Element {
   return (

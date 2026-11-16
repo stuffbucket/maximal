@@ -47,7 +47,10 @@ type Story = StoryObj<Args>;
 const at = (scenario: ScenarioId, fail?: Array<string>): Story => ({ args: { scenario, fail } });
 
 /** Rules that are fine, nearly spent and spent, with a week of activity. */
-export const LimitsAndActivity = at("budget-limits");
+export const LimitsAndActivity: Story = {
+  ...at("budget-limits"),
+  tags: ["asset", "journey", "funnel-retention"],
+};
 /** Enforcement off: limits kept, none refuses. */
 export const EnforcementOff = at("budget-off");
 /** Spend and a provider allowance, no limits yet. */

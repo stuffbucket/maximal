@@ -12,6 +12,7 @@ import { join, resolve } from "node:path";
 
 import { firstAvailablePort, portIsAvailable, storybookPortOption } from "./port";
 import { REPO, buildUi, stageUi } from "./prepare-ui";
+import { ignoreStorybookRestagePath } from "./watch-policy";
 
 const PKG = resolve(import.meta.dir, "..");
 const WATCHED = [
@@ -74,10 +75,10 @@ function schedule(): void {
 }
 for (const path of WATCHED) {
   watch(path, { recursive: true }, (_event, file) => {
-    // build-ui copies shell/ui/*/vendor/ into dist, and that copy raises
-    // change events on the sources here — restaging on them would loop.
-    // Vendor bundles only change on deliberate upgrades; restart for those.
-    if (file && /(^|[\\/])vendor([\\/]|$)/.test(String(file))) return;
+    // build-ui copies static sources into dist, and those copies raise change
+    // events on the sources here — restaging on them would loop. These assets
+    // change only deliberately; restart Storybook after upgrading or adding one.
+    if (file && ignoreStorybookRestagePath(String(file))) return;
     schedule();
   });
 }

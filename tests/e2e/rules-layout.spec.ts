@@ -365,6 +365,17 @@ test("every rule row has a sparkline that opens its history", async ({
 test("a spent rule marks where it warned, reached its limit and refused", async ({
   page,
 }) => {
+  const amounts =
+    (await page
+      .locator(".limit", { hasText: "Client codex" })
+      .locator(".limit__amounts")
+      .textContent()) ?? ""
+  const limit = amounts.split(" of ")[1]
+  expect(
+    limit,
+    `Could not read the Client codex limit from "${amounts}"`,
+  ).toBeTruthy()
+
   await page
     .getByRole("button", { name: /^Show how Client codex is performing/ })
     .click()
@@ -381,7 +392,7 @@ test("a spent rule marks where it warned, reached its limit and refused", async 
     detail.locator(".timeline__marker .marker--refused").first(),
   ).toBeVisible()
   await expect(detail.locator(".timeline__tag--limit")).toContainText(
-    "Limit $1.80",
+    `Limit ${limit}`,
   )
   const refused =
     (await detail
@@ -424,6 +435,11 @@ test("the history's range picker refetches, and the history fits a 640px window"
 test("a failed history load says so with a retry, and leaves the rule alone", async ({
   page,
 }) => {
+  const amounts = page
+    .locator(".limit", { hasText: "Client codex" })
+    .locator(".limit__amounts")
+  const amountsBefore = await amounts.textContent()
+
   await page.route("**/limits/key-codex-weekly/timeline?*", (route) =>
     route.fulfill({ status: 500, body: '{"error":{"message":"boom"}}' }),
   )
@@ -435,7 +451,7 @@ test("a failed history load says so with a retry, and leaves the rule alone", as
   })
   await expect(detail.locator(".callout")).toBeVisible()
   await expect(detail.locator(".timeline__plot")).toBeHidden()
-  await expect(page.locator(".limit").nth(3)).toContainText("$2.02 of $1.80")
+  await expect(amounts).toHaveText(amountsBefore)
 })
 
 // What if: the rule being typed, replayed over past usage.
@@ -733,7 +749,12 @@ async function openModels(page: Page) {
   await page.addStyleTag({
     content: "#__harness { display: none !important; }",
   })
-  await expect(page.locator(".model-row").first()).toBeVisible()
+  const chatModels = page.locator("details.advanced-section", {
+    hasText: "Chat models",
+  })
+  await chatModels.locator("summary").click()
+  await expect(chatModels).toHaveAttribute("open", "")
+  await expect(chatModels.locator(".model-row").first()).toBeVisible()
 }
 
 test("the Models list marks the models a rule names, and says once what covers everything", async ({

@@ -11,6 +11,7 @@ import { getConfig } from "~/lib/config/config"
 import { settingsEventBus } from "~/lib/config/settings-events"
 
 import { removeLegacyClaudeDesktopEntries } from "./clients/claude-desktop-cleanup"
+import { pluginClientDriver } from "./clients/drivers"
 import { syncPluginClient } from "./clients/sync"
 import { composePluginGateway, reloadComposedPluginInventory } from "./compose"
 import { getPluginGateway, setPluginGateway } from "./gateway"
@@ -25,7 +26,7 @@ import {
   legacyPluginConfigs,
   migratePluginSettings,
 } from "./settings"
-import { listPluginViews, PLUGIN_CLIENTS } from "./view"
+import { listPluginViews } from "./view"
 
 /** Gateway events come in bursts (a reload is stop + start + status +
  *  tools); Settings gets one `plugins.changed` per burst. */
@@ -59,8 +60,12 @@ export function notifyPluginsChanged(): void {
  * throws; a client that fails is logged.
  */
 export function syncPluginClients(): void {
+  const gateway = getPluginGateway()
+  if (!gateway) return
   let changed = false
-  for (const configurator of PLUGIN_CLIENTS) {
+  for (const contribution of gateway.pluginClientContributions()) {
+    const configurator = pluginClientDriver(contribution)
+    if (!configurator) continue
     try {
       changed = syncPluginClient(configurator) || changed
     } catch (error) {

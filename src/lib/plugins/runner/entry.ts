@@ -25,6 +25,7 @@ import type {
 
 import { RELEASE_UPSTREAM_SESSION_METHOD } from "../generation-lifecycle"
 import { currentPluginGenerationCompatibility } from "../generations"
+import { RunnerBlobBridge } from "../transport/blob-codec"
 import { DuplexRpcDispatcher } from "../transport/dispatcher"
 import { BunIpcTransport } from "../transport/ipc"
 import {
@@ -270,10 +271,17 @@ export class VerifiedGenerationInventoryComposer implements RunnerInventoryCompo
     const { composePluginGateway, composeRunnerPluginGateway } =
       await import("../compose")
     signal.throwIfAborted()
-    const reverse =
+    const blobs =
       this.#dispatcher === undefined ?
         undefined
-      : await createReverseServices(this.#dispatcher)
+      : new RunnerBlobBridge(
+          this.#dispatcher,
+          generation.prepared.manifest.generationId,
+        )
+    const reverse =
+      this.#dispatcher === undefined || blobs === undefined ?
+        undefined
+      : await createReverseServices(this.#dispatcher, blobs)
     const gateway =
       reverse === undefined ?
         composePluginGateway({ plugins })
@@ -284,11 +292,12 @@ export class VerifiedGenerationInventoryComposer implements RunnerInventoryCompo
           host: reverse.host,
         })
     const unregister =
-      this.#dispatcher && this.#transport ?
+      this.#dispatcher && this.#transport && blobs ?
         registerRunnerGateway(
           this.#dispatcher,
           this.#transport,
           gateway,
+          blobs,
           gateway.resourceLifecycle(),
         )
       : undefined

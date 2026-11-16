@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   createLoopbackTransportPair,
+  decodeBlobHandle,
   decodeFrame,
   decodeMultipart,
   errorToWireError,
@@ -176,6 +177,32 @@ describe("protocol codec", () => {
             },
           },
           { generation },
+        ),
+      ),
+    ).toBe("oversize")
+  })
+
+  test("validates bounded generation-fenced blob handles", () => {
+    const handle = {
+      generation,
+      id: "blob-1",
+      byteLength: PROTOCOL_LIMITS.stringBytes + 1,
+      mediaType: "image/png",
+    }
+    expect(decodeBlobHandle(handle, generation)).toEqual(handle)
+    expect(
+      protocolCode(() =>
+        decodeBlobHandle({ ...handle, generation: "old" }, generation),
+      ),
+    ).toBe("stale-generation")
+    expect(
+      protocolCode(() =>
+        decodeBlobHandle(
+          {
+            ...handle,
+            filename: "x".repeat(PROTOCOL_LIMITS.stringBytes + 1),
+          },
+          generation,
         ),
       ),
     ).toBe("oversize")

@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 import {
   devConfig,
+  discoverRunningAppDev,
   prepareAppDev,
   resolveDevProfile,
   resolveTauriAppDataDir,
@@ -137,6 +145,111 @@ describe("app:dev worktree identity", () => {
     )
 
     expect(profile.home).toBe("relative/dev-home")
+  })
+})
+
+describe("app:dev running session discovery", () => {
+  const worktreeId = "a1b2c3d4e5f6"
+  const identifier = `co.stuffbucket.maximal.dev.maximal-${worktreeId}`
+
+  function profileFixture(): { repo: string; home: string } {
+    const repo = temporaryDirectory()
+    git(repo, "init", "--quiet")
+    resolveWorktreeId(repo, () => worktreeId)
+    const home = path.join(repo, "relative", "dev-home")
+    mkdirSync(home, { recursive: true })
+    return { repo, home }
+  }
+
+  test("discovers the live sidecar's actual loopback port", () => {
+    const { repo, home } = profileFixture()
+    writeFileSync(
+      path.join(home, "session-running"),
+      JSON.stringify({
+        version: 2,
+        pid: 101,
+        port: 49_321,
+        parentPid: 202,
+        instanceId: identifier,
+      }),
+    )
+
+    const running = discoverRunningAppDev(
+      { COPILOT_API_HOME: "relative/dev-home" },
+      repo,
+      (pid) => pid === 101,
+    )
+
+    expect(running).toMatchObject({
+      home,
+      identifier,
+      worktreeId,
+      pid: 101,
+      port: 49_321,
+    })
+    expect(running?.baseUrl.origin).toBe("http://127.0.0.1:49321")
+  })
+
+  test("does not create a missing worktree identity while discovering", () => {
+    const repo = temporaryDirectory()
+    git(repo, "init", "--quiet")
+    const idPath = git(
+      repo,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "maximal-worktree-id",
+    )
+
+    expect(discoverRunningAppDev({}, repo, () => true)).toBeUndefined()
+    expect(existsSync(idPath)).toBe(false)
+  })
+
+  test.each([
+    ["malformed sentinel", "not json", () => true],
+    [
+      "invalid port",
+      JSON.stringify({ pid: 101, port: 70_000, instanceId: identifier }),
+      () => true,
+    ],
+    [
+      "another profile",
+      JSON.stringify({
+        pid: 101,
+        port: 49_321,
+        instanceId: `${identifier}-other`,
+      }),
+      () => true,
+    ],
+    [
+      "dead sidecar",
+      JSON.stringify({ pid: 101, port: 49_321, instanceId: identifier }),
+      () => false,
+    ],
+  ])("rejects %s", (_label, sentinel, isAlive) => {
+    const { repo, home } = profileFixture()
+    writeFileSync(path.join(home, "session-running"), sentinel)
+
+    expect(
+      discoverRunningAppDev(
+        { COPILOT_API_HOME: "relative/dev-home" },
+        repo,
+        isAlive,
+      ),
+    ).toBeUndefined()
+  })
+
+  test("does not treat a persisted preferred port as a running session", () => {
+    const { repo, home } = profileFixture()
+    writeFileSync(path.join(home, "sidecar-port"), "49321\n")
+
+    expect(
+      discoverRunningAppDev(
+        { COPILOT_API_HOME: "relative/dev-home" },
+        repo,
+        () => true,
+      ),
+    ).toBeUndefined()
   })
 })
 

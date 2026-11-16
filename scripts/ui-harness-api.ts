@@ -281,7 +281,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       return json(state.auth)
     }
 
-    // --- apps toggles (flip enabled, echo the fresh entry) ---
+    // --- apps toggles (same conflict and install gates as the real routes) ---
     const appToggle =
       /^\/settings\/api\/apps\/(claude-code|claude-desktop|codex)\/toggle$/.exec(
         path,
@@ -289,7 +289,27 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (appToggle && method === "POST") {
       const app = state.apps.apps.find((a) => a.id === appToggle[1])
       if (!app) return json({ error: { message: "no such app" } }, 404)
-      app.enabled = !!(await body()).enabled
+      const payload = await body()
+      if (
+        typeof payload.enabled !== "boolean"
+        || (payload.overrideOtherMaximal !== undefined
+          && typeof payload.overrideOtherMaximal !== "boolean")
+      ) {
+        return json({ error: { message: "Expected { enabled: boolean, overrideOtherMaximal?: boolean }" } }, 400)
+      }
+      if (payload.enabled && app.status === "not-installed") {
+        return json({ error: { message: `No ${app.name} install detected. Install it first, then enable routing.` } }, 409)
+      }
+      if (payload.enabled && app.conflict) {
+        if (
+          app.conflict !== "other-maximal-config"
+          || payload.overrideOtherMaximal !== true
+        ) {
+          return json(app)
+        }
+        app.conflict = null
+      }
+      app.enabled = payload.enabled
       return json(app)
     }
 
@@ -343,6 +363,16 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       }
       if (b.clients) {
         for (const client of connector.clients) client.selected = b.clients.includes(client.id)
+      }
+      if (b.access) {
+        for (const target of connector.access) {
+          const permission = b.access[target.id]
+          if (!permission) continue
+          target.permission = permission
+          // The compatibility view of apps follows the app's policy.
+          const client = connector.clients.find((c) => c.id === target.clientId)
+          if (client) client.selected = permission !== "block"
+        }
       }
       syncTools(connector)
       pluginsChanged()

@@ -3,6 +3,7 @@ import type {
   ModelBinding,
   ModelOperation,
   OperationDispatch,
+  PluginClientContribution,
   PluginGateway,
   PluginGatewayEvent,
   PluginGenerationLease,
@@ -30,9 +31,11 @@ import {
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import { randomUUID } from "node:crypto"
 
+import type { GenerationSpoolStore } from "~/lib/plugins/spool/store"
 import type { DuplexRpcDispatcher } from "~/lib/plugins/transport/dispatcher"
 import type { GatewayProjectionDto } from "~/lib/plugins/transport/gateway-codec"
 
+import { materializeParentStrings } from "~/lib/plugins/transport/blob-codec"
 import {
   encodeBody,
   exact,
@@ -53,6 +56,45 @@ const MAX_PROVIDER_CALLS_PER_INVOCATION = 64
 const clone = <T>(value: T): T => structuredClone(value)
 const operationKey = (operation: ModelOperation, model: string): string =>
   JSON.stringify([operation, model])
+
+async function materializeOperationJson(
+  value: JsonValue,
+  spool: GenerationSpoolStore,
+): Promise<Record<string, unknown>> {
+  try {
+    return structuredClone(
+      record(
+        await materializeParentStrings(value, spool),
+        "Operation result JSON",
+      ),
+    )
+  } catch {
+    throw new WireRemoteError({
+      kind: "indeterminate",
+      code: "operation_result_transport_failed",
+      message:
+        "The provider completed, but its response could not be materialized safely.",
+      retry: "never",
+    })
+  }
+}
+
+async function materializeServerToolResult(
+  value: JsonValue,
+  spool: GenerationSpoolStore,
+): Promise<JsonValue> {
+  try {
+    return await materializeParentStrings(value, spool)
+  } catch {
+    throw new WireRemoteError({
+      kind: "indeterminate",
+      code: "server_tool_result_transport_failed",
+      message:
+        "The server tool completed, but its result could not be materialized safely.",
+      retry: "never",
+    })
+  }
+}
 
 function gatewayError(error: unknown): Error {
   if (!(error instanceof WireRemoteError))
@@ -95,6 +137,7 @@ export class TransportPluginGateway implements PluginGateway {
   >()
   readonly #operations: OperationDispatch
   readonly #onDispose: (() => Promise<void>) | undefined
+  readonly #spool: GenerationSpoolStore
   #projection: GatewayProjectionDto
   #disposed = false
   #refresh = Promise.resolve()
@@ -103,11 +146,13 @@ export class TransportPluginGateway implements PluginGateway {
     dispatcher: DuplexRpcDispatcher,
     generationId: string,
     projection: GatewayProjectionDto,
+    spool: GenerationSpoolStore,
     onDispose?: () => Promise<void>,
   ) {
     this.#dispatcher = dispatcher
     this.#generationId = generationId
     this.#projection = clone(projection)
+    this.#spool = spool
     this.#onDispose = onDispose
     this.#operations = this.#operationView()
   }
@@ -210,6 +255,10 @@ export class TransportPluginGateway implements PluginGateway {
         live()
         return projection.serverTools.map((value) => clone(value))
       },
+      pluginClientContributions: () => {
+        live()
+        return projection.pluginClients.map((value) => clone(value))
+      },
       operations: () => this.#operationView(projection, live),
       callTool: async (pluginId, name, input, call) => {
         live()
@@ -264,6 +313,10 @@ export class TransportPluginGateway implements PluginGateway {
 
   serverTools(): Array<ServerToolView> {
     return this.#projection.serverTools.map((value) => clone(value))
+  }
+
+  pluginClientContributions(): Array<PluginClientContribution> {
+    return this.#projection.pluginClients.map((value) => clone(value))
   }
 
   async prepareServerTool(
@@ -438,29 +491,43 @@ export class TransportPluginGateway implements PluginGateway {
         binding: clone(target.binding),
         execute: async (request) => {
           if (released) throw new Error("Prepared operation was released.")
-          const body = await encodeBody(request.body)
-          const result = parseOperationResult(
-            await this.#call(
-              GATEWAY_RPC.executeOperation,
-              json(
-                {
-                  operationRevision,
-                  operation,
-                  model,
-                  pluginId: target.pluginId,
-                  binding: target.binding,
-                  body,
-                  invocationId: request.invocationId,
-                  providerCallId: request.providerCallId,
-                  sequence: request.sequence,
-                  origin: request.origin,
-                },
-                "Operation execution",
+          try {
+            const body = await encodeBody(request.body, {
+              store: this.#spool,
+              callId: request.invocationId,
+              signal: request.signal,
+            })
+            const result = parseOperationResult(
+              await this.#call(
+                GATEWAY_RPC.executeOperation,
+                json(
+                  {
+                    operationRevision,
+                    operation,
+                    model,
+                    pluginId: target.pluginId,
+                    binding: target.binding,
+                    body,
+                    invocationId: request.invocationId,
+                    providerCallId: request.providerCallId,
+                    sequence: request.sequence,
+                    origin: request.origin,
+                  },
+                  "Operation execution",
+                ),
+                { signal: request.signal },
               ),
-              { signal: request.signal },
-            ),
-          )
-          return result
+            )
+            return {
+              ...result,
+              json: await materializeOperationJson(
+                json(result.json, "Operation result JSON"),
+                this.#spool,
+              ),
+            }
+          } finally {
+            await this.#spool.releaseCall(request.invocationId)
+          }
         },
         release: () => {
           released = true
@@ -550,9 +617,12 @@ export class TransportPluginGateway implements PluginGateway {
             },
             { signal: call.signal },
           )
-          return parseToolResult(result)
+          return parseToolResult(
+            await materializeServerToolResult(result, this.#spool),
+          )
         } finally {
           this.#spend.delete(call.invocationId)
+          await this.#spool.releaseCall(call.invocationId)
         }
       },
       release,
@@ -585,6 +655,8 @@ function decodePreparedBody(
   for (const part of body.parts) {
     if (part.kind === "text") form.append(part.name, part.value)
     else {
+      if (part.handle)
+        throw new Error("Prepared tool estimates cannot contain blob handles.")
       const bytes = Uint8Array.from(Buffer.from(part.bytesBase64, "base64"))
       const blob = new Blob([bytes], { type: part.mediaType })
       if (part.filename === undefined) form.append(part.name, blob)

@@ -34,7 +34,12 @@ interface UseConnectors {
 }
 
 function sortByName(connectors: Array<PluginView>): Array<PluginView> {
-  return [...connectors].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return [...connectors].sort(
+    (a, b) =>
+      a.displayName.localeCompare(b.displayName, "en", {
+        sensitivity: "base",
+      }) || a.id.localeCompare(b.id, "en"),
+  );
 }
 
 export function useConnectors(): UseConnectors {

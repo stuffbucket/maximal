@@ -8,6 +8,7 @@ import { subscribeModelCatalogChanged } from "~/lib/runtime-state/state"
 import {
   applyProxyBaseUrl,
   getClaudeCodeSettingsPath,
+  inspectClaudeCodeRoutingFile,
   revertProxyBaseUrlForShutdown,
 } from "./config"
 
@@ -104,6 +105,14 @@ export function reconcileClaudeCodeOnBoot(
   ensureCatalogSubscription(filePath)
   if (!intended) return
   try {
+    const inspection = inspectClaudeCodeRoutingFile(filePath)
+    if (inspection.conflict === "other-maximal-config") {
+      setClaudeCodeRoutingIntent(false)
+      consola.warn(
+        "claude-code: another Maximal profile owns routing; disabled stale local intent",
+      )
+      return
+    }
     const result = applyProxyBaseUrl(filePath)
     if (result.wrote) {
       consola.info(

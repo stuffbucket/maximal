@@ -43,6 +43,7 @@ function generation(
     listTools: unsupported,
     toolViews: unsupported,
     serverTools: unsupported,
+    pluginClientContributions: unsupported,
     operations: unsupported,
     callTool: unsupported,
     prepareServerTool: unsupported,

@@ -16,6 +16,7 @@ import { getConfig, writeConfig } from "~/lib/config/config"
 
 import {
   applyConfigLibraryProfile,
+  type ApplyConfigLibraryOptions,
   type ApplyConfigLibraryResult,
   configLibraryConflict,
   DESKTOP_KEY_LABEL,
@@ -49,8 +50,9 @@ function setClaudeDesktopRoutingIntent(enabled: boolean): void {
  *  passes through undefined so the config writer owns the default. */
 export function enableClaudeDesktopRouting(
   home?: string,
+  options: ApplyConfigLibraryOptions = {},
 ): ApplyConfigLibraryResult {
-  const result = applyWithKey(home)
+  const result = applyWithKey(home, options)
   if (!result.conflict) setClaudeDesktopRoutingIntent(true)
   return result
 }
@@ -64,9 +66,19 @@ export function disableClaudeDesktopRouting(home?: string): RevertResult {
 /** Apply with a real key: provision one first, but only for an apply that
  *  will take effect — a refused enable shouldn't leave a key behind, and a
  *  profile must never be written with an empty key. */
-function applyWithKey(home: string | undefined): ApplyConfigLibraryResult {
-  if (!configLibraryConflict(home)) ensureApiKey(DESKTOP_KEY_LABEL)
-  return applyConfigLibraryProfile(home)
+function applyWithKey(
+  home: string | undefined,
+  options: ApplyConfigLibraryOptions = {},
+): ApplyConfigLibraryResult {
+  const conflict = configLibraryConflict(home)
+  if (
+    !conflict
+    || (conflict === "other-maximal-config"
+      && options.overrideOtherMaximal === true)
+  ) {
+    ensureApiKey(DESKTOP_KEY_LABEL)
+  }
+  return applyConfigLibraryProfile(home, undefined, options)
 }
 
 /** Re-apply when the intent is on. A no-op unless something we write
@@ -80,9 +92,13 @@ function reapply(
   try {
     const result = applyWithKey(home)
     if (result.conflict) {
+      if (result.conflict === "other-maximal-config") {
+        setClaudeDesktopRoutingIntent(false)
+      }
       consola.warn(
-        "claude-desktop: routing intent is on, but another gateway profile is"
-          + " applied — left it untouched",
+        result.conflict === "other-maximal-config" ?
+          "claude-desktop: another Maximal profile owns routing; disabled stale local intent"
+        : "claude-desktop: routing intent is on, but another gateway profile is applied — left it untouched",
       )
     } else if (result.wrote) {
       consola.info(`claude-desktop: updated gateway profile (${why})`)
