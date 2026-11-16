@@ -276,7 +276,7 @@ describe("GET /settings/api/plugins", () => {
           clientId: "claude-code",
           permission: "block",
           available: false,
-          reason: "Turn on Claude Code in Maximal first.",
+          reasonKind: "app-off",
         },
         {
           id: "app:claude-desktop",
@@ -285,7 +285,7 @@ describe("GET /settings/api/plugins", () => {
           clientId: "claude-desktop",
           permission: "block",
           available: false,
-          reason: "Turn on Claude Desktop in Maximal first.",
+          reasonKind: "app-off",
         },
         {
           id: "app:codex",
@@ -294,6 +294,7 @@ describe("GET /settings/api/plugins", () => {
           clientId: "codex",
           permission: "block",
           available: false,
+          reasonKind: "custom",
           reason: "Maximal doesn't add connectors to Codex yet.",
         },
         {
@@ -303,6 +304,7 @@ describe("GET /settings/api/plugins", () => {
           clientId: "copilot-cli",
           permission: "block",
           available: false,
+          reasonKind: "custom",
           reason: "Copilot CLI integration is coming soon.",
         },
       ],
@@ -560,7 +562,7 @@ describe("PATCH /settings/api/plugins/:id", () => {
       expect(byId["connection:k-off"]).toMatchObject({
         permission: "allow",
         available: false,
-        reason: "This connection is turned off.",
+        reasonKind: "generic",
       })
       await patch("alpha", { access: { "connection:k-off": "ask" } })
       expect((await get("alpha")).access.at(-1)?.permission).toBe("ask")

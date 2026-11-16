@@ -166,30 +166,20 @@ export function createPluginMcpRoutes(
     allowOptionsBypass: false,
   })
   const app = new Hono()
-  const guard =
-    (pluginId: (c: Context) => string | undefined): MiddlewareHandler =>
-    async (c, next) => {
-      if (!isLoopbackAddress(getRequestIp(c))) return c.notFound()
-      if (hasForeignOrigin(c.req.header("origin"))) {
-        return mcpError(c, "MCP_ORIGIN_REJECTED")
-      }
-      const id = pluginId(c)
-      if (id !== undefined) {
-        const snapshot = getGateway()?.get(id)
-        if (snapshot?.kind !== "connector" || !snapshot.enabled) {
-          return mcpError(c, "MCP_ENDPOINT_NOT_FOUND")
-        }
-      }
-      return mainPortAuth(c, next)
+  const guard: MiddlewareHandler = async (c, next) => {
+    if (!isLoopbackAddress(getRequestIp(c))) return c.notFound()
+    if (hasForeignOrigin(c.req.header("origin"))) {
+      return mcpError(c, "MCP_ORIGIN_REJECTED")
     }
+    return mainPortAuth(c, next)
+  }
 
   const serve = async (
     c: Context,
     pluginId: string | undefined,
   ): Promise<Response> => {
     const gateway = getGateway()
-    if (!gateway) return mcpError(c, "MCP_ENDPOINT_NOT_FOUND")
-    sessions.watch(gateway)
+    if (gateway) sessions.watch(gateway)
     const caller = mcpCaller(c)
 
     const sessionId = c.req.header("mcp-session-id")
@@ -204,6 +194,13 @@ export function createPluginMcpRoutes(
       return sessions.serve(session, c.req.raw)
     }
 
+    if (!gateway) return mcpError(c, "MCP_ENDPOINT_NOT_FOUND")
+    if (pluginId !== undefined) {
+      const snapshot = gateway.get(pluginId)
+      if (snapshot?.kind !== "connector" || !snapshot.enabled) {
+        return mcpError(c, "MCP_ENDPOINT_NOT_FOUND")
+      }
+    }
     if (c.req.method !== "POST") {
       return jsonRpcError(c, 400, {
         code: -32_000,
@@ -222,15 +219,9 @@ export function createPluginMcpRoutes(
     }
   }
 
-  app.all(
-    "/",
-    guard(() => undefined),
-  )
+  app.all("/", guard)
   app.all("/", (c) => serve(c, undefined))
-  app.all(
-    "/:pluginId",
-    guard((c) => c.req.param("pluginId")),
-  )
+  app.all("/:pluginId", guard)
   app.all("/:pluginId", (c) => serve(c, c.req.param("pluginId")))
 
   return {

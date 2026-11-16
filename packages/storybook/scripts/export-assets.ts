@@ -431,12 +431,14 @@ async function assetBounds(page: Page, selector: string | undefined, padding: nu
   return cropBounds(target, padding);
 }
 
-async function captureWebp(page: Page, bounds: AssetBounds, scale: number): Promise<Uint8Array> {
+async function captureWebp(page: Page, bounds: AssetBounds): Promise<Uint8Array> {
   const session = await page.context().newCDPSession(page);
   try {
     const result = await session.send("Page.captureScreenshot", {
       captureBeyondViewport: true,
-      clip: { ...bounds, scale },
+      // The browser context's deviceScaleFactor supplies pixelScale. Applying
+      // it here too would square the requested raster dimensions.
+      clip: { ...bounds, scale: 1 },
       format: "webp",
       fromSurface: true,
       quality: 100,
@@ -495,7 +497,7 @@ async function exportStory(
   if (format === "png") {
     await page.screenshot({ clip: bounds, path: join(outDir, file), type: "png" });
   } else {
-    await writeFile(join(outDir, file), await captureWebp(page, bounds, options.scale));
+    await writeFile(join(outDir, file), await captureWebp(page, bounds));
   }
   return {
     file,

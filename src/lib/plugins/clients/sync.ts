@@ -114,6 +114,10 @@ export interface PluginClientApplyResult {
   removed: Array<string>
 }
 
+export type PluginClientUnavailableReason =
+  | { kind: "app-off" }
+  | { kind: "custom"; reason: string }
+
 export interface PluginClientConfigurator {
   readonly clientId: PluginClientId
   /** The label of the key the app itself uses for Maximal (`ClientApp.apiKeyLabel`).
@@ -121,8 +125,8 @@ export interface PluginClientConfigurator {
   readonly apiKeyLabel: string
   /** Whether Maximal's integration for this client is on. */
   available(): boolean
-  /** When not `available()`, why, in English, for Settings. */
-  unavailableReason(): string
+  /** Stable UI reason, with prose only for a host-specific conflict. */
+  unavailableReason(): PluginClientUnavailableReason
   /** The client's own setup of plugin `id`, if it has one. */
   standalone(id: string): StandaloneInstall | undefined
   /** Make Maximal's entries exactly `desired` and remove the `legacy`

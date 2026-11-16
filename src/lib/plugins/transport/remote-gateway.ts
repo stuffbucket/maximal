@@ -243,6 +243,10 @@ export class TransportPluginGateway implements PluginGateway {
         const found = projection.plugins.find((plugin) => plugin.id === id)
         return found === undefined ? undefined : clone(found)
       },
+      list: () => {
+        live()
+        return projection.plugins.map((plugin) => clone(plugin))
+      },
       listTools: (pluginId) => {
         live()
         return projectedList(projection.listings, pluginId)

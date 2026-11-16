@@ -158,4 +158,48 @@ describe("resumable MCP HTTP transport", () => {
     expect(second.sent.at(-1)).toEqual(request)
     expect(transport.sessionId).toBe("session-2")
   })
+
+  test("does not replay a stale response into a replacement session", async () => {
+    const first = new FakeHttpTransport("session-1", (message) =>
+      "result" in message ?
+        Promise.reject(Object.assign(new Error("missing"), { status: 404 }))
+      : Promise.resolve(),
+    )
+    const second = new FakeHttpTransport("session-2", (message) => {
+      if (isJSONRPCRequest(message) && methodOf(message) === "initialize") {
+        queueMicrotask(() => {
+          second.onmessage?.({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              serverInfo: { name: "maximal", version: "test" },
+            },
+          })
+        })
+      }
+      return Promise.resolve()
+    })
+    const transports = [first, second]
+    const transport = new ResumableTransport(
+      () => transports.shift() ?? second,
+      1_000,
+    )
+    const stale: JSONRPCMessage = {
+      jsonrpc: "2.0",
+      id: 99,
+      result: { action: "accept" },
+    }
+
+    await transport.start()
+    await transport.send(INITIALIZE)
+    await transport.send(stale)
+
+    expect(second.sent.map((message) => methodOf(message))).toEqual([
+      "initialize",
+      "notifications/initialized",
+    ])
+    expect(second.sent).not.toContainEqual(stale)
+  })
 })

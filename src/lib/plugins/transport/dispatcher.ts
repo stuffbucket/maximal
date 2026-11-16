@@ -569,35 +569,11 @@ export class DuplexRpcDispatcher {
     const callId = frame.callId
     if (!callId)
       throw new ProtocolError("malformed", "Elicitation has no call identity.")
-    const parent = this.#outbound.get(frame.payload.parentCallId)
-    const direct = parent?.onElicit
-    if (direct) {
-      void direct(frame.payload.message, frame.payload.requestedSchema)
-        .then((reply) => this.#elicitationReply(reply))
-        .then((reply) =>
-          this.#transport.send({
-            type: "elicitation-reply",
-            callId,
-            payload: reply,
-          }),
-        )
-        .catch(() =>
-          this.#transport.send({
-            type: "elicitation-reply",
-            callId,
-            payload: { action: "cancel" },
-          }),
-        )
-      return
-    }
-    const handler = this.#handlers.host.get("elicitation")
-    if (!handler) {
-      void this.#transport.send({
-        type: "elicitation-reply",
-        callId,
-        payload: { action: "decline" },
-      })
-      return
+    if (this.#inbound.has(callId) || this.#terminalHistory.has(callId)) {
+      throw new ProtocolError(
+        "out-of-order",
+        "Inbound call identity is not unique.",
+      )
     }
     const controller = new AbortController()
     const call: InboundCall = {
@@ -609,9 +585,30 @@ export class DuplexRpcDispatcher {
       nested: new Set(),
     }
     this.#inbound.set(callId, call)
-    void (async () => {
-      try {
-        const value = await handler(
+    void this.#answerElicitation(callId, frame, call).catch((error) =>
+      this.#transport.close(
+        error instanceof Error ? error.message : "Elicitation failed.",
+      ),
+    )
+  }
+
+  async #answerElicitation(
+    callId: string,
+    frame: Extract<ProtocolFrame, { type: "elicitation" }>,
+    call: InboundCall,
+  ): Promise<void> {
+    try {
+      const parent = this.#outbound.get(frame.payload.parentCallId)
+      const direct = parent?.onElicit
+      const handler = this.#handlers.host.get("elicitation")
+      let value: unknown
+      if (direct) {
+        value = await direct(
+          frame.payload.message,
+          frame.payload.requestedSchema,
+        )
+      } else if (handler) {
+        value = await handler(
           {
             parentCallId: frame.payload.parentCallId,
             message: frame.payload.message,
@@ -619,23 +616,26 @@ export class DuplexRpcDispatcher {
           },
           this.#context(callId, call),
         )
-        const reply = this.#elicitationReply(value)
-        await this.#sendTerminal(call, {
-          type: "elicitation-reply",
-          callId,
-          payload: reply,
-        })
-      } catch {
-        await this.#sendTerminal(call, {
-          type: "elicitation-reply",
-          callId,
-          payload: { action: "cancel" },
-        })
-      } finally {
-        this.#inbound.delete(callId)
-        this.#rememberTerminal(callId)
+      } else {
+        value = { action: "decline" }
       }
-    })()
+      if (call.cancelled) return
+      await this.#sendTerminal(call, {
+        type: "elicitation-reply",
+        callId,
+        payload: this.#elicitationReply(value),
+      })
+    } catch {
+      if (call.cancelled) return
+      await this.#sendTerminal(call, {
+        type: "elicitation-reply",
+        callId,
+        payload: { action: "cancel" },
+      })
+    } finally {
+      if (this.#inbound.get(callId) === call) this.#inbound.delete(callId)
+      this.#rememberTerminal(callId)
+    }
   }
 
   #elicitationReply(value: unknown): ElicitationReply {

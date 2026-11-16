@@ -62,7 +62,7 @@ interface SmokeReport {
 }
 
 class PreflightError extends Error {}
-class AmbiguousPostError extends Error {}
+export class AmbiguousPostError extends Error {}
 class InvalidJsonResponseError extends Error {}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -129,7 +129,7 @@ interface OperationReply {
   durationMs: number
 }
 
-async function post(
+export async function post(
   options: SmokeOptions,
   input: PostInput,
 ): Promise<OperationReply> {
@@ -155,11 +155,10 @@ async function post(
   try {
     parsed = await responseJson(response)
   } catch (error) {
-    if (error instanceof InvalidJsonResponseError) throw error
     const reason =
       error instanceof Error ? error.message : "body transport error"
     throw new AmbiguousPostError(
-      `POST ${input.pathname} returned headers but its body did not complete (${reason}); it may have executed`,
+      `POST ${input.pathname} returned headers but no definitive JSON body (${reason}); it may have executed`,
     )
   }
   return {
@@ -789,6 +788,12 @@ export async function runSmoke(options: SmokeOptions): Promise<number> {
   return results.every(({ status }) => status === "PASS") ? 0 : 1
 }
 
+export function smokeErrorExitCode(error: unknown): 1 | 2 | 3 {
+  if (error instanceof AmbiguousPostError) return 3
+  if (error instanceof UsageError || error instanceof PreflightError) return 2
+  return 1
+}
+
 async function main(): Promise<number> {
   try {
     const options = parseArgs(process.argv.slice(2))
@@ -797,18 +802,18 @@ async function main(): Promise<number> {
     if (error instanceof UsageError) {
       console.error(error.message)
       if (error.message !== usage()) console.error(`\n${usage()}`)
-      return 2
+      return smokeErrorExitCode(error)
     }
     if (error instanceof AmbiguousPostError) {
       console.error(`AMBIGUOUS: ${error.message}`)
-      return 3
+      return smokeErrorExitCode(error)
     }
     if (error instanceof PreflightError) {
       console.error(`Preflight failed: ${error.message}`)
-      return 2
+      return smokeErrorExitCode(error)
     }
     console.error(error instanceof Error ? error.message : "Smoke failed")
-    return 1
+    return smokeErrorExitCode(error)
   }
 }
 

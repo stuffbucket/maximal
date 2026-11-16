@@ -559,6 +559,10 @@ class PluginHost implements PluginHostGateway {
         live()
         return this.get(id)
       },
+      list: () => {
+        live()
+        return this.list()
+      },
       listTools: (pluginId) => {
         live()
         return this.listTools(pluginId)

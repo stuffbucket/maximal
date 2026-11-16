@@ -200,6 +200,71 @@ export function materializeParentStrings(
   })
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw signal.reason ?? new Error("Aborted")
+}
+
+async function writeChunk(
+  file: Awaited<ReturnType<typeof open>>,
+  chunk: Uint8Array,
+  options: { position: number; signal: AbortSignal | undefined },
+): Promise<void> {
+  let offset = 0
+  while (offset < chunk.byteLength) {
+    throwIfAborted(options.signal)
+    const result = await file.write(
+      chunk,
+      offset,
+      chunk.byteLength - offset,
+      options.position + offset,
+    )
+    if (result.bytesWritten === 0)
+      throw new Error("Blob upload write made no progress.")
+    offset += result.bytesWritten
+  }
+}
+
+async function streamBlobToFile(
+  file: Awaited<ReturnType<typeof open>>,
+  blob: Blob,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const reader = blob.stream().getReader()
+  let written = 0
+  const cancelRead = () => {
+    void reader.cancel(signal?.reason).catch(() => undefined)
+  }
+  signal?.addEventListener("abort", cancelRead, { once: true })
+  try {
+    for (;;) {
+      throwIfAborted(signal)
+      const { done, value } = await reader.read()
+      throwIfAborted(signal)
+      if (done) break
+      if (written + value.byteLength > blob.size) {
+        throw new ProtocolError(
+          "malformed",
+          "Blob stream exceeded its declared length.",
+        )
+      }
+      await writeChunk(file, value, { position: written, signal })
+      written += value.byteLength
+    }
+  } catch (error) {
+    await reader.cancel(error).catch(() => undefined)
+    throw error
+  } finally {
+    signal?.removeEventListener("abort", cancelRead)
+    reader.releaseLock()
+  }
+  if (written !== blob.size) {
+    throw new ProtocolError(
+      "malformed",
+      "Blob stream length did not match its declared length.",
+    )
+  }
+}
+
 /** Runner-side bridge for parent-owned blob handles. */
 export class RunnerBlobBridge {
   readonly #dispatcher: DuplexRpcDispatcher
@@ -284,20 +349,7 @@ export class RunnerBlobBridge {
         path,
         constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW,
       )
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      let offset = 0
-      while (offset < bytes.byteLength) {
-        if (signal?.aborted) throw signal.reason ?? new Error("Aborted")
-        const result = await file.write(
-          bytes,
-          offset,
-          bytes.byteLength - offset,
-          offset,
-        )
-        if (result.bytesWritten === 0)
-          throw new Error("Blob upload write made no progress.")
-        offset += result.bytesWritten
-      }
+      await streamBlobToFile(file, blob, signal)
       await file.sync()
       await file.close()
       file = undefined

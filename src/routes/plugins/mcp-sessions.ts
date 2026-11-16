@@ -514,9 +514,7 @@ export class McpSessions {
   }
 
   #aggregatePluginIds(generation: PluginGenerationLease): Array<string> {
-    const gateway = this.#options.getGateway()
-    if (!gateway) return []
-    return gateway
+    return generation
       .list()
       .map((plugin) => plugin.id)
       .filter((pluginId) => {

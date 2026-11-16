@@ -153,7 +153,9 @@ export class ResumableTransport implements Transport {
         throw error
       }
       if (this.#inner === inner) await this.#replaceSession()
-      await this.#inner.send(message, options)
+      if (isJSONRPCRequest(message)) {
+        await this.#inner.send(message, options)
+      }
     }
   }
 

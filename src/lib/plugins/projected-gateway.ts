@@ -292,6 +292,12 @@ export class ProjectedPluginGateway implements PluginGateway {
         const value = state.projection.pluginById.get(id)
         return value === undefined ? undefined : clone(value)
       },
+      list: () => {
+        live()
+        return [...state.projection.pluginById.values()].map((value) =>
+          clone(value),
+        )
+      },
       listTools: (pluginId) => {
         live()
         return this.#projectedList(state.projection.listings, pluginId)

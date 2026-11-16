@@ -140,6 +140,7 @@ function serverToolFixture(): ServerToolFixture {
   const generation: PluginGenerationLease = {
     generationId: "generation-one",
     get: unsupported,
+    list: unsupported,
     listTools: unsupported,
     toolViews: unsupported,
     serverTools: () => [view],

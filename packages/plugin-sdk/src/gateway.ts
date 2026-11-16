@@ -156,6 +156,7 @@ export interface PluginGenerationLease {
   /** Diagnostic identity only; callers must not route with it. */
   readonly generationId: string
   get(id: string): PluginSnapshot | undefined
+  list(): Array<PluginSnapshot>
   listTools(pluginId: string): Array<PluginToolListing>
   toolViews(pluginId: string): Array<PluginToolView>
   serverTools(): Array<ServerToolView>

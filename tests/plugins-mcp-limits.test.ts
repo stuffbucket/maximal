@@ -113,6 +113,38 @@ describe("/mcp guards", () => {
     expect(sessionId).toBeTruthy()
     expect(routes.sessionCount("demo")).toBe(1)
   })
+
+  test("keeps an existing session available after current inventory changes", async () => {
+    const stable = plugins.gateway
+    let visible = true
+    const gateway = new Proxy(stable, {
+      get(target, property) {
+        if (property === "get") {
+          return (id: string) => (visible ? target.get(id) : undefined)
+        }
+        const value: unknown = Reflect.get(target, property)
+        if (typeof value !== "function") return value
+        return (...args: Array<unknown>): unknown =>
+          Reflect.apply(value, target, args)
+      },
+    })
+    mount({ getGateway: () => gateway })
+    const { sessionId } = await initialize()
+    visible = false
+
+    const response = await routes.app.fetch(
+      new Request("http://127.0.0.1/demo", {
+        method: "POST",
+        headers: {
+          ...JSON_HEADERS,
+          "mcp-session-id": sessionId ?? "",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }),
+      }),
+    )
+    expect(response.status).toBe(200)
+    await response.text()
+  })
 })
 
 describe("session cap", () => {

@@ -52,6 +52,13 @@ function viewport(raw: string): { height: number; width: number } {
   };
 }
 
+function localeValue(raw: string): string {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/iu.test(raw)) {
+    throw new Error("--locale must contain only letters, numbers, and hyphens.");
+  }
+  return raw;
+}
+
 export function parseAssetArgs(args: ReadonlyArray<string>): AssetExportOptions {
   const ids: Array<string> = [];
   const matches: Array<string> = [];
@@ -85,7 +92,7 @@ export function parseAssetArgs(args: ReadonlyArray<string>): AssetExportOptions 
     else if (arg === "--out") outDir = nextValue(args, index++, arg);
     else if (arg === "--selector") selector = nextValue(args, index++, arg);
     else if (arg === "--url") url = nextValue(args, index++, arg).replace(/\/+$/u, "");
-    else if (arg === "--locale") locale = nextValue(args, index++, arg);
+    else if (arg === "--locale") locale = localeValue(nextValue(args, index++, arg));
     else if (arg === "--padding") padding = integer(nextValue(args, index++, arg), arg, 0, 128);
     else if (arg === "--scale") scale = integer(nextValue(args, index++, arg), arg, 1, 4);
     else if (arg === "--viewport") size = viewport(nextValue(args, index++, arg));
@@ -151,7 +158,8 @@ export function selectStoryEntries(
   return selected.sort((left, right) => left.id.localeCompare(right.id));
 }
 
-export function assetFileStem(entry: Pick<StorybookEntry, "id">, theme: AssetTheme, locale: string): string {
-  const suffix = locale === "en" ? theme : `${theme}--${locale}`;
+export function assetFileStem(entry: Pick<StorybookEntry, "id">, theme: AssetTheme, localeName: string): string {
+  const safeLocale = localeValue(localeName);
+  const suffix = safeLocale === "en" ? theme : `${theme}--${safeLocale}`;
   return `${entry.id.replaceAll(/[^a-z0-9-]+/giu, "-")}--${suffix}`;
 }

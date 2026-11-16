@@ -22,6 +22,21 @@ interface AccessRowProps {
   onChange: (permission: ToolPermission) => void;
 }
 
+function accessReason(target: PluginAccessView): string {
+  switch (target.reasonKind) {
+    case "app-off":
+      return t("connectors-access-reason-app-off", { name: target.name });
+    case "unsupported":
+      return t("connectors-access-reason-unsupported", { name: target.name });
+    case "custom":
+      return target.reason ?
+          t("connectors-access-reason-custom", { reason: target.reason })
+        : t("connectors-access-reason-generic", { name: target.name });
+    default:
+      return t("connectors-access-reason-generic", { name: target.name });
+  }
+}
+
 function AccessInformation({ target }: { target: PluginAccessView }): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement>(null);
@@ -39,7 +54,7 @@ function AccessInformation({ target }: { target: PluginAccessView }): JSX.Elemen
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
-  if (target.available || !target.reason) return null;
+  if (target.available) return null;
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
     // Only an open card consumes Escape; otherwise it closes the dialog.
@@ -73,7 +88,7 @@ function AccessInformation({ target }: { target: PluginAccessView }): JSX.Elemen
       </button>
       {open && (
         <span className="access-info__card" id={tooltipId} role="tooltip">
-          {target.reason}
+          {accessReason(target)}
         </span>
       )}
     </span>

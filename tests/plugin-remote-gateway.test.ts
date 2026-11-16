@@ -51,6 +51,12 @@ const result = (text: string): ToolResult => ({
   content: [{ type: "text", text }],
 })
 
+class StreamingOnlyFile extends File {
+  override arrayBuffer(): Promise<ArrayBuffer> {
+    return Promise.reject(new Error("Runner upload must stream the blob."))
+  }
+}
+
 function emptySubscription(): () => void {
   return () => undefined
 }
@@ -299,7 +305,9 @@ class RunnerFixtureGateway implements PluginGateway {
           const body = new FormData()
           body.append(
             "image[]",
-            new File([bytes], "runner.png", { type: "image/png" }),
+            new StreamingOnlyFile([bytes], "runner.png", {
+              type: "image/png",
+            }),
           )
           body.append("prompt", "runner-originated")
           const invocation = call.nextProviderCall("decisions", "fixture-model")
@@ -888,7 +896,7 @@ describe("large projected gateway values", () => {
     }
   })
 
-  test("spools runner-originated multipart blobs before provider dispatch", async () => {
+  test("streams runner-originated multipart blobs before provider dispatch", async () => {
     const pair = await connectedPair()
     try {
       const prepared = await pair.remote.prepareServerTool(

@@ -85,6 +85,22 @@ function moveRoutingToOtherProfile(port: number): void {
   )
 }
 
+describe("profile identity", () => {
+  test("stays stable when a missing directory below a symlink is created", () => {
+    if (process.platform === "win32") return
+    const target = path.join(configDir, "target")
+    const alias = path.join(configDir, "alias")
+    fs.mkdirSync(target)
+    fs.symlinkSync(target, alias, "dir")
+    const profile = path.join(alias, "missing", "profile")
+    const before = profileIdForDirectory(profile)
+
+    fs.mkdirSync(profile, { recursive: true })
+
+    expect(profileIdForDirectory(profile)).toBe(before)
+  })
+})
+
 describe("Claude Code Maximal profile ownership", () => {
   test("classifies the current profile and endpoint as enabled", () => {
     setListeningPort(5151)

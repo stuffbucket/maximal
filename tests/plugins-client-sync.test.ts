@@ -46,7 +46,7 @@ function fakeClient(
     apiKeyLabel: "claude-code",
     calls,
     available: () => options.available ?? true,
-    unavailableReason: () => "off",
+    unavailableReason: () => ({ kind: "custom", reason: "off" }),
     standalone: (id) => options.standalone?.[id],
     apply(desired, legacy) {
       calls.push({ desired: [...desired], legacy: [...legacy] })

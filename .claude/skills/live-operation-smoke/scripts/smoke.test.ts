@@ -10,8 +10,19 @@ import {
   decodePng,
   hasValidAnswers,
 } from "./response-validation"
+import { AmbiguousPostError, post, smokeErrorExitCode } from "./smoke"
 
 const temporaryDirectories: Array<string> = []
+const originalFetch = globalThis.fetch
+
+async function rejection(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise
+  } catch (error) {
+    return error
+  }
+  throw new Error("Expected the promise to reject.")
+}
 
 function temporaryRepo(): string {
   const repo = mkdtempSync(path.join(os.tmpdir(), "maximal-live-smoke-"))
@@ -26,6 +37,7 @@ function temporaryRepo(): string {
 }
 
 afterEach(() => {
+  globalThis.fetch = originalFetch
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true })
   }
@@ -82,6 +94,31 @@ describe("live operation smoke arguments", () => {
     ).toThrow("--confirm-live")
   })
 
+  test("classifies a truncated paid POST response as ambiguous", async () => {
+    globalThis.fetch = Object.assign(
+      () =>
+        Promise.resolve(
+          new Response('{"incomplete"', {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        ),
+      { preconnect: originalFetch.preconnect },
+    )
+    const options = parseArgs(["--base-url", "http://127.0.0.1:64792"], {})
+
+    const error = await rejection(
+      post(options, {
+        pathname: "/v1/decisions",
+        body: "{}",
+        contentType: "application/json",
+      }),
+    )
+
+    expect(error).toBeInstanceOf(AmbiguousPostError)
+    expect(smokeErrorExitCode(error)).toBe(3)
+  })
+
   test("image edit requires generation and the exact spend acknowledgements", () => {
     expect(() =>
       parseArgs(
@@ -118,6 +155,26 @@ describe("live operation smoke arguments", () => {
         {},
       ),
     ).toThrow("above the acknowledged")
+  })
+
+  test("rejects image edit before its generated fixture", () => {
+    expect(() =>
+      parseArgs(
+        [
+          "--base-url",
+          "http://127.0.0.1:64792",
+          "--operations",
+          "images.edit,images.generate",
+          "--confirm-live",
+          "--allow-image-spend",
+          "--max-planned-image-credits",
+          "2",
+          "--out-dir",
+          "/tmp/smoke",
+        ],
+        {},
+      ),
+    ).toThrow("images.generate must appear before images.edit")
   })
 
   test("the fixed full image plan is two credits", () => {

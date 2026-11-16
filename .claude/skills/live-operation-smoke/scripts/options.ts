@@ -244,13 +244,15 @@ function validateFlags(parsed: ParsedFlags): void {
   if (parsed.operations.length > 0 && !parsed.confirmLive) {
     throw new UsageError("Live operations require --confirm-live")
   }
-  if (
-    parsed.operations.includes("images.edit")
-    && !parsed.operations.includes("images.generate")
-  ) {
+  const editIndex = parsed.operations.indexOf("images.edit")
+  const generationIndex = parsed.operations.indexOf("images.generate")
+  if (editIndex !== -1 && generationIndex === -1) {
     throw new UsageError(
       "images.edit requires images.generate in the same run for its safe fixture",
     )
+  }
+  if (editIndex !== -1 && generationIndex > editIndex) {
+    throw new UsageError("images.generate must appear before images.edit")
   }
   if (imageCredits === 0) return
   if (!parsed.allowImageSpend) {

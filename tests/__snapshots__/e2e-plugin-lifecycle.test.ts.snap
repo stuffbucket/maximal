@@ -17,7 +17,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                   "kind": "app",
                   "name": "Claude Code",
                   "permission": "block",
-                  "reason": "Turn on Claude Code in Maximal first.",
+                  "reasonKind": "app-off",
                 },
                 {
                   "available": false,
@@ -26,7 +26,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                   "kind": "app",
                   "name": "Claude Desktop",
                   "permission": "block",
-                  "reason": "Turn on Claude Desktop in Maximal first.",
+                  "reasonKind": "app-off",
                 },
                 {
                   "available": false,
@@ -36,6 +36,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                   "name": "Codex",
                   "permission": "block",
                   "reason": "Maximal doesn't add connectors to Codex yet.",
+                  "reasonKind": "custom",
                 },
                 {
                   "available": false,
@@ -45,6 +46,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                   "name": "Copilot CLI",
                   "permission": "block",
                   "reason": "Copilot CLI integration is coming soon.",
+                  "reasonKind": "custom",
                 },
                 {
                   "available": true,
@@ -154,7 +156,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             "kind": "app",
             "name": "Claude Code",
             "permission": "block",
-            "reason": "Turn on Claude Code in Maximal first.",
+            "reasonKind": "app-off",
           },
           {
             "available": false,
@@ -163,7 +165,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             "kind": "app",
             "name": "Claude Desktop",
             "permission": "block",
-            "reason": "Turn on Claude Desktop in Maximal first.",
+            "reasonKind": "app-off",
           },
           {
             "available": false,
@@ -173,6 +175,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             "name": "Codex",
             "permission": "block",
             "reason": "Maximal doesn't add connectors to Codex yet.",
+            "reasonKind": "custom",
           },
           {
             "available": false,
@@ -182,6 +185,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             "name": "Copilot CLI",
             "permission": "block",
             "reason": "Copilot CLI integration is coming soon.",
+            "reasonKind": "custom",
           },
           {
             "available": true,
@@ -276,7 +280,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "kind": "app",
               "name": "Claude Code",
               "permission": "block",
-              "reason": "Turn on Claude Code in Maximal first.",
+              "reasonKind": "app-off",
             },
             {
               "available": false,
@@ -285,7 +289,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "kind": "app",
               "name": "Claude Desktop",
               "permission": "block",
-              "reason": "Turn on Claude Desktop in Maximal first.",
+              "reasonKind": "app-off",
             },
             {
               "available": false,
@@ -295,6 +299,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Codex",
               "permission": "block",
               "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
             },
             {
               "available": false,
@@ -304,6 +309,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Copilot CLI",
               "permission": "block",
               "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
             },
             {
               "available": true,
@@ -656,7 +662,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "kind": "app",
               "name": "Claude Desktop",
               "permission": "block",
-              "reason": "Turn on Claude Desktop in Maximal first.",
+              "reasonKind": "app-off",
             },
             {
               "available": false,
@@ -666,6 +672,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Codex",
               "permission": "block",
               "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
             },
             {
               "available": false,
@@ -675,6 +682,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Copilot CLI",
               "permission": "block",
               "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
             },
             {
               "available": true,
@@ -742,7 +750,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                 "kind": "app",
                 "name": "Claude Desktop",
                 "permission": "block",
-                "reason": "Turn on Claude Desktop in Maximal first.",
+                "reasonKind": "app-off",
               },
               {
                 "available": false,
@@ -752,6 +760,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                 "name": "Codex",
                 "permission": "block",
                 "reason": "Maximal doesn't add connectors to Codex yet.",
+                "reasonKind": "custom",
               },
               {
                 "available": false,
@@ -761,6 +770,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                 "name": "Copilot CLI",
                 "permission": "block",
                 "reason": "Copilot CLI integration is coming soon.",
+                "reasonKind": "custom",
               },
               {
                 "available": true,
@@ -842,7 +852,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "kind": "app",
               "name": "Claude Desktop",
               "permission": "block",
-              "reason": "Turn on Claude Desktop in Maximal first.",
+              "reasonKind": "app-off",
             },
             {
               "available": false,
@@ -852,6 +862,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Codex",
               "permission": "block",
               "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
             },
             {
               "available": false,
@@ -861,6 +872,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Copilot CLI",
               "permission": "block",
               "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
             },
             {
               "available": true,
@@ -926,7 +938,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "kind": "app",
               "name": "Claude Desktop",
               "permission": "block",
-              "reason": "Turn on Claude Desktop in Maximal first.",
+              "reasonKind": "app-off",
             },
             {
               "available": false,
@@ -936,6 +948,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Codex",
               "permission": "block",
               "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
             },
             {
               "available": false,
@@ -945,6 +958,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Copilot CLI",
               "permission": "block",
               "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
             },
             {
               "available": true,
@@ -1135,7 +1149,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "kind": "app",
               "name": "Claude Desktop",
               "permission": "block",
-              "reason": "Turn on Claude Desktop in Maximal first.",
+              "reasonKind": "app-off",
             },
             {
               "available": false,
@@ -1145,6 +1159,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Codex",
               "permission": "block",
               "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
             },
             {
               "available": false,
@@ -1154,6 +1169,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Copilot CLI",
               "permission": "block",
               "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
             },
             {
               "available": true,
@@ -1220,7 +1236,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                 "kind": "app",
                 "name": "Claude Desktop",
                 "permission": "block",
-                "reason": "Turn on Claude Desktop in Maximal first.",
+                "reasonKind": "app-off",
               },
               {
                 "available": false,
@@ -1230,6 +1246,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                 "name": "Codex",
                 "permission": "block",
                 "reason": "Maximal doesn't add connectors to Codex yet.",
+                "reasonKind": "custom",
               },
               {
                 "available": false,
@@ -1239,6 +1256,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                 "name": "Copilot CLI",
                 "permission": "block",
                 "reason": "Copilot CLI integration is coming soon.",
+                "reasonKind": "custom",
               },
               {
                 "available": true,
@@ -1312,7 +1330,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "kind": "app",
               "name": "Claude Desktop",
               "permission": "block",
-              "reason": "Turn on Claude Desktop in Maximal first.",
+              "reasonKind": "app-off",
             },
             {
               "available": false,
@@ -1322,6 +1340,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Codex",
               "permission": "block",
               "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
             },
             {
               "available": false,
@@ -1331,6 +1350,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               "name": "Copilot CLI",
               "permission": "block",
               "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
             },
             {
               "available": true,

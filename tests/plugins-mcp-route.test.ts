@@ -366,6 +366,32 @@ describe("/mcp: aggregate connector server", () => {
     expect(otherResult.content).toEqual([{ type: "text", text: "other:hello" }])
   })
 
+  test("lists tools from the session generation after a cutover", async () => {
+    const client = await connect(null)
+    const target = plugins.gateway
+    const current = new Proxy(target, {
+      get(gateway, property) {
+        if (property === "list") return () => []
+        const value: unknown = Reflect.get(gateway, property)
+        if (typeof value !== "function") return value
+        return (...args: Array<unknown>): unknown =>
+          Reflect.apply(value, gateway, args)
+      },
+    })
+    setPluginGateway(current)
+    try {
+      expect(await names(client)).toEqual([
+        "demo__echo",
+        "demo__count",
+        "demo__ask",
+        "demo__boom",
+        "other__echo",
+      ])
+    } finally {
+      setPluginGateway(target)
+    }
+  })
+
   test("isolates a connector that races a reload", async () => {
     const target = plugins.gateway
     const racing = new Proxy(target, {

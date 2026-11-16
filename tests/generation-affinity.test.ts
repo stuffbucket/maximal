@@ -40,6 +40,7 @@ function generation(
   return {
     generationId: id,
     get: () => undefined as PluginSnapshot | undefined,
+    list: unsupported,
     listTools: unsupported,
     toolViews: unsupported,
     serverTools: unsupported,

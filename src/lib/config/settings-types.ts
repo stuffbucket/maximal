@@ -626,6 +626,11 @@ export const PluginAccessView = z.object({
   /** Whether the target is enabled and usable right now. Its permission can
    *  still be changed while unavailable. */
   available: z.boolean(),
+  /** Stable localization key for why this target is unavailable. */
+  reasonKind: z
+    .enum(["generic", "app-off", "unsupported", "custom"])
+    .optional(),
+  /** Host- or plugin-supplied prose when `reasonKind` is `custom`. */
   reason: z.string().optional(),
   clientId: PluginClientId.optional(),
   standalone: PluginClientView.shape.standalone,

@@ -510,6 +510,31 @@ describe("duplex RPC dispatcher", () => {
     parentDispatcher.dispose()
     runnerDispatcher.dispose()
   })
+
+  test("cancels a direct elicitation without closing the channel", async () => {
+    const { parent, runner } = await pair()
+    const parentDispatcher = new DuplexRpcDispatcher(parent, "parent")
+    const runnerDispatcher = new DuplexRpcDispatcher(runner, "runner")
+    runnerDispatcher.register("request", "ask", async (_params, context) => {
+      return context.elicit("Continue?", { type: "object" })
+    })
+    const controller = new AbortController()
+    const pending = parentDispatcher.call("ask", null, {
+      signal: controller.signal,
+      onElicit: () => new Promise<never>(() => undefined),
+    })
+    await tick()
+    controller.abort("cancelled by test")
+
+    expect(await rejection(pending)).toMatchObject({ name: "AbortError" })
+    await tick()
+    expect(parent.closed).toBe(false)
+    expect(runner.closed).toBe(false)
+    expect(parentDispatcher.inflight).toBe(0)
+    expect(runnerDispatcher.inflight).toBe(0)
+    parentDispatcher.dispose()
+    runnerDispatcher.dispose()
+  })
 })
 
 test("handshake constants remain exact", () => {

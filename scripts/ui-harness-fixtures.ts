@@ -899,7 +899,9 @@ export function workiqDetail({
       clientId: "claude-code",
       permission: enabled && selected ? "allow" : "block",
       available: !claudeCodeUnavailable,
-      ...(claudeCodeUnavailable ? { reason: claudeCodeReason } : {}),
+      ...(claudeCodeUnavailable ?
+        { reasonKind: "custom", reason: claudeCodeReason }
+      : {}),
       ...(standalone ? { standalone } : {}),
     },
     ...CONNECTOR_APP_ACCESS.map(
@@ -910,6 +912,7 @@ export function workiqDetail({
         clientId,
         permission,
         available: false,
+        reasonKind: "custom",
         reason,
       }),
     ),
@@ -920,7 +923,7 @@ export function workiqDetail({
       name: "CI",
       permission: "block",
       available: false,
-      reason: "This connection is turned off.",
+      reasonKind: "generic",
     },
   ]
   return {

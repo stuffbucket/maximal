@@ -30,6 +30,7 @@ import {
   type PluginClientApplyResult,
   type PluginClientConfigurator,
   type PluginClientEntry,
+  type PluginClientUnavailableReason,
   pluginAggregateMcpUrl,
 } from "./sync"
 
@@ -199,13 +200,21 @@ function applyToFile(
   throw new Error("Claude Desktop kept rewriting its config")
 }
 
-function unavailableReason(): string {
+function unavailableReason(): PluginClientUnavailableReason {
   const conflict = configLibraryConflict()
   if (conflict === "other-maximal-config") {
-    return "Another Maximal profile manages Claude Desktop."
+    return {
+      kind: "custom",
+      reason: "Another Maximal profile manages Claude Desktop.",
+    }
   }
-  if (conflict) return "Claude Desktop's configuration needs attention first."
-  return "Turn on Claude Desktop in Maximal first."
+  if (conflict) {
+    return {
+      kind: "custom",
+      reason: "Claude Desktop's configuration needs attention first.",
+    }
+  }
+  return { kind: "app-off" }
 }
 
 export function createClaudeDesktopPluginClient(

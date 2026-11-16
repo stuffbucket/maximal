@@ -6,13 +6,19 @@ import { PATHS } from "~/lib/platform/paths"
 
 function canonicalProfileDirectory(directory: string): string {
   const resolved = path.resolve(directory)
+  const missing: Array<string> = []
+  let ancestor = resolved
   let canonical = resolved
-  try {
-    canonical = fs.realpathSync.native(resolved)
-  } catch {
-    // The profile directory may not exist on the first run. path.resolve still
-    // gives it a deterministic identity, and no directory is created merely to
-    // mint that identity.
+  for (;;) {
+    try {
+      canonical = path.join(fs.realpathSync.native(ancestor), ...missing)
+      break
+    } catch {
+      const parent = path.dirname(ancestor)
+      if (parent === ancestor) break
+      missing.unshift(path.basename(ancestor))
+      ancestor = parent
+    }
   }
   const normalized = path.normalize(canonical).replaceAll("\\", "/")
   return process.platform === "win32" ? normalized.toLowerCase() : normalized

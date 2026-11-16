@@ -76,6 +76,15 @@ describe("Storybook asset export policy", () => {
     )
   })
 
+  test("rejects locales that could escape the output directory", () => {
+    expect(() => parseAssetArgs(["--locale", "../../escape"])).toThrow(
+      "--locale must contain only letters, numbers, and hyphens",
+    )
+    expect(() => assetFileStem(entries[0], "light", "../escape")).toThrow(
+      "--locale must contain only letters, numbers, and hyphens",
+    )
+  })
+
   test("parses rendering controls and makes variant-safe filenames", () => {
     const options = parseAssetArgs([
       "--all",

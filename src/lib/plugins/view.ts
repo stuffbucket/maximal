@@ -163,6 +163,34 @@ interface ViewContext {
   clients: Array<ClientAvailability>
 }
 
+function appUnavailableReason(
+  unavailableReason: string | undefined,
+  configurator: PluginClientConfigurator | undefined,
+): Pick<PluginAccessView, "reasonKind" | "reason"> {
+  if (unavailableReason) {
+    return { reasonKind: "custom", reason: unavailableReason }
+  }
+  if (!configurator) return { reasonKind: "unsupported" }
+  const reason = configurator.unavailableReason()
+  return reason.kind === "custom" ?
+      { reasonKind: "custom", reason: reason.reason }
+    : { reasonKind: "app-off" }
+}
+
+function legacyClientUnavailableReason(
+  name: string,
+  unavailableReason: string | undefined,
+  configurator: PluginClientConfigurator | undefined,
+): string {
+  if (unavailableReason) return unavailableReason
+  const reason = configurator?.unavailableReason()
+  if (reason?.kind === "custom") return reason.reason
+  if (reason?.kind === "app-off") {
+    return `Turn on ${name} in Maximal first.`
+  }
+  return "This app can't receive connectors from Maximal yet."
+}
+
 function accessViews(
   pluginId: string,
   { config, clients }: ViewContext,
@@ -179,12 +207,7 @@ function accessViews(
       available,
       ...(available ?
         {}
-      : {
-          reason:
-            unavailableReason
-            ?? configurator?.unavailableReason()
-            ?? "This app can't receive connectors from Maximal yet.",
-        }),
+      : appUnavailableReason(unavailableReason, configurator)),
       clientId,
       ...(standalone ? { standalone } : {}),
     }
@@ -201,9 +224,7 @@ function accessViews(
           name: entry.label,
           permission: pluginConnectionPermission(config, pluginId, entry.id),
           available: entry.enabled,
-          ...(entry.enabled ?
-            {}
-          : { reason: "This connection is turned off." }),
+          ...(entry.enabled ? {} : { reasonKind: "generic" }),
         },
       ]
     },
@@ -261,10 +282,11 @@ function toView(
             ...(available ?
               {}
             : {
-                reason:
-                  unavailableReason
-                  ?? configurator?.unavailableReason()
-                  ?? "This app can't receive connectors from Maximal yet.",
+                reason: legacyClientUnavailableReason(
+                  PLUGIN_CLIENT_NAMES[clientId],
+                  unavailableReason,
+                  configurator,
+                ),
               }),
             ...(standalone ? { standalone } : {}),
           }
