@@ -202,7 +202,7 @@ You interact with the user through a terminal. You have 2 ways of communicating 
 - As you are thinking, you very frequently provide updates even if not taking any actions, informing the user of your progress. You interrupt your thinking and send multiple updates in a row if thinking for more than 100 words.
 - Tone of your updates MUST match your personality.`
 
-export const defaultConfig: AppConfig = {
+const defaultConfig: AppConfig = {
   auth: {
     apiKeys: [],
   },
@@ -232,6 +232,11 @@ export const defaultConfig: AppConfig = {
   useFunctionApplyPatch: true,
   useMessagesApi: true,
   useResponsesApiWebSearch: true,
+}
+
+/** Return a detached snapshot so callers cannot mutate process-wide defaults. */
+export function getDefaultConfig(): AppConfig {
+  return structuredClone(defaultConfig)
 }
 
 let cachedConfig: AppConfig | null = null

@@ -1,17 +1,20 @@
 import { describe, expect, it } from "bun:test"
 
 import {
-  defaultConfig,
   getConfig,
+  getDefaultConfig,
   mergeConfigWithDefaults,
   type ModelMappingRule,
   writeConfig,
 } from "~/lib/config/config"
 import {
+  detectUnknownKeys,
   ReasoningEffortSchema,
   validateAppConfig,
 } from "~/lib/config/config-schema"
 import { PATHS } from "~/lib/platform/paths"
+
+const defaultConfig = getDefaultConfig()
 
 const defaultMapping: ModelMappingRule = {
   match: { type: "exact", value: "codex-auto-review" },
@@ -19,8 +22,9 @@ const defaultMapping: ModelMappingRule = {
 }
 
 describe("defaultConfig", () => {
-  it("satisfies the runtime config schema", () => {
-    expect(() => validateAppConfig(defaultConfig)).not.toThrow()
+  it("round-trips through the runtime config schema", () => {
+    expect(detectUnknownKeys(defaultConfig)).toEqual([])
+    expect(validateAppConfig(defaultConfig)).toEqual(defaultConfig)
   })
 
   it("keeps prompt and reasoning-effort model ids aligned", () => {
@@ -31,9 +35,13 @@ describe("defaultConfig", () => {
 
   it("uses a configured model as the small model", () => {
     const smallModel = defaultConfig.smallModel ?? ""
-    expect(smallModel).not.toBe("")
-    expect(defaultConfig.extraPrompts).toHaveProperty(smallModel)
-    expect(defaultConfig.modelReasoningEfforts).toHaveProperty(smallModel)
+    expect(smallModel.trim()).not.toBe("")
+    expect(Object.hasOwn(defaultConfig.extraPrompts ?? {}, smallModel)).toBe(
+      true,
+    )
+    expect(
+      Object.hasOwn(defaultConfig.modelReasoningEfforts ?? {}, smallModel),
+    ).toBe(true)
   })
 
   it("uses only supported reasoning efforts", () => {
