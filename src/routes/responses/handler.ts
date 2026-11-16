@@ -1,4 +1,5 @@
 import type { Context } from "hono"
+import type { SSEStreamingApi } from "hono/streaming"
 
 import { streamSSE } from "hono/streaming"
 
@@ -78,6 +79,28 @@ import {
 const logger = createHandlerLogger("responses-handler")
 
 const RESPONSES_ENDPOINT = "/responses"
+
+async function emitResponsesStreamError(
+  stream: SSEStreamingApi,
+  message: string,
+): Promise<void> {
+  try {
+    await stream.writeSSE({
+      event: "error",
+      data: JSON.stringify({
+        type: "error",
+        code: "server_error",
+        message,
+        param: null,
+      }),
+    })
+  } catch (writeError) {
+    logger.warn(
+      "Could not write stream-error event (client may have disconnected)",
+      writeError,
+    )
+  }
+}
 
 // Mapping validation adds one guarded branch to this protocol translation flow.
 // eslint-disable-next-line complexity, max-lines-per-function
@@ -235,20 +258,21 @@ export const handleResponses = async (c: Context) => {
           })
         }
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        logger.error(`Upstream responses stream failed mid-flight: ${message}`)
+        await emitResponsesStreamError(
+          stream,
+          `Upstream stream ended unexpectedly: ${message}`,
+        )
         await finishUsage(usage, "stream-interrupted")
-        throw error
+        return
       }
       if (!terminalSeen) {
         logger.warn("Responses stream ended without a terminal event")
-        await stream.writeSSE({
-          event: "error",
-          data: JSON.stringify({
-            type: "error",
-            code: "server_error",
-            message: "Responses stream ended without a terminal event",
-            param: null,
-          }),
-        })
+        await emitResponsesStreamError(
+          stream,
+          "Responses stream ended without a terminal event",
+        )
         await finishUsage(usage, "stream-interrupted")
         return
       }

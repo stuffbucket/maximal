@@ -1,0 +1,35 @@
+name: Issue triage
+
+# Adds or clears `needs-triage` from the issue's playbook:* and repro:* labels.
+# The rule lives in scripts/triage-issue.ts; see docs/architecture.md, Issue labels.
+# Label edits made with GITHUB_TOKEN don't trigger workflows, so this can't loop.
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    # Label events fire on closed issues too, and closed issues don't need triage.
+    if: github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.4.3
+
+      - name: Triage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bun scripts/triage-issue.ts "${{ github.event.issue.number }}"

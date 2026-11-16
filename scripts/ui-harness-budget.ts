@@ -475,22 +475,28 @@ export function createBudgetMock(seed: BudgetSeed): BudgetMock {
       .reduce((sum, row) => sum + row.nanoAiu, 0)
 
   // Size each seeded limit so the current period reads as `fill` spent, in
-  // steps that look like amounts a person would type.
+  // steps that look like amounts a person would type where that preserves the
+  // seed's intended state.
   const limits: Array<StoredLimit> = seed.limits.map((entry) => {
     const period = resolvePeriod(entry.limitReset, startedAt, followable)
     const usage = spend(entry.scope, period.startMs, period.endMs)
     const raw = usage > 0 ? usage / entry.fill : 50_000_000_000
     const step = raw >= 500_000_000_000 ? 50_000_000_000 : raw >= 100_000_000_000 ? 5_000_000_000 : 1_000_000_000
     const rounded = entry.fill >= 1 ? Math.floor(raw / step) * step : Math.ceil(raw / step) * step
+    const warnAt = entry.warnAt ?? 0.8
+    let limit = Math.max(step, rounded)
+    if (usage > 0 && entry.fill >= warnAt && entry.fill < 1) {
+      limit = Math.max(usage + 1, Math.min(limit, Math.floor(usage / warnAt)))
+    }
     if (entry.held) held.set(entry.id, entry.held)
     if (entry.unreconciled) unreconciled.set(entry.id, entry.unreconciled)
     return {
       id: entry.id,
       ...(entry.label ? { label: entry.label } : {}),
       scope: entry.scope,
-      limit: Math.max(step, rounded),
+      limit,
       limitReset: entry.limitReset,
-      warnAt: entry.warnAt ?? 0.8,
+      warnAt,
       action: entry.action,
     }
   })

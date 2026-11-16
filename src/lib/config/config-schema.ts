@@ -40,7 +40,7 @@ const ProviderConfigSchema = z.object({
   adjustInputTokens: z.boolean().optional(),
 })
 
-const ReasoningEffortSchema = z.enum([
+export const ReasoningEffortSchema = z.enum([
   "none",
   "minimal",
   "low",
@@ -188,7 +188,7 @@ export const AppConfigSchema = z
       .optional(),
     providers: z.record(z.string(), ProviderConfigSchema).optional(),
     extraPrompts: z.record(z.string(), z.string()).optional(),
-    smallModel: z.string().optional(),
+    smallModel: z.string().trim().min(1).optional(),
     responsesApiContextManagementModels: z.array(z.string()).optional(),
     /**
      * Copilot/OpenAI-Responses-specific: extend server-side prefix-cache

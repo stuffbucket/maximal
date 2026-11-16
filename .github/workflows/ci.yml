@@ -228,6 +228,7 @@ jobs:
     if: >-
       always()
       && needs.classify.result == 'success'
+      && needs.classify.outputs.mode != 'docs'
       && (needs.deduplicate.result == 'success' || needs.deduplicate.result == 'skipped')
       && needs.deduplicate.outputs.duplicate != 'true'
     runs-on: ubuntu-latest
@@ -277,6 +278,7 @@ jobs:
     if: >-
       always()
       && needs.classify.result == 'success'
+      && needs.classify.outputs.mode != 'docs'
       && (needs.deduplicate.result == 'success' || needs.deduplicate.result == 'skipped')
       && needs.deduplicate.outputs.duplicate != 'true'
     runs-on: ubuntu-latest
@@ -315,6 +317,7 @@ jobs:
     if: >-
       always()
       && needs.classify.result == 'success'
+      && needs.classify.outputs.mode != 'docs'
       && (needs.deduplicate.result == 'success' || needs.deduplicate.result == 'skipped')
       && needs.deduplicate.outputs.duplicate != 'true'
     runs-on: ubuntu-latest
@@ -361,9 +364,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require full validation or a proven duplicate
+      - name: Require validation or a classified skip
         env:
           CLASSIFY: ${{ needs.classify.result }}
+          MODE: ${{ needs.classify.outputs.mode }}
           DEDUPLICATE: ${{ needs.deduplicate.result }}
           DUPLICATE: ${{ needs.deduplicate.outputs.duplicate || 'false' }}
           QUALITY: ${{ needs.quality.result }}
@@ -381,6 +385,9 @@ jobs:
           fi
 
           expected="success"
+          if [ "$MODE" = "docs" ]; then
+            expected="skipped"
+          fi
           if [ "$DUPLICATE" = "true" ]; then
             if [ "$DEDUPLICATE" != "success" ]; then
               echo "::error::duplicate=true without successful evidence job"
