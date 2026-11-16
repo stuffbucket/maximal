@@ -1,15 +1,21 @@
 import type { JsonValue } from "@stuffbucket/maximal-plugin-protocol"
 
-import { ProtocolError } from "@stuffbucket/maximal-plugin-protocol"
+import {
+  decodeBlobHandle,
+  ProtocolError,
+  WireRemoteError,
+} from "@stuffbucket/maximal-plugin-protocol"
 import consola from "consola"
 
 import type { ParentHostServiceBroker } from "~/lib/plugins/host-service-broker"
 import type { ParentProviderBroker } from "~/lib/plugins/provider-broker"
+import type { GenerationSpoolStore } from "~/lib/plugins/spool/store"
 import type { PluginStateBroker } from "~/lib/plugins/state-broker"
 import type { DuplexRpcDispatcher } from "~/lib/plugins/transport/dispatcher"
 import type { BodyDto } from "~/lib/plugins/transport/gateway-codec"
 
 import { providerInvocationJournal } from "~/lib/plugins/provider-broker"
+import { spoolLargeStrings } from "~/lib/plugins/transport/blob-codec"
 import {
   decodeBody,
   exact,
@@ -41,6 +47,7 @@ interface ParentBrokerOptions {
   readonly state: PluginStateBroker
   readonly provider: ParentProviderBroker
   readonly host: ParentHostServiceBroker
+  readonly spool: GenerationSpoolStore
 }
 
 function proposal(value: JsonValue): PluginSettingsProposal {
@@ -71,6 +78,16 @@ function transaction(
     transactions.set(id, found)
   }
   return found
+}
+
+function completedProviderTransportError(): WireRemoteError {
+  return new WireRemoteError({
+    kind: "indeterminate",
+    code: "provider_reply_transport_failed",
+    message:
+      "The provider completed, but its response could not be transported safely.",
+    retry: "never",
+  })
 }
 
 function bodyDto(value: JsonValue): BodyDto {
@@ -241,6 +258,7 @@ function registerSettings(
 function registerProvider(
   dispatcher: DuplexRpcDispatcher,
   provider: ParentProviderBroker,
+  spool: GenerationSpoolStore,
 ): Array<() => void> {
   const rpc = (
     method: string,
@@ -280,21 +298,39 @@ function registerProvider(
       providerInvocationJournal.begin(invocation, provider.id)
       const reply = await provider.postJson<JsonValue>(
         path,
-        decodeBody(bodyDto(input.body ?? null)),
+        await decodeBody(bodyDto(input.body ?? null), { store: spool }),
         options,
       )
-      const cost =
-        reply !== null && typeof reply === "object" && !Array.isArray(reply) ?
-          provider.cost(reply, {
-            operation: invocation.operation,
-            model: invocation.model,
-          })
-        : undefined
+      let cost: ReturnType<ParentProviderBroker["cost"]>
+      try {
+        cost =
+          reply !== null && typeof reply === "object" && !Array.isArray(reply) ?
+            provider.cost(reply, {
+              operation: invocation.operation,
+              model: invocation.model,
+            })
+          : undefined
+      } catch {
+        providerInvocationJournal.observeSuccess(invocation, provider.id)
+        throw completedProviderTransportError()
+      }
       providerInvocationJournal.observeSuccess(invocation, provider.id, cost)
-      return json(
-        { reply, ...(cost === undefined ? {} : { cost }) },
-        "Provider reply",
-      )
+      try {
+        const transported = await spoolLargeStrings(
+          json(reply, "Provider reply body"),
+          {
+            store: spool,
+            callId: invocation.invocationId,
+            signal: context.signal,
+          },
+        )
+        return json(
+          { reply: transported, ...(cost === undefined ? {} : { cost }) },
+          "Provider reply",
+        )
+      } catch {
+        throw completedProviderTransportError()
+      }
     }),
     rpc(PROVIDER_RPC.quotaWindows, async () =>
       json((await provider.quotaWindows?.()) ?? [], "Provider quota windows"),
@@ -316,6 +352,7 @@ function registerProvider(
 function registerHost(
   dispatcher: DuplexRpcDispatcher,
   host: ParentHostServiceBroker,
+  spool: GenerationSpoolStore,
 ): Array<() => void> {
   const rpc = (
     method: string,
@@ -343,6 +380,48 @@ function registerHost(
       else throw new Error("Host log level is invalid.")
       return null
     }),
+    rpc(HOST_RPC.blobStage, async (params, context) => {
+      const input = exact(
+        params,
+        "Blob stage",
+        ["callId", "byteLength"],
+        ["filename", "mediaType"],
+      )
+      if (context.signal.aborted)
+        throw context.signal.reason ?? new Error("Aborted")
+      return json(
+        await spool.stageUpload({
+          callId: stringValue(input.callId, "Blob call id"),
+          byteLength: integerValue(input.byteLength, "Blob byte length"),
+          ...(input.filename === undefined ?
+            {}
+          : { filename: stringValue(input.filename, "Blob filename") }),
+          ...(input.mediaType === undefined ?
+            {}
+          : { mediaType: stringValue(input.mediaType, "Blob media type") }),
+          signal: context.signal,
+        }),
+        "Blob stage result",
+      )
+    }),
+    rpc(HOST_RPC.blobCommit, async (params) => {
+      const input = exact(params, "Blob commit", ["id"])
+      return json(
+        await spool.commitUpload(stringValue(input.id, "Blob upload id")),
+        "Blob handle",
+      )
+    }),
+    rpc(HOST_RPC.blobAbort, async (params) => {
+      const input = exact(params, "Blob abort", ["id"])
+      await spool.abortUpload(stringValue(input.id, "Blob upload id"))
+      return null
+    }),
+    rpc(HOST_RPC.blobPath, async (params) => {
+      const input = exact(params, "Blob path", ["handle"])
+      return await spool.resolvePath(
+        decodeBlobHandle(input.handle, spool.generation),
+      )
+    }),
   ]
 }
 
@@ -354,8 +433,8 @@ export function registerParentBrokers(
   const transactions = new Map<string, PluginSettingsTransaction>()
   const disposers = [
     ...registerSettings(dispatcher, options.state, transactions),
-    ...registerProvider(dispatcher, options.provider),
-    ...registerHost(dispatcher, options.host),
+    ...registerProvider(dispatcher, options.provider, options.spool),
+    ...registerHost(dispatcher, options.host, options.spool),
   ]
   return () => {
     for (const transaction of transactions.values()) transaction.rollback()

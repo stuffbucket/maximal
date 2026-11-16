@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 
 import type { AppEntry } from "../../../../shell/src/proxy/client";
-import { AppCard } from "../../../../shell/src/ui/features/apps/AppCard";
 import { AppsPanel } from "../../../../shell/src/ui/features/apps/AppsPanel";
+import { HarnessRow } from "../../../../shell/src/ui/features/apps/HarnessRow";
 import type { MockApiParameters } from "../mock/fetch-mock";
 
 const claudeCode: AppEntry = {
@@ -12,81 +12,189 @@ const claudeCode: AppEntry = {
   kind: "config",
   enabled: true,
   status: "ready",
-  installs: [{ path: "/Users/you/.local/bin/claude", version: "2.1.195", source: "local-bin" }],
+  installs: [
+    {
+      path: "/Users/you/.local/bin/claude",
+      version: "2.1.195",
+      source: "local-bin",
+    },
+  ],
   install: null,
   conflict: null,
 };
 
+const notFound: AppEntry = {
+  ...claudeCode,
+  enabled: false,
+  status: "not-installed",
+  installs: [],
+  install: {
+    method: "curl",
+    command: "curl -fsSL https://claude.ai/install.sh | sh",
+    automatic: null,
+  },
+};
+
+const otherMaximalConflict: AppEntry = {
+  ...claudeCode,
+  enabled: false,
+  conflict: "other-maximal-config",
+};
+
+const comingSoon = (id: AppEntry["id"], name: string): AppEntry => ({
+  id,
+  name,
+  kind: "coming-soon",
+  enabled: false,
+  status: "coming-soon",
+  installs: [],
+  install: null,
+  conflict: null,
+});
+
 const meta = {
   title: "Settings/Apps",
-  component: AppCard,
-  decorators: [(Story) => <div className="sb-pane"><Story /></div>],
+  component: HarnessRow,
+  decorators: [
+    (Story, context) =>
+      context.name.startsWith("Panel") ? (
+        <div className="sb-pane">
+          <Story />
+        </div>
+      ) : (
+        <div className="sb-pane">
+          <table className="table harnesses__table">
+            <tbody>
+              <Story />
+            </tbody>
+          </table>
+        </div>
+      ),
+  ],
   args: {
     app: claudeCode,
     onToggle: fn(async () => ({ ok: true })),
-    onRescan: fn(async () => {}),
   },
-} satisfies Meta<typeof AppCard>;
+} satisfies Meta<typeof HarnessRow>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// ---- AppCard, one state per story (props only, no backend) ----------------
+/** Installed, routed, and ready end to end. The name opens the detected app. */
+export const InstalledWorking: Story = {};
 
-export const CardOn: Story = {};
-export const CardOff: Story = { args: { app: { ...claudeCode, enabled: false } } };
-export const CardMultipleInstalls: Story = {
+/** Installed and available, with routing turned off. */
+export const InstalledOff: Story = {
+  args: { app: { ...claudeCode, enabled: false } },
+};
+
+/** A working Codex CLI row. */
+export const CodexWorking: Story = {
   args: {
     app: {
       ...claudeCode,
+      id: "codex",
+      name: "Codex CLI",
       installs: [
-        ...claudeCode.installs,
-        { path: "/opt/homebrew/bin/claude", version: "2.1.180", source: "homebrew" },
+        {
+          kind: "cli",
+          path: "/Users/you/.local/bin/codex",
+          version: "1.0.0",
+          source: "local-bin",
+        },
       ],
     },
   },
 };
-export const CardNotInstalled: Story = {
-  args: {
-    app: {
-      ...claudeCode,
-      enabled: false,
-      status: "not-installed",
-      installs: [],
-      install: { method: "curl", command: "curl -fsSL https://claude.ai/install.sh | sh", automatic: null },
-    },
-  },
+
+/** Missing from this host. Connect replaces the switch. */
+export const NotFound: Story = {
+  args: { app: notFound },
 };
-export const CardConflictBaseUrl: Story = {
-  args: { app: { ...claudeCode, enabled: false, conflict: "foreign-base-url" } },
+
+/** A stale conflict never blocks setup instructions while the app is missing. */
+export const NotFoundWithConflict: Story = {
+  args: { app: { ...notFound, conflict: "other-maximal-config" } },
 };
-export const CardConflictApiKeyHelper: Story = {
-  args: { app: { ...claudeCode, enabled: false, conflict: "foreign-api-key-helper" } },
-};
-export const CardToggleFails: Story = {
-  args: { onToggle: fn(async () => ({ ok: false, error: "Couldn't write ~/.claude/settings.json (permission denied)." })) },
-};
-export const CardClaudeDesktop: Story = {
-  args: { app: { ...claudeCode, id: "claude-desktop", name: "Claude Desktop", enabled: false, installs: [] } },
-};
-export const CardComingSoon: Story = {
-  args: {
-    app: { ...claudeCode, id: "copilot-cli", name: "Copilot CLI", kind: "coming-soon", status: "coming-soon", enabled: false, installs: [] },
+
+/** Connect on a missing app offers its official setup instructions. */
+export const MissingConnectDialog: Story = {
+  args: { app: notFound },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: /connect/i }),
+    );
   },
 };
 
-// ---- the whole panel against the mock sidecar ------------------------------
+/** A setting owned by another tool stays untouched and explains safe cleanup. */
+export const NeedsAttention: Story = {
+  args: {
+    app: { ...claudeCode, enabled: false, conflict: "foreign-base-url" },
+  },
+};
+
+/** Another Maximal profile can be deliberately connected after confirmation. */
+export const OtherMaximalConnectDialog: Story = {
+  args: { app: otherMaximalConflict },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: /connect/i }),
+    );
+  },
+};
+
+/** ChatGPT is represented without implying that routing works yet. */
+export const ChatGptComingSoon: Story = {
+  args: { app: comingSoon("chatgpt", "ChatGPT") },
+};
+
+/** Pi is represented without implying that routing works yet. */
+export const PiComingSoon: Story = {
+  args: { app: comingSoon("pi", "Pi") },
+};
+
+/** Copilot CLI is represented without implying that routing works yet. */
+export const CopilotCliComingSoon: Story = {
+  args: { app: comingSoon("copilot-cli", "Copilot CLI") },
+};
 
 const panel = (mockApi: MockApiParameters): Story => ({
   render: () => <AppsPanel />,
   parameters: { mockApi },
 });
 
-export const Panel = panel({ scenario: "signed-in" });
-export const PanelClaudeCodeMissing = panel({ scenario: "claude-code-missing" });
-export const PanelConflict = panel({ scenario: "apps-conflict" });
-export const PanelLoading = panel({ overrides: { "/settings/api/apps": "hang" } });
-export const PanelLoadError = panel({
-  overrides: { "/settings/api/apps": { status: 500, body: { error: { message: "Couldn't read app settings." } } } },
+export const PanelLoaded: Story = {
+  ...panel({ scenario: "signed-in" }),
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByText("Pi");
+    await expect(
+      [...canvasElement.querySelectorAll(".harness-row__name")].map((element) =>
+        element.textContent?.trim(),
+      ),
+    ).toEqual([
+      "ChatGPT",
+      "Claude Code",
+      "Claude Desktop (Cowork, Code)",
+      "Codex CLI",
+      "Copilot CLI",
+      "Pi",
+    ]);
+  },
+};
+export const PanelNotFound = panel({ scenario: "claude-code-missing" });
+export const PanelNeedsAttention = panel({ scenario: "apps-conflict" });
+export const PanelLoading = panel({
+  overrides: { "/settings/api/apps": "hang" },
 });
-/** Maximal not answering, after ~5s of automatic retries. */
-export const PanelUnreachable = panel({ overrides: { "/settings/api/apps": "offline" } });
+export const PanelLoadError = panel({
+  overrides: {
+    "/settings/api/apps": {
+      status: 500,
+      body: { error: { message: "Couldn't read app settings." } },
+    },
+  },
+});
+/** Maximal not answering, after automatic retries. */
+export const PanelUnreachable = panel({
+  overrides: { "/settings/api/apps": "offline" },
+});

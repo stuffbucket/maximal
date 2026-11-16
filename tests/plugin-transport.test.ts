@@ -2,6 +2,7 @@
 import {
   PLUGIN_API_VERSION,
   PLUGIN_PROTOCOL_VERSION,
+  WireRemoteError,
   frame,
 } from "@stuffbucket/maximal-plugin-protocol"
 import { describe, expect, test } from "bun:test"
@@ -381,6 +382,31 @@ describe("duplex RPC dispatcher", () => {
     runnerDispatcher.dispose()
   })
 
+  test("marks a post-handler terminal failure as non-retryable", async () => {
+    const { parent, runner } = await pair()
+    const parentDispatcher = new DuplexRpcDispatcher(parent, "parent")
+    const runnerDispatcher = new DuplexRpcDispatcher(runner, "runner")
+    let handlerCalls = 0
+    runnerDispatcher.register("request", "oversized", () => {
+      handlerCalls += 1
+      return { value: "x".repeat(300_000) }
+    })
+    const error = await rejection(parentDispatcher.call("oversized", null))
+    expect(error).toBeInstanceOf(WireRemoteError)
+    if (!(error instanceof WireRemoteError))
+      throw new Error("Expected wire error.")
+    expect(error.wire).toMatchObject({
+      kind: "indeterminate",
+      code: "terminal_send_failed",
+      retry: "never",
+    })
+    expect(handlerCalls).toBe(1)
+    expect(parent.closed).toBe(false)
+    expect(runner.closed).toBe(false)
+    parentDispatcher.dispose()
+    runnerDispatcher.dispose()
+  })
+
   test("orders multiple reverse provider calls with stable correlation IDs", async () => {
     const { parent, runner } = await pair()
     const parentDispatcher = new DuplexRpcDispatcher(parent, "parent")
@@ -481,6 +507,31 @@ describe("duplex RPC dispatcher", () => {
       action: "accept",
       content: { answer: 42 },
     })
+    parentDispatcher.dispose()
+    runnerDispatcher.dispose()
+  })
+
+  test("cancels a direct elicitation without closing the channel", async () => {
+    const { parent, runner } = await pair()
+    const parentDispatcher = new DuplexRpcDispatcher(parent, "parent")
+    const runnerDispatcher = new DuplexRpcDispatcher(runner, "runner")
+    runnerDispatcher.register("request", "ask", async (_params, context) => {
+      return context.elicit("Continue?", { type: "object" })
+    })
+    const controller = new AbortController()
+    const pending = parentDispatcher.call("ask", null, {
+      signal: controller.signal,
+      onElicit: () => new Promise<never>(() => undefined),
+    })
+    await tick()
+    controller.abort("cancelled by test")
+
+    expect(await rejection(pending)).toMatchObject({ name: "AbortError" })
+    await tick()
+    expect(parent.closed).toBe(false)
+    expect(runner.closed).toBe(false)
+    expect(parentDispatcher.inflight).toBe(0)
+    expect(runnerDispatcher.inflight).toBe(0)
     parentDispatcher.dispose()
     runnerDispatcher.dispose()
   })

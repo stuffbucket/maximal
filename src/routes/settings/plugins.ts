@@ -5,17 +5,24 @@
  *   GET    /                          → { plugins: PluginView[] }
  *   GET    /attention                 → { attention: PluginAttentionItem[] }
  *   GET    /:id                       → PluginDetailView
- *   PATCH  /:id                       { enabled?, clients?, config? } → PluginDetailView
+ *   PATCH  /:id                       { enabled?, clients?, access?, config? } → PluginDetailView
  *   PUT    /:id/tool-permissions      { permissions } → PluginDetailView
  *   POST   /:id/actions/:actionId     → 202 { ok: true }
  *
  * PATCH validates and writes `config` to the plugin's settings file first
  * (the plugin's own `Config` rejects ⇒ 400 with `issues`, nothing changed),
- * then persists `enabled` / `clients` to `config.json` → `plugins.<id>`,
- * starts/stops/reloads the plugin to match and updates client MCP entries
- * before answering. PUT tool-permissions writes the settings file only (no
- * reload); the MCP projection hides blocked tools and tells clients the
- * list changed. An action (sign in, accept terms) can take minutes, so POST
+ * then persists `enabled` / `clients` / `access` to `config.json` →
+ * `plugins.<id>`, starts/stops/reloads the plugin to match and updates client
+ * MCP entries before answering. `access` and `clients` (what apps and
+ * connections may use the connector) are changed only by Maximal's own UI or
+ * an unkeyed caller; another API key gets 403. `access` maps `app:<client-id>` and
+ * `connection:<api-key-entry-id>` to Allow / Ask / Block and merges into the
+ * stored map; `clients` is the legacy app list (kept in step with `access`).
+ * Block removes the connector from that app's own config; Ask keeps it there
+ * and Maximal asks at call time. An access change also tells open MCP
+ * sessions of that plugin that the tool list changed. PUT tool-permissions
+ * writes the settings file only (no reload); the MCP projection marks blocked
+ * tools as turned off and tells clients the list changed. An action (sign in, accept terms) can take minutes, so POST
  * answers as soon as the plugin has accepted it; how it goes arrives
  * through the plugin's status (`plugins.changed` on the events stream).
  * 404 for an unknown plugin or action, 409 when the plugin isn't running
@@ -34,6 +41,7 @@ import consola from "consola"
 import { Hono } from "hono"
 
 import { coreAttention, runCoreAttentionAction } from "~/lib/attention"
+import { extractRequestApiKey } from "~/lib/auth/request-auth"
 import {
   PluginActionResponse,
   PluginDetailView,
@@ -43,6 +51,7 @@ import {
   PluginUpdateRequest,
   type PluginValidationIssue,
 } from "~/lib/config/settings-types"
+import { notifyPluginAccessChanged } from "~/lib/plugins/access-events"
 import { pluginAttention } from "~/lib/plugins/attention"
 import { getPluginGateway } from "~/lib/plugins/gateway"
 import {
@@ -52,11 +61,13 @@ import {
 } from "~/lib/plugins/runtime"
 import { updatePluginEntry } from "~/lib/plugins/settings"
 import { listPluginViews, pluginDetailView } from "~/lib/plugins/view"
+import { state } from "~/lib/runtime-state/state"
 
 import { respondValidated } from "./respond-validated"
 
 const ERROR_TYPES = {
   400: "invalid_request_error",
+  403: "forbidden",
   404: "not_found",
   409: "conflict",
   503: "unavailable",
@@ -185,6 +196,17 @@ async function settledSoon<T>(
   }
 }
 
+/**
+ * Who may change which apps and connections can use a connector: Maximal's
+ * own UI (its shell key) or a caller with no key at all (auth not enforced).
+ * An app's or connection's API key may not, or a Blocked or Ask app could
+ * simply Allow itself.
+ */
+function mayChangeAccess(c: Context): boolean {
+  const key = extractRequestApiKey(c)
+  return !key || (state.shellApiKey !== undefined && key === state.shellApiKey)
+}
+
 export const pluginsRoutes = new Hono()
 
 pluginsRoutes.get("/", async (c) => {
@@ -244,6 +266,16 @@ pluginsRoutes.patch("/:id", async (c) => {
   const parsed = PluginUpdateRequest.safeParse(json.body)
   if (!parsed.success) return validationError(c, zodIssues(parsed.error))
   const { config, ...entry } = parsed.data
+  if (
+    (entry.access !== undefined || entry.clients !== undefined)
+    && !mayChangeAccess(c)
+  ) {
+    return apiError(
+      c,
+      403,
+      "App Permissions can only be changed from Maximal's own Settings, not with an app's or connection's API key.",
+    )
+  }
 
   if (config !== undefined) {
     try {
@@ -257,9 +289,21 @@ pluginsRoutes.patch("/:id", async (c) => {
       throw error
     }
   }
-  if (entry.enabled !== undefined || entry.clients !== undefined) {
+  if (
+    entry.enabled !== undefined
+    || entry.clients !== undefined
+    || entry.access !== undefined
+  ) {
     updatePluginEntry(id, entry)
-    await applyPluginSettings()
+    try {
+      await applyPluginSettings()
+    } finally {
+      // The policy is already written (and read live by every call), so open
+      // sessions hear about the new list even when reload or sync failed.
+      if (entry.access !== undefined || entry.clients !== undefined) {
+        notifyPluginAccessChanged(id)
+      }
+    }
   }
   notifyPluginsChanged()
   return respondDetail(c, gateway, id)

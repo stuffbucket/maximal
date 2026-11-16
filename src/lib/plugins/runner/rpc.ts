@@ -28,6 +28,7 @@ import {
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import { randomUUID } from "node:crypto"
 
+import type { RunnerBlobBridge } from "~/lib/plugins/transport/blob-codec"
 import type {
   DuplexRpcDispatcher,
   RpcContext,
@@ -256,6 +257,7 @@ interface CreatedProvider {
 
 async function createProvider(
   dispatcher: DuplexRpcDispatcher,
+  blobs: RunnerBlobBridge,
 ): Promise<CreatedProvider> {
   const listeners = new Set<() => void>()
   let snapshot: ProviderSnapshotDto | undefined
@@ -302,7 +304,12 @@ async function createProvider(
         body: Record<string, unknown> | FormData,
         options: ProviderRequestOptions,
       ): Promise<T> {
-        const encoded = await encodeBody(body)
+        const callId = options.invocation.invocationId
+        const encoded = await encodeBody(body, {
+          handleForBlob: (blob) => blobs.handleForBlob(blob, callId),
+          publishBlob: (blob) =>
+            blobs.publishBlob(blob, callId, options.signal),
+        })
         const value = parseProviderReply(
           await dispatcher.callProvider(
             PROVIDER_RPC.postJson,
@@ -320,7 +327,7 @@ async function createProvider(
             { signal: options.signal },
           ),
         )
-        const reply = structuredClone(value.reply)
+        const reply = await blobs.materializeStrings(value.reply, callId)
         if (reply !== null && typeof reply === "object")
           costs.set(reply, value.cost)
         return reply as T
@@ -380,10 +387,11 @@ async function createHost(
 
 export async function createReverseServices(
   dispatcher: DuplexRpcDispatcher,
+  blobs: RunnerBlobBridge,
 ): Promise<ReverseServices> {
   const pending = new Set<Promise<unknown>>()
   const [createdProvider, host] = await Promise.all([
-    createProvider(dispatcher),
+    createProvider(dispatcher, blobs),
     createHost(dispatcher),
   ])
   return {
@@ -430,6 +438,7 @@ export function gatewayProjection(
     listings,
     toolViews,
     serverTools: gateway.serverTools(),
+    pluginClients: gateway.pluginClientContributions(),
     servedModels,
     operationTargets,
   }
@@ -525,6 +534,7 @@ export function registerRunnerGateway(
   dispatcher: DuplexRpcDispatcher,
   transport: BunIpcTransport,
   gateway: PluginGateway,
+  blobs: RunnerBlobBridge,
   resources?: PluginGenerationResourceLifecycle,
 ): () => Promise<void> {
   const prepared = new Map<string, PreparedServerTool>()
@@ -612,20 +622,28 @@ export function registerRunnerGateway(
         || current.binding.upstreamModel !== request.binding.upstreamModel
       )
         throw new Error("Prepared operation binding changed before execution.")
-      return parseOperationResult(
-        json(
-          await current.execute({
-            body: decodeBody(request.body),
-            signal: context.signal,
-            invocationId: request.invocationId,
-            providerCallId: request.providerCallId,
-            sequence: request.sequence,
-            origin: request.origin,
-          }),
-          "Operation result",
+      const body = await decodeBody(request.body, {
+        fileForHandle: (handle) =>
+          blobs.fileForHandle(handle, request.invocationId),
+      })
+      const result = await current.execute({
+        body,
+        signal: context.signal,
+        invocationId: request.invocationId,
+        providerCallId: request.providerCallId,
+        sequence: request.sequence,
+        origin: request.origin,
+      })
+      const transported = {
+        ...result,
+        json: blobs.restoreStringHandles(
+          json(result.json, "Operation result JSON"),
+          request.invocationId,
         ),
-      )
+      }
+      return parseOperationResult(json(transported, "Operation result"))
     } finally {
+      blobs.release(request.invocationId)
       current.release()
     }
   })
@@ -694,7 +712,15 @@ export function registerRunnerGateway(
         )
       },
     }
-    return await value.execute(serverCall)
+    try {
+      const result = await value.execute(serverCall)
+      return blobs.restoreStringHandles(
+        json(result, "Server tool result"),
+        call.invocationId,
+      )
+    } finally {
+      blobs.release(call.invocationId)
+    }
   })
   rpc(GATEWAY_RPC.releaseServerTool, (params) => {
     const input = exact(params, "Release server tool", ["preparedId"])

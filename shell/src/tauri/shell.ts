@@ -19,6 +19,10 @@ export async function openUrl(url: string): Promise<void> {
   await invoke("plugin:opener|open_url", { url });
 }
 
+export async function revealPath(path: string): Promise<boolean> {
+  return safeInvoke("plugin:opener|reveal_item_in_dir", { paths: [path] });
+}
+
 export async function safeInvoke(
   cmd: string,
   args?: Record<string, unknown>,

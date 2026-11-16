@@ -9,6 +9,53 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         "response": {
           "plugins": [
             {
+              "access": [
+                {
+                  "available": false,
+                  "clientId": "claude-code",
+                  "id": "app:claude-code",
+                  "kind": "app",
+                  "name": "Claude Code",
+                  "permission": "block",
+                  "reasonKind": "app-off",
+                },
+                {
+                  "available": false,
+                  "clientId": "claude-desktop",
+                  "id": "app:claude-desktop",
+                  "kind": "app",
+                  "name": "Claude Desktop",
+                  "permission": "block",
+                  "reasonKind": "app-off",
+                },
+                {
+                  "available": false,
+                  "clientId": "codex",
+                  "id": "app:codex",
+                  "kind": "app",
+                  "name": "Codex",
+                  "permission": "block",
+                  "reason": "Maximal doesn't add connectors to Codex yet.",
+                  "reasonKind": "custom",
+                },
+                {
+                  "available": false,
+                  "clientId": "copilot-cli",
+                  "id": "app:copilot-cli",
+                  "kind": "app",
+                  "name": "Copilot CLI",
+                  "permission": "block",
+                  "reason": "Copilot CLI integration is coming soon.",
+                  "reasonKind": "custom",
+                },
+                {
+                  "available": true,
+                  "id": "connection:e2e",
+                  "kind": "connection",
+                  "name": "e2e",
+                  "permission": "allow",
+                },
+              ],
               "clients": [
                 {
                   "available": false,
@@ -19,7 +66,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
                 {
                   "available": false,
                   "id": "claude-desktop",
-                  "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+                  "reason": "Turn on Claude Desktop in Maximal first.",
                   "selected": false,
                 },
                 {
@@ -101,6 +148,53 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
     },
     "sse": [
       {
+        "access": [
+          {
+            "available": false,
+            "clientId": "claude-code",
+            "id": "app:claude-code",
+            "kind": "app",
+            "name": "Claude Code",
+            "permission": "block",
+            "reasonKind": "app-off",
+          },
+          {
+            "available": false,
+            "clientId": "claude-desktop",
+            "id": "app:claude-desktop",
+            "kind": "app",
+            "name": "Claude Desktop",
+            "permission": "block",
+            "reasonKind": "app-off",
+          },
+          {
+            "available": false,
+            "clientId": "codex",
+            "id": "app:codex",
+            "kind": "app",
+            "name": "Codex",
+            "permission": "block",
+            "reason": "Maximal doesn't add connectors to Codex yet.",
+            "reasonKind": "custom",
+          },
+          {
+            "available": false,
+            "clientId": "copilot-cli",
+            "id": "app:copilot-cli",
+            "kind": "app",
+            "name": "Copilot CLI",
+            "permission": "block",
+            "reason": "Copilot CLI integration is coming soon.",
+            "reasonKind": "custom",
+          },
+          {
+            "available": true,
+            "id": "connection:e2e",
+            "kind": "connection",
+            "name": "e2e",
+            "permission": "allow",
+          },
+        ],
         "clients": [
           {
             "available": false,
@@ -111,7 +205,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
           {
             "available": false,
             "id": "claude-desktop",
-            "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+            "reason": "Turn on Claude Desktop in Maximal first.",
             "selected": false,
           },
           {
@@ -178,6 +272,53 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         },
         "request": "PATCH /settings/api/plugins/workiq",
         "response": {
+          "access": [
+            {
+              "available": false,
+              "clientId": "claude-code",
+              "id": "app:claude-code",
+              "kind": "app",
+              "name": "Claude Code",
+              "permission": "block",
+              "reasonKind": "app-off",
+            },
+            {
+              "available": false,
+              "clientId": "claude-desktop",
+              "id": "app:claude-desktop",
+              "kind": "app",
+              "name": "Claude Desktop",
+              "permission": "block",
+              "reasonKind": "app-off",
+            },
+            {
+              "available": false,
+              "clientId": "codex",
+              "id": "app:codex",
+              "kind": "app",
+              "name": "Codex",
+              "permission": "block",
+              "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": false,
+              "clientId": "copilot-cli",
+              "id": "app:copilot-cli",
+              "kind": "app",
+              "name": "Copilot CLI",
+              "permission": "block",
+              "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": true,
+              "id": "connection:e2e",
+              "kind": "connection",
+              "name": "e2e",
+              "permission": "allow",
+            },
+          ],
           "clients": [
             {
               "available": false,
@@ -188,7 +329,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             {
               "available": false,
               "id": "claude-desktop",
-              "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+              "reason": "Turn on Claude Desktop in Maximal first.",
               "selected": false,
             },
             {
@@ -505,6 +646,52 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
     "sse": [
       {
         "(changed)": {
+          "access": [
+            {
+              "available": true,
+              "clientId": "claude-code",
+              "id": "app:claude-code",
+              "kind": "app",
+              "name": "Claude Code",
+              "permission": "block",
+            },
+            {
+              "available": false,
+              "clientId": "claude-desktop",
+              "id": "app:claude-desktop",
+              "kind": "app",
+              "name": "Claude Desktop",
+              "permission": "block",
+              "reasonKind": "app-off",
+            },
+            {
+              "available": false,
+              "clientId": "codex",
+              "id": "app:codex",
+              "kind": "app",
+              "name": "Codex",
+              "permission": "block",
+              "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": false,
+              "clientId": "copilot-cli",
+              "id": "app:copilot-cli",
+              "kind": "app",
+              "name": "Copilot CLI",
+              "permission": "block",
+              "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": true,
+              "id": "connection:e2e",
+              "kind": "connection",
+              "name": "e2e",
+              "permission": "allow",
+            },
+          ],
           "clients": [
             {
               "available": true,
@@ -514,7 +701,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             {
               "available": false,
               "id": "claude-desktop",
-              "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+              "reason": "Turn on Claude Desktop in Maximal first.",
               "selected": false,
             },
             {
@@ -547,6 +734,52 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         "request": "PATCH /settings/api/plugins/workiq",
         "response": {
           "(changed)": {
+            "access": [
+              {
+                "available": true,
+                "clientId": "claude-code",
+                "id": "app:claude-code",
+                "kind": "app",
+                "name": "Claude Code",
+                "permission": "allow",
+              },
+              {
+                "available": false,
+                "clientId": "claude-desktop",
+                "id": "app:claude-desktop",
+                "kind": "app",
+                "name": "Claude Desktop",
+                "permission": "block",
+                "reasonKind": "app-off",
+              },
+              {
+                "available": false,
+                "clientId": "codex",
+                "id": "app:codex",
+                "kind": "app",
+                "name": "Codex",
+                "permission": "block",
+                "reason": "Maximal doesn't add connectors to Codex yet.",
+                "reasonKind": "custom",
+              },
+              {
+                "available": false,
+                "clientId": "copilot-cli",
+                "id": "app:copilot-cli",
+                "kind": "app",
+                "name": "Copilot CLI",
+                "permission": "block",
+                "reason": "Copilot CLI integration is coming soon.",
+                "reasonKind": "custom",
+              },
+              {
+                "available": true,
+                "id": "connection:e2e",
+                "kind": "connection",
+                "name": "e2e",
+                "permission": "allow",
+              },
+            ],
             "clients": [
               {
                 "available": true,
@@ -556,7 +789,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               {
                 "available": false,
                 "id": "claude-desktop",
-                "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+                "reason": "Turn on Claude Desktop in Maximal first.",
                 "selected": false,
               },
               {
@@ -585,7 +818,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
       },
       "maximal-workiq": {
         "headers": {
-          "Authorization": "Bearer <api-key>",
+          "Authorization": "Bearer <claude-code-api-key>",
         },
         "type": "http",
         "url": "<maximal>/mcp/workiq",
@@ -603,6 +836,52 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
     "sse": [
       {
         "(changed)": {
+          "access": [
+            {
+              "available": true,
+              "clientId": "claude-code",
+              "id": "app:claude-code",
+              "kind": "app",
+              "name": "Claude Code",
+              "permission": "allow",
+            },
+            {
+              "available": false,
+              "clientId": "claude-desktop",
+              "id": "app:claude-desktop",
+              "kind": "app",
+              "name": "Claude Desktop",
+              "permission": "block",
+              "reasonKind": "app-off",
+            },
+            {
+              "available": false,
+              "clientId": "codex",
+              "id": "app:codex",
+              "kind": "app",
+              "name": "Codex",
+              "permission": "block",
+              "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": false,
+              "clientId": "copilot-cli",
+              "id": "app:copilot-cli",
+              "kind": "app",
+              "name": "Copilot CLI",
+              "permission": "block",
+              "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": true,
+              "id": "connection:e2e",
+              "kind": "connection",
+              "name": "e2e",
+              "permission": "allow",
+            },
+          ],
           "clients": [
             {
               "available": true,
@@ -612,7 +891,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             {
               "available": false,
               "id": "claude-desktop",
-              "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+              "reason": "Turn on Claude Desktop in Maximal first.",
               "selected": false,
             },
             {
@@ -639,6 +918,56 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
       {
         "request": "GET /settings/api/plugins/workiq",
         "response": {
+          "access": [
+            {
+              "available": true,
+              "clientId": "claude-code",
+              "id": "app:claude-code",
+              "kind": "app",
+              "name": "Claude Code",
+              "permission": "allow",
+              "standalone": {
+                "name": "workiq",
+                "source": "server",
+              },
+            },
+            {
+              "available": false,
+              "clientId": "claude-desktop",
+              "id": "app:claude-desktop",
+              "kind": "app",
+              "name": "Claude Desktop",
+              "permission": "block",
+              "reasonKind": "app-off",
+            },
+            {
+              "available": false,
+              "clientId": "codex",
+              "id": "app:codex",
+              "kind": "app",
+              "name": "Codex",
+              "permission": "block",
+              "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": false,
+              "clientId": "copilot-cli",
+              "id": "app:copilot-cli",
+              "kind": "app",
+              "name": "Copilot CLI",
+              "permission": "block",
+              "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": true,
+              "id": "connection:e2e",
+              "kind": "connection",
+              "name": "e2e",
+              "permission": "allow",
+            },
+          ],
           "catalogUpdatedAt": "<time>",
           "clients": [
             {
@@ -653,7 +982,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             {
               "available": false,
               "id": "claude-desktop",
-              "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+              "reason": "Turn on Claude Desktop in Maximal first.",
               "selected": false,
             },
             {
@@ -800,6 +1129,56 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
     "sse": [
       {
         "(changed)": {
+          "access": [
+            {
+              "available": true,
+              "clientId": "claude-code",
+              "id": "app:claude-code",
+              "kind": "app",
+              "name": "Claude Code",
+              "permission": "allow",
+              "standalone": {
+                "name": "workiq",
+                "source": "server",
+              },
+            },
+            {
+              "available": false,
+              "clientId": "claude-desktop",
+              "id": "app:claude-desktop",
+              "kind": "app",
+              "name": "Claude Desktop",
+              "permission": "block",
+              "reasonKind": "app-off",
+            },
+            {
+              "available": false,
+              "clientId": "codex",
+              "id": "app:codex",
+              "kind": "app",
+              "name": "Codex",
+              "permission": "block",
+              "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": false,
+              "clientId": "copilot-cli",
+              "id": "app:copilot-cli",
+              "kind": "app",
+              "name": "Copilot CLI",
+              "permission": "block",
+              "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": true,
+              "id": "connection:e2e",
+              "kind": "connection",
+              "name": "e2e",
+              "permission": "allow",
+            },
+          ],
           "clients": [
             {
               "available": true,
@@ -813,7 +1192,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             {
               "available": false,
               "id": "claude-desktop",
-              "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+              "reason": "Turn on Claude Desktop in Maximal first.",
               "selected": false,
             },
             {
@@ -841,6 +1220,52 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
         "request": "GET /settings/api/plugins/workiq",
         "response": {
           "(changed)": {
+            "access": [
+              {
+                "available": true,
+                "clientId": "claude-code",
+                "id": "app:claude-code",
+                "kind": "app",
+                "name": "Claude Code",
+                "permission": "allow",
+              },
+              {
+                "available": false,
+                "clientId": "claude-desktop",
+                "id": "app:claude-desktop",
+                "kind": "app",
+                "name": "Claude Desktop",
+                "permission": "block",
+                "reasonKind": "app-off",
+              },
+              {
+                "available": false,
+                "clientId": "codex",
+                "id": "app:codex",
+                "kind": "app",
+                "name": "Codex",
+                "permission": "block",
+                "reason": "Maximal doesn't add connectors to Codex yet.",
+                "reasonKind": "custom",
+              },
+              {
+                "available": false,
+                "clientId": "copilot-cli",
+                "id": "app:copilot-cli",
+                "kind": "app",
+                "name": "Copilot CLI",
+                "permission": "block",
+                "reason": "Copilot CLI integration is coming soon.",
+                "reasonKind": "custom",
+              },
+              {
+                "available": true,
+                "id": "connection:e2e",
+                "kind": "connection",
+                "name": "e2e",
+                "permission": "allow",
+              },
+            ],
             "clients": [
               {
                 "available": true,
@@ -850,7 +1275,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
               {
                 "available": false,
                 "id": "claude-desktop",
-                "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+                "reason": "Turn on Claude Desktop in Maximal first.",
                 "selected": false,
               },
               {
@@ -879,7 +1304,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
       },
       "maximal-workiq": {
         "headers": {
-          "Authorization": "Bearer <api-key>",
+          "Authorization": "Bearer <claude-code-api-key>",
         },
         "type": "http",
         "url": "<maximal>/mcp/workiq",
@@ -889,6 +1314,52 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
     "sse": [
       {
         "(changed)": {
+          "access": [
+            {
+              "available": true,
+              "clientId": "claude-code",
+              "id": "app:claude-code",
+              "kind": "app",
+              "name": "Claude Code",
+              "permission": "allow",
+            },
+            {
+              "available": false,
+              "clientId": "claude-desktop",
+              "id": "app:claude-desktop",
+              "kind": "app",
+              "name": "Claude Desktop",
+              "permission": "block",
+              "reasonKind": "app-off",
+            },
+            {
+              "available": false,
+              "clientId": "codex",
+              "id": "app:codex",
+              "kind": "app",
+              "name": "Codex",
+              "permission": "block",
+              "reason": "Maximal doesn't add connectors to Codex yet.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": false,
+              "clientId": "copilot-cli",
+              "id": "app:copilot-cli",
+              "kind": "app",
+              "name": "Copilot CLI",
+              "permission": "block",
+              "reason": "Copilot CLI integration is coming soon.",
+              "reasonKind": "custom",
+            },
+            {
+              "available": true,
+              "id": "connection:e2e",
+              "kind": "connection",
+              "name": "e2e",
+              "permission": "allow",
+            },
+          ],
           "clients": [
             {
               "available": true,
@@ -898,7 +1369,7 @@ exports[`Work IQ end to end: boot → setup → tools → calls → config → s
             {
               "available": false,
               "id": "claude-desktop",
-              "reason": "Claude Desktop only accepts local MCP processes here; Maximal can't add this HTTP connector.",
+              "reason": "Turn on Claude Desktop in Maximal first.",
               "selected": false,
             },
             {

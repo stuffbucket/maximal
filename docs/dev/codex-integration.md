@@ -39,23 +39,35 @@ outside this integration and may not use the local user configuration.
 
 ## Ownership, reversal, and recovery
 
-Maximal records versioned ownership metadata in comments beside the managed
-provider. The metadata retains the original top-level selector, the chosen
-provider ID, and a semantic fingerprint of the owned values. Apply and revert
-preserve unrelated bytes, comments, ordering, quote style, and newline style.
-Repeated apply is a no-op when the effective owned state is already current.
+Maximal records versioned, profile-aware ownership metadata in comments beside
+the managed provider. The metadata retains the owning Maximal profile, the
+original top-level selector, the chosen provider ID, and a semantic fingerprint
+of the owned values. Apply and revert preserve unrelated bytes, comments,
+ordering, quote style, and newline style. Repeated apply is a no-op when the
+effective owned state is already current.
 
 On disable or shutdown, Maximal restores the original selector and removes only
-provider content that still matches its ownership record. A file created solely
-by Maximal is removed after a complete revert. A pre-existing file is restored
-byte-for-byte when its owned content has not changed.
+provider content whose marker belongs to the current profile and still matches
+its ownership record. A file created solely by Maximal is removed after a
+complete revert. A pre-existing file is restored byte-for-byte when its owned
+content has not changed. Limiting boot reconciliation and shutdown cleanup to
+the owning profile prevents development profiles that share `$CODEX_HOME` from
+alternately applying and reverting each other’s route.
+
+A complete, valid marker owned by another Maximal profile or copy is reported as
+an other-Maximal conflict. Settings → Apps can replace it only after the person
+confirms the explicit override; the replacement transfers routing ownership to
+the current profile, so the other copy stops managing Codex. The override is
+accepted only for a valid Maximal marker whose owned values still match its
+fingerprint. It never authorizes Maximal to overwrite arbitrary Codex settings.
 
 If a person or another tool changes or references owned content after setup,
 Maximal preserves that content and reports `cleanup-required` instead of
 claiming success. Review the user-level `config.toml`, identify the provider ID
 inside the `# >>> maximal codex routing` ownership block, and manually remove or
-repair only that routing entry. Damaged, partial, or duplicate ownership markers
-are a hard conflict: Maximal does not guess which content is safe to remove.
+repair only that routing entry. Foreign, damaged, partial, duplicate, or
+user-edited ownership markers are a hard conflict: Maximal does not guess which
+content is safe to remove or offer the other-Maximal override.
 
 Routing intent is stored in Maximal's validated `config.json` under
 `apps.codex.enabled`. Boot reapplies routing only when that intent is true.

@@ -5,6 +5,7 @@
  */
 
 import type {
+  PluginClientContribution,
   PluginGateway,
   UpstreamProvider,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
@@ -17,6 +18,7 @@ import {
   serverToolsService,
   type HostServices,
   operationsService,
+  pluginClientsService,
   type PluginHostGateway,
   type PluginModule,
   providersService,
@@ -71,6 +73,29 @@ const BUILTIN_PLUGINS: ReadonlyArray<PluginModule> = [
   images,
 ]
 const BUILT_IN_SOURCE = Object.freeze({ type: "built-in" as const })
+
+/**
+ * Mandatory host catalog. It is installed as a Cordis service in every direct
+ * and child composition, not as app plugins that inventory settings can turn
+ * off. Writers named by `driverId` stay parent-owned.
+ */
+export const BUILTIN_PLUGIN_CLIENT_CATALOG: ReadonlyArray<PluginClientContribution> =
+  Object.freeze([
+    Object.freeze({ clientId: "claude-code", driverId: "claude-code" }),
+    Object.freeze({
+      clientId: "claude-desktop",
+      driverId: "claude-desktop",
+    }),
+    Object.freeze({
+      clientId: "codex",
+      unavailableReason: "Maximal doesn't add connectors to Codex yet.",
+    }),
+    Object.freeze({
+      clientId: "copilot-cli",
+      unavailableReason: "Copilot CLI integration is coming soon.",
+    }),
+  ])
+
 const OPEN_TIMEOUT_MS = 10_000
 
 /** A host-owned catalog row. Modules can enter this table only from code. */
@@ -447,6 +472,7 @@ export function composeRunnerPluginGateway(
       settingsAuthority: options.settingsAuthority,
       extra: [
         operationsService,
+        pluginClientsService(BUILTIN_PLUGIN_CLIENT_CATALOG),
         providersService(options.providers),
         serverToolsService,
       ],
@@ -495,6 +521,7 @@ export function composePluginGateway(
       settingsAuthority: stateBroker,
       extra: [
         operationsService,
+        pluginClientsService(BUILTIN_PLUGIN_CLIENT_CATALOG),
         providersService([
           createCopilotProvider({
             ...options.copilot,

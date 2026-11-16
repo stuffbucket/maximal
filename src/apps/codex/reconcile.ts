@@ -1,5 +1,6 @@
 import consola from "consola"
 
+import { CodexOtherMaximalConfigError } from "~/apps/codex/config"
 import {
   applyCodexProvider,
   getCodexConfigPath,
@@ -55,6 +56,13 @@ export function reconcileCodexOnBoot(
       )
     }
   } catch (error) {
+    if (error instanceof CodexOtherMaximalConfigError) {
+      setCodexRoutingIntent(false)
+      consola.warn(
+        "codex: another Maximal profile owns routing; disabled stale local intent",
+      )
+      return
+    }
     consola.warn("codex: failed to reconcile provider routing on boot", error)
   }
 }
@@ -64,7 +72,16 @@ export function reconcileCodexOnShutdown(
   filePath: string = getCodexConfigPath(),
 ): void {
   if (!intended) return
-  const result = revertCodexProvider({ filePath })
+  let result: ReturnType<typeof revertCodexProvider>
+  try {
+    result = revertCodexProvider({ filePath })
+  } catch (error) {
+    if (error instanceof CodexOtherMaximalConfigError) {
+      setCodexRoutingIntent(false)
+      return
+    }
+    throw error
+  }
   if (result.status === "cleanup-required") {
     consola.warn(
       "codex: provider routing requires manual cleanup after shutdown",

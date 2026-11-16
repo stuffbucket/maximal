@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from "node:util"
 import type { ClaudeAutoModelsState } from "~/lib/config/settings-types"
 import type { ClaudeAutoTier } from "~/lib/models/claude-auto-models"
 
+import { currentProfileId } from "~/apps/profile-identity"
 import {
   echoApiKeyHelperCommand,
   ensureApiKey,
@@ -62,6 +63,8 @@ const AUTO_MODE_SERVER_DISABLED = "0"
  *  and we strip this on revert. */
 const PRIOR_KEY = "_maximalPrior"
 const HELPER_OWNERSHIP_KEY = "_maximalHelper"
+const PROFILE_OWNERSHIP_KEY = "_maximalProfile"
+const PROFILE_OWNERSHIP_VERSION = 1
 const HELPER_STRATEGY = "echo"
 
 interface PriorSnapshot {
@@ -98,6 +101,20 @@ function readPriorSnapshot(
   }
 }
 
+/** A snapshot written by `preparePrior` always names both routing fields. An
+ *  object missing either is malformed: it cannot be transferred to another
+ *  profile, and applying over it rebuilds the missing fields. */
+function hasCompletePrior(settings: Record<string, unknown>): boolean {
+  const snap = settings[PRIOR_KEY]
+  return (
+    typeof snap === "object"
+    && snap !== null
+    && !Array.isArray(snap)
+    && BASE_URL_KEY in snap
+    && API_KEY_HELPER_KEY in snap
+  )
+}
+
 export function getClaudeCodeSettingsPath(): string {
   const configDir =
     process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")
@@ -107,10 +124,14 @@ export function getClaudeCodeSettingsPath(): string {
 interface ClaudeCodeSettingsSnapshot {
   raw: string | null
   settings: Record<string, unknown>
+  malformed: boolean
 }
 
-function parseClaudeCodeSettings(raw: string | null): Record<string, unknown> {
-  if (!raw?.trim()) return {}
+function parseClaudeCodeSettings(
+  raw: string | null,
+): Pick<ClaudeCodeSettingsSnapshot, "settings" | "malformed"> {
+  if (raw === null) return { settings: {}, malformed: false }
+  if (!raw.trim()) return { settings: {}, malformed: true }
   try {
     const parsed: unknown = parseJsonText(raw)
     if (
@@ -118,11 +139,14 @@ function parseClaudeCodeSettings(raw: string | null): Record<string, unknown> {
       || parsed === null
       || Array.isArray(parsed)
     ) {
-      return {}
+      return { settings: {}, malformed: true }
     }
-    return parsed as Record<string, unknown>
+    return {
+      settings: parsed as Record<string, unknown>,
+      malformed: false,
+    }
   } catch {
-    return {}
+    return { settings: {}, malformed: true }
   }
 }
 
@@ -133,7 +157,7 @@ function readClaudeCodeSettingsSnapshot(
     filePath,
     () => new Error("refusing to read Claude Code settings: symbolic link"),
   )
-  return { raw, settings: parseClaudeCodeSettings(raw) }
+  return { raw, ...parseClaudeCodeSettings(raw) }
 }
 
 export function readClaudeCodeSettings(
@@ -146,34 +170,36 @@ export function readClaudeCodeSettings(
   }
 }
 
-export type BaseUrlOwnership = "ours" | "foreign" | "absent"
+export type BaseUrlOwnership = "ours" | "other-maximal" | "foreign" | "absent"
 
 /** Any port, since the proxy's port can change between runs. */
 const LOOPBACK_BASE_URL = /^http:\/\/127\.0\.0\.1:\d+$/
 
-/**
- * Our URL is the current proxy URL, or — after a port change — a loopback
- * URL sitting next to our own fingerprinted apiKeyHelper. A loopback URL
- * without our helper is some other local proxy the user set up, so it stays
- * foreign.
- */
-export function getBaseUrlOwnership(
-  settings: Record<string, unknown>,
-): BaseUrlOwnership {
-  const env = readSettingsEnv(settings)
-  if (!(BASE_URL_KEY in env)) return "absent"
-  const url = env[BASE_URL_KEY]
-  if (url === proxyBaseUrl()) return "ours"
-  return (
-      typeof url === "string"
-        && LOOPBACK_BASE_URL.test(url)
-        && getApiKeyHelperOwnership(settings) === "ours"
-    ) ?
-      "ours"
-    : "foreign"
-}
+export type ApiKeyHelperOwnership =
+  | "ours"
+  | "other-maximal"
+  | "foreign"
+  | "absent"
 
-export type ApiKeyHelperOwnership = "ours" | "foreign" | "absent"
+type ProfileMarkerOwnership = "ours" | "other-maximal" | "legacy" | "invalid"
+
+function profileMarkerOwnership(
+  settings: Record<string, unknown>,
+): ProfileMarkerOwnership {
+  if (!(PROFILE_OWNERSHIP_KEY in settings)) return "legacy"
+  const marker = settings[PROFILE_OWNERSHIP_KEY]
+  if (typeof marker !== "object" || marker === null || Array.isArray(marker)) {
+    return "invalid"
+  }
+  const record = marker as Record<string, unknown>
+  if (
+    record.version !== PROFILE_OWNERSHIP_VERSION
+    || typeof record.profileId !== "string"
+  ) {
+    return "invalid"
+  }
+  return record.profileId === currentProfileId() ? "ours" : "other-maximal"
+}
 
 function helperFingerprint(command: string): string {
   // This is an equality fingerprint for owned config, not a password verifier.
@@ -181,7 +207,7 @@ function helperFingerprint(command: string): string {
   return createHash("sha256").update(command).digest("hex")
 }
 
-function markerOwnsHelper(marker: unknown, command: unknown): boolean {
+function validHelperMarker(marker: unknown, command: unknown): boolean {
   if (
     typeof marker !== "object"
     || marker === null
@@ -195,7 +221,16 @@ function markerOwnsHelper(marker: unknown, command: unknown): boolean {
     record.label === HELPER_LABEL
     && record.strategy === HELPER_STRATEGY
     && record.fingerprint === helperFingerprint(command)
+    && (record.profileId === undefined || typeof record.profileId === "string")
   )
+}
+
+function helperMarkerProfileId(marker: unknown): string | null {
+  if (typeof marker !== "object" || marker === null || Array.isArray(marker)) {
+    return null
+  }
+  const profileId = (marker as Record<string, unknown>).profileId
+  return typeof profileId === "string" ? profileId : null
 }
 
 export function getApiKeyHelperOwnership(
@@ -203,14 +238,16 @@ export function getApiKeyHelperOwnership(
 ): ApiKeyHelperOwnership {
   if (!(API_KEY_HELPER_KEY in settings)) return "absent"
   if (HELPER_OWNERSHIP_KEY in settings) {
-    return (
-        markerOwnsHelper(
-          settings[HELPER_OWNERSHIP_KEY],
-          settings[API_KEY_HELPER_KEY],
-        )
-      ) ?
-        "ours"
-      : "foreign"
+    const marker = settings[HELPER_OWNERSHIP_KEY]
+    if (!validHelperMarker(marker, settings[API_KEY_HELPER_KEY]))
+      return "foreign"
+    const markerProfileId = helperMarkerProfileId(marker)
+    if (markerProfileId) {
+      return markerProfileId === currentProfileId() ? "ours" : "other-maximal"
+    }
+    const profileOwnership = profileMarkerOwnership(settings)
+    if (profileOwnership === "invalid") return "foreign"
+    return profileOwnership === "other-maximal" ? "other-maximal" : "ours"
   }
   // Before the marker existed, maximal-owned helpers were identifiable by their
   // binary invocation signature. Keep recognizing those so they can migrate to
@@ -220,6 +257,126 @@ export function getApiKeyHelperOwnership(
     : "foreign"
 }
 
+/** Classify the URL only when it is paired with valid Maximal helper metadata.
+ * An arbitrary loopback gateway is never inferred to be Maximal-owned. */
+export function getBaseUrlOwnership(
+  settings: Record<string, unknown>,
+): BaseUrlOwnership {
+  const env = readSettingsEnv(settings)
+  if (!(BASE_URL_KEY in env)) return "absent"
+  const url = env[BASE_URL_KEY]
+  if (typeof url !== "string" || !LOOPBACK_BASE_URL.test(url)) return "foreign"
+  const profile = profileMarkerOwnership(settings)
+  const helper = getApiKeyHelperOwnership(settings)
+  if (url === proxyBaseUrl()) {
+    if (profile === "other-maximal") return "other-maximal"
+    if (profile === "ours" || helper === "ours") return "ours"
+    return "foreign"
+  }
+  if (profile === "ours" && helper === "ours") return "ours"
+  if (helper === "ours" || helper === "other-maximal") {
+    return "other-maximal"
+  }
+  return "foreign"
+}
+
+export type ClaudeCodeRoutingConflict =
+  | "foreign-base-url"
+  | "foreign-api-key-helper"
+  | "other-maximal-config"
+  | "cleanup-required"
+  | null
+
+export interface ClaudeCodeRoutingInspection {
+  enabled: boolean
+  conflict: ClaudeCodeRoutingConflict
+}
+
+function structuralRoutingConflict(
+  settings: Record<string, unknown>,
+  env: Record<string, unknown>,
+  helper: ApiKeyHelperOwnership,
+): ClaudeCodeRoutingConflict {
+  const baseUrl = env[BASE_URL_KEY]
+  if (
+    BASE_URL_KEY in env
+    && (typeof baseUrl !== "string" || !LOOPBACK_BASE_URL.test(baseUrl))
+  ) {
+    return "foreign-base-url"
+  }
+  if (API_KEY_HELPER_KEY in settings && helper === "foreign") {
+    return "foreign-api-key-helper"
+  }
+  return BASE_URL_KEY in env && !(API_KEY_HELPER_KEY in settings) ?
+      "foreign-base-url"
+    : null
+}
+
+/** Resolve complete routing ownership. Legacy unprofiled Maximal artifacts are
+ * adopted only when their endpoint exactly matches this profile's endpoint. */
+export function inspectClaudeCodeRouting(
+  settings: Record<string, unknown>,
+): ClaudeCodeRoutingInspection {
+  const env = readSettingsEnv(settings)
+  const baseUrl = env[BASE_URL_KEY]
+  const helper = getApiKeyHelperOwnership(settings)
+  const profile = profileMarkerOwnership(settings)
+  const structuralConflict = structuralRoutingConflict(settings, env, helper)
+
+  if (structuralConflict) {
+    return { enabled: false, conflict: structuralConflict }
+  }
+  if (
+    profile === "invalid"
+    || (PRIOR_KEY in settings && !hasCompletePrior(settings))
+  ) {
+    return { enabled: false, conflict: "cleanup-required" }
+  }
+  // Another profile's markers fail closed even when part of its routing was
+  // removed (for example the URL was deleted): leftover owned markers are never
+  // adopted silently, only through the explicit override.
+  if (profile === "other-maximal" || helper === "other-maximal") {
+    const marker = settings[HELPER_OWNERSHIP_KEY]
+    const sameOwner =
+      profile === "other-maximal"
+      && helperMarkerProfileId(marker)
+        === (settings[PROFILE_OWNERSHIP_KEY] as Record<string, unknown>)
+          .profileId
+    return {
+      enabled: false,
+      conflict:
+        sameOwner && hasCompletePrior(settings) ?
+          "other-maximal-config"
+        : "cleanup-required",
+    }
+  }
+  if (!(BASE_URL_KEY in env) || !(API_KEY_HELPER_KEY in settings)) {
+    return { enabled: false, conflict: null }
+  }
+
+  if (profile === "legacy") {
+    return baseUrl === proxyBaseUrl() ?
+        { enabled: true, conflict: null }
+      : { enabled: false, conflict: "other-maximal-config" }
+  }
+  return { enabled: true, conflict: null }
+}
+
+/** Inspect the on-disk file without treating unreadable or malformed content as
+ * an empty configuration. Those cases require manual cleanup and stay untouched. */
+export function inspectClaudeCodeRoutingFile(
+  filePath: string = getClaudeCodeSettingsPath(),
+): ClaudeCodeRoutingInspection {
+  try {
+    const snapshot = readClaudeCodeSettingsSnapshot(filePath)
+    return snapshot.malformed ?
+        { enabled: false, conflict: "cleanup-required" }
+      : inspectClaudeCodeRouting(snapshot.settings)
+  } catch {
+    return { enabled: false, conflict: "cleanup-required" }
+  }
+}
+
 function preparePrior(input: {
   addsAutoModeSetting: boolean
   env: Record<string, unknown>
@@ -227,12 +384,16 @@ function preparePrior(input: {
 }): unknown {
   const helperOwnership = getApiKeyHelperOwnership(input.settings)
   const baseUrlOwnership = getBaseUrlOwnership(input.settings)
+  const maximalHelper =
+    helperOwnership === "ours" || helperOwnership === "other-maximal"
+  const maximalBaseUrl =
+    baseUrlOwnership === "ours" || baseUrlOwnership === "other-maximal"
   const priorBaseUrl =
-    baseUrlOwnership === "ours" && helperOwnership === "ours" ?
-      SETTINGS_UNSET
-    : (input.env[BASE_URL_KEY] ?? SETTINGS_UNSET)
+    maximalBaseUrl && maximalHelper ? SETTINGS_UNSET : (
+      (input.env[BASE_URL_KEY] ?? SETTINGS_UNSET)
+    )
   const priorHelper =
-    helperOwnership === "ours" ? SETTINGS_UNSET : (
+    maximalHelper ? SETTINGS_UNSET : (
       (input.settings[API_KEY_HELPER_KEY] ?? SETTINGS_UNSET)
     )
   const existingPrior = readPriorSnapshot(input.settings)
@@ -260,6 +421,7 @@ function preparePrior(input: {
 
 interface AutoModelApplyOptions {
   claimAutoModels?: ReadonlySet<ClaudeAutoTier>
+  overrideOtherMaximal?: boolean
 }
 
 function isSettingsRecord(value: unknown): value is Record<string, unknown> {
@@ -343,6 +505,7 @@ export function mergeBaseUrl(
   const {
     [AUTO_MODELS_JOURNAL_KEY]: _oldJournal,
     [AUTO_MODELS_OWNERSHIP_KEY]: _oldAutoModels,
+    [PROFILE_OWNERSHIP_KEY]: _oldProfile,
     ...withoutMarker
   } = effectiveExisting
   return {
@@ -353,6 +516,11 @@ export function mergeBaseUrl(
       label: HELPER_LABEL,
       strategy: HELPER_STRATEGY,
       fingerprint: helperFingerprint(helperCommand),
+      profileId: currentProfileId(),
+    },
+    [PROFILE_OWNERSHIP_KEY]: {
+      version: PROFILE_OWNERSHIP_VERSION,
+      profileId: currentProfileId(),
     },
     [PRIOR_KEY]: prior,
     ...outputAutoModelMetadata({
@@ -384,6 +552,7 @@ export function stripBaseUrl(
   const {
     [PRIOR_KEY]: _droppedPrior,
     [HELPER_OWNERSHIP_KEY]: _droppedMarker,
+    [PROFILE_OWNERSHIP_KEY]: _droppedProfile,
     [AUTO_MODELS_OWNERSHIP_KEY]: _droppedAutoModels,
     [AUTO_MODELS_JOURNAL_KEY]: _droppedJournal,
     [SETTINGS_ENV_KEY]: _droppedEnv,
@@ -450,11 +619,7 @@ function stripBaseUrlForShutdown(
 export function isProxyBaseUrlConfigured(
   filePath: string = getClaudeCodeSettingsPath(),
 ): boolean {
-  const settings = readClaudeCodeSettings(filePath)
-  return (
-    getBaseUrlOwnership(settings) === "ours"
-    && getApiKeyHelperOwnership(settings) === "ours"
-  )
+  return inspectClaudeCodeRoutingFile(filePath).enabled
 }
 
 export function getClaudeAutoModelsState(
@@ -464,8 +629,7 @@ export function getClaudeAutoModelsState(
   return buildClaudeAutoModelsState(
     settings,
     readPriorSnapshot(settings) as Record<string, unknown> | null,
-    getBaseUrlOwnership(settings) === "ours"
-      && getApiKeyHelperOwnership(settings) === "ours",
+    inspectClaudeCodeRouting(settings).enabled,
   )
 }
 
@@ -484,6 +648,8 @@ export type SkipReason =
   | "already-ours"
   | "foreign-base-url"
   | "foreign-api-key-helper"
+  | "other-maximal-config"
+  | "cleanup-required"
   | "missing-api-key"
 
 export interface ApplyResult {
@@ -494,6 +660,16 @@ export interface ApplyResult {
 
 type ResolveHelperKey = () => ReturnType<typeof resolveApiKey>
 
+function applySkipReason(
+  snapshot: ClaudeCodeSettingsSnapshot,
+  overrideOtherMaximal: boolean,
+): SkipReason | null {
+  if (snapshot.malformed) return "cleanup-required"
+  const { conflict } = inspectClaudeCodeRouting(snapshot.settings)
+  if (conflict === "other-maximal-config" && overrideOtherMaximal) return null
+  return conflict
+}
+
 export function applyProxyBaseUrl(
   filePath: string = getClaudeCodeSettingsPath(),
   resolveHelperKey: ResolveHelperKey = () => ensureApiKey(HELPER_LABEL),
@@ -503,17 +679,12 @@ export function applyProxyBaseUrl(
   let helperCommand: string | null = null
   let retried = false
   while (true) {
-    const baseUrlOwnership = getBaseUrlOwnership(snapshot.settings)
-    const helperOwnership = getApiKeyHelperOwnership(snapshot.settings)
-    if (baseUrlOwnership === "foreign") {
-      return { path: filePath, wrote: false, skippedReason: "foreign-base-url" }
-    }
-    if (helperOwnership === "foreign") {
-      return {
-        path: filePath,
-        wrote: false,
-        skippedReason: "foreign-api-key-helper",
-      }
+    const skippedReason = applySkipReason(
+      snapshot,
+      options.overrideOtherMaximal === true,
+    )
+    if (skippedReason) {
+      return { path: filePath, wrote: false, skippedReason }
     }
     if (helperCommand === null) {
       const keyResult = resolveHelperKey()
@@ -552,7 +723,19 @@ function revertProxyBaseUrlWithMode(
   filePath: string,
   preserveAutoModels: boolean,
 ): RevertResult {
-  const existing = readClaudeCodeSettingsSnapshot(filePath).settings
+  const snapshot = readClaudeCodeSettingsSnapshot(filePath)
+  const existing = snapshot.settings
+  const inspection = inspectClaudeCodeRouting(existing)
+  if (
+    inspection.conflict === "other-maximal-config"
+    || inspection.conflict === "cleanup-required"
+  ) {
+    return {
+      path: filePath,
+      wrote: false,
+      remainingKeys: Object.keys(existing),
+    }
+  }
   const baseUrlOwnership = getBaseUrlOwnership(existing)
   const helperOwnership = getApiKeyHelperOwnership(existing)
   const hasSuspendedAutoModels = AUTO_MODELS_JOURNAL_KEY in existing
@@ -574,10 +757,19 @@ function revertProxyBaseUrlWithMode(
       stripBaseUrlForShutdown(existing)
     : stripBaseUrl(existing)
   if (Object.keys(stripped).length === 0) {
+    const current = readFileNoFollow(
+      filePath,
+      () => new Error("refusing to remove Claude Code settings: symbolic link"),
+    )
+    if (current !== snapshot.raw) {
+      throw new AtomicWriteConflictError(
+        "refusing to remove Claude Code settings: file changed before it could be removed",
+      )
+    }
     fs.rmSync(filePath, { force: true })
     return { path: filePath, wrote: true, remainingKeys: [] }
   }
-  writeClaudeCodeSettings(filePath, stripped)
+  writeClaudeCodeSettings(filePath, stripped, snapshot.raw)
   return {
     path: filePath,
     wrote: true,

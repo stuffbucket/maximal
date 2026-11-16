@@ -114,6 +114,30 @@ describe("generation spool", () => {
     await spool.close()
   })
 
+  test("adopts a staged same-generation upload", async () => {
+    const spool = await store()
+    const staged = await spool.stageUpload({
+      callId: "runner:1",
+      byteLength: 4,
+      filename: "image.png",
+      mediaType: "image/png",
+    })
+    await writeFile(staged.path, new Uint8Array([1, 2, 3, 4]))
+    const handle = await spool.commitUpload(staged.id)
+    expect(handle).toMatchObject({
+      byteLength: 4,
+      filename: "image.png",
+      mediaType: "image/png",
+    })
+    expect(await collect(spool.read(handle))).toEqual(
+      new Uint8Array([1, 2, 3, 4]),
+    )
+    await spool.releaseCall("runner:1")
+    expect(spool.openLeases).toBe(0)
+    expect(spool.aggregateBytes).toBe(0)
+    await spool.close()
+  })
+
   test("streams large binary values with bounded chunks", async () => {
     const spool = await store({
       root: "",

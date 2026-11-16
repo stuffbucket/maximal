@@ -84,13 +84,14 @@
     "shell:test": "bun scripts/shell-test.ts",
     "start": "NODE_ENV=production bun run ./src/main.ts",
     "storybook": "mise -C packages/storybook exec -- pnpm dev",
+    "storybook:assets": "mise -C packages/storybook exec -- pnpm assets",
     "storybook:build": "mise -C packages/storybook exec -- pnpm build",
     "storybook:check": "bun scripts/ui-harness.ts --check && mise -C packages/storybook exec -- pnpm typecheck && mise -C packages/storybook exec -- pnpm contrast",
     "storybook:install": "mise -C packages/storybook exec -- pnpm install --frozen-lockfile",
     "test:e2e": "playwright test tests/e2e/",
     "test:e2e:plugins": "bun test tests/e2e-plugin-lifecycle.test.ts",
     "tokens:generate": "bun scripts/generate-css-tokens.ts",
-    "typecheck": "tsc && tsc -p .claude/skills/ui-layout-verification/tsconfig.json",
+    "typecheck": "tsc && tsc -p .claude/skills/ui-layout-verification/tsconfig.json && tsc -p .claude/skills/live-operation-smoke/tsconfig.json",
     "ui:harness": "bun run build:ui && bun run scripts/ui-harness.ts",
     "verify:build": "bun scripts/dev/verify-build.ts"
   },
@@ -105,6 +106,7 @@
     ]
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/server": "2.3.1",
     "@stuffbucket/maximal-connector-kit": "workspace:*",
     "@stuffbucket/maximal-plugin-decisions": "workspace:*",
@@ -134,7 +136,6 @@
   },
   "devDependencies": {
     "@echristian/eslint-config": "^0.0.54",
-    "@modelcontextprotocol/client": "2.3.1",
     "@playwright/test": "1.56.1",
     "@stryker-mutator/core": "^9.6.1",
     "@types/bun": "^1.2.23",

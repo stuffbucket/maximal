@@ -1,4 +1,4 @@
-/* eslint-disable complexity, max-lines-per-function, max-params, require-atomic-updates -- publication and policy validation intentionally fail closed at each boundary */
+/* eslint-disable complexity, max-lines, max-lines-per-function, max-params, require-atomic-updates -- one spool authority owns publication, staged uploads, leases, and policy validation */
 import type { BlobHandleDto } from "@stuffbucket/maximal-plugin-protocol"
 
 import { createHash, randomUUID } from "node:crypto"
@@ -64,6 +64,19 @@ interface LeaseRecord {
   ino: number
   digest: string
   deleting: boolean
+}
+
+interface UploadRecord {
+  id: string
+  path: string
+  options: PublishBlobOptions
+  dev: number
+  ino: number
+}
+
+export interface StagedBlobUpload {
+  readonly id: string
+  readonly path: string
 }
 
 export interface DeleteRetryPolicy {
@@ -195,6 +208,7 @@ export class GenerationSpoolStore {
   readonly #remove: typeof rm
   readonly #sleep: (milliseconds: number) => Promise<void>
   readonly #leases = new Map<string, LeaseRecord>()
+  readonly #uploads = new Map<string, UploadRecord>()
   readonly #callLeases = new Map<string, Set<string>>()
   readonly #callBytes = new Map<string, number>()
   #root = ""
@@ -395,6 +409,145 @@ export class GenerationSpoolStore {
     }
   }
 
+  /** Reserve a private same-generation file for a runner-side upload. */
+  async stageUpload(options: PublishBlobOptions): Promise<StagedBlobUpload> {
+    await this.initialize()
+    if (this.#closed) throw new Error("Spool store is closed.")
+    await this.#verifyRoot()
+    this.#assertPublication(options)
+    this.#pendingPublishes += 1
+    this.#reserve(options.callId, options.byteLength)
+    const id = randomUUID()
+    const path = join(this.#root, `.${id}.upload`)
+    let staged = false
+    let file: Awaited<ReturnType<typeof open>> | undefined
+    try {
+      file = await open(
+        path,
+        constants.O_WRONLY
+          | constants.O_CREAT
+          | constants.O_EXCL
+          | constants.O_NOFOLLOW,
+        0o600,
+      )
+      const info = await file.stat()
+      if (
+        !info.isFile()
+        || info.nlink !== 1
+        || info.dev !== this.#rootDev
+        || info.size > 0
+      )
+        throw new InvalidBlobHandleError(
+          "Staged upload is not a private regular file.",
+        )
+      this.#uploads.set(id, {
+        id,
+        path,
+        options: { ...options, signal: undefined },
+        dev: info.dev,
+        ino: info.ino,
+      })
+      staged = true
+      return { id, path }
+    } finally {
+      this.#pendingPublishes -= 1
+      await file?.close().catch(() => undefined)
+      if (!staged) {
+        this.#unreserve(options.callId, options.byteLength)
+        await this.#removeWithRetry(path)
+      }
+    }
+  }
+
+  /** Verify and atomically adopt a completed runner-side upload. */
+  async commitUpload(id: string): Promise<BlobHandleDto> {
+    const upload = this.#upload(id)
+    await this.#verifyRoot()
+    let file: Awaited<ReturnType<typeof open>> | undefined
+    let committed = false
+    try {
+      file = await open(upload.path, constants.O_RDONLY | constants.O_NOFOLLOW)
+      const info = await file.stat()
+      if (
+        !info.isFile()
+        || info.nlink !== 1
+        || info.dev !== upload.dev
+        || info.ino !== upload.ino
+        || info.size !== upload.options.byteLength
+      )
+        throw new InvalidBlobHandleError(
+          "Staged upload identity or length changed.",
+        )
+      const digest = createHash("sha256")
+      let offset = 0
+      while (offset < upload.options.byteLength) {
+        const length = Math.min(
+          this.#limits.chunkBytes,
+          upload.options.byteLength - offset,
+        )
+        const buffer = new Uint8Array(length)
+        const result = await file.read(buffer, 0, length, offset)
+        if (result.bytesRead === 0) break
+        offset += result.bytesRead
+        digest.update(buffer.subarray(0, result.bytesRead))
+      }
+      if (offset !== upload.options.byteLength)
+        throw new InvalidBlobHandleError(
+          "Staged upload length changed while it was read.",
+        )
+      await file.close()
+      file = undefined
+      await this.#verifyRoot()
+      const finalPath = join(this.#root, `${upload.id}.blob`)
+      await rename(upload.path, finalPath)
+      upload.path = finalPath
+      const published = await this.#openVerified(
+        finalPath,
+        upload.dev,
+        upload.ino,
+        upload.options.byteLength,
+      )
+      await published.close()
+      const handle: BlobHandleDto = {
+        generation: this.#generation,
+        id: upload.id,
+        byteLength: upload.options.byteLength,
+        ...(upload.options.mediaType === undefined ?
+          {}
+        : { mediaType: upload.options.mediaType }),
+        ...(upload.options.filename === undefined ?
+          {}
+        : { filename: upload.options.filename }),
+      }
+      this.#leases.set(upload.id, {
+        handle,
+        path: finalPath,
+        callId: upload.options.callId,
+        refs: 1,
+        dev: upload.dev,
+        ino: upload.ino,
+        digest: digest.digest("hex"),
+        deleting: false,
+      })
+      let call = this.#callLeases.get(upload.options.callId)
+      if (!call) {
+        call = new Set()
+        this.#callLeases.set(upload.options.callId, call)
+      }
+      call.add(upload.id)
+      this.#uploads.delete(upload.id)
+      committed = true
+      return structuredClone(handle)
+    } finally {
+      await file?.close().catch(() => undefined)
+      if (!committed) await this.#abortUpload(upload)
+    }
+  }
+
+  async abortUpload(id: string): Promise<void> {
+    await this.#abortUpload(this.#upload(id))
+  }
+
   retain(handle: BlobHandleDto): void {
     const lease = this.#lease(handle)
     if (lease.deleting) {
@@ -422,6 +575,10 @@ export class GenerationSpoolStore {
   }
 
   async releaseCall(callId: string): Promise<void> {
+    const uploads = Array.from(this.#uploads.values()).filter(
+      (upload) => upload.options.callId === callId,
+    )
+    for (const upload of uploads) await this.#abortUpload(upload)
     const owned = this.#callLeases.get(callId)
     if (!owned) return
     for (const id of owned) {
@@ -504,6 +661,7 @@ export class GenerationSpoolStore {
       this.#initialized = false
     }
     this.#leases.clear()
+    this.#uploads.clear()
     this.#callLeases.clear()
     this.#callBytes.clear()
     this.#aggregateBytes = 0
@@ -522,6 +680,22 @@ export class GenerationSpoolStore {
     await store.#removeWithRetry(store.#root, true)
   }
 
+  #upload(id: string): UploadRecord {
+    if (!SAFE_ID.test(id) || basename(id) !== id)
+      throw new InvalidBlobHandleError("Staged upload identity is unsafe.")
+    const upload = this.#uploads.get(id)
+    if (!upload)
+      throw new InvalidBlobHandleError("Staged upload is not active.")
+    return upload
+  }
+
+  async #abortUpload(upload: UploadRecord): Promise<void> {
+    if (!this.#uploads.has(upload.id)) return
+    await this.#removeWithRetry(upload.path)
+    this.#uploads.delete(upload.id)
+    this.#unreserve(upload.options.callId, upload.options.byteLength)
+  }
+
   #assertPublication(options: PublishBlobOptions): void {
     if (!SAFE_CALL_ID.test(options.callId)) {
       throw new InvalidBlobHandleError("Call ID is not a safe spool identity.")
@@ -532,7 +706,10 @@ export class GenerationSpoolStore {
     if (options.byteLength > this.#limits.perBlobBytes) {
       throw new SpoolLimitError("Blob exceeds the per-blob limit.")
     }
-    if (this.#leases.size + this.#pendingPublishes >= this.#limits.maxBlobs) {
+    if (
+      this.#leases.size + this.#uploads.size + this.#pendingPublishes
+      >= this.#limits.maxBlobs
+    ) {
       throw new SpoolLimitError("Spool blob credit is exhausted.")
     }
     const callBytes = this.#callBytes.get(options.callId) ?? 0

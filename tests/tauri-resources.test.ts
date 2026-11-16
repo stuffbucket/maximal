@@ -55,6 +55,19 @@ describe("Tauri packaging contracts", () => {
     expect(resourcePatterns(loadConf())).toContain("plugin-builtins")
   })
 
+  test("clears only Tauri's copied sealed generation before restaging", () => {
+    const build = readFileSync(resolve(TAURI_ROOT, "build.rs"), "utf8")
+    const cleanup = build.indexOf("remove_staged_plugin_builtins()")
+    const tauriBuild = build.indexOf("tauri_build::build()")
+
+    expect(build).toContain('var_os("OUT_DIR")')
+    expect(build).toContain('join("plugin-builtins")')
+    expect(build).toContain("target_profile_directory(&out_dir)")
+    expect(build).not.toContain('join("shell/src-tauri/plugin-builtins")')
+    expect(cleanup).toBeGreaterThan(-1)
+    expect(tauriBuild).toBeGreaterThan(cleanup)
+  })
+
   test("contains Windows sidecars before their suspended process starts", () => {
     const cargo = readFileSync(resolve(TAURI_ROOT, "Cargo.toml"), "utf8")
     const patchPath = "patches/tauri-plugin-shell-2.6.0"

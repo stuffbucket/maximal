@@ -1,7 +1,9 @@
-/* eslint-disable max-params -- transport contract integration fixture */
+/* eslint-disable max-lines, max-params -- transport contract integration fixture shares one paired-endpoint harness */
+import type { UpstreamProvider } from "@stuffbucket/maximal-plugin-sdk"
 import type {
   ModelOperation,
   OperationDispatch,
+  PluginClientContribution,
   PluginGateway,
   PluginGatewayEvent,
   PluginGenerationLease,
@@ -26,13 +28,16 @@ import path from "node:path"
 import type { ParentHostServiceBroker } from "~/lib/plugins/host-service-broker"
 import type { ParentProviderBroker } from "~/lib/plugins/provider-broker"
 
+import { BUILTIN_PLUGIN_CLIENT_CATALOG } from "~/lib/plugins/compose"
 import { providerInvocationJournal } from "~/lib/plugins/provider-broker"
 import {
   createReverseServices,
   gatewayProjection,
   registerRunnerGateway,
 } from "~/lib/plugins/runner/rpc"
+import { GenerationSpoolStore } from "~/lib/plugins/spool/store"
 import { createPluginStateBroker } from "~/lib/plugins/state-broker"
+import { RunnerBlobBridge } from "~/lib/plugins/transport/blob-codec"
 import { DuplexRpcDispatcher } from "~/lib/plugins/transport/dispatcher"
 import { BunIpcTransport } from "~/lib/plugins/transport/ipc"
 import { registerParentBrokers } from "~/lib/plugins/transport/parent-brokers"
@@ -41,9 +46,20 @@ import { TransportPluginGateway } from "~/lib/plugins/transport/remote-gateway"
 
 const generation = "remote-generation"
 const nonce = "remote-nonce-0123456789"
+const LARGE_PROVIDER_TEXT = "image-payload-".repeat(100_000)
 const result = (text: string): ToolResult => ({
   content: [{ type: "text", text }],
 })
+
+class StreamingOnlyFile extends File {
+  override arrayBuffer(): Promise<ArrayBuffer> {
+    return Promise.reject(new Error("Runner upload must stream the blob."))
+  }
+}
+
+function emptySubscription(): () => void {
+  return () => undefined
+}
 
 function resolveFixtureOperation(
   binding: { provider: string; upstreamModel: string },
@@ -57,6 +73,8 @@ function resolveFixtureOperation(
 
 class RunnerFixtureGateway implements PluginGateway {
   readonly executedOperationProviders: Array<string> = []
+  readonly #provider: UpstreamProvider | undefined
+  reconciledSettings: PluginSettings | undefined
   releasedOperations = 0
   readonly #listeners = new Set<(event: PluginGatewayEvent) => void>()
   readonly #operationListeners = new Set<() => void>()
@@ -65,6 +83,10 @@ class RunnerFixtureGateway implements PluginGateway {
     upstreamModel: "fixture-model",
   }
   #config: unknown = { version: 1 }
+
+  constructor(provider?: UpstreamProvider) {
+    this.#provider = provider
+  }
 
   replaceOperation(provider: string): void {
     this.#operationBinding = {
@@ -120,15 +142,37 @@ class RunnerFixtureGateway implements PluginGateway {
           model,
           pluginId: target.pluginId,
           binding,
-          execute: (request) => {
+          execute: async (request) => {
             this.executedOperationProviders.push(binding.provider)
-            return Promise.resolve({
-              json: { transported: true, provider: binding.provider },
+            const relayed =
+              (
+                this.#provider
+                && (request.body instanceof FormData
+                  || request.body.providerReply === true)
+              ) ?
+                await this.#provider.postJson<Record<string, unknown>>(
+                  request.body instanceof FormData ? "/multipart" : "/large",
+                  request.body,
+                  {
+                    signal: request.signal,
+                    errorMessage: "Fixture provider failed.",
+                    invocation: {
+                      invocationId: request.invocationId,
+                      providerCallId: request.providerCallId,
+                      sequence: request.sequence,
+                      operation,
+                      model,
+                    },
+                  },
+                )
+              : { transported: true, provider: binding.provider }
+            return {
+              json: relayed,
               usage: { input_tokens: 2, output_tokens: 1 },
               invocationId: request.invocationId,
               providerCallId: request.providerCallId,
               sequence: request.sequence,
-            })
+            }
           },
           release: () => {
             this.releasedOperations += 1
@@ -166,7 +210,8 @@ class RunnerFixtureGateway implements PluginGateway {
     throw new Error("Fixture generation leases are not used.")
   }
 
-  reconcile(_settings: PluginSettings | undefined): Promise<void> {
+  reconcile(settings: PluginSettings | undefined): Promise<void> {
+    this.reconciledSettings = structuredClone(settings)
     return Promise.resolve()
   }
 
@@ -240,6 +285,10 @@ class RunnerFixtureGateway implements PluginGateway {
     ]
   }
 
+  pluginClientContributions(): Array<PluginClientContribution> {
+    return BUILTIN_PLUGIN_CLIENT_CATALOG.map((value) => ({ ...value }))
+  }
+
   prepareServerTool(
     _pluginId: string,
     _name: string,
@@ -250,7 +299,38 @@ class RunnerFixtureGateway implements PluginGateway {
       pluginId: "fixture",
       name: "fixture_server",
       estimate: { operation: "decisions", body: {} },
-      execute: (call: ServerToolCall) => {
+      execute: async (call: ServerToolCall) => {
+        if (input.runnerMultipart === true && this.#provider) {
+          const bytes = Uint8Array.from({ length: 300_000 }, () => 67)
+          const body = new FormData()
+          body.append(
+            "image[]",
+            new StreamingOnlyFile([bytes], "runner.png", {
+              type: "image/png",
+            }),
+          )
+          body.append("prompt", "runner-originated")
+          const invocation = call.nextProviderCall("decisions", "fixture-model")
+          await this.#provider.postJson("/multipart", body, {
+            signal: call.signal,
+            errorMessage: "Fixture provider failed.",
+            invocation,
+          })
+          return result("multipart")
+        }
+        if (input.providerReply === true && this.#provider) {
+          const invocation = call.nextProviderCall("decisions", "fixture-model")
+          const reply = await this.#provider.postJson<{ data: string }>(
+            "/large",
+            {},
+            {
+              signal: call.signal,
+              errorMessage: "Fixture provider failed.",
+              invocation,
+            },
+          )
+          return result(reply.data)
+        }
         const providerCallIds: Array<string> = []
         for (let index = 0; index < calls; index += 1) {
           const invocation = call.nextProviderCall("decisions", "fixture-model")
@@ -264,7 +344,7 @@ class RunnerFixtureGateway implements PluginGateway {
             },
           })
         }
-        return Promise.resolve(result(providerCallIds.join(",")))
+        return result(providerCallIds.join(","))
       },
       release: () => undefined,
     })
@@ -318,6 +398,11 @@ class RunnerFixtureGateway implements PluginGateway {
 }
 
 async function connectedPair() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "remote-gateway-"))
+  const spool = new GenerationSpoolStore({
+    root: path.join(root, "spool"),
+    generation,
+  })
   const ports = createInMemoryIpcPair()
   const protocolErrors: Array<Error> = []
   const parentTransport = new BunIpcTransport(ports.parent, {
@@ -344,24 +429,94 @@ async function connectedPair() {
     onSpend: (_callId, invocationId, providerCallId, _amount, evidence) =>
       remoteRef.current?.handleSpend(invocationId, providerCallId, evidence),
   })
-  const fixture = new RunnerFixtureGateway()
+  const state = createPluginStateBroker(path.join(root, "state"))
+  let providerCalls = 0
+  const multipartParts: Array<string> = []
+  const provider: ParentProviderBroker = {
+    id: "fixture-provider",
+    displayName: "Fixture Provider",
+    snapshot: () => ({
+      revision: 1,
+      available: true,
+      models: [
+        {
+          id: "fixture-model",
+          type: "decisions",
+          endpoints: ["/large", "/multipart"],
+          preview: false,
+        },
+      ],
+    }),
+    subscribe: emptySubscription,
+    postJson: async <T>(
+      requestPath: string,
+      body: Record<string, unknown> | FormData,
+    ) => {
+      providerCalls += 1
+      if (requestPath === "/large") return { data: LARGE_PROVIDER_TEXT } as T
+      if (!(body instanceof FormData))
+        throw new Error("Multipart fixture did not receive FormData.")
+      for (const [name, value] of body.entries()) {
+        const part: unknown = value
+        if (typeof part === "string") {
+          multipartParts.push(`${name}:text:${part}`)
+          continue
+        }
+        if (!(part instanceof Blob))
+          throw new Error("Multipart fixture received an invalid part.")
+        const bytes = new Uint8Array(await part.arrayBuffer())
+        multipartParts.push(
+          `${name}:blob:${bytes.byteLength}:${bytes[0]}:${bytes.at(-1)}`,
+        )
+      }
+      return { multipart: true } as T
+    },
+    cost: () => ({ unit: "nano_aiu", amount: 4, estimated: false }),
+  }
+  const host: ParentHostServiceBroker = {
+    snapshot: () => ({ revision: 1, appVersion: "test", maximalPort: 4150 }),
+    openExternal: () => Promise.resolve(),
+    logger: {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    },
+  }
+  const unregisterBrokers = registerParentBrokers(parentDispatcher, {
+    state,
+    provider,
+    host,
+    spool,
+  })
+  const blobs = new RunnerBlobBridge(runnerDispatcher, generation)
+  const reverse = await createReverseServices(runnerDispatcher, blobs)
+  const fixture = new RunnerFixtureGateway(reverse.provider)
   const unregister = registerRunnerGateway(
     runnerDispatcher,
     runnerTransport,
     fixture,
+    blobs,
   )
   const remote = new TransportPluginGateway(
     parentDispatcher,
     generation,
     gatewayProjection(fixture),
+    spool,
   )
   remoteRef.current = remote
   return {
     fixture,
     remote,
+    spool,
+    multipartParts,
+    providerCalls: () => providerCalls,
     dispose: async () => {
       await remote.dispose()
       await unregister()
+      reverse.dispose()
+      await reverse.flush()
+      unregisterBrokers()
       await Bun.sleep(0)
       if (parentDispatcher.inflight !== 0 || runnerDispatcher.inflight !== 0)
         throw new Error(
@@ -372,6 +527,9 @@ async function connectedPair() {
           `Gateway protocol failed: ${protocolErrors.map((error) => error.message).join(" / ")}`,
         )
       await fixture.dispose()
+      providerInvocationJournal.reset()
+      await spool.close()
+      await rm(root, { recursive: true, force: true })
     },
   }
 }
@@ -388,6 +546,10 @@ function rejection(promise: Promise<unknown>): Promise<unknown> {
 describe("reverse runner service brokers", () => {
   test("keeps settings, provider credentials, and host effects in the parent", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "runner-brokers-"))
+    const spool = new GenerationSpoolStore({
+      root: path.join(root, "spool"),
+      generation,
+    })
     const ports = createInMemoryIpcPair()
     const parentTransport = new BunIpcTransport(ports.parent, {
       role: "parent",
@@ -464,8 +626,16 @@ describe("reverse runner service brokers", () => {
         error: () => undefined,
       },
     }
-    const unregister = registerParentBrokers(parent, { state, provider, host })
-    const reverse = await createReverseServices(runner)
+    const unregister = registerParentBrokers(parent, {
+      state,
+      provider,
+      host,
+      spool,
+    })
+    const reverse = await createReverseServices(
+      runner,
+      new RunnerBlobBridge(runner, generation),
+    )
     try {
       const initial = await reverse.settingsAuthority.snapshot("fixture")
       const commit = await reverse.settingsAuthority.commit({
@@ -558,6 +728,7 @@ describe("reverse runner service brokers", () => {
       await reverse.flush()
       unregister()
       providerInvocationJournal.reset()
+      await spool.close()
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -570,6 +741,27 @@ describe("projected runner gateway transport", () => {
       expect(pair.remote.list()).toMatchObject([
         { id: "fixture", lifecycle: "active" },
       ])
+      expect(pair.remote.pluginClientContributions()).toEqual([
+        ...BUILTIN_PLUGIN_CLIENT_CATALOG,
+      ])
+      const settings: PluginSettings = {
+        fixture: {
+          enabled: true,
+          clients: ["claude-code"],
+          access: {
+            "app:claude-desktop": "allow",
+            "connection:k-workiq": "ask",
+          },
+        },
+      }
+      await pair.remote.reconcile(settings)
+      expect(pair.fixture.reconciledSettings).toEqual(settings)
+
+      const lease = pair.remote.acquireGeneration()
+      expect(lease.pluginClientContributions()).toEqual(
+        pair.remote.pluginClientContributions(),
+      )
+      lease.release()
       const progress: Array<number> = []
       expect(
         await pair.remote.callTool(
@@ -651,6 +843,142 @@ describe("projected runner gateway transport", () => {
       await pair.remote.updateConfig("fixture", { version: 2 })
       await stateEvent
       expect(pair.remote.get("fixture")?.config).toEqual({ version: 2 })
+    } finally {
+      await pair.dispose()
+    }
+  })
+})
+
+describe("large projected gateway values", () => {
+  test("round-trips a provider reply larger than the IPC envelope once", async () => {
+    const pair = await connectedPair()
+    try {
+      const response = await pair.remote.operations().dispatch({
+        operation: "decisions",
+        model: "fixture-model",
+        body: { providerReply: true },
+        signal: new AbortController().signal,
+        invocationId: "large-reply-invocation",
+        providerCallId: "large-reply-call",
+        sequence: 1,
+        origin: { kind: "http", client: "test" },
+      })
+      expect(response.json).toEqual({ data: LARGE_PROVIDER_TEXT })
+      expect(pair.providerCalls()).toBe(1)
+      expect(pair.spool.openLeases).toBe(0)
+    } finally {
+      await pair.dispose()
+    }
+  })
+
+  test("round-trips a large provider-backed server-tool result", async () => {
+    const pair = await connectedPair()
+    try {
+      const prepared = await pair.remote.prepareServerTool(
+        "fixture",
+        "fixture_server",
+        { providerReply: true },
+      )
+      const response = await prepared.execute({
+        signal: new AbortController().signal,
+        invocationId: "large-tool-invocation",
+        nextProviderCall: () => {
+          throw new Error("Runner must use parent-provisioned identities.")
+        },
+        model: "fixture-model",
+        client: "test",
+      })
+      expect(response).toEqual(result(LARGE_PROVIDER_TEXT))
+      expect(pair.providerCalls()).toBe(1)
+      expect(pair.spool.openLeases).toBe(0)
+    } finally {
+      await pair.dispose()
+    }
+  })
+
+  test("streams runner-originated multipart blobs before provider dispatch", async () => {
+    const pair = await connectedPair()
+    try {
+      const prepared = await pair.remote.prepareServerTool(
+        "fixture",
+        "fixture_server",
+        { runnerMultipart: true },
+      )
+      const response = await prepared.execute({
+        signal: new AbortController().signal,
+        invocationId: "runner-multipart-invocation",
+        nextProviderCall: () => {
+          throw new Error("Runner must use parent-provisioned identities.")
+        },
+        model: "fixture-model",
+        client: "test",
+      })
+      expect(response).toEqual(result("multipart"))
+      expect(pair.multipartParts).toEqual([
+        "image[]:blob:300000:67:67",
+        "prompt:text:runner-originated",
+      ])
+      expect(pair.providerCalls()).toBe(1)
+      expect(pair.spool.openLeases).toBe(0)
+    } finally {
+      await pair.dispose()
+    }
+  })
+
+  test("preserves large duplicate multipart fields and their order", async () => {
+    const pair = await connectedPair()
+    try {
+      const first = Uint8Array.from({ length: 300_000 }, () => 65)
+      const second = Uint8Array.from({ length: 310_000 }, () => 66)
+      const body = new FormData()
+      body.append(
+        "image[]",
+        new File([first], "first.png", { type: "image/png" }),
+      )
+      body.append("prompt", "turn red blue")
+      body.append(
+        "image[]",
+        new File([second], "second.png", { type: "image/png" }),
+      )
+      const response = await pair.remote.operations().dispatch({
+        operation: "decisions",
+        model: "fixture-model",
+        body,
+        signal: new AbortController().signal,
+        invocationId: "multipart-invocation",
+        providerCallId: "multipart-call",
+        sequence: 1,
+        origin: { kind: "http", client: "test" },
+      })
+      expect(response.json).toEqual({ multipart: true })
+      expect(pair.multipartParts).toEqual([
+        "image[]:blob:300000:65:65",
+        "prompt:text:turn red blue",
+        "image[]:blob:310000:66:66",
+      ])
+      expect(pair.providerCalls()).toBe(1)
+      expect(pair.spool.openLeases).toBe(0)
+    } finally {
+      await pair.dispose()
+    }
+  })
+})
+
+describe("projected runner gateway transport failures", () => {
+  test("rejects malformed plugin access settings", async () => {
+    const pair = await connectedPair()
+    try {
+      for (const access of [
+        { "team:desktop": "allow" },
+        { "app:claude-desktop": "sometimes" },
+      ]) {
+        const error = await rejection(
+          pair.remote.reconcile({
+            fixture: { access },
+          } as unknown as PluginSettings),
+        )
+        expect(String(error)).toContain("Plugin access is invalid.")
+      }
     } finally {
       await pair.dispose()
     }

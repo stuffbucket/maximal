@@ -58,15 +58,24 @@ const connector = (scenario: ScenarioId, id = "workiq"): Story => ({
   args: { section: "connectors", page: id, scenario },
 });
 
-export const AccountSignedIn = at("account");
-export const AccountSignedOut = at("account", "signed-out");
+export const AccountSignedIn: Story = {
+  ...at("account"),
+  tags: ["asset", "journey", "funnel-activation"],
+};
+export const AccountSignedOut: Story = {
+  ...at("account", "signed-out"),
+  tags: ["asset", "journey", "funnel-onboarding"],
+};
 export const AccountSignInPending = at("account", "sign-in-pending");
 export const AccountSignInError = at("account", "auth-error");
 export const AccountUpstreamRejection = at("account", "upstream-rejection");
 export const Apps = at("apps");
 export const ConnectorsOff = at("connectors", "connectors-off");
 export const ConnectorsList = at("connectors", "connectors-list");
-export const ConnectorReady = connector("connectors-detail-ready");
+export const ConnectorReady: Story = {
+  ...connector("connectors-detail-ready"),
+  tags: ["asset", "journey", "funnel-integration"],
+};
 export const ConnectorTermsNeeded = connector("connectors-detail-terms-needed");
 export const ConnectorSignInNeededCached = connector("connectors-detail-signin-needed-cached");
 export const ConnectorWorking = connector("connectors-detail-working");
@@ -86,7 +95,10 @@ export const Models = at("models");
 export const Logs = at("logs");
 export const Diagnostics = at("diagnostics");
 export const DiagnosticsUpdateAvailable = at("diagnostics", "update-available");
-export const FreshInstall = at("apps", "fresh-install");
+export const FreshInstall: Story = {
+  ...at("apps", "fresh-install"),
+  tags: ["asset", "journey", "funnel-configuration"],
+};
 
 // ---- section-level load failures (the banner across the section) ----------
 export const AppsLoadError = at("apps", "signed-in", ["/settings/api/apps"]);

@@ -1,10 +1,18 @@
 import type { AppEntry } from "~/lib/config/settings-types"
 
+import { claudeDesktopPluginClient } from "~/lib/plugins/clients/claude-desktop"
+import { removePluginClientEntries } from "~/lib/plugins/clients/sync"
+import { notifyPluginsChanged, syncPluginClients } from "~/lib/plugins/runtime"
+
 import type { AppUninstallResult, ClientApp } from "../index"
 
 import { claudeDesktopCli } from "./cli"
-import { DESKTOP_KEY_LABEL, isConfigLibraryApplied } from "./config"
-import { claudeAppInstalled } from "./detect"
+import {
+  configLibraryConflict,
+  DESKTOP_KEY_LABEL,
+  isConfigLibraryApplied,
+} from "./config"
+import { claudeAppInstalled, detectClaudeAppInstallations } from "./detect"
 import {
   disableClaudeDesktopRouting,
   enableClaudeDesktopRouting,
@@ -24,34 +32,47 @@ export const claudeDesktopApp: ClientApp = {
   getDetails(conflict: AppEntry["conflict"] = null): Promise<AppEntry> {
     const installed = claudeAppInstalled()
     const configured = isConfigLibraryApplied()
+    const installations = detectClaudeAppInstallations()
     return Promise.resolve({
       id: "claude-desktop",
       name: "Claude Desktop",
       kind: "config",
       enabled: configured,
       status: installed ? "ready" : "not-installed",
-      installs: [],
+      installs: installations.map((installation) => ({
+        kind: "desktop",
+        ...installation,
+      })),
       install: null,
-      conflict,
+      conflict: conflict ?? configLibraryConflict(),
     })
   },
 
-  enable() {
-    const { conflict } = enableClaudeDesktopRouting()
+  enable(options) {
+    const { conflict } = enableClaudeDesktopRouting(undefined, options)
     if (conflict) return Promise.resolve({ success: false, conflict })
+    syncPluginClients()
+    notifyPluginsChanged()
     return Promise.resolve({ success: true })
   },
 
   disable() {
+    // Remove the entry before routing state: the latter carries profile
+    // ownership used by the former's write guard.
+    removePluginClientEntries(claudeDesktopPluginClient)
     disableClaudeDesktopRouting()
+    notifyPluginsChanged()
     return Promise.resolve({ success: true })
   },
 
   uninstall(): Promise<AppUninstallResult> {
-    // Removes only our gateway profile from the Claude Desktop config,
-    // no-op when we never wired it. A profile the user
-    // edited after we wrote it is left on disk.
+    // Removes only our gateway profile and signed MCP entry. A profile or
+    // entry the user edited after setup is left on disk.
     const reverted: Array<string> = []
+    const mcp = removePluginClientEntries(claudeDesktopPluginClient)
+    if (mcp.removed.length > 0) {
+      reverted.push(`removed our MCP servers: ${mcp.removed.join(", ")}`)
+    }
     // Also clears the routing intent, so the next boot doesn't re-apply.
     const result = disableClaudeDesktopRouting()
     if (result.reverted) {

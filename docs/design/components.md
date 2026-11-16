@@ -120,7 +120,7 @@ error wins.
 
 ## Checkbox groups with "All"
 
-For one entity offered to several targets (a plugin to each app):
+For one entity offered to several targets (a plugin to each of several places):
 an "All …" checkbox heads the group, the targets indent under it by
 `--space-5`, rows split by a hairline. "All" shows the mixed
 (indeterminate) state when some are checked. Each target row is a
@@ -176,12 +176,18 @@ sections, and sections appear only when they apply to that plugin kind:
   secondary, or destructive as a ghost that reads red); an action with
   `confirm` asks in a `ConfirmDialog` first. One that failed to start
   shows an error `Callout` instead. Off shows no status line.
-- Connect to apps: a compact checkbox menu lists every app, summarizes the
-  selected apps in its trigger (or names the connector when none are selected),
-  and stays open while choices are changed. Apps
-  that cannot receive the connector remain visible as disabled menu items with
-  a warning glyph and an accessible reason. Changes save as made. The endpoint
-  address and its Copy button sit below the menu.
+- App Permissions: one visible row for every fixed app (Claude Code, Claude
+  Desktop, Codex, Copilot CLI) and every named API connection; nothing hides
+  behind a menu. A row is the name (a connection shows the label the person
+  gave it) and an editable Allow / Ask / Block `PermissionControl`
+  (`kind="access"`, the `.perm-seg` radio group: glyph-only, each option named
+  and with a tooltip). A row that can't be used right now (the app can't
+  receive connectors yet, the connection is turned off) stays in the list with
+  its control editable, so the choice is kept, and carries an info glyph;
+  hover or keyboard focus on it opens a card giving the reason. Changes save as
+  made and show at once; a failed save puts the control back and says why in a
+  `ProblemCallout`. The endpoint address and its Copy button sit below the rows.
+  A fixed app starts at Block until chosen; a named connection starts at Allow.
 - Tool permissions: the tools in three groups (Read-only, Write/delete,
   Other), each a twirl with a `.count-badge` and a menu button (Always
   allow / Ask every time / Blocked set the whole group; Custom marks a mixed
@@ -194,6 +200,12 @@ sections, and sections appear only when they apply to that plugin kind:
   Changes save as made and show at once; a failed save puts the control
   back and says why in a `ProblemCallout`. Tools from the cached catalog
   carry a quiet `.panel-status` line saying when they were last seen.
+  These compose with App Permissions, the caller's gate, which is checked
+  first: Block there refuses the whole connector for that app or connection
+  whatever its tools say (no tools are listed to it and an app gets no
+  connector entry); Ask there needs approval on each call, even to a tool that
+  is Allowed; Allow there defers to the per-tool permissions, which then
+  decide on their own.
 - Configuration: a `.form` generated from the connector's config schema;
   advanced fields fold under a twirl (open when the connector failed to
   start). Save / Revert; the connector's validation lands as a caption
@@ -201,7 +213,7 @@ sections, and sections appear only when they apply to that plugin kind:
 - About: where it connects, how it signs in, its terms and website.
 
 Extensions use the same detail dialog, status/actions, switch, configuration,
-and About sections, but omit connector-only app, MCP endpoint, and tool
+and About sections, but omit connector-only App Permissions, MCP endpoint, and tool
 permission sections. This keeps FigJam and Work IQ in one plugin-detail pattern
 without presenting controls that do not apply.
 

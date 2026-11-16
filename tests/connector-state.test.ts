@@ -30,6 +30,7 @@ const WAITING_CONNECTOR = {
   },
   toolsSource: "none",
   clients: [],
+  access: [],
   endpoint: "/mcp/waiting-connector",
 } satisfies PluginView
 

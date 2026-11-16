@@ -38,7 +38,18 @@ export default meta;
 type Story = StoryObj<Args>;
 
 /** Streaming, warm, cooling, and cold sessions with live rate and context. */
-export const LiveSessions: Story = {};
+export const LiveSessions: Story = {
+  tags: ["asset", "journey", "funnel-engagement"],
+};
+/**
+ * A real FigJam panel session: a normal session id with the client "other",
+ * labelled with the board it belongs to. It is not the folded "Other requests"
+ * row, so it shows its own tokens, cache and context.
+ */
+export const FigJamSession: Story = {
+  tags: ["asset"],
+  args: { scenario: "figjam-session" },
+};
 /** No requests have reached Maximal yet. */
 export const Empty: Story = { args: { scenario: "fresh-install" } };
 /** The sessions endpoint failed while the rest of the observability UI remains available. */

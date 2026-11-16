@@ -117,12 +117,21 @@ function abortError(reason?: unknown): Error {
   return error
 }
 
-function fallbackWireError(error: unknown): WireErrorDto {
+function fallbackWireError(
+  error: unknown,
+  handlerCompleted = false,
+): WireErrorDto {
   const aborted = error instanceof Error && error.name === "AbortError"
   return errorToWireError(error, {
-    kind: aborted ? "aborted" : "internal",
-    code: aborted ? "aborted" : "handler_failed",
-    retry: aborted ? "never" : "unknown",
+    kind:
+      aborted ? "aborted"
+      : handlerCompleted ? "indeterminate"
+      : "internal",
+    code:
+      aborted ? "aborted"
+      : handlerCompleted ? "terminal_send_failed"
+      : "handler_failed",
+    retry: aborted || handlerCompleted ? "never" : "unknown",
   })
 }
 
@@ -197,8 +206,12 @@ export class DuplexRpcDispatcher {
     return this.#startCall("provider", method, params, options)
   }
 
-  callHost(method: string, params: JsonValue): Promise<JsonValue> {
-    return this.#startCall("host", method, params)
+  callHost(
+    method: string,
+    params: JsonValue,
+    options: RpcCallOptions = {},
+  ): Promise<JsonValue> {
+    return this.#startCall("host", method, params, options)
   }
 
   dispose(reason = "Dispatcher disposed."): void {
@@ -422,16 +435,18 @@ export class DuplexRpcDispatcher {
     call: InboundCall,
     handler: RpcHandler | undefined,
   ): Promise<void> {
+    let handlerCompleted = false
     try {
       if (!handler) throw new Error(`No RPC handler for ${call.kind}.`)
       const value = await handler(params, this.#context(callId, call))
+      handlerCompleted = true
       await Promise.all(call.nested)
       await Promise.all(call.spends)
       if (call.cancelled) throw abortError(call.controller.signal.reason)
       await this.#sendInboundTerminal(callId, call, value)
     } catch (error) {
       await Promise.allSettled(call.spends)
-      await this.#sendInboundError(callId, call, error)
+      await this.#sendInboundError(callId, call, error, handlerCompleted)
     } finally {
       this.#inbound.delete(callId)
       this.#rememberTerminal(callId)
@@ -554,35 +569,11 @@ export class DuplexRpcDispatcher {
     const callId = frame.callId
     if (!callId)
       throw new ProtocolError("malformed", "Elicitation has no call identity.")
-    const parent = this.#outbound.get(frame.payload.parentCallId)
-    const direct = parent?.onElicit
-    if (direct) {
-      void direct(frame.payload.message, frame.payload.requestedSchema)
-        .then((reply) => this.#elicitationReply(reply))
-        .then((reply) =>
-          this.#transport.send({
-            type: "elicitation-reply",
-            callId,
-            payload: reply,
-          }),
-        )
-        .catch(() =>
-          this.#transport.send({
-            type: "elicitation-reply",
-            callId,
-            payload: { action: "cancel" },
-          }),
-        )
-      return
-    }
-    const handler = this.#handlers.host.get("elicitation")
-    if (!handler) {
-      void this.#transport.send({
-        type: "elicitation-reply",
-        callId,
-        payload: { action: "decline" },
-      })
-      return
+    if (this.#inbound.has(callId) || this.#terminalHistory.has(callId)) {
+      throw new ProtocolError(
+        "out-of-order",
+        "Inbound call identity is not unique.",
+      )
     }
     const controller = new AbortController()
     const call: InboundCall = {
@@ -594,9 +585,30 @@ export class DuplexRpcDispatcher {
       nested: new Set(),
     }
     this.#inbound.set(callId, call)
-    void (async () => {
-      try {
-        const value = await handler(
+    void this.#answerElicitation(callId, frame, call).catch((error) =>
+      this.#transport.close(
+        error instanceof Error ? error.message : "Elicitation failed.",
+      ),
+    )
+  }
+
+  async #answerElicitation(
+    callId: string,
+    frame: Extract<ProtocolFrame, { type: "elicitation" }>,
+    call: InboundCall,
+  ): Promise<void> {
+    try {
+      const parent = this.#outbound.get(frame.payload.parentCallId)
+      const direct = parent?.onElicit
+      const handler = this.#handlers.host.get("elicitation")
+      let value: unknown
+      if (direct) {
+        value = await direct(
+          frame.payload.message,
+          frame.payload.requestedSchema,
+        )
+      } else if (handler) {
+        value = await handler(
           {
             parentCallId: frame.payload.parentCallId,
             message: frame.payload.message,
@@ -604,23 +616,26 @@ export class DuplexRpcDispatcher {
           },
           this.#context(callId, call),
         )
-        const reply = this.#elicitationReply(value)
-        await this.#sendTerminal(call, {
-          type: "elicitation-reply",
-          callId,
-          payload: reply,
-        })
-      } catch {
-        await this.#sendTerminal(call, {
-          type: "elicitation-reply",
-          callId,
-          payload: { action: "cancel" },
-        })
-      } finally {
-        this.#inbound.delete(callId)
-        this.#rememberTerminal(callId)
+      } else {
+        value = { action: "decline" }
       }
-    })()
+      if (call.cancelled) return
+      await this.#sendTerminal(call, {
+        type: "elicitation-reply",
+        callId,
+        payload: this.#elicitationReply(value),
+      })
+    } catch {
+      if (call.cancelled) return
+      await this.#sendTerminal(call, {
+        type: "elicitation-reply",
+        callId,
+        payload: { action: "cancel" },
+      })
+    } finally {
+      if (this.#inbound.get(callId) === call) this.#inbound.delete(callId)
+      this.#rememberTerminal(callId)
+    }
   }
 
   #elicitationReply(value: unknown): ElicitationReply {
@@ -675,12 +690,13 @@ export class DuplexRpcDispatcher {
     callId: string,
     call: InboundCall,
     error: unknown,
+    handlerCompleted = false,
   ): Promise<void> {
     if (call.terminalSent || call.terminalPromise) {
       await call.terminalPromise
       return
     }
-    const wire = fallbackWireError(error)
+    const wire = fallbackWireError(error, handlerCompleted)
     let draft: FrameDraft
     switch (call.kind) {
       case "elicitation": {

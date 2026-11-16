@@ -22,6 +22,10 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const list = (mockApi: MockApiParameters): Story => ({ parameters: { mockApi } });
+/** The dialog is open and its heading has taken first focus; focus moved before that is stolen back. */
+const dialogSettled = async (canvas: ReturnType<typeof within>): Promise<void> => {
+  await waitFor(() => expect(canvas.getByRole("heading", { name: "Work IQ", level: 3 })).toHaveFocus());
+};
 const dialog = (mockApi: MockApiParameters, play?: Story["play"]): Story => ({
   args: { initialConnectorId: "workiq" },
   parameters: { mockApi },
@@ -80,17 +84,140 @@ export const DialogConfigErrorSaved = dialog({ scenario: "connectors-detail-conf
   await canvas.findByText(/Invalid URL/);
 });
 export const DialogClaudeCodeOff = dialog({ scenario: "connectors-claude-code-off" });
-/** No app selected: the trigger says what it controls instead of repeating the section title. */
+/** Claude Code is Blocked: every other app and connection still has its own permission row. */
 export const DialogNoAppsSelected = dialog({ scenario: "connectors-no-apps" });
-/** The app picker open: every app is listed and unsupported targets explain why. */
-export const DialogClientMenu = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+/**
+ * App Permissions: every fixed app (Claude Code, Claude Desktop, Codex, Copilot
+ * CLI) and every named API connection (Laptop, CI) gets its own Allow / Ask /
+ * Block row. Claude Code and Laptop are usable; the others say why they aren't.
+ */
+export const DialogAppPermissions: Story = {
+  ...dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const expected: Array<[string, RegExp]> = [
+      ["Claude Code", /allow/i],
+      ["Claude Desktop", /ask/i],
+      ["Codex", /block/i],
+      ["Copilot CLI", /ask/i],
+      ["Laptop", /allow/i],
+      ["CI", /block/i],
+    ];
+    for (const [target, permission] of expected) {
+      const group = await canvas.findByRole("radiogroup", { name: new RegExp(`Permission for ${target}$`) });
+      await expect(within(group).getByRole("radio", { name: permission })).toBeChecked();
+    }
+  }),
+  tags: ["asset"],
+};
+/** Named API connections sit below the fixed apps; CI is turned off but keeps its Block policy. */
+export const DialogNamedConnections = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
   const canvas = within(canvasElement);
-  await userEvent.click(await canvas.findByRole("button", { name: "Apps that get Work IQ" }));
-  const menu = within(await canvas.findByRole("menu", { name: "Apps that get Work IQ" }));
-  await expect(menu.getByRole("menuitemcheckbox", { name: "Claude Code" })).toHaveAttribute("aria-checked", "true");
-  for (const app of ["Claude Desktop", "Codex", "Copilot CLI"]) {
-    await expect(menu.getByRole("menuitemcheckbox", { name: app })).toHaveAttribute("aria-disabled", "true");
+  await canvas.findByText("Laptop");
+  await canvas.findByText("CI");
+  const ci = await canvas.findByRole("radiogroup", { name: /Permission for CI$/ });
+  await expect(within(ci).getByRole("radio", { name: /block/i })).toBeChecked();
+});
+/** Each row is three-way: Allow, then Ask, then Block, for a fixed app and a named connection. */
+export const DialogAppPermissionsTriState = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  for (const target of ["Claude Code", "Laptop"]) {
+    const group = await canvas.findByRole("radiogroup", { name: new RegExp(`Permission for ${target}$`) });
+    for (const permission of [/ask/i, /block/i, /allow/i]) {
+      // The control is read-only while a save is in flight; wait it out.
+      await waitFor(() => expect(group).not.toHaveAttribute("aria-busy"));
+      await userEvent.click(within(group).getByRole("radio", { name: permission }));
+      await waitFor(() => expect(within(group).getByRole("radio", { name: permission })).toBeChecked());
+    }
+    await waitFor(() => expect(group).not.toHaveAttribute("aria-busy"));
   }
+});
+/**
+ * A slow save keeps keyboard focus on the radio group: the options stay
+ * focusable (read-only, aria-busy) instead of being disabled, the status
+ * live region is already mounted and fills in, and arrows work again after.
+ */
+export const DialogAppPermissionsKeyboard = dialog(
+  { scenario: "connectors-detail-ready", latencyMs: 300 },
+  async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const group = await canvas.findByRole("radiogroup", { name: /Permission for Claude Code$/ });
+    await dialogSettled(canvas);
+    const status = canvasElement.querySelector(".connector-detail__saving");
+    await expect(status).toBeInTheDocument();
+    await expect(status).toBeEmptyDOMElement();
+
+    within(group).getByRole("radio", { name: /allow/i }).focus();
+    await userEvent.keyboard("{ArrowRight}");
+    const ask = within(group).getByRole("radio", { name: /ask/i });
+    await expect(ask).toBeChecked();
+    await expect(ask).toHaveFocus();
+    await expect(ask).toBeEnabled();
+    await expect(group).toHaveAttribute("aria-busy", "true");
+    await expect(group).toHaveAttribute("aria-readonly", "true");
+    await expect(status).toHaveTextContent("Saving");
+
+    // Read-only while saving: a second arrow neither moves focus nor saves.
+    await userEvent.keyboard("{ArrowRight}");
+    await expect(ask).toBeChecked();
+    await expect(ask).toHaveFocus();
+
+    await waitFor(() => expect(group).not.toHaveAttribute("aria-busy"));
+    await expect(status).toBeEmptyDOMElement();
+    await expect(ask).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    const block = within(group).getByRole("radio", { name: /block/i });
+    await waitFor(() => expect(block).toBeChecked());
+    await expect(block).toHaveFocus();
+  },
+);
+/** Hovering the info control beside an unavailable app opens a card with the reason; clicking it keeps it open. */
+export const DialogUnavailableInfo = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  const info = await canvas.findByRole("button", { name: "Why Codex is unavailable" });
+  // At least a 24px target.
+  const box = info.getBoundingClientRect();
+  await expect(box.width).toBeGreaterThanOrEqual(24);
+  await expect(box.height).toBeGreaterThanOrEqual(24);
+  // Closed: the card isn't in the DOM at all (no hidden overflow, no stale text).
+  await expect(canvas.queryByRole("tooltip")).toBeNull();
+  await userEvent.hover(info);
+  const card = await canvas.findByRole("tooltip");
+  // The dialog fades in; visibility is only meaningful once it has.
+  await waitFor(() => expect(card).toBeVisible());
+  await expect(card).toHaveTextContent("Maximal doesn't add connectors to Codex yet.");
+  await expect(info).toHaveAccessibleDescription("Maximal doesn't add connectors to Codex yet.");
+  // The click that follows a hover must not close it.
+  await userEvent.click(info);
+  await expect(canvas.getByRole("tooltip")).toBeVisible();
+  await expect(info).toHaveAccessibleDescription("Maximal doesn't add connectors to Codex yet.");
+  // The card stays inside the dialog's scrolling body.
+  const body = canvasElement.querySelector(".connector-detail__body");
+  const bounds = body?.getBoundingClientRect();
+  const cardBox = card.getBoundingClientRect();
+  await expect(bounds).toBeDefined();
+  await expect(cardBox.left).toBeGreaterThanOrEqual((bounds?.left ?? 0) - 1);
+  await expect(cardBox.right).toBeLessThanOrEqual((bounds?.right ?? 0) + 1);
+});
+/** Keyboard focus opens the card; the first Escape closes only the card, the next is left for the dialog. */
+export const DialogUnavailableConnectionInfo = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  const info = await canvas.findByRole("button", { name: "Why CI is unavailable" });
+  await dialogSettled(canvas);
+  info.focus();
+  const card = await canvas.findByRole("tooltip");
+  await waitFor(() => expect(card).toBeVisible());
+  await expect(card).toHaveTextContent("This connection is turned off.");
+  const escape = (): KeyboardEvent => {
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    info.dispatchEvent(event);
+    return event;
+  };
+  // Open: Escape is consumed (that also suppresses the native dialog's cancel).
+  await expect(escape().defaultPrevented).toBe(true);
+  await waitFor(() => expect(canvas.queryByRole("tooltip")).toBeNull());
+  await expect(info).toHaveFocus();
+  // Closed: Escape passes through so the dialog can dismiss.
+  await expect(escape().defaultPrevented).toBe(false);
 });
 /** The Write/delete group's menu open: Custom is checked, not choosable. */
 export const DialogGroupMenu = dialog({ scenario: "connectors-detail-ready" }, async ({ canvasElement }) => {

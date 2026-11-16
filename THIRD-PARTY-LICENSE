@@ -53,3 +53,40 @@ License not verified (no license stated in the shipped file):
 - **cssesc v3.0.0** (https://mths.be/cssesc), embedded in
   `shell/ui/dashboard/vendor/tailwind.min.js`. The bundle preserves
   only the line "https://mths.be/cssesc v3.0.0 by @mathias".
+
+================================================================================
+Harness identification icons
+================================================================================
+
+- **Ollama launch icons** — Claude Code, Claude Desktop, Codex, and ChatGPT
+  icons under `shell/src/ui/features/apps/icons/`, sourced from
+  https://github.com/ollama/ollama. Copyright (c) Ollama. MIT License.
+- **Pi icon** — `shell/src/ui/features/apps/icons/pi.svg`, sourced from
+  https://github.com/earendil-works/pi. Copyright (c) 2025 Mario Zechner.
+  MIT License.
+- **GitHub Octicon** — `shell/src/ui/features/apps/icons/copilot-cli.svg`,
+  sourced from https://github.com/primer/octicons. Copyright (c) GitHub, Inc.
+  MIT License. This current GitHub mark identifies the Copilot CLI integration;
+  the retired Copilot mascot artwork is not used.
+
+The product and service names and logos above identify compatible third-party
+harnesses. Their inclusion does not imply sponsorship or endorsement by their
+respective owners. Trademark rights are not granted by the MIT License.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

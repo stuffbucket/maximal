@@ -2328,121 +2328,150 @@ html[data-os="macos"] .topbar {
   cursor: not-allowed;
 }
 
-/* ---- Apps: per-integration cards ----
-   One card per app (Claude Code, Claude Desktop, Codex, Copilot CLI) — each
-   is a discrete actionable entity, so a card earns its chrome here.
-   The name leads; the On/Off switch (or install action) anchors the
-   right edge; detected surfaces live below as flat rows. */
+/* ---- Apps: harness table ---- */
+.apps-panel,
+.harnesses,
+.harnesses__header {
+  display: flex;
+  flex-direction: column;
+}
+
 .apps-panel {
-  display: flex;
-  flex-direction: column;
   gap: var(--space-4);
 }
 
+.harnesses,
+.harnesses__header {
+  gap: var(--space-2);
+}
 
-.app-card {
-  background: var(--surface-card);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  box-shadow: var(--elevation-card);
-  padding: var(--space-4) var(--space-5);
+.harnesses__table-wrap {
+  overflow-x: auto;
+}
+
+.harnesses__table {
+  table-layout: fixed;
+}
+
+.harnesses__table th:first-child {
+  width: 58%;
+}
+
+.harnesses__table th:nth-child(2) {
+  width: 16%;
+}
+
+.harnesses__table th:last-child,
+.harness-row__action {
+  text-align: end;
+}
+
+.harness-row__identity {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-3);
-}
-
-/* Coming-soon apps read as present-but-inert: dashed border, muted name,
-   no interaction. No opacity — it compounds with --text-muted and drops
-   the name below AA (contrast-audit.ts caught it). */
-.app-card--soon {
-  border-style: dashed;
-}
-
-.app-card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.app-card__name {
-  margin: 0;
   min-width: 0;
-  flex: 1 1 auto;
-  font-size: var(--text-md);
-  font-weight: var(--weight-lg);
-  line-height: var(--leading-lg);
-  color: var(--text-strong);
 }
 
-.app-card--soon .app-card__name {
-  color: var(--text-muted);
-  font-weight: var(--weight-md);
-}
-
-.app-card__control {
-  flex: 0 0 auto;
-  display: flex;
+.harness-row__icon {
+  display: inline-flex;
+  flex: 0 0 var(--size-xl);
   align-items: center;
+  justify-content: center;
+  width: var(--size-xl);
+  height: var(--size-xl);
+  overflow: hidden;
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
 }
 
-.app-card__pill {
+.harness-icon {
+  display: block;
+  width: var(--size-lg);
+  height: var(--size-lg);
+  object-fit: contain;
+}
+
+.harness-icon--monochrome {
+  filter: invert(1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .harness-icon--monochrome {
+    filter: none;
+  }
+}
+
+[data-theme="light"] .harness-icon--monochrome {
+  filter: none;
+}
+
+.harness-row__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.harness-row__name--link {
+  appearance: none;
+  min-height: var(--size-xl);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-input);
+  color: var(--link);
+  text-align: start;
+  cursor: pointer;
+}
+
+.harness-row__name--link:hover {
+  color: var(--link-hover);
+}
+
+.harness-row__name--link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.harness-row__type,
+.harness-row__coming-soon {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.harness-row__type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-lg);
+  height: var(--size-lg);
+}
+
+.harness-row__type-icon svg {
+  width: var(--size-md);
+  height: var(--size-md);
+}
+
+.harness-row__action .switch {
+  display: inline-flex;
+}
+
+/* Legacy install/update affordance shared by the vanilla Linux apt UI. */
 .app-card__hint {
   margin: 0;
   font-size: var(--text-sm);
   line-height: var(--leading-lg);
   color: var(--text-muted);
-  /* A hint can be a path, such as an MCP server's on Windows. */
   overflow-wrap: anywhere;
 }
 
-.app-card__installs {
-  display: flex;
-  flex-direction: column;
-  border-block: var(--border-width-hairline) solid var(--border-subtle);
-}
-
-.app-card__install-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  padding-block: var(--space-2);
-}
-
-.app-card__install-row + .app-card__install-row {
-  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
-}
-
-.app-card__install-kind {
-  flex: 0 0 auto;
-  min-width: var(--space-12);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-md);
-  color: var(--text-muted);
-}
-
-.app-card__install-path {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
-}
-
-.app-card__guidance {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding-inline-start: var(--space-5);
-  font-size: var(--text-sm);
-  line-height: var(--leading-lg);
-  color: var(--text-muted);
-}
-
-/* ---- Install affordance (Claude Code, no install found) ---- */
 .app-card__install {
   display: flex;
   flex-direction: column;
@@ -2473,70 +2502,6 @@ html[data-os="macos"] .topbar {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-}
-
-/* ---- WinGet install progress and output (Claude Code, Windows) ----
-   Live progress is the last line WinGet printed; a failed install shows the
-   whole recent output in a box that scrolls rather than growing the card. */
-.app-card__progress {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.app-card__output {
-  margin: 0;
-  max-height: 12em;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-/* ---- Conflict surface (enable refused) ----
-   Shown when toggling on was refused because the app's config already
-   carries a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL).
-   Honest, not alarming: an error-colored icon (the toggle snapped back)
-   with a plain-language remedy so the user is never left guessing why the
-   switch didn't take. Same shape as .callout. */
-.app-card__conflict {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-control);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-card);
-}
-
-.app-card__conflict-icon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-block-start: 2px;
-  color: var(--status-error);
-}
-
-.app-card__conflict-text {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.app-card__conflict-title {
-  font-size: var(--text-base);
-  font-weight: var(--weight-md);
-  line-height: var(--leading-lg);
-  color: var(--text-strong);
-}
-
-.app-card__conflict-detail {
-  font-size: var(--text-sm);
-  line-height: var(--leading-lg);
-  color: var(--text-muted);
 }
 
 /* ---- Callout (banner across a section or card) ----
@@ -2886,6 +2851,15 @@ html[data-os="macos"] .topbar {
   color: var(--text-muted);
 }
 
+/* The live region stays mounted; idle, it takes no space (an absolutely
+   positioned flex item adds no gap) but is still announced when it fills. */
+.connector-detail__saving:not([data-active]) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 .connector-detail__desc {
   margin: 0;
   font-size: var(--text-sm);
@@ -2971,40 +2945,118 @@ html[data-os="macos"] .topbar {
   overflow-wrap: anywhere;
 }
 
-.client-menu {
-  align-self: flex-start;
-  max-width: 100%;
-}
-
-.client-menu__trigger {
-  max-width: 100%;
+.app-permissions,
+.access-group {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
-}
-
-.client-menu__summary {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.client-menu__list {
-  inset-inline: 0 auto;
+.access-group + .access-group {
+  margin-block-start: var(--space-2);
 }
 
-.client-menu__check {
-  margin-inline-start: 0;
+.access-group__title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
 }
 
-.client-menu__warning {
-  display: inline-flex;
+.access-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.access-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-block: var(--space-2);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.access-row:last-child {
+  border-block-end: 0;
+}
+
+.access-row__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.access-row__name {
+  min-width: 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.access-row--unavailable .access-row__name {
+  color: var(--text-muted);
+}
+
+.access-info {
   flex: 0 0 auto;
-  color: var(--status-warning);
+  display: inline-flex;
 }
 
-.client-menu__warning svg {
+.access-info__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-lg);
+  height: var(--size-lg);
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: help;
+}
+
+.access-info__trigger:hover {
+  color: var(--text-strong);
+}
+
+.access-info__trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.access-info__trigger svg {
   width: var(--size-sm);
   height: var(--size-sm);
+}
+
+/* Anchored to the row, not the icon, and only in the DOM while open, so it
+   can't run past the dialog body or leave scroll overflow behind. */
+.access-info__card {
+  position: absolute;
+  inset-block-start: calc(100% - var(--space-1));
+  inset-inline-start: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: min(34ch, 100%);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  box-shadow: var(--elevation-tooltip);
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 
 .connector-endpoint {
@@ -3364,8 +3416,8 @@ html[data-os="macos"] .topbar {
   display: none;
 }
 
-/* Two-state permission control (Allowed / Blocked): a segmented pair on a
-   control surface; the chosen option steps forward onto the card surface. */
+/* Three-state permission control (Allow / Ask / Block): a segmented group on
+   a control surface; the chosen option steps forward onto the card surface. */
 .perm-seg {
   flex: 0 0 auto;
   display: inline-flex;
@@ -3425,6 +3477,10 @@ html[data-os="macos"] .topbar {
 
 .perm-seg__option:disabled {
   cursor: not-allowed;
+}
+
+.perm-seg[aria-busy="true"] .perm-seg__option {
+  cursor: progress;
 }
 
 /* Configuration form: the shared .form rows. */

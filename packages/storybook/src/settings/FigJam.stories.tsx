@@ -33,7 +33,17 @@ export const ListOff = list({ scenario: "figjam-off" });
 /** On, the Figma plugin not built yet: "Needs setup". */
 export const ListNeedsSetup = list({ scenario: "figjam-needs-setup" });
 /** Ready: a tick, same as a ready connector. */
-export const ListReady = list({ scenario: "figjam-ready" });
+export const ListReady: Story = {
+  ...list({ scenario: "figjam-ready" }),
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByRole("button", { name: "Work IQ" });
+    await expect(
+      [...canvasElement.querySelectorAll(".connector-row__name")].map(
+        (element) => element.textContent?.trim(),
+      ),
+    ).toEqual(["FigJam", "Work IQ"]);
+  },
+};
 /** A panel is waiting for approval: the row still reads ready (the tray and toast carry the ask). */
 export const ListPairing = list({ scenario: "figjam-pairing" });
 /** Bridge port taken: "Error". */

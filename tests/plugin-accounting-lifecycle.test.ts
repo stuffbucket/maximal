@@ -140,9 +140,11 @@ function serverToolFixture(): ServerToolFixture {
   const generation: PluginGenerationLease = {
     generationId: "generation-one",
     get: unsupported,
+    list: unsupported,
     listTools: unsupported,
     toolViews: unsupported,
     serverTools: () => [view],
+    pluginClientContributions: () => [],
     operations: unsupported,
     callTool: unsupported,
     prepareServerTool: () =>
@@ -192,6 +194,7 @@ function serverToolFixture(): ServerToolFixture {
     callTool: unsupported,
     operations: unsupported,
     serverTools: unsupported,
+    pluginClientContributions: () => [],
     prepareServerTool: unsupported,
     callServerTool: unsupported,
     runAction: unsupported,

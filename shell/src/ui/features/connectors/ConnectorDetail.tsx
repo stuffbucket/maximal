@@ -1,14 +1,14 @@
 import { useState, type RefObject } from "react";
 
 import { t } from "../../../i18n";
-import type { PluginClientId, PluginView } from "../../../proxy/client";
+import type { PluginView, ToolPermission } from "../../../proxy/client";
 import { Button } from "../../components/Button";
 import { Callout } from "../../components/Callout";
 import { ProblemCallout } from "../../components/ProblemCallout";
 import { Switch } from "../../components/Switch";
 import type { Problem } from "../../problems";
 
-import { ClientMenu } from "./ClientMenu";
+import { AppPermissions } from "./AppPermissions";
 import { ConfigForm } from "./ConfigForm";
 import { connectorLine } from "./connector-state";
 import { ConnectorStatusBlock } from "./ConnectorStatusBlock";
@@ -20,9 +20,10 @@ import { useConnectorDetail } from "./useConnectorDetail";
 
 const COPIED_FLASH_MS = 1400;
 
+/** Only what the person just changed; never a snapshot of the rest. */
 interface Change {
-  enabled: boolean;
-  clients: Array<PluginClientId>;
+  enabled?: boolean;
+  access?: Record<string, ToolPermission>;
 }
 
 interface ConnectorDetailProps {
@@ -64,7 +65,10 @@ export function ConnectorDetail({
 
   const busy = pending !== null;
   const enabled = pending?.enabled ?? connector.enabled;
-  const chosen = new Set(pending?.clients ?? connector.clients.filter((c) => c.selected).map((c) => c.id));
+  const access: Record<string, ToolPermission> = {
+    ...Object.fromEntries(connector.access.map((target) => [target.id, target.permission])),
+    ...pending?.access,
+  };
   const line = connectorLine(connector);
   const failedToStart = connector.enabled && connector.lifecycle === "failed";
 
@@ -76,11 +80,9 @@ export function ConnectorDetail({
     if (!result.ok && result.problem) setFailed({ problem: result.problem, change });
   };
 
-  const setClient = (id: PluginClientId, checked: boolean): void => {
-    const next = new Set(chosen);
-    if (checked) next.add(id);
-    else next.delete(id);
-    void save({ enabled, clients: [...next] });
+  const setAccess = (id: string, permission: ToolPermission): void => {
+    if (busy) return;
+    void save({ access: { [id]: permission } });
   };
 
   const copyEndpoint = async (): Promise<void> => {
@@ -95,7 +97,7 @@ export function ConnectorDetail({
   };
 
   const upstream = connector.manifest.connector;
-  // Extensions have no MCP endpoint, clients or tools: just status and settings.
+  // Extensions have no MCP endpoint, access targets, or tools: just status and settings.
   const isConnector = connector.kind === "connector";
 
   return (
@@ -106,15 +108,17 @@ export function ConnectorDetail({
           {connector.displayName}
         </h3>
         <div className="connector-detail__control">
-          {busy && (
-            <span className="connector-detail__saving" role="status">
-              {t("connectors-saving")}
-            </span>
-          )}
+          {/* Always present so assistive tech announces its text changing. */}
+          <span className="connector-detail__saving" role="status" data-active={busy || undefined}>
+            {busy ? t("connectors-saving") : ""}
+          </span>
+          {/* Stays enabled while saving so focus isn't dropped; a second
+              change waits for the first (the controlled value snaps back). */}
           <Switch
             checked={enabled}
-            disabled={busy}
-            onCheckedChange={(next) => void save({ enabled: next, clients: [...chosen] })}
+            onCheckedChange={(next) => {
+              if (!busy) void save({ enabled: next });
+            }}
             label={enabled ? t("connectors-switch-on") : t("connectors-switch-off")}
           />
         </div>
@@ -162,18 +166,15 @@ export function ConnectorDetail({
         <section className="connector-section" aria-labelledby={`${connector.id}-connect-title`}>
           <div className="connector-section__head">
             <h4 className="connector-section__title" id={`${connector.id}-connect-title`}>
-              {t("connectors-connect-title")}
+              {t("connectors-access-title")}
             </h4>
           </div>
-          {connector.clients.length > 0 && (
-            <ClientMenu
-              connector={connector.displayName}
-              clients={connector.clients}
-              selected={chosen}
-              disabled={busy}
-              onChange={setClient}
-            />
-          )}
+          <AppPermissions
+            targets={connector.access}
+            permissions={access}
+            busy={busy}
+            onChange={setAccess}
+          />
           {connector.clients.map(
             (client) =>
               client.standalone && (

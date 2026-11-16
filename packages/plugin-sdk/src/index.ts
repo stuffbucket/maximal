@@ -26,9 +26,11 @@ export { PluginContractError, type PluginContractErrorCode } from "./errors"
 export {
   isOperationUnavailableError,
   OperationUnavailableError,
+  PLUGIN_CLIENT_IDS,
 } from "./gateway"
 export * from "./lifecycle"
 export * from "./operations"
+export * from "./plugin-clients"
 export * from "./providers"
 export * from "./relay"
 export * from "./server-tools"

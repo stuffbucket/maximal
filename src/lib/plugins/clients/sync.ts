@@ -3,7 +3,8 @@
  *
  * A connector's MCP endpoint (`/mcp/<id>`) is wanted in a client when the
  * connector is on (`plugins.<id>.enabled`), the user chose that client for
- * it (`plugins.<id>.clients`), Maximal's integration for the client is on,
+ * it (not Block in `plugins.<id>.access`, or listed in the legacy
+ * `plugins.<id>.clients`), Maximal's integration for the client is on,
  * and the client doesn't already run the same service without Maximal
  * (`standalone`). The client's configurator owns its file format and which
  * entries are Maximal's; this module only works out what is wanted.
@@ -20,19 +21,54 @@
 import type { PluginClientId } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import consola from "consola"
+import { randomUUID } from "node:crypto"
 
-import { resolveApiKey } from "~/lib/auth/api-key-helper"
-import { type AppConfig, getConfig, writeConfig } from "~/lib/config/config"
+import { generateApiKey } from "~/lib/auth/api-key-helper"
+import {
+  type ApiKeyEntry,
+  type AppConfig,
+  getConfig,
+  writeConfig,
+} from "~/lib/config/config"
 import { currentProxyPort } from "~/lib/start/proxy-port"
 
+import { pluginAccessIdForApiKey, pluginAppAccessId } from "../access"
 import { getPluginGateway } from "../gateway"
+import { pluginClientPermission } from "../settings"
+
+/** Maximal's aggregate MCP endpoint, on the port it listens on. */
+export function pluginAggregateMcpUrl(
+  port: number = currentProxyPort(),
+): string {
+  return `http://127.0.0.1:${port}/mcp`
+}
+
+/** Whether `value` is Maximal's aggregate endpoint on any loopback port. */
+export function isMaximalAggregateMcpUrl(value: unknown): boolean {
+  if (typeof value !== "string") return false
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+  return (
+    url.protocol === "http:"
+    && url.hostname === "127.0.0.1"
+    && url.username === ""
+    && url.password === ""
+    && url.pathname === "/mcp"
+    && url.search === ""
+    && url.hash === ""
+  )
+}
 
 /** Maximal's URL for a plugin's MCP endpoint, on the port it listens on. */
 export function pluginMcpUrl(
   id: string,
   port: number = currentProxyPort(),
 ): string {
-  return `http://127.0.0.1:${port}/mcp/${id}`
+  return `${pluginAggregateMcpUrl(port)}/${id}`
 }
 
 /** Whether `value` is Maximal's URL for plugin `id` on any port, so an entry
@@ -78,14 +114,19 @@ export interface PluginClientApplyResult {
   removed: Array<string>
 }
 
+export type PluginClientUnavailableReason =
+  | { kind: "app-off" }
+  | { kind: "custom"; reason: string }
+
 export interface PluginClientConfigurator {
   readonly clientId: PluginClientId
-  /** The label that resolves this client's Maximal key (`ClientApp.apiKeyLabel`). */
+  /** The label of the key the app itself uses for Maximal (`ClientApp.apiKeyLabel`).
+   *  Its MCP entries use the key labelled with `clientId` instead; see `appIdentityKey`. */
   readonly apiKeyLabel: string
   /** Whether Maximal's integration for this client is on. */
   available(): boolean
-  /** When not `available()`, why, in English, for Settings. */
-  unavailableReason(): string
+  /** Stable UI reason, with prose only for a host-specific conflict. */
+  unavailableReason(): PluginClientUnavailableReason
   /** The client's own setup of plugin `id`, if it has one. */
   standalone(id: string): StandaloneInstall | undefined
   /** Make Maximal's entries exactly `desired` and remove the `legacy`
@@ -119,26 +160,83 @@ function clearLegacyNames(clientId: PluginClientId): void {
   writeConfig({ ...latest, apps: { ...latest.apps, [key]: rest } })
 }
 
+/**
+ * The key a client's MCP entries authenticate with. It must be one the MCP
+ * route maps back to this app (`app:<client-id>`, see `access.ts`), never the
+ * default endpoint key: a key that identifies as a generic connection would
+ * let the app skip its own App Permissions (Ask in particular).
+ */
+function appIdentityKey(
+  config: AppConfig,
+  clientId: PluginClientId,
+): ApiKeyEntry | undefined {
+  const target = pluginAppAccessId(clientId)
+  return (config.auth?.apiKeyEntries ?? []).find(
+    (entry) =>
+      entry.enabled
+      && entry.key.trim().length > 0
+      && pluginAccessIdForApiKey(entry) === target,
+  )
+}
+
+/** Whether the user holds a key that identifies the app but turned it off.
+ *  That is a revocation: Maximal must not replace it behind their back. */
+function appIdentityKeyRevoked(
+  config: AppConfig,
+  clientId: PluginClientId,
+): boolean {
+  const target = pluginAppAccessId(clientId)
+  return (config.auth?.apiKeyEntries ?? []).some(
+    (entry) => pluginAccessIdForApiKey(entry) === target,
+  )
+}
+
+/** Make sure the app has an enabled key that identifies it, unless the user
+ *  deliberately disabled the one it had. */
+function ensureAppIdentityKey(clientId: PluginClientId): void {
+  const config = getConfig()
+  if (appIdentityKey(config, clientId)) return
+  if (appIdentityKeyRevoked(config, clientId)) return
+  const entry: ApiKeyEntry = {
+    id: randomUUID(),
+    label: clientId,
+    key: generateApiKey(),
+    enabled: true,
+    created_at: new Date().toISOString(),
+  }
+  writeConfig({
+    ...config,
+    auth: {
+      ...config.auth,
+      apiKeyEntries: [...(config.auth?.apiKeyEntries ?? []), entry],
+    },
+  })
+}
+
 /** What the client should have: an entry for each connector that is on,
- *  goes to this client, and that the client doesn't already run itself. */
+ *  isn't Blocked for this client, and that the client doesn't already run
+ *  itself. (Ask stays: Maximal asks at call time.) Entries carry the app's
+ *  identifying key, absent while the app has none; an app whose key the user
+ *  turned off gets none at all. */
 export function desiredEntriesFor(
-  configurator: Pick<
-    PluginClientConfigurator,
-    "clientId" | "apiKeyLabel" | "standalone"
-  >,
+  configurator: Pick<PluginClientConfigurator, "clientId" | "standalone">,
   config: AppConfig,
   connectorIds: ReadonlySet<string>,
 ): Array<PluginClientEntry> {
-  const appKey = resolveApiKey(configurator.apiKeyLabel, config)
+  const appKey = appIdentityKey(config, configurator.clientId)?.key.trim()
+  // Its key was turned off: the app gets no connector entries, and never a
+  // keyless one (an unkeyed caller is exempt from App Permissions).
+  if (!appKey && appIdentityKeyRevoked(config, configurator.clientId)) return []
   const entries: Array<PluginClientEntry> = []
   for (const [id, entry] of Object.entries(config.plugins ?? {})) {
     if (!connectorIds.has(id) || entry.enabled !== true) continue
-    if (!entry.clients?.includes(configurator.clientId)) continue
+    if (pluginClientPermission(config, id, configurator.clientId) === "block")
+      continue
     if (configurator.standalone(id)) continue
     entries.push({
       id,
       url: pluginMcpUrl(id),
-      ...(appKey.ok ? { apiKey: appKey.key } : {}),
+      ...(appKey ? { apiKey: appKey } : {}),
     })
   }
   return entries
@@ -184,9 +282,14 @@ export function syncPluginClient(
 ): boolean {
   const ids = connectorIds()
   if (!ids) return false
-  const config = getConfig()
-  const desired =
+  let config = getConfig()
+  let desired =
     configurator.available() ? desiredEntriesFor(configurator, config, ids) : []
+  if (desired.some((entry) => !entry.apiKey)) {
+    ensureAppIdentityKey(configurator.clientId)
+    config = getConfig()
+    desired = desiredEntriesFor(configurator, config, ids)
+  }
   return run(configurator, desired, legacyNames(configurator.clientId, config))
 }
 

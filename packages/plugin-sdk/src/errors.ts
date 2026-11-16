@@ -20,6 +20,8 @@ export type PluginContractErrorCode =
   | "duplicate-operation"
   | "invalid-provider"
   | "duplicate-provider"
+  | "invalid-plugin-client"
+  | "duplicate-plugin-client"
 
 /**
  * Thrown when a plugin (or a plugin list) violates the plugin contract:

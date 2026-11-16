@@ -1,8 +1,12 @@
-import type { JsonValue } from "@stuffbucket/maximal-plugin-protocol"
+import type {
+  BlobHandleDto,
+  JsonValue,
+} from "@stuffbucket/maximal-plugin-protocol"
 import type {
   ModelBinding,
   ModelOperation,
   OperationResult,
+  PluginClientContribution,
   PluginGatewayEvent,
   PluginSettings,
   PluginSnapshot,
@@ -17,6 +21,14 @@ import type {
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { ProtocolError } from "@stuffbucket/maximal-plugin-protocol"
+import { PLUGIN_CLIENT_IDS } from "@stuffbucket/maximal-plugin-sdk/gateway"
+
+import type { GenerationSpoolStore } from "~/lib/plugins/spool/store"
+
+const PLUGIN_CLIENT_DRIVER_ID = /^[a-z][a-z0-9-]{0,63}$/
+const PLUGIN_ACCESS_ID = /^(?:app|connection):[\w.-]{1,128}$/u
+const PLUGIN_ACCESS_PERMISSIONS = new Set<JsonValue>(["allow", "ask", "block"])
+const MAX_PLUGIN_CLIENT_REASON_LENGTH = 500
 
 export const GATEWAY_RPC = Object.freeze({
   snapshot: "gateway.snapshot",
@@ -61,6 +73,10 @@ export const HOST_RPC = Object.freeze({
   snapshot: "host.snapshot",
   openExternal: "host.open-external",
   log: "host.log",
+  blobPath: "host.blob-path",
+  blobStage: "host.blob-stage",
+  blobCommit: "host.blob-commit",
+  blobAbort: "host.blob-abort",
 } as const)
 
 export interface GatewayProjectionDto {
@@ -73,6 +89,7 @@ export interface GatewayProjectionDto {
     Partial<Record<string, ReadonlyArray<PluginToolView>>>
   >
   readonly serverTools: ReadonlyArray<ServerToolView>
+  readonly pluginClients: ReadonlyArray<PluginClientContribution>
   readonly servedModels: ReadonlyArray<ServedModel>
   readonly operationTargets: ReadonlyArray<{
     operation: ModelOperation
@@ -101,6 +118,15 @@ export type BodyDto =
             readonly bytesBase64: string
             readonly mediaType: string
             readonly filename?: string
+            readonly handle?: never
+          }
+        | {
+            readonly name: string
+            readonly kind: "blob"
+            readonly handle: BlobHandleDto
+            readonly bytesBase64?: never
+            readonly mediaType?: never
+            readonly filename?: never
           }
       >
     }
@@ -231,6 +257,47 @@ export function json(value: unknown, context: string): JsonValue {
   return normalized
 }
 
+function validatePluginClients(value: JsonValue | undefined): void {
+  if (!Array.isArray(value))
+    malformed("Gateway plugin clients must be an array.")
+  const clientIds = new Set<string>()
+  for (const [index, item] of value.entries()) {
+    const client = exact(
+      item,
+      `Gateway plugin client ${index}`,
+      ["clientId"],
+      ["driverId", "unavailableReason"],
+    )
+    const clientId = stringValue(client.clientId, "Gateway plugin client id")
+    if (!(PLUGIN_CLIENT_IDS as ReadonlyArray<string>).includes(clientId))
+      malformed(`Gateway plugin client ${index} has an unknown id.`)
+    if (clientIds.has(clientId))
+      malformed(`Gateway plugin client ${index} duplicates an id.`)
+    clientIds.add(clientId)
+    if (client.driverId !== undefined) {
+      const driverId = stringValue(
+        client.driverId,
+        "Gateway plugin client driver id",
+      )
+      if (!PLUGIN_CLIENT_DRIVER_ID.test(driverId))
+        malformed(`Gateway plugin client ${index} has an invalid driver id.`)
+    }
+    if (client.unavailableReason !== undefined) {
+      const reason = stringValue(
+        client.unavailableReason,
+        "Gateway plugin client unavailable reason",
+      )
+      if (
+        reason.trim() === ""
+        || reason.length > MAX_PLUGIN_CLIENT_REASON_LENGTH
+      )
+        malformed(
+          `Gateway plugin client ${index} has an invalid unavailable reason.`,
+        )
+    }
+  }
+}
+
 export function parseProjection(value: JsonValue): GatewayProjectionDto {
   const input = exact(value, "Gateway projection", [
     "operationRevision",
@@ -238,6 +305,7 @@ export function parseProjection(value: JsonValue): GatewayProjectionDto {
     "listings",
     "toolViews",
     "serverTools",
+    "pluginClients",
     "servedModels",
     "operationTargets",
   ])
@@ -247,6 +315,7 @@ export function parseProjection(value: JsonValue): GatewayProjectionDto {
     malformed("Gateway plugins must be an array.")
   if (!Array.isArray(input.serverTools))
     malformed("Gateway server tools must be an array.")
+  validatePluginClients(input.pluginClients)
   if (!Array.isArray(input.servedModels))
     malformed("Gateway served models must be an array.")
   if (!Array.isArray(input.operationTargets))
@@ -350,18 +419,45 @@ export function parsePluginSettings(
       entryValue,
       "Plugin settings entry",
       [],
-      ["enabled", "clients"],
+      ["enabled", "clients", "access"],
     )
     if (entry.enabled !== undefined)
       booleanValue(entry.enabled, "Plugin enabled")
     if (entry.clients !== undefined && !Array.isArray(entry.clients))
       malformed("Plugin clients must be an array.")
+    if (entry.access !== undefined) {
+      const access = record(entry.access, "Plugin access")
+      for (const [accessId, permission] of Object.entries(access)) {
+        if (
+          !PLUGIN_ACCESS_ID.test(accessId)
+          || permission === undefined
+          || !PLUGIN_ACCESS_PERMISSIONS.has(permission)
+        )
+          malformed("Plugin access is invalid.")
+      }
+    }
   }
   return structuredClone(input) as PluginSettings
 }
 
+interface EncodeBodyOptions {
+  readonly store?: GenerationSpoolStore
+  readonly callId?: string
+  readonly signal?: AbortSignal
+  readonly handleForBlob?: (
+    blob: Blob,
+  ) => BlobHandleDto | undefined | Promise<BlobHandleDto | undefined>
+  readonly publishBlob?: (blob: Blob) => Promise<BlobHandleDto>
+}
+
+interface DecodeBodyOptions {
+  readonly store?: GenerationSpoolStore
+  readonly fileForHandle?: (handle: BlobHandleDto) => Promise<File>
+}
+
 export async function encodeBody(
   body: Record<string, unknown> | FormData,
+  options: EncodeBodyOptions = {},
 ): Promise<BodyDto> {
   if (!(body instanceof FormData)) {
     const value = json(body, "Operation body")
@@ -380,43 +476,100 @@ export async function encodeBody(
         bytesBase64: string
         mediaType: string
         filename?: string
+        handle?: never
+      }
+    | {
+        name: string
+        kind: "blob"
+        handle: BlobHandleDto
+        bytesBase64?: never
+        mediaType?: never
+        filename?: never
       }
   > = []
   for (const [name, rawValue] of body.entries()) {
     const value: unknown = rawValue
-    if (typeof value === "string") encoded.push({ name, kind: "text", value })
-    else if (value instanceof Blob) {
-      const bytes = new Uint8Array(await value.arrayBuffer())
-      const filename =
-        "name" in value && typeof value.name === "string" ?
-          value.name
-        : undefined
+    if (typeof value === "string") {
+      encoded.push({ name, kind: "text", value })
+      continue
+    }
+    if (!(value instanceof Blob))
+      throw new Error("Multipart body contains an unsupported value.")
+    const remembered = await options.handleForBlob?.(value)
+    if (remembered) {
+      encoded.push({ name, kind: "blob", handle: remembered })
+      continue
+    }
+    if (options.publishBlob) {
       encoded.push({
         name,
         kind: "blob",
-        bytesBase64: Buffer.from(bytes).toString("base64"),
-        mediaType: value.type,
-        ...(filename === undefined || filename.length === 0 ?
-          {}
-        : { filename }),
+        handle: await options.publishBlob(value),
       })
-    } else throw new Error("Multipart body contains an unsupported value.")
+      continue
+    }
+    const filename =
+      (
+        "name" in value
+        && typeof value.name === "string"
+        && value.name.length > 0
+      ) ?
+        value.name
+      : undefined
+    if (options.store && options.callId) {
+      const handle = await options.store.publish(value, {
+        callId: options.callId,
+        byteLength: value.size,
+        mediaType: value.type || undefined,
+        filename,
+        signal: options.signal,
+      })
+      encoded.push({ name, kind: "blob", handle })
+      continue
+    }
+    const bytes = new Uint8Array(await value.arrayBuffer())
+    encoded.push({
+      name,
+      kind: "blob",
+      bytesBase64: Buffer.from(bytes).toString("base64"),
+      mediaType: value.type,
+      ...(filename === undefined ? {} : { filename }),
+    })
   }
   json({ kind: "multipart", parts: encoded }, "Multipart body")
   return { kind: "multipart", parts: encoded }
 }
 
-export function decodeBody(body: BodyDto): Record<string, unknown> | FormData {
+export async function decodeBody(
+  body: BodyDto,
+  options: DecodeBodyOptions = {},
+): Promise<Record<string, unknown> | FormData> {
   if (body.kind === "json") return structuredClone(body.value)
   const form = new FormData()
   for (const part of body.parts) {
-    if (part.kind === "text") form.append(part.name, part.value)
-    else {
-      const bytes = Uint8Array.from(Buffer.from(part.bytesBase64, "base64"))
-      const blob = new Blob([bytes], { type: part.mediaType })
-      if (part.filename === undefined) form.append(part.name, blob)
-      else form.append(part.name, blob, part.filename)
+    if (part.kind === "text") {
+      form.append(part.name, part.value)
+      continue
     }
+    if (part.handle) {
+      let file: File
+      if (options.fileForHandle) file = await options.fileForHandle(part.handle)
+      else if (options.store) {
+        const path = await options.store.resolvePath(part.handle)
+        const source = Bun.file(path, {
+          type: part.handle.mediaType ?? "application/octet-stream",
+        })
+        file = new File([source], part.handle.filename ?? "blob", {
+          type: part.handle.mediaType ?? "application/octet-stream",
+        })
+      } else throw new Error("Multipart blob handle has no resolver.")
+      form.append(part.name, file)
+      continue
+    }
+    const bytes = Uint8Array.from(Buffer.from(part.bytesBase64, "base64"))
+    const blob = new Blob([bytes], { type: part.mediaType })
+    if (part.filename === undefined) form.append(part.name, blob)
+    else form.append(part.name, blob, part.filename)
   }
   return form
 }

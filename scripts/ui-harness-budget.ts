@@ -333,6 +333,7 @@ const limitsSeed: BudgetSeed["limits"] = [
     limitReset: "daily",
     action: "block",
     fill: 0.86,
+    warnAt: 0.75,
     held: 600_000_000,
     unreconciled: 200_000_000,
   },

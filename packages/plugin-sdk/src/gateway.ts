@@ -7,6 +7,7 @@
  * guard, and the tool-permission wording the host and the MCP layer share.
  */
 import type { OperationDispatch } from "./operations"
+import type { PluginClientContribution, PluginClientId } from "./plugin-clients"
 import type {
   PreparedServerTool,
   ServerToolCall,
@@ -26,12 +27,21 @@ import type {
   ToolResult,
 } from "./types"
 
-/** Apps shown as possible destinations for a plugin's MCP endpoint. */
-export type PluginClientId =
-  | "claude-code"
-  | "claude-desktop"
-  | "codex"
-  | "copilot-cli"
+export type {
+  ModelBinding,
+  ModelOperation,
+  OperationDispatch,
+  OperationRequest,
+  OperationResult,
+  PreparedOperation,
+  ServedModel,
+} from "./operations"
+export const PLUGIN_CLIENT_IDS = [
+  "claude-code",
+  "claude-desktop",
+  "codex",
+  "copilot-cli",
+] as const
 
 /**
  * One `config.json` → `plugins.<id>` entry. Absent ⇒ disabled. The plugin's
@@ -39,7 +49,12 @@ export type PluginClientId =
  */
 export interface PluginSettingsEntry {
   enabled?: boolean
+  /** Legacy app destinations. Kept for config compatibility; new writes use
+   *  `access`, whose `app:<id>` entries can also represent Ask. */
   clients?: Array<PluginClientId>
+  /** Per app or named API connection access. Keys are `app:<client-id>` or
+   *  `connection:<api-key-entry-id>`; omitted keys retain legacy defaults. */
+  access?: Record<string, ToolPermission>
 }
 
 export type PluginSettings = Record<string, PluginSettingsEntry>
@@ -116,6 +131,7 @@ export type PluginGatewayEventType =
   | "lifecycle"
   | "status"
   | "tools"
+  | "clients"
   | "settings"
   | "notice"
   | "inventory"
@@ -140,9 +156,11 @@ export interface PluginGenerationLease {
   /** Diagnostic identity only; callers must not route with it. */
   readonly generationId: string
   get(id: string): PluginSnapshot | undefined
+  list(): Array<PluginSnapshot>
   listTools(pluginId: string): Array<PluginToolListing>
   toolViews(pluginId: string): Array<PluginToolView>
   serverTools(): Array<ServerToolView>
+  pluginClientContributions(): Array<PluginClientContribution>
   operations(): OperationDispatch
   callTool(
     pluginId: string,
@@ -208,6 +226,8 @@ export interface PluginGateway {
    * and registers or withdraws the tool.)
    */
   serverTools(): Array<ServerToolView>
+  /** Data-only client destinations; parent-owned drivers are resolved separately. */
+  pluginClientContributions(): Array<PluginClientContribution>
   /**
    * Prepare one server tool input against the exact current definition. Its
    * estimate is data, never an executable function exposed by the view.
@@ -346,15 +366,7 @@ export function isOperationUnavailableError(
     || (error instanceof Error && error.name === "OperationUnavailableError")
   )
 }
-export type {
-  ModelBinding,
-  ModelOperation,
-  OperationDispatch,
-  OperationRequest,
-  OperationResult,
-  PreparedOperation,
-  ServedModel,
-} from "./operations"
+export type { PluginClientContribution, PluginClientId } from "./plugin-clients"
 export type {
   ProviderCall,
   ProviderModelInfo,

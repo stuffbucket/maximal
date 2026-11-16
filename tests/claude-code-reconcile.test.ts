@@ -81,9 +81,12 @@ describe("reconcileClaudeCodeOnBoot", () => {
 })
 
 describe("reconcileClaudeCodeOnShutdown", () => {
-  test("removes the proxy base URL when routing is intended", () => {
-    writeSettings({ env: { ANTHROPIC_BASE_URL: proxyBaseUrl() } })
+  test("removes owned proxy routing when routing is intended", () => {
+    reconcileClaudeCodeOnBoot(true, SETTINGS)
+    expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(true)
+
     reconcileClaudeCodeOnShutdown(true, SETTINGS)
+
     expect(isProxyBaseUrlConfigured(SETTINGS)).toBe(false)
   })
 
@@ -99,9 +102,16 @@ describe("reconcileClaudeCodeOnShutdown", () => {
   })
 
   test("preserves sibling env keys when reverting", () => {
+    reconcileClaudeCodeOnBoot(true, SETTINGS)
+    const settings = readClaudeCodeSettings(SETTINGS)
     writeSettings({
-      env: { ANTHROPIC_BASE_URL: proxyBaseUrl(), ANTHROPIC_API_KEY: "sk-keep" },
+      ...settings,
+      env: {
+        ...(settings.env as Record<string, unknown>),
+        ANTHROPIC_API_KEY: "sk-keep",
+      },
     })
+
     reconcileClaudeCodeOnShutdown(true, SETTINGS)
     const env = (readClaudeCodeSettings(SETTINGS).env ?? {}) as Record<
       string,

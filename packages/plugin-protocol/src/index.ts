@@ -527,6 +527,24 @@ export interface DecodeOptions {
   pluginApi?: number
 }
 
+export function decodeBlobHandle(
+  input: unknown,
+  generation: string,
+): BlobHandleDto {
+  assertBoundedJson(input)
+  const parsed = blobHandleSchema.safeParse(input)
+  if (!parsed.success) {
+    throw new ProtocolError("malformed", "Malformed blob handle.")
+  }
+  if (parsed.data.generation !== generation) {
+    throw new ProtocolError(
+      "stale-generation",
+      "Blob handle belongs to another generation.",
+    )
+  }
+  return parsed.data
+}
+
 export function decodeMultipart(
   input: unknown,
   generation: string,
