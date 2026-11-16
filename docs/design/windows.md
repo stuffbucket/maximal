@@ -29,6 +29,21 @@ while mounted.
   observability bundle's Sessions surface, and `/ui/rules/` (and the old
   `/ui/budget/`) to the Rules section (`/ui/settings/#rules`).
 
+### Browser access to a headless service
+
+Native Settings uses the shell’s per-launch credential. In a plain browser,
+a Settings API 401 opens the **Connect this browser to Maximal** dialog. It
+accepts an existing Maximal API key, validates it with a read-only request and
+saves it only in the tab’s session storage. The password field names the key
+explicitly so it is not confused with GitHub or Microsoft sign-in. Invalid
+keys and unavailable session storage have inline errors. Cancel and Escape
+dismiss the prompt; the topbar and prerequisite callouts can reopen it.
+
+After connecting, the page reloads at the same deep link, rebuilding reads
+and live subscriptions without replaying failed writes. **Disconnect browser**
+clears browser access only. Browser API calls and live events send credentials
+in headers, never URLs. The native shell’s authentication is unchanged.
+
 ## Where they diverge
 
 | Concern        | Dashboard                                                | Sessions                                         | Rules                                                                   | Settings                                                                          |

@@ -1,14 +1,15 @@
 import { getShellApiKey } from "../tauri/shell";
+import { browserApiKey, isApiKeyChallenge, isNativeShell, requireBrowserAuth } from "./browser-auth";
+import { subscribeBrowserEvents } from "./browser-events";
 
 /**
  * Typed fetch client for the proxy's `/settings/api/*` surface.
  *
  * - All data endpoints are auth-gated (see src/routes/settings/api.ts).
- *   The shell pulls its API key from the same Tauri-managed config
- *   the sidecar uses; for now we read it from a global injected by
- *   the Tauri Rust shell (TODO: wire via @tauri-apps/api in a later
- *   phase). In dev (Vite on :1420) the user supplies a key via the
- *   `VITE_API_KEY` env.
+ *   The native shell supplies a per-launch key. A plain browser can
+ *   supply an existing Maximal API key, kept only in sessionStorage.
+ *   A rejected browser credential opens the access dialog; requests
+ *   (especially mutations) are never replayed automatically.
  * - 5s timeout per call via AbortController.
  * - Zero retries for v1. If retry logic is needed later, layer it
  *   here so call sites stay flat — do NOT scatter retry into each
@@ -472,7 +473,7 @@ interface ApiOptions {
 
 export type ApiResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status: number; error: string }
+  | { ok: false; status: number; error: string; authRequired?: boolean }
 
 /** A failed call: HTTP status (0 when Maximal never answered) + raw body. */
 export type ApiFailure = Extract<ApiResult<unknown>, { ok: false }>
@@ -497,7 +498,7 @@ async function resolveApiKey(override?: string): Promise<string | undefined> {
   // The Tauri shell injects a per-launch key into the sidecar and serves
   // it to the webview on demand; that's the sole key source now.
   const shellKey = await getShellApiKey()
-  return shellKey ?? undefined
+  return shellKey ?? browserApiKey()
 }
 
 export async function apiCall<K extends EndpointKind>(
@@ -534,11 +535,14 @@ export async function apiCall<K extends EndpointKind>(
       signal,
     })
     if (!res.ok) {
+      const authRequired = isApiKeyChallenge(res)
+      if (authRequired && !options.apiKey) requireBrowserAuth(apiKey)
       const text = await res.text().catch(() => "")
       return {
         ok: false,
         status: res.status,
         error: text || `HTTP ${res.status}`,
+        ...(authRequired ? { authRequired: true } : {}),
       }
     }
     // 204 No Content (delete) — no JSON to parse. The endpoint catalog
@@ -585,6 +589,15 @@ export async function subscribeAuthEvents(handlers: {
   onOpen?: () => void
   onError?: () => void
 }): Promise<EventSubscription> {
+  if (!isNativeShell()) {
+    return subscribeBrowserEvents({
+      ...handlers,
+      onEvent: (event, data) => {
+        if (event !== "auth.changed") return
+        try { handlers.onAuth(JSON.parse(data) as AuthStatus) } catch { /* Resync on next event. */ }
+      },
+    }, resolveApiKey)
+  }
   const apiKey = await resolveApiKey()
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
   const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
@@ -615,6 +628,12 @@ export async function subscribePluginEvents(handlers: {
   onOpen?: () => void
   onError?: () => void
 }): Promise<EventSubscription> {
+  if (!isNativeShell()) {
+    return subscribeBrowserEvents({
+      ...handlers,
+      onEvent: (event) => { if (event === "plugins.changed") handlers.onChanged() },
+    }, resolveApiKey)
+  }
   const apiKey = await resolveApiKey()
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
   const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
@@ -638,6 +657,15 @@ export async function subscribeBudgetEvents(handlers: {
   onOpen?: () => void
   onError?: () => void
 }): Promise<EventSubscription> {
+  if (!isNativeShell()) {
+    return subscribeBrowserEvents({
+      ...handlers,
+      onEvent: (event, data) => {
+        if (event !== "budget.changed") return
+        try { handlers.onChanged(JSON.parse(data) as BudgetStatusResponse) } catch { /* Resync on next event. */ }
+      },
+    }, resolveApiKey)
+  }
   const apiKey = await resolveApiKey()
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""
   const source = new EventSource(`${baseUrl()}/settings/api/events${query}`)
@@ -673,7 +701,9 @@ export async function fetchBudgetCsv(
     })
     const text = await res.text().catch(() => "")
     if (!res.ok) {
-      return { ok: false, status: res.status, error: text || `HTTP ${res.status}` }
+      const authRequired = isApiKeyChallenge(res)
+      if (authRequired) requireBrowserAuth(apiKey)
+      return { ok: false, status: res.status, error: text || `HTTP ${res.status}`, ...(authRequired ? { authRequired: true } : {}) }
     }
     return { ok: true, data: text }
   } catch (err) {

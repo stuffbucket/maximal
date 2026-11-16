@@ -6,6 +6,7 @@
       "name": "shell",
       "dependencies": {
         "@tauri-apps/api": "^2.12.4",
+        "fetch-event-stream": "^0.1.5",
         "intl-messageformat": "^11.2.9",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
@@ -58,6 +59,8 @@
     "@types/react-dom": ["@types/react-dom@18.3.7", "https://packagefeedproxy.microsoft.io/npm/@types/react-dom/-/react-dom-18.3.7.tgz", { "peerDependencies": { "@types/react": "^18.0.0" } }, "sha512-MEe3UeoENYVFXzoXEWsvcpg6ZvlrFNlOQ7EOsvhI3CfAXwzPfO8Qwuxd40nepsYKqyyVQnTdEfv68q91yLcKrQ=="],
 
     "csstype": ["csstype@3.2.3", "https://packagefeedproxy.microsoft.io/npm/csstype/-/csstype-3.2.3.tgz", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
+
+    "fetch-event-stream": ["fetch-event-stream@0.1.6", "", {}, "sha512-GREtJ5HNikdU2AXtZ6E/5bk+aslMU6ie5mPG6H9nvsdDkkHQ6m5lHwmmmDTOBexok9hApQ7EprsXCdmz9ZC68w=="],
 
     "intl-messageformat": ["intl-messageformat@11.2.9", "https://packagefeedproxy.microsoft.io/npm/intl-messageformat/-/intl-messageformat-11.2.9.tgz", { "dependencies": { "@formatjs/fast-memoize": "3.1.6", "@formatjs/icu-messageformat-parser": "3.5.12" } }, "sha512-cGzymZerpDhVXRKjKLgXKda9gI29TU2o88L7gwNMHp3WZVxA/0c5tX52udXbW9JklDApolvMXZG6Dhhdz5eirA=="],
 

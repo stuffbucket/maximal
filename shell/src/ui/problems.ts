@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+import { isNativeShell } from "../proxy/browser-auth";
 import type { ApiFailure, ApiResult } from "../proxy/client";
 
 import { humanize } from "./features/api-clients/humanize";
@@ -22,7 +24,9 @@ export type Remedy =
   /** Restart Maximal's background service. */
   | "restart"
   /** Sign in to GitHub on the Account page. */
-  | "sign-in";
+  | "sign-in"
+  /** Supply a Maximal API key in the browser access dialog. */
+  | "connect-browser";
 
 export interface Problem {
   title: string;
@@ -89,6 +93,15 @@ export function describeProblem(
     };
   }
 
+  if (failure.authRequired && !isNativeShell()) {
+    return {
+      title: t("browser-auth-title"),
+      detail: t("browser-auth-description"),
+      remedy: "connect-browser",
+      technical,
+    };
+  }
+
   if (upstream) {
     if (failure.status === 401) {
       return {
@@ -124,7 +137,7 @@ export function describeProblem(
     }
   }
 
-  // Settings and Maximal disagree about the per-launch key: a restart re-pairs them.
+  // Native Settings and Maximal disagree about the per-launch key.
   if (failure.status === 401 || failure.status === 403) {
     return {
       title: "Settings lost its connection to Maximal",

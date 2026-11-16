@@ -25,6 +25,7 @@ import type {
   UpstreamRejection,
 } from "./proxy/client";
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
+import { browserAuthRequired, isNativeShell } from "./proxy/browser-auth";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
 import { canonicalHash, canonicalSection } from "./section-alias";
@@ -32,6 +33,7 @@ import { mountBudget } from "./ui/islands/budget-island";
 import { mountModels } from "./ui/islands/models-island";
 import { mountConnectors } from "./ui/islands/connectors-island";
 import { mountQuitDialog } from "./ui/islands/quit-dialog-island";
+import { mountBrowserAuth } from "./ui/islands/browser-auth-island";
 import { waitForSidecarBack } from "./ui/restart";
 
 type SectionId =
@@ -1843,6 +1845,11 @@ function showGhAccountsForAuthenticated(): void {
 }
 
 function renderAccount(status: AuthStatus): void {
+  // Missing browser access says nothing about the user's GitHub sign-in.
+  if (browserAuthRequired() && !isNativeShell()) {
+    stopAuthPolling();
+    return;
+  }
   notifyDashboardOfAuthChange(status);
   currentAuthStatus = status;
   const active = accountKeyFor(status.state);
@@ -2670,6 +2677,7 @@ async function checkInitialAccountHealth(): Promise<void> {
     method: "GET",
     path: "/settings/api/auth/github/status",
   });
+  if (!result.ok && result.authRequired && !isNativeShell()) return;
   if (!result.ok || hasAccountProblem(result.data)) {
     if (!userExplicitlySelectedTab) {
       showSection("account", { persist: false });
@@ -2705,6 +2713,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireEndpoint();
   wireUninstall();
   wireAppearance();
+  mountBrowserAuth();
   mountApiClients();
   mountApps();
   mountConnectors();
