@@ -438,7 +438,7 @@ test("a failed history load says so with a retry, and leaves the rule alone", as
   const amounts = page
     .locator(".limit", { hasText: "Client codex" })
     .locator(".limit__amounts")
-  const amountsBefore = await amounts.textContent()
+  const amountsBefore = (await amounts.textContent()) ?? ""
 
   await page.route("**/limits/key-codex-weekly/timeline?*", (route) =>
     route.fulfill({ status: 500, body: '{"error":{"message":"boom"}}' }),
