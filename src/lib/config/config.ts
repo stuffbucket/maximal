@@ -30,44 +30,27 @@ export interface ModelMappingRule {
 }
 
 export interface AnthropicMessagesConfig {
-  /** Concrete catalog model used for inbound Claude Haiku identifiers. */
   haikuModel?: string
-  /** Concrete catalog model used for inbound Claude Sonnet identifiers. */
   sonnetModel?: string
-  /** Claude Code's client-side Auto permission classifier model. */
   autoPermissionModel?: string
 }
 
 export interface AppConfig {
   auth?: {
-    /** Legacy free-form list of accepted bearer tokens. */
     apiKeys?: Array<string>
-    /** Structured registry managed by Settings → API clients. */
     apiKeyEntries?: Array<ApiKeyEntry>
-    /** When true, only requests with a known enabled key are accepted. */
     enforce?: boolean
   }
   providers?: Record<string, ProviderConfig>
   extraPrompts?: Record<string, string>
   smallModel?: string
   responsesApiContextManagementModels?: Array<string>
-  /**
-   * Copilot/OpenAI-Responses-specific server-side prefix-cache retention for
-   * the `/responses` path. UNSET (undefined) → param is not sent, behavior
-   * unchanged. "24h" keeps the cached prefix alive up to 24h (default is a
-   * few minutes); cached input tokens are ~10x cheaper. Opt-in because some
-   * model/endpoint combos have historically 400'd on this param — enablement
-   * is made safe by a one-shot strip-and-retry fallback in create-responses.ts.
-   * NOTE: independent from `store` (which controls response persistence/ZDR).
-   */
   promptCacheRetention?: "in_memory" | "24h"
   modelReasoningEfforts?: Record<
     string,
     "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
   >
   modelMappings?: Array<ModelMappingRule>
-  /** Model aliases owned by the Anthropic Messages ingress, independent of any
-   *  client integration that happens to send those identifiers. */
   anthropicMessages?: AnthropicMessagesConfig
   useFunctionApplyPatch?: boolean
   useMessagesApi?: boolean
@@ -75,62 +58,33 @@ export interface AppConfig {
   useResponsesApiWebSearch?: boolean
   claudeTokenMultiplier?: number
   logRetentionDays?: number
-  /**
-   * Opt-in: when true, a fatal Copilot rejection may AUTO-SWITCH to another
-   * previously-successful account without a per-event prompt. Defaults OFF —
-   * enabling it is the user's PRIOR AUTHORIZATION that all their stored accounts
-   * are interchangeable (same data governance), since same-plan accounts can
-   * still differ in tenancy/residency/retention. Off → degrade + surface the
-   * reason; the user picks. See auth-recovery.ts.
-   */
   autoRecoverAccount?: boolean
-  /**
-   * Whether to check for a newer maximal release and surface it (Settings line
-   * + a once-per-day OS notification). Defaults ON; set false to opt out of the
-   * GitHub releases ping entirely. See update-check.ts.
-   */
   checkUpdates?: boolean
   editorVersion?: string
   apps?: AppsConfig
-  /** Built-in plugins by id: on/off, plugin config, client connections. */
   plugins?: PluginSettings
-  /** Optional data-only built-in inventory, relative to the app directory. */
   pluginInventory?: { entry: string }
-  /** The parked MCP broker's config (`parked/mcp`). Accepted and preserved,
-   *  never interpreted by the build. */
   mcpBroker?: unknown
-  /** Spend limits and the unit costs are shown in. Amounts are nano-AIU. */
   budget?: BudgetConfig
 }
 
 export interface AppsConfig {
   codex?: {
-    /** Maximal-owned user-level model provider routing in Codex config.toml. */
     enabled?: boolean
   }
   claudeCode?: {
-    /** Proxy routing applied to Claude Code (env.ANTHROPIC_BASE_URL in
-     *  ~/.claude/settings.json). */
     enabled?: boolean
-    /** Legacy: entry names older versions wrote into Claude Code's user
-     *  scope. The next plugin client sync removes them and this list. */
     mcpServers?: Array<string>
-    /** Legacy model selections. Read as a compatibility fallback; new writes
-     *  use the route-scoped `anthropicMessages` block. */
     fastModel?: string
     capableModel?: string
     classifierModel?: string
   }
   claudeDesktop?: {
-    /** Proxy config applied to Claude Desktop. */
     enabled?: boolean
-    /** MCP endpoint ids Maximal added to Claude Desktop's config. */
     mcpServers?: Array<string>
   }
 }
 
-/** Read route-scoped Messages selections, falling back to pre-migration
- *  Claude Code app fields so existing config files keep their behavior. */
 export function anthropicMessagesConfig(
   config: AppConfig,
 ): AnthropicMessagesConfig {
@@ -232,19 +186,14 @@ const defaultConfig: AppConfig = {
   useResponsesApiWebSearch: true,
 }
 
-/** Return a detached snapshot so callers cannot mutate process-wide defaults. */
 export function getDefaultConfig(): AppConfig {
   return structuredClone(defaultConfig)
 }
 
 let cachedConfig: AppConfig | null = null
 
-/** Set while `config.json` exists but isn't valid JSON. Maximal then runs
- *  on the defaults and writes nothing to the file, so the person's own
- *  settings are still there to fix; a later read that succeeds clears it. */
 let unreadableConfigError: string | undefined
 
-/** Writing was refused because `config.json` couldn't be read. */
 export class ConfigUnreadableError extends Error {
   constructor(reason: string) {
     super(
@@ -278,8 +227,6 @@ function readConfigFromDisk(): AppConfig {
   try {
     const raw = fs.readFileSync(PATHS.CONFIG_PATH, "utf8")
     unreadableConfigError = undefined
-    // trim() also drops a byte order mark, so a file that is only one
-    // counts as empty.
     if (!raw.trim()) {
       fs.writeFileSync(
         PATHS.CONFIG_PATH,
@@ -299,11 +246,6 @@ function readConfigFromDisk(): AppConfig {
     return defaultConfig
   }
 
-  // Schema-validate before returning. A bad value (e.g. typo'd
-  // authType) is fatal — the proxy should not boot with an invalid
-  // config because the failures show up later as confusing runtime
-  // errors. Unknown top-level keys are warnings: forward-compat hedge
-  // for configs written by newer versions.
   let config: AppConfig
   try {
     config = validateAppConfig(parsed)
@@ -314,9 +256,6 @@ function readConfigFromDisk(): AppConfig {
           .map((i) => `  ${i.path || "<root>"}: ${i.message}`)
           .join("\n")}`,
       )
-      // Exit non-zero so process supervisors / shells see the failure.
-      // Do NOT silently fall back to defaultConfig — that hides the
-      // problem and the user keeps wondering why settings don't apply.
       process.exit(1)
     }
     throw error
@@ -408,30 +347,12 @@ export function getConfig(): AppConfig {
   return cachedConfig
 }
 
-/** Re-read `config.json` after another process (e.g. the CLI) changed it,
- *  so the next `getConfig()` sees the edit. */
 export function reloadConfig(): AppConfig {
   cachedConfig = readConfigFromDisk()
   return cachedConfig
 }
 
-/**
- * Persist a new config to disk, replacing the in-memory cache.
- *
- * Re-validates against `AppConfigSchema` before writing — if the caller
- * passes a malformed shape, this throws `ConfigValidationError` and
- * does NOT touch disk. The write is atomic-by-replace (write to a
- * sibling then rename), so a crash mid-write can't leave a partial
- * JSON file in place.
- *
- * Callers that mutate config (e.g. the Settings API) should always
- * round-trip through this: read with `getConfig()`, mutate a copy,
- * call `writeConfig(next)`. The next `getConfiguredApiKeys()` /
- * `getConfig()` will reflect the write immediately.
- */
 export function writeConfig(next: AppConfig): AppConfig {
-  // Never write over a config.json that couldn't be read: what's in it is
-  // the person's, and these defaults would replace it.
   if (unreadableConfigError !== undefined) {
     throw new ConfigUnreadableError(unreadableConfigError)
   }
@@ -441,9 +362,8 @@ export function writeConfig(next: AppConfig): AppConfig {
   fs.writeFileSync(tmpPath, `${JSON.stringify(validated, null, 2)}\n`, "utf8")
   try {
     fs.chmodSync(tmpPath, 0o600)
-  } catch {
-    // chmod failure is non-fatal — Windows and some shared FS don't
-    // honor mode bits. The data write still went through.
+  } catch (error) {
+    void error
   }
   fs.renameSync(tmpPath, PATHS.CONFIG_PATH)
   cachedConfig = validated
@@ -473,11 +393,6 @@ export function isResponsesApiContextManagementModel(model: string): boolean {
   return getResponsesApiContextManagementModels().includes(model)
 }
 
-/**
- * Copilot/OpenAI-Responses-specific prefix-cache retention knob. Returns the
- * configured value or `undefined` (the conservative default → param omitted,
- * behavior unchanged). A future non-Copilot provider path won't use this.
- */
 export function getPromptCacheRetention(): "in_memory" | "24h" | undefined {
   const config = getConfig()
   return config.promptCacheRetention
@@ -487,10 +402,6 @@ export function getReasoningEffortForModel(
   model: string,
 ): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" {
   const config = getConfig()
-  // Fall through to the static default map so a config that
-  // doesn't carry modelReasoningEfforts (e.g. a test stub, or a
-  // user config that pre-dates the field) still gets the curated
-  // per-model effort instead of a global "high" fallback.
   return (
     config.modelReasoningEfforts?.[model]
     ?? defaultConfig.modelReasoningEfforts?.[model]
@@ -592,16 +503,11 @@ export function getLogRetentionDays(): number {
   return config.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS
 }
 
-/** Whether the user has authorized auto-switching to another stored account on
- *  a fatal rejection. Defaults OFF — see AppConfig.autoRecoverAccount. */
 export function isAutoRecoverAccountEnabled(): boolean {
   const config = getConfig()
   return config.autoRecoverAccount ?? false
 }
 
-/** Whether to consume release update metadata and surface a newer version.
- * Defaults ON via AppConfig.checkUpdates. A supervising desktop shell can own
- * update metadata itself by setting MAXIMAL_UPDATE_POLICY=disabled. */
 export function isUpdateCheckEnabled(): boolean {
   if (process.env.MAXIMAL_UPDATE_POLICY === "disabled") return false
   const config = getConfig()
