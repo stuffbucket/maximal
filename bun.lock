@@ -74,6 +74,9 @@
       "bin": {
         "figjam": "./src/cli.ts",
       },
+      "dependencies": {
+        "@stuffbucket/maximal-figjam-plugin": "workspace:*",
+      },
     },
     "packages/figjam-layout": {
       "name": "@stuffbucket/maximal-figjam-layout",

@@ -445,9 +445,12 @@
 "use strict";
 
 // The build (scripts/build.ts) rewrites this line with the ports the manifest's
-// devAllowedDomains allow, so the panel only dials what the manifest permits.
-// These are the defaults an unstamped source runs with.
-const PANEL_BUILD = {"maximalPort":4141,"bridgePort":4150};
+// devAllowedDomains allow, so the panel only dials what the manifest permits,
+// and with the relay key of the bridge whose host wrote this plugin ("" =
+// none). The bridge refuses a socket without its key, so a page that isn't
+// this plugin can't even ask to pair. Never log or send the key anywhere but
+// the bridge socket. These are the defaults an unstamped source runs with.
+const PANEL_BUILD = {"maximalPort":4141,"bridgePort":4150,"relayKey":""};
 const LEGACY_BASE = "http://localhost:4141"; // the address older panels saved
 const DEFAULT_BASE = `http://localhost:${PANEL_BUILD.maximalPort}`;
 const PREFERRED_MODELS = ["claude-sonnet", "claude-opus", "claude-fable", "gpt-6", "gpt-5"];
@@ -1362,6 +1365,8 @@ function bridgeIssue() {
       return { text: "Approval timed out · see Settings", say: "Bridge approval timed out. Ask again in Settings.", key: "b:expired" };
     case "unpaired":
       return { text: "Panel unpaired · see Settings", say: "This panel was unpaired from the bridge.", key: "b:unpaired" };
+    case "unkeyed":
+      return { text: "Bridge: plugin not set up · see Settings", say: "This copy of the plugin can't connect to the bridge. See Settings.", key: "b:unkeyed" };
     case "retrying":
       if (b.why === "pair-name-in-use") return { text: "Bridge: name in use · retrying", say: "Another panel is using this name. Retrying.", key: "b:name" };
       if (b.why === "pair-busy") return { text: "Bridge busy · retrying", say: "The bridge has too many requests. Retrying.", key: "b:busy" };
@@ -1383,6 +1388,7 @@ function bridgeStatus() {
   switch (b.s) {
     case "connected": return { text: `Paired with this computer ✓ · ${SESSION}`, act: "forget" };
     case "connecting": return { text: `${b.attempt ? "Reconnecting" : "Connecting"} to the bridge on ${BRIDGE_HOST}…`, act: "" };
+    case "unkeyed": return { text: "This copy of the plugin can't connect to the bridge. Import the one Maximal set up (Settings → Integrations → FigJam), or the one bun run figjam:bridge writes.", act: "" };
     case "pending": return { text: `Waiting for approval${b.expiresAt ? ` (${mmss(b.expiresAt)})` : ""}. ${APPROVE_HINT(b.name || SESSION)}`, act: "ask" };
     case "denied": return { text: "Pairing was denied.", act: "ask" };
     case "expired": return { text: "The approval request timed out.", act: "ask" };
@@ -1391,7 +1397,7 @@ function bridgeStatus() {
     case "retrying": {
       const why = b.why === "pair-name-in-use" ? `Another request already uses the name ${SESSION}`
         : b.why === "pair-busy" ? "The bridge has too many pending requests"
-        : `Bridge isn't running on ${BRIDGE_HOST}`;
+        : `Can't reach the bridge on ${BRIDGE_HOST} (if Maximal restarted, run the plugin again)`;
       return { text: `${why} · ${countdown(b)} (attempt ${b.attempt})`, act: "retry" };
     }
     case "blocked": return { text: `Bridge blocked: ${b.error}`, act: "retry" };
@@ -2633,9 +2639,11 @@ function openBridge() {
   clearTimeout(bridgeRetry);
   if (!settings.remote) return setNet("bridge", "off");
   if (bridge || pairStop) return;
+  // A build without its bridge's relay key would only be refused.
+  if (!PANEL_BUILD.relayKey) return setNet("bridge", "unkeyed");
   let ws;
   try {
-    ws = new WebSocket(BRIDGE_URL);
+    ws = new WebSocket(BRIDGE_URL, [PANEL_BUILD.relayKey]);
   } catch (error) {
     setNet("bridge", "blocked", { error: error.message });
     return;

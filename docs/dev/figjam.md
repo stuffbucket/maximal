@@ -25,30 +25,34 @@ build embeds them (text imports, so a compiled Maximal can write the plugin with
 2. Click **Set up the Figma plugin**. Maximal builds the development plugin
    into `<app dir>/plugins/figjam/figma-plugin/` and shows the path of its
    `manifest.json`. On start, Maximal compares `manifest.json`, `code.js` and `ui.html` byte
-   for byte with what a build would write (the ports it was given included), and
-   rebuilds when any differs or is missing, even if the version and ports are
-   unchanged. Other files in the folder are left alone. **Rebuild the Figma
-   plugin** does it on demand. A rebuild writes all three files to temp names,
-   then renames them into place. Each rename is atomic, but the three together
+   for byte with what a build would write (the ports and relay key it was
+   given included), and rebuilds when any differs or is missing, even if the
+   version and ports are unchanged. Other files in the folder are left alone.
+   **Rebuild the Figma plugin** does it on demand. A rebuild writes all three
+   files (owner-only) to temp names, then renames them into place. Each rename
+   is atomic, but the three together
    are not: if a rename throws, the files already renamed are restored from
    their previous contents (or removed if they did not exist), so the folder
    is left as it was. A crash or power loss between renames can still leave a
    mix of old and new files; the next start finds the folder stale and
-   rebuilds it.
+   rebuilds it. The relay key is new for each process that hosts the bridge,
+   so after Maximal restarts, run the plugin again in Figma (a paired panel
+   reconnects without asking again).
 3. In the Figma desktop app: **Plugins → Development → Import plugin from
    manifest…**, then choose that `manifest.json`. Run **Maximal Agent (dev)**
    on a FigJam board and tick **Let Claude Code drive this board** in its
    Settings.
-4. Maximal raises a notification, "A FigJam panel ("grumpy-lynx") wants to
-   connect.", and FigJam's page in Integrations lists the request with
-   **Approve** and **Deny**. The status also shows the port, the connected
-   boards and who's waiting. The notice code is `figjam-pair-requested`
-   (param `name`); it has no localized wording yet, so the English message is
-   shown.
+4. Maximal raises a notification, "A FigJam panel ("grumpy-lynx") on board
+   "Roadmap" wants to connect.", and FigJam's page in Integrations lists the
+   request with **Approve** and **Deny**. The status also shows the port, the
+   connected boards and who's waiting, each with the board name, file key and
+   Figma user the panel reported. The notice code is `figjam-pair-requested`
+   (params `name` and `board`); it has no localized wording yet, so the English
+   message is shown.
 
    The same request can be answered from the tray, without opening Settings.
    While a panel waits, the status carries `attention` (summary: `A FigJam panel
-   ("name") wants to connect`, actions: Approve and Deny), so the tray icon
+   ("name") on board "board" wants to connect`, actions: Approve and Deny), so the tray icon
    turns to its attention state and the menu (macOS menu bar, Windows
    notification-area right-click) starts with `FigJam: Approve "name"` and
    `FigJam: Deny "name"`. They disappear once the request is answered or
@@ -94,20 +98,28 @@ folder each time the plugin starts, so a rebuild takes effect on the next run.
 Development plugins run only in the desktop app, for the person who imported
 them.
 
+A plugin built by `figjam:build` carries no relay key, so its panel works with
+Maximal but can't connect to a bridge (its Settings say so). To drive a board
+from a coding agent, use the plugin the bridge's host writes: Maximal's (see
+above), or the one `bun run figjam:bridge` writes (see The bridge).
+
 The manifest is FigJam-only (`editorType: ["figjam"]`), uses
 `documentAccess: "dynamic-page"`, and sets `enablePrivatePluginApi` so the
 sandbox can read `figma.fileKey`. Network access is limited to Figma's REST
 API (`https://api.figma.com`, for comments) through `allowedDomains`, and to
 Maximal (`http://localhost:4141`) and the bridge (`ws://localhost:4150`)
 through `devAllowedDomains`. Change the ports with the build flags. The build
-stamps the same two ports into the panel's `PANEL_BUILD` line, so the panel's
+stamps the same two ports, and the relay key when the bridge's host builds it,
+into the panel's `PANEL_BUILD` line, so the panel's
 model calls, bridge socket and the bridge address in its status text always
 match the manifest allowlist. A Maximal address saved by an older panel (the
 old `4141` default) follows the build's port.
 
-In `scripts/build.ts`, `resolveBuildOptions` fills in the defaults and
-`renderPlugin` turns the result into all three files: the manifest from
-`pluginManifest`, the panel stamp from `panelBuild`, and `code.js`.
+In `scripts/build.ts`, `resolveBuildOptions` fills in the defaults and checks
+the options (a release build drops the relay key; a malformed key is refused),
+and `renderPlugin` turns the result into all three files: the manifest from
+`pluginManifest` (which can't see the key), the panel stamp from `panelBuild`,
+and `code.js`.
 `buildPlugin` writes what `renderPlugin` returns, and `inspectPlugin` compares
 a folder with it, so a new build option is added to `BuildOptions`, given its
 default in `resolveBuildOptions`, and, if the panel needs it, added to
@@ -152,12 +164,30 @@ bun run figjam -- tools               # tool schemas, as the plugin reports them
 bun run figjam -- get_board '{}' --board <name>
 ```
 
-A panel connects only when its user ticks **Let Claude Code drive this board**
-in the panel's Settings. Each panel instance has a name such as
+`bun run figjam:bridge` also writes the development plugin for this run into
+`packages/figjam-plugin/dist/dev` (`FIGJAM_PLUGIN_OUT` overrides), stamped
+with the bridge's port and relay key. Import that `manifest.json`; after
+restarting the bridge, run the plugin again.
+
+### Who can connect
+
+1. **Relay key.** Each bridge has a relay key: 32 random bytes, new for each
+   process that hosts it (Maximal's FigJam plugin keeps one per process, so a
+   Retry or settings change keeps it; `figjam:bridge` makes one per run). It
+   lives in memory and in the `ui.html` the host writes (mode 0600; never the
+   manifest, a log, the status or the HTTP API). The panel offers it as its
+   WebSocket subprotocol, and the bridge refuses an upgrade to `/plugin`
+   without it (403) before any socket or pairing request exists. The Figma
+   plugin iframe's origin is the opaque `null`, which any sandboxed frame on
+   any web page can also send, so the origin check only rules out ordinary
+   web pages. A key left on disk opens nothing once its process has ended.
+2. **Approval.** Behind the key, a panel connects only when its user ticks
+   **Let Claude Code drive this board** in the panel's Settings. Each panel instance has a name such as
 `grumpy-lynx`, shown in the plugin's title bar. The first time it connects,
 the bridge holds the request until someone approves that name (in Maximal's
 Integrations page, or with `figjam approve <name>` from the CLI), or denies it. An approved panel gets a token of its
-own and reconnects without asking again. Requests expire after five minutes
+own and reconnects without asking again (it still needs the relay key: the
+token doesn't stand in for it). Requests expire after five minutes
 (`FIGJAM_PAIR_TTL_S`).
 
 HTTP callers (the CLI, scripts) authenticate with the admin token. Browser
@@ -186,9 +216,11 @@ const bridge = await startBridge({
   port: 0, // default FIGJAM_BRIDGE_PORT, else 4150; 0 picks a free port
   hostname: "127.0.0.1",
   dataDir, // default: the data directory described below
+  relayKey, // default: createRelayKey(), new for this start
   onEvent: (e) => { /* BridgeEvent */ },
 })
 bridge.port
+bridge.relayKey // stamp into the plugin you write (buildPlugin({ relayKey })); never log it
 bridge.status() // { port, version, boards, pending, clients }
 await bridge.approve("grumpy-lynx") // name optional when one request is pending
 await bridge.deny("grumpy-lynx")
@@ -210,28 +242,37 @@ bun run figjam:test        # CI runs this in unit-tests
 bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
 ```
 
-- `figjam-plugin` builds into a temp folder, checks the manifest and the
-  version stamp, then runs the stub tests in `test/sandbox/*.mjs` under Node.
+- `figjam-plugin` builds into a temp folder, checks the manifest, the
+  version stamp and the panel's build line (the relay key only in `ui.html`,
+  files owner-only, never in a release build), then runs the stub tests in `test/sandbox/*.mjs` under Node.
   Each stub loads the built `code.js` in a `vm` context with a fake `figma`
   global. `panel-ports.mjs` does the same for the built `ui.html` with fake
   browser globals and checks, for default and non-default ports, that Maximal
   calls, the bridge socket and the status text use the stamped ports and
-  agree with the manifest. They need Node rather than Bun, because Bun's `vm` doesn't keep a
+  agree with the manifest, that a keyed panel offers exactly its stamped key
+  as the socket's subprotocol, and that an unkeyed one opens no socket and
+  says why. They need Node rather than Bun, because Bun's `vm` doesn't keep a
   context's top-level `var` bindings in sync with the context object.
 - `plugin-figjam` runs the plugin conformance suite, then the real bridge on a
-  spare port with a temporary data directory: a fake panel asks to pair, and
+  spare port with a temporary data directory: a fake panel holding the relay
+  key from the plugin it built asks to pair, and
   the test checks the `figjam-pair-requested` notice, the Approve/Deny status
   actions and the `attention` that carries them (with action ids that stay
-  the same for the same panel name), that approving pairs the panel, that the
+  the same for the same panel name), that approving pairs the panel and that
+  it reconnects with its token without a new request, that a forged
+  `Origin: null` socket without the key raises nothing, that the
   host's Maximal port reaches the built manifest's `devAllowedDomains`, the
   stale-folder rebuild (changed content with the same version and ports, a
-  missing file, and a panel stamped with other ports), the port-in-use error
-  and that stopping the plugin
+  missing file, a panel stamped with other ports, and another relay key), the
+  port-in-use error and that stopping the plugin
   frees the port. It runs with
   `bun run plugins:test`.
 - `figjam-bridge` starts a bridge on a spare port with a temporary data
   directory and drives pairing the way the panel and the CLI do, both as a
-  subprocess (the CLI path) and in-process through `startBridge`.
+  subprocess (the CLI path, reading the key from the plugin it wrote) and
+  in-process through `startBridge`, including forged `Origin: null` sockets
+  with no, wrong, truncated or padded keys, a web origin with the right key,
+  token reconnects, and restarts with the same and a new key.
 - `figjam-layout` runs the recommended pipeline on the capability-map fixture
   (about 10s): every hard check must pass, and its crossings, wire length and
   name-tag counts are pinned, so a routing change shows up as a deliberate

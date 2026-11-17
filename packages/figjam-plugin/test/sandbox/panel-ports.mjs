@@ -1,6 +1,8 @@
 // Runs the built panel (ui.html) with fake browser globals and checks that its
 // Maximal and bridge connections, and the status text it shows, use the ports
-// stamped by the build and agree with the manifest's devAllowedDomains.
+// stamped by the build and agree with the manifest's devAllowedDomains. A
+// keyed build must offer exactly its stamped relay key as the socket's
+// subprotocol; an unkeyed one must open no socket and say why.
 //
 //   node panel-ports.mjs <built dir> <maximalPort> <bridgePort> [saved baseUrl]
 import assert from "node:assert"
@@ -14,6 +16,10 @@ const bridgePort = Number(bridgeArg)
 const html = fs.readFileSync(path.join(dir, "ui.html"), "utf8")
 const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"))
 const script = html.match(/<script>([\s\S]*)<\/script>/)[1]
+const stamped = JSON.parse(html.match(/^const PANEL_BUILD = (.*);$/m)[1])
+assert.equal(stamped.maximalPort, maximalPort)
+assert.equal(stamped.bridgePort, bridgePort)
+const relayKey = stamped.relayKey
 
 // An element that accepts any call and keeps what's assigned to it.
 const elements = {}
@@ -48,7 +54,7 @@ const sockets = []
 class FakeSocket {
   static OPEN = 1
   readyState = 0
-  constructor(url) { this.url = url; sockets.push(this) }
+  constructor(url, protocols) { this.url = url; this.protocols = protocols; sockets.push(this) }
   send() {}
   close() {}
 }
@@ -99,22 +105,33 @@ for (const url of fetched) {
 }
 assert.equal(fetched[0], `http://localhost:${maximalPort}/v1/models`)
 
-// Bridge: the socket goes to the stamped port.
-assert.equal(sockets.length, 1, "one bridge socket expected")
-assert.equal(sockets[0].url, `ws://localhost:${bridgePort}/plugin`)
-assert.ok(allowed.includes(new URL(sockets[0].url).origin.replace(/^http/, "ws")))
-
-// The connecting line names the stamped bridge port and no other.
 const status = () => elements.bridgeStatus.textContent
-assert.equal(status(), `Connecting to the bridge on localhost:${bridgePort}…`)
 
-// A refused connection says where it looked.
-sockets[0].onclose({ code: 1006 })
-assert.equal(
-  status().startsWith(`Bridge isn't running on localhost:${bridgePort} · `),
-  true,
-  status(),
-)
+if (relayKey) {
+  // Bridge: the socket goes to the stamped port and offers the stamped key.
+  assert.equal(sockets.length, 1, "one bridge socket expected")
+  assert.equal(sockets[0].url, `ws://localhost:${bridgePort}/plugin`)
+  assert.ok(allowed.includes(new URL(sockets[0].url).origin.replace(/^http/, "ws")))
+  assert.deepEqual(sockets[0].protocols, [relayKey])
+
+  // The connecting line names the stamped bridge port and no other.
+  assert.equal(status(), `Connecting to the bridge on localhost:${bridgePort}…`)
+
+  // A refused connection says where it looked.
+  sockets[0].onclose({ code: 1006 })
+  assert.equal(
+    status().startsWith(`Can't reach the bridge on localhost:${bridgePort} `),
+    true,
+    status(),
+  )
+} else {
+  // Without a key the bridge would refuse it, so no socket is opened.
+  assert.equal(sockets.length, 0, "an unkeyed panel must not open the bridge socket")
+  assert.ok(status().startsWith("This copy of the plugin can't connect to the bridge."), status())
+}
+
+// The key appears only in the build line, never in what the panel shows.
+if (relayKey) assert.ok(!status().includes(relayKey))
 
 // Neither endpoint's text mentions a port the build didn't stamp.
 const shown = [status(), elements.baseUrl.value].join(" ")
@@ -126,5 +143,5 @@ assert.equal(elements.baseUrl.value, `http://localhost:${maximalPort}`)
 // The static markup carries no port, so nothing wrong shows before the script runs.
 assert.ok(!/localhost:\d+/.test(html.replace(script, "")), "ui.html markup must not hard-code a port")
 
-console.log(`panel ports ${maximalPort}/${bridgePort} ok`)
+console.log(`panel ports ${maximalPort}/${bridgePort} ${relayKey ? "keyed" : "unkeyed"} ok`)
 process.exit(0)

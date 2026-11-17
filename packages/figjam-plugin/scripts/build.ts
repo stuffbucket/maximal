@@ -5,15 +5,21 @@ import { watch } from "node:fs"
  *
  * Today the sources are the single-file `src/legacy/code.js` and
  * `src/legacy/ui.html`, copied through unchanged except for the version
- * stamp and the ports stamped into the panel (`PANEL_BUILD`). Splitting them
- * into modules happens behind this same entry point.
+ * stamp in code.js and the build line in ui.html (`PANEL_BUILD`: the Maximal
+ * and bridge ports and, when the process hosting the bridge builds it, that
+ * bridge's relay key). Splitting them into modules happens behind this same
+ * entry point.
+ *
+ * A build from this command carries no relay key, so its panel can't open
+ * the bridge socket: the bridge's host (Maximal's FigJam plugin, or
+ * `bun run figjam:bridge`) writes the panel that can.
  *
  *   bun scripts/build.ts                 # dev build → dist/dev
  *   bun scripts/build.ts --release       # release build → dist/release
  *   bun scripts/build.ts --out <dir>     # write somewhere else
  *   bun scripts/build.ts --watch         # rebuild when src/ changes
  */
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 // Embedded when bundled, so a compiled Maximal can write the plugin without
@@ -35,9 +41,16 @@ const PACKAGE_DIR = path.resolve(import.meta.dir, "..")
 const SOURCE_DIR = path.join(PACKAGE_DIR, "src")
 const VERSION_LINE = /^var PLUGIN_VERSION = "[^"\n]*"$/m
 const PANEL_BUILD_LINE = /^const PANEL_BUILD = .*;$/m
+/** A bridge relay key: 32 random bytes as base64url. */
+const RELAY_KEY = /^[\w-]{43}$/
 
 export const DEFAULT_MAXIMAL_PORT = 4141
 export const DEFAULT_BRIDGE_PORT = 4150
+
+/** Where `bun run figjam:build` writes by default: `dist/dev` or `dist/release`. */
+export function defaultOutDir(release = false): string {
+  return path.join(PACKAGE_DIR, "dist", release ? "release" : "dev")
+}
 
 export interface BuildOptions {
   /** Folder to write into. Created if missing. */
@@ -48,6 +61,12 @@ export interface BuildOptions {
   maximalPort?: number
   /** The bridge's WebSocket port, for coding agents driving the board. */
   bridgePort?: number
+  /**
+   * The running bridge's relay key (`BridgeHandle.relayKey`). Only a panel
+   * built with it can open the bridge socket. Stamped into ui.html alone,
+   * never the manifest or any output; release builds never carry one.
+   */
+  relayKey?: string
 }
 
 /**
@@ -57,21 +76,27 @@ export interface BuildOptions {
  */
 export type PluginBuildOptions = Omit<BuildOptions, "outDir">
 
-/** `PluginBuildOptions` with every default filled in. */
+/** `PluginBuildOptions` with every default filled in (`relayKey` "" = none). */
 export type ResolvedBuildOptions = Required<PluginBuildOptions>
 
 /**
- * The one place defaults are applied. `renderPlugin` turns the result into
- * every managed file (manifest, panel stamp, sandbox), so a new option is
- * added here and read from there.
+ * The one place defaults are applied and options are checked. `renderPlugin`
+ * turns the result into every managed file (manifest, panel stamp, sandbox),
+ * so a new option is added here and read from there.
  */
 export function resolveBuildOptions(
   options: PluginBuildOptions,
 ): ResolvedBuildOptions {
+  const release = options.release ?? false
+  const relayKey = release ? "" : (options.relayKey ?? "")
+  if (relayKey !== "" && !RELAY_KEY.test(relayKey)) {
+    throw new Error("A FigJam relay key must be 32 bytes of base64url text.")
+  }
   return {
-    release: options.release ?? false,
+    release,
     maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
     bridgePort: options.bridgePort ?? DEFAULT_BRIDGE_PORT,
+    relayKey,
   }
 }
 
@@ -107,10 +132,15 @@ function assertPort(name: string, value: number): void {
   }
 }
 
-/** What the build stamps into the panel as `PANEL_BUILD`. */
+/**
+ * What the build stamps into the panel as `PANEL_BUILD`: the ports its
+ * manifest allows, and the relay key it opens the bridge socket with ("" =
+ * none, so the panel says it can't reach the bridge instead of trying).
+ */
 export interface PanelBuild {
   maximalPort: number
   bridgePort: number
+  relayKey: string
 }
 
 /**
@@ -121,6 +151,7 @@ export function panelBuild(options: ResolvedBuildOptions): PanelBuild {
   return {
     maximalPort: options.maximalPort,
     bridgePort: options.bridgePort,
+    relayKey: options.relayKey,
   }
 }
 
@@ -131,6 +162,7 @@ export function panelBuildLine(build: PanelBuild): string {
   const stamped: PanelBuild = {
     maximalPort: build.maximalPort,
     bridgePort: build.bridgePort,
+    relayKey: build.relayKey,
   }
   return `const PANEL_BUILD = ${JSON.stringify(stamped)};`
 }
@@ -151,8 +183,9 @@ export function stampPanel(html: string, build: PanelBuild): string {
   return html.replace(PANEL_BUILD_LINE, () => line)
 }
 
+/** The manifest never sees the relay key. */
 export function pluginManifest(
-  options: ResolvedBuildOptions,
+  options: Omit<ResolvedBuildOptions, "relayKey">,
 ): Record<string, unknown> {
   return {
     name: options.release ? "Maximal Agent" : "Maximal Agent (dev)",
@@ -255,9 +288,23 @@ async function bestEffortRm(ops: FileOps, file: string): Promise<void> {
 }
 
 /**
- * Put the managed files in place. Each file is written to a temp name first,
- * so Figma never reads a half-written file, and then renamed over its final
- * name. Each rename is atomic, but the three together are not: a process
+ * Write `file` owner-only: ui.html can carry the bridge's relay key, and so
+ * can the previous ui.html a rollback restores. The chmod covers a file left
+ * behind with other permissions, which `mode` alone would keep.
+ */
+async function writePrivate(
+  file: string,
+  contents: string | Buffer,
+): Promise<void> {
+  await writeFile(file, contents, { mode: 0o600 })
+  await chmod(file, 0o600)
+}
+
+/**
+ * Put the managed files in place. Each file is written to a temp name first
+ * (owner-only, see `writePrivate`), so Figma never reads a half-written file,
+ * and then renamed over its final name. Each rename is atomic, but the three
+ * together are not: a process
  * crash or power loss between renames can leave a mix of old and new files,
  * which the next start sees as stale and rebuilds. What an ordinary failure
  * (a rename that throws) gets is rollback: the previous contents are read up
@@ -285,7 +332,7 @@ async function writeAll(
   )
   const renamed: Array<(typeof staged)[number]> = []
   try {
-    await Promise.all(staged.map((f) => writeFile(f.temp, f.contents)))
+    await Promise.all(staged.map((f) => writePrivate(f.temp, f.contents)))
     for (const f of staged) {
       await ops.rename(f.temp, f.final)
       renamed.push(f)
@@ -296,7 +343,7 @@ async function writeAll(
         if (f.prior === null) {
           await ops.rm(f.final)
         } else {
-          await writeFile(f.undo, f.prior)
+          await writePrivate(f.undo, f.prior)
           await ops.rename(f.undo, f.final)
         }
       } catch {
@@ -338,10 +385,7 @@ function parseArgs(argv: Array<string>): BuildOptions & { watch: boolean } {
     return raw === undefined ? undefined : Number.parseInt(raw, 10)
   }
   return {
-    outDir: path.resolve(
-      value("--out")
-        ?? path.join(PACKAGE_DIR, "dist", release ? "release" : "dev"),
-    ),
+    outDir: path.resolve(value("--out") ?? defaultOutDir(release)),
     release,
     maximalPort: port("--maximal-port"),
     bridgePort: port("--bridge-port"),

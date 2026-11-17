@@ -13,6 +13,7 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises"
 import os from "node:os"
@@ -20,6 +21,8 @@ import path from "node:path"
 
 import {
   buildPlugin,
+  DEFAULT_BRIDGE_PORT,
+  DEFAULT_MAXIMAL_PORT,
   inspectPlugin,
   panelBuild,
   panelBuildLine,
@@ -177,6 +180,13 @@ async function leftovers(dir: string): Promise<Array<string>> {
   return (await readdir(dir)).filter((name) => LEFTOVER.test(name))
 }
 
+/** Every file in `dir` is owner-only (ui.html can carry a relay key). */
+async function expectOwnerOnly(dir: string): Promise<void> {
+  for (const name of await readdir(dir)) {
+    expect((await stat(path.join(dir, name))).mode & 0o777, name).toBe(0o600)
+  }
+}
+
 /**
  * File operations whose `failAt`th rename (1-based) throws. With `persist`
  * every later rename fails too (so a rollback fails as well), and `removal`
@@ -267,6 +277,86 @@ describe("rollback", () => {
   })
 })
 
+describe("relay key", () => {
+  const KEY = "k".repeat(22) + "_-".repeat(10) + "Z"
+  const OTHER_KEY = "o".repeat(43)
+
+  test("a plain build stamps the ports and no key, so the panel won't try the bridge", async () => {
+    const ui = await readFile(path.join(outDir, "ui.html"), "utf8")
+    expect(ui).toContain(
+      panelBuildLine({
+        maximalPort: DEFAULT_MAXIMAL_PORT,
+        bridgePort: DEFAULT_BRIDGE_PORT,
+        relayKey: "",
+      }),
+    )
+  })
+
+  test("the key goes into ui.html alone, owner-only", async () => {
+    const keyed = path.join(outDir, "keyed")
+    await buildPlugin({ outDir: keyed, bridgePort: 5150, relayKey: KEY })
+    const ui = await readFile(path.join(keyed, "ui.html"), "utf8")
+    expect(ui).toContain(
+      panelBuildLine({
+        maximalPort: DEFAULT_MAXIMAL_PORT,
+        bridgePort: 5150,
+        relayKey: KEY,
+      }),
+    )
+    for (const name of ["manifest.json", "code.js"]) {
+      expect(await readFile(path.join(keyed, name), "utf8")).not.toContain(KEY)
+    }
+    await expectOwnerOnly(keyed)
+  })
+
+  test("a release build never carries a key", async () => {
+    const release = path.join(outDir, "release-keyed")
+    await buildPlugin({ outDir: release, release: true, relayKey: KEY })
+    const ui = await readFile(path.join(release, "ui.html"), "utf8")
+    expect(ui).not.toContain(KEY)
+  })
+
+  test("a malformed key is refused", async () => {
+    const refused = await buildPlugin({
+      outDir: path.join(outDir, "bad"),
+      relayKey: "nope",
+    }).then(() => "", String)
+    expect(refused).toContain("relay key")
+  })
+
+  test("the panel source has exactly one build line", () => {
+    expect(() =>
+      stampPanel("<script></script>", {
+        maximalPort: 1,
+        bridgePort: 1,
+        relayKey: "",
+      }),
+    ).toThrow("found 0")
+  })
+
+  test("the key is part of freshness: another key makes the folder stale", async () => {
+    const dir = path.join(outDir, "keyed-fresh")
+    await buildPlugin({ outDir: dir, relayKey: KEY })
+    expect(await inspectPlugin(dir, { relayKey: KEY })).toBe("current")
+    expect(await inspectPlugin(dir, { relayKey: OTHER_KEY })).toBe("stale")
+    expect(await inspectPlugin(dir, {})).toBe("stale")
+  })
+
+  test("a rolled-back rebuild restores the previous key, owner-only, with no leftovers", async () => {
+    const dir = path.join(outDir, "keyed-undo")
+    await buildPlugin({ outDir: dir, relayKey: KEY })
+    const before = await snapshot(dir)
+    // code.js renames, then ui.html (carrying OTHER_KEY) throws.
+    const error = await caught(
+      buildPlugin({ outDir: dir, relayKey: OTHER_KEY }, failingOps(2)),
+    )
+    expect((error as Error).message).toBe("rename failed")
+    expect(await snapshot(dir)).toEqual(before)
+    expect(await leftovers(dir)).toEqual([])
+    await expectOwnerOnly(dir)
+  })
+})
+
 // The sandbox checks run the built code.js against a stubbed `figma` global,
 // each in its own process because they install globals and exit when done.
 // They run under Node: Bun's `vm` doesn't keep a context's top-level `var`
@@ -295,8 +385,10 @@ describe("sandbox", () => {
 
 // The built panel runs against fake browser globals and must dial the same
 // ports the manifest allows: the defaults, and non-default values for both.
+// Only a keyed build (what the bridge's host writes) opens the bridge socket.
 describe("panel ports", () => {
   const script = path.join(import.meta.dir, "sandbox", "panel-ports.mjs")
+  const KEY = "p".repeat(21) + "-_".repeat(11)
   const run = (
     dir: string,
     ports: { maximalPort: number; bridgePort: number },
@@ -319,7 +411,14 @@ describe("panel ports", () => {
     }
   }
 
-  test("default build connects to 4141 and 4150", () => {
+  test("default ports: a keyed build connects to 4141 and 4150 with its key", async () => {
+    const keyedDir = path.join(outDir, "default-keyed")
+    await buildPlugin({ outDir: keyedDir, relayKey: KEY })
+    const result = run(keyedDir, { maximalPort: 4141, bridgePort: 4150 })
+    expect(result.code, result.output).toBe(0)
+  })
+
+  test("an unkeyed build still calls Maximal but opens no bridge socket", () => {
     const result = run(outDir, { maximalPort: 4141, bridgePort: 4150 })
     expect(result.code, result.output).toBe(0)
   })
@@ -330,10 +429,11 @@ describe("panel ports", () => {
       outDir: customDir,
       maximalPort: 5141,
       bridgePort: 5150,
+      relayKey: KEY,
     })
     const ui = await readFile(path.join(customDir, "ui.html"), "utf8")
     expect(ui).toContain(
-      'const PANEL_BUILD = {"maximalPort":5141,"bridgePort":5150};',
+      `const PANEL_BUILD = {"maximalPort":5141,"bridgePort":5150,"relayKey":"${KEY}"};`,
     )
     const result = run(customDir, { maximalPort: 5141, bridgePort: 5150 })
     expect(result.code, result.output).toBe(0)
@@ -345,6 +445,7 @@ describe("panel ports", () => {
       outDir: customDir,
       maximalPort: 4999,
       bridgePort: 4998,
+      relayKey: KEY,
     })
     const result = run(
       customDir,
@@ -357,13 +458,21 @@ describe("panel ports", () => {
   test("refuses ports that aren't ports", () => {
     const line = "const PANEL_BUILD = {};"
     expect(() =>
-      stampPanel(line, { maximalPort: 0, bridgePort: 4150 }),
+      stampPanel(line, { maximalPort: 0, bridgePort: 4150, relayKey: "" }),
     ).toThrow("Maximal port")
     expect(() =>
-      stampPanel(line, { maximalPort: 4141, bridgePort: Number.NaN }),
+      stampPanel(line, {
+        maximalPort: 4141,
+        bridgePort: Number.NaN,
+        relayKey: "",
+      }),
     ).toThrow("bridge port")
     expect(() =>
-      stampPanel("<html></html>", { maximalPort: 4141, bridgePort: 4150 }),
+      stampPanel("<html></html>", {
+        maximalPort: 4141,
+        bridgePort: 4150,
+        relayKey: "",
+      }),
     ).toThrow("found 0")
   })
 })

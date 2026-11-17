@@ -1,23 +1,27 @@
 import type { Subprocess } from "bun"
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
 // Starts a real bridge on a spare port with a throwaway data directory, then
 // drives it the way the panel and the CLI do: a WebSocket hello from a fake
-// panel, and approve/deny over the admin HTTP API.
+// panel (holding the relay key from the plugin the CLI wrote), and
+// approve/deny over the admin HTTP API.
 const PORT = 4300 + Math.floor(Math.random() * 500)
 let home: string
+let pluginDir: string
 let bridge: Subprocess
 let token: string
+let relayKey: string
 
 async function waitForBridge(): Promise<void> {
   for (let i = 0; i < 100; i++) {
     try {
       const res = await fetch(`http://localhost:${PORT}/status`)
-      if (res.status > 0) return
+      if (res.status > 0 && existsSync(path.join(pluginDir, "ui.html"))) return
     } catch {
       // not listening yet
     }
@@ -26,12 +30,20 @@ async function waitForBridge(): Promise<void> {
   throw new Error("bridge did not start")
 }
 
+/** The build line the bridge stamped into the panel it wrote. */
+async function panelBuild(): Promise<{ bridgePort: number; relayKey: string }> {
+  const html = await readFile(path.join(pluginDir, "ui.html"), "utf8")
+  const line = /^const PANEL_BUILD = (.*);$/m.exec(html)
+  if (!line) throw new Error("no PANEL_BUILD line in ui.html")
+  return JSON.parse(line[1]) as { bridgePort: number; relayKey: string }
+}
+
 async function admin(
   route: string,
-  body: unknown,
+  body?: unknown,
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`http://localhost:${PORT}${route}`, {
-    method: "POST",
+    method: body === undefined ? "GET" : "POST",
     // By design: the test reads the throwaway bridge's admin token from its
     // temp data directory and calls that bridge on localhost. See ADR-0001.
     // codeql[js/file-access-to-http]
@@ -39,19 +51,28 @@ async function admin(
       "content-type": "application/json",
       authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   return (await res.json()) as Record<string, unknown>
 }
 
 interface FakePanel {
   messages: Array<string>
+  opened: Promise<boolean>
   closed: Promise<number>
   next: (type: string) => Promise<void>
 }
 
-function openPanel(name: string, boardId: string): FakePanel {
-  const ws = new WebSocket(`ws://localhost:${PORT}/plugin`)
+function openPanel(
+  name: string,
+  boardId: string,
+  protocols: Array<string> = [relayKey],
+): FakePanel {
+  // The Figma plugin iframe's origin is opaque: `null`.
+  const ws = new WebSocket(`ws://localhost:${PORT}/plugin`, {
+    protocols,
+    headers: { origin: "null" },
+  })
   const messages: Array<string> = []
   const waiters: Array<{ type: string; resolve: () => void }> = []
   ws.addEventListener("open", () => {
@@ -70,6 +91,11 @@ function openPanel(name: string, boardId: string): FakePanel {
     messages.push(type)
     for (const w of waiters.filter((x) => x.type === type)) w.resolve()
   })
+  const opened = new Promise<boolean>((resolve) => {
+    ws.addEventListener("open", () => resolve(true))
+    ws.addEventListener("error", () => resolve(false))
+    ws.addEventListener("close", () => resolve(false))
+  })
   const closed = new Promise<number>((resolve) => {
     ws.addEventListener("close", (event) => resolve(event.code))
   })
@@ -77,11 +103,12 @@ function openPanel(name: string, boardId: string): FakePanel {
     messages.includes(type) ?
       Promise.resolve()
     : new Promise((resolve) => waiters.push({ type, resolve }))
-  return { messages, closed, next }
+  return { messages, opened, closed, next }
 }
 
 beforeAll(async () => {
   home = await mkdtemp(path.join(os.tmpdir(), "figjam-bridge-"))
+  pluginDir = path.join(home, "figma-plugin")
   bridge = Bun.spawn(
     [process.execPath, path.join(import.meta.dir, "..", "src", "bridge.ts")],
     {
@@ -90,6 +117,7 @@ beforeAll(async () => {
         COPILOT_API_HOME: home,
         FIGJAM_BRIDGE_PORT: String(PORT),
         FIGJAM_PAIR_TTL_S: "2",
+        FIGJAM_PLUGIN_OUT: pluginDir,
       },
       stdout: "ignore",
       stderr: "ignore",
@@ -99,6 +127,7 @@ beforeAll(async () => {
   token = (
     await readFile(path.join(home, "figjam", "pairing-token"), "utf8")
   ).trim()
+  ;({ relayKey } = await panelBuild())
 })
 
 afterAll(async () => {
@@ -108,6 +137,32 @@ afterAll(async () => {
 })
 
 describe("pairing", () => {
+  test("the CLI writes the dev plugin with its port and a fresh relay key, kept out of the manifest", async () => {
+    const build = await panelBuild()
+    expect(build.bridgePort).toBe(PORT)
+    expect(build.relayKey).toMatch(/^[\w-]{43}$/)
+    const manifest = await readFile(
+      path.join(pluginDir, "manifest.json"),
+      "utf8",
+    )
+    expect(manifest).toContain(`ws://localhost:${PORT}`)
+    expect(manifest).not.toContain(relayKey)
+    expect(
+      await readFile(path.join(pluginDir, "code.js"), "utf8"),
+    ).not.toContain(relayKey)
+  })
+
+  test("a forged Origin: null panel without the key never becomes a request", async () => {
+    const forged = openPanel("forged-otter", "bf", [])
+    expect(await forged.opened).toBe(false)
+    const wrong = openPanel("forged-otter", "bf", ["x".repeat(43)])
+    expect(await wrong.opened).toBe(false)
+    expect((await admin("/pair")).pending).toEqual([])
+    expect((await admin("/pair/approve", { name: "forged-otter" })).ok).toBe(
+      false,
+    )
+  })
+
   test("approving a name nobody sent says so", async () => {
     const out = await admin("/pair/approve", { name: "sunny-otter" })
     expect(out.ok).toBe(false)

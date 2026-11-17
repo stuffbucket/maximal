@@ -9,7 +9,10 @@ import type {
   PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
 
-import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
+import {
+  createRelayKey,
+  startBridge,
+} from "@stuffbucket/maximal-figjam-bridge/server"
 import {
   buildPlugin,
   inspectPlugin,
@@ -23,6 +26,7 @@ import {
   composeStatus,
   displayName,
   pairActionIds,
+  type PendingPanel,
   type PluginFolder,
   RETRY_ACTION,
   SETUP_ACTION,
@@ -48,6 +52,14 @@ interface PairRequest {
 // The bridge keeps its state at module level, so one runs per process. A
 // reload starts the new bridge only after the old one has let go of its port.
 let previousStop: Promise<void> = Promise.resolve()
+
+// One relay key per process hosting the bridge, in memory only. Every bridge
+// this process starts uses it, so a Retry, a config reload or a resumed
+// handoff keeps the panels already written working; a new process (Maximal
+// restarted, a new plugin generation) makes a new key and rewrites the plugin.
+// The copy stamped into the plugin folder opens nothing once this process ends.
+let processRelayKey: string | undefined
+const relayKey = (): string => (processRelayKey ??= createRelayKey())
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -172,6 +184,7 @@ export class FigjamController {
       const { dataDir } = this.#options
       const started = await startBridge({
         port: this.#config.port,
+        relayKey: relayKey(),
         ...(dataDir === undefined ? {} : { dataDir }),
         onEvent: (event) => this.#onEvent(event),
       })
@@ -207,7 +220,8 @@ export class FigjamController {
    * Learn what the plugin folder holds, and bring a stale one up to date. The
    * managed files are compared byte for byte with what a build would write,
    * so a source, manifest or security change rebuilds even when the version
-   * and ports are unchanged.
+   * and ports are unchanged, and so does a folder holding another process's
+   * relay key.
    */
   async #checkFolder(): Promise<void> {
     try {
@@ -230,6 +244,7 @@ export class FigjamController {
     return {
       bridgePort: this.#handle?.port ?? this.#config.port,
       maximalPort: this.#ctx.host.maximalPort(),
+      relayKey: relayKey(),
     }
   }
 
@@ -255,7 +270,7 @@ export class FigjamController {
   #onEvent(event: BridgeEvent): void {
     if (this.#disposed) return
     if (event.type === "pair-requested" && !this.#requests.has(event.name)) {
-      this.#notify(event.name)
+      this.#notify(event)
     }
     try {
       this.#sync()
@@ -266,13 +281,15 @@ export class FigjamController {
     }
   }
 
-  #notify(name: string): void {
-    const shown = displayName(name)
+  #notify(event: { name: string; board?: string }): void {
+    const shown = displayName(event.name)
+    const board =
+      event.board === undefined ? undefined : displayName(event.board)
     try {
       this.#ctx.surface.notify({
         code: "figjam-pair-requested",
-        message: `A FigJam panel ("${shown}") wants to connect.`,
-        params: { name: shown },
+        message: `A FigJam panel ("${shown}")${board === undefined ? "" : ` on board "${board}"`} wants to connect.`,
+        params: { name: shown, ...(board === undefined ? {} : { board }) },
       })
     } catch (error) {
       this.#ctx.host.logger.warn(
@@ -362,7 +379,14 @@ export class FigjamController {
                     title
                   : board.id
               }),
-              pending: view.pending.map((request) => request.name),
+              pending: view.pending.map(
+                (request): PendingPanel => ({
+                  name: request.name,
+                  board: request.board,
+                  fileKey: request.fileKey,
+                  user: request.user,
+                }),
+              ),
             }
           : undefined,
         building: this.#building,
