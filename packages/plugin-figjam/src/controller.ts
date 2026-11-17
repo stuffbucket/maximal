@@ -13,6 +13,7 @@ import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
 import {
   buildPlugin,
   inspectPlugin,
+  type PluginBuildOptions,
 } from "@stuffbucket/maximal-figjam-plugin/build"
 import path from "node:path"
 
@@ -220,8 +221,12 @@ export class FigjamController {
     if (this.#folder === "stale") await this.#build()
   }
 
-  /** The ports the generated plugin must name, for building and for checking. */
-  #buildOptions(): { bridgePort: number; maximalPort: number } {
+  /**
+   * The options the generated plugin is built with. The start-time check and
+   * every build (start or manual) both read this, so a folder is judged
+   * against exactly what a rebuild would write.
+   */
+  #buildOptions(): PluginBuildOptions {
     return {
       bridgePort: this.#handle?.port ?? this.#config.port,
       maximalPort: this.#ctx.host.maximalPort(),

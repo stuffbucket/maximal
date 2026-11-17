@@ -105,6 +105,16 @@ model calls, bridge socket and the bridge address in its status text always
 match the manifest allowlist. A Maximal address saved by an older panel (the
 old `4141` default) follows the build's port.
 
+In `scripts/build.ts`, `resolveBuildOptions` fills in the defaults and
+`renderPlugin` turns the result into all three files: the manifest from
+`pluginManifest`, the panel stamp from `panelBuild`, and `code.js`.
+`buildPlugin` writes what `renderPlugin` returns, and `inspectPlugin` compares
+a folder with it, so a new build option is added to `BuildOptions`, given its
+default in `resolveBuildOptions`, and, if the panel needs it, added to
+`PanelBuild` and `panelBuild`. Maximal's FigJam plugin passes the same
+options (`#buildOptions()` in `packages/plugin-figjam/src/controller.ts`) to
+both.
+
 ## Comments
 
 The Plugin API can't see comments, so the sandbox calls Figma's REST API with

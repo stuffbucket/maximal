@@ -21,7 +21,12 @@ import path from "node:path"
 import {
   buildPlugin,
   inspectPlugin,
+  panelBuild,
+  panelBuildLine,
+  pluginManifest,
   readPackageVersion,
+  renderPlugin,
+  resolveBuildOptions,
   stampPanel,
   stampVersion,
 } from "../scripts/build"
@@ -124,6 +129,21 @@ describe("freshness", () => {
     expect(
       await inspectPlugin(dir, { maximalPort: 5141, bridgePort: 5150 }),
     ).toBe("stale")
+  })
+
+  test("the manifest and the panel stamp come from the same resolved options", async () => {
+    for (const options of [
+      {},
+      { maximalPort: 5141, bridgePort: 5150 },
+      { release: true, bridgePort: 6150 },
+    ]) {
+      const resolved = resolveBuildOptions(options)
+      const files = await renderPlugin(options)
+      expect(JSON.parse(files["manifest.json"])).toEqual(
+        pluginManifest(resolved),
+      )
+      expect(files["ui.html"]).toContain(panelBuildLine(panelBuild(resolved)))
+    }
   })
 
   test("files outside the managed set are ignored, and a build leaves no temp files", async () => {

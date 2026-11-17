@@ -50,6 +50,31 @@ export interface BuildOptions {
   bridgePort?: number
 }
 
+/**
+ * Everything that shapes a build's output: `BuildOptions` without where it
+ * goes. `buildPlugin` and `inspectPlugin` both take this, so a folder is
+ * checked against exactly the options it would be built with.
+ */
+export type PluginBuildOptions = Omit<BuildOptions, "outDir">
+
+/** `PluginBuildOptions` with every default filled in. */
+export type ResolvedBuildOptions = Required<PluginBuildOptions>
+
+/**
+ * The one place defaults are applied. `renderPlugin` turns the result into
+ * every managed file (manifest, panel stamp, sandbox), so a new option is
+ * added here and read from there.
+ */
+export function resolveBuildOptions(
+  options: PluginBuildOptions,
+): ResolvedBuildOptions {
+  return {
+    release: options.release ?? false,
+    maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
+    bridgePort: options.bridgePort ?? DEFAULT_BRIDGE_PORT,
+  }
+}
+
 export interface BuildResult {
   outDir: string
   version: string
@@ -82,29 +107,41 @@ function assertPort(name: string, value: number): void {
   }
 }
 
-/** The `PANEL_BUILD` line stamped into the panel for these ports. */
-export function panelBuildLine(ports: {
+/** What the build stamps into the panel as `PANEL_BUILD`. */
+export interface PanelBuild {
   maximalPort: number
   bridgePort: number
-}): string {
-  assertPort("Maximal port", ports.maximalPort)
-  assertPort("bridge port", ports.bridgePort)
-  const build = {
-    maximalPort: ports.maximalPort,
-    bridgePort: ports.bridgePort,
-  }
-  return `const PANEL_BUILD = ${JSON.stringify(build)};`
 }
 
 /**
- * The panel source with its `PANEL_BUILD` line set to the ports the manifest
- * allows, so the panel dials exactly the origins in `devAllowedDomains`.
+ * The panel's share of the resolved build options. The panel sees only what
+ * is listed here, in this key order (the stamp is compared byte for byte).
  */
-export function stampPanel(
-  html: string,
-  ports: { maximalPort: number; bridgePort: number },
-): string {
-  const line = panelBuildLine(ports)
+export function panelBuild(options: ResolvedBuildOptions): PanelBuild {
+  return {
+    maximalPort: options.maximalPort,
+    bridgePort: options.bridgePort,
+  }
+}
+
+/** The `PANEL_BUILD` line stamped into the panel. */
+export function panelBuildLine(build: PanelBuild): string {
+  assertPort("Maximal port", build.maximalPort)
+  assertPort("bridge port", build.bridgePort)
+  const stamped: PanelBuild = {
+    maximalPort: build.maximalPort,
+    bridgePort: build.bridgePort,
+  }
+  return `const PANEL_BUILD = ${JSON.stringify(stamped)};`
+}
+
+/**
+ * The panel source with its `PANEL_BUILD` line set from `build`, whose ports
+ * are the ones the manifest allows, so the panel dials exactly the origins in
+ * `devAllowedDomains`.
+ */
+export function stampPanel(html: string, build: PanelBuild): string {
+  const line = panelBuildLine(build)
   const matches = html.match(new RegExp(PANEL_BUILD_LINE.source, "gm")) ?? []
   if (matches.length !== 1) {
     throw new Error(
@@ -115,7 +152,7 @@ export function stampPanel(
 }
 
 export function pluginManifest(
-  options: Required<Omit<BuildOptions, "outDir">>,
+  options: ResolvedBuildOptions,
 ): Record<string, unknown> {
   return {
     name: options.release ? "Maximal Agent" : "Maximal Agent (dev)",
@@ -141,29 +178,23 @@ export function pluginManifest(
 type PluginFiles = Record<"code.js" | "manifest.json" | "ui.html", string>
 type FolderState = "missing" | "stale" | "current"
 
-function resolveOptions(
-  options: Omit<BuildOptions, "outDir">,
-): Required<Omit<BuildOptions, "outDir">> {
-  return {
-    release: options.release ?? false,
-    maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
-    bridgePort: options.bridgePort ?? DEFAULT_BRIDGE_PORT,
-  }
-}
-
 /**
  * The exact files a build writes, by name. Pure: nothing touches the disk.
  * These three are the plugin's managed outputs; a folder is current only when
- * every one holds exactly these bytes.
+ * every one holds exactly these bytes. Both `buildPlugin` and `inspectPlugin`
+ * go through here, so anything that changes the output changes freshness too.
  */
 export async function renderPlugin(
-  options: Omit<BuildOptions, "outDir">,
+  options: PluginBuildOptions,
 ): Promise<PluginFiles> {
   const version = await readPackageVersion()
-  const resolved = resolveOptions(options)
+  const resolved = resolveBuildOptions(options)
   return {
     "code.js": stampVersion(embeddedText(codeSource, "code.js"), version),
-    "ui.html": stampPanel(embeddedText(uiSource, "ui.html"), resolved),
+    "ui.html": stampPanel(
+      embeddedText(uiSource, "ui.html"),
+      panelBuild(resolved),
+    ),
     "manifest.json": `${JSON.stringify(pluginManifest(resolved), null, 2)}\n`,
   }
 }
@@ -176,7 +207,7 @@ export async function renderPlugin(
  */
 export async function inspectPlugin(
   outDir: string,
-  options: Omit<BuildOptions, "outDir">,
+  options: PluginBuildOptions,
 ): Promise<FolderState> {
   const expected = await renderPlugin(options)
   const found = await Promise.all(
