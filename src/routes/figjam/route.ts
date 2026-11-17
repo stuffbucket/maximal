@@ -14,10 +14,10 @@
  * The bridge's port is internal. It is never returned, and the panel never
  * needs it.
  *
- * Callers must be on this computer and, when a browser labels the request, be
- * a Figma plugin frame (`Origin: null`): the same allowlist the bridge's own
- * socket applies. Nothing secret is ever answered or logged: no tokens, no
- * file paths, only the port-free availability and profile.
+ * Callers must be on this computer. Opaque-origin browser requests must also
+ * carry the per-process relay capability stamped into the staged panel; local
+ * no-Origin diagnostics remain usable. Nothing secret is ever answered or
+ * logged: no keys, tokens or file paths, only port-free availability/profile.
  */
 
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
@@ -34,6 +34,10 @@ import {
   isVerboseProfile,
   resolveFigjamProfile,
 } from "~/lib/figjam/profile"
+import {
+  FIGJAM_RELAY_KEY_ENV,
+  FIGJAM_RELAY_KEY_HEADER,
+} from "~/lib/figjam/relay-key"
 import { getPluginGateway } from "~/lib/plugins/gateway"
 import { currentProxyPort } from "~/lib/start/proxy-port"
 import { BUILD_VERSION } from "~/lib/update/build-info"
@@ -80,7 +84,10 @@ export function bridgeAvailability(
 }
 
 interface BunServerLike {
-  upgrade(request: Request, options: { data: FigjamRelayData }): boolean
+  upgrade(
+    request: Request,
+    options: { data: FigjamRelayData; headers?: Record<string, string> },
+  ): boolean
 }
 
 function bunServerOf(request: Request): BunServerLike | undefined {
@@ -101,17 +108,23 @@ function bunServerOf(request: Request): BunServerLike | undefined {
 
 const PROFILE_PARAM = /^[a-z0-9][a-z0-9-]{0,39}$/
 
+interface RequestGuard {
+  getRequestIp: (c: Context) => string | null
+  relayKey: string
+}
+
 /** `undefined` to go on; otherwise the refusal. */
 function refuseRequest(
   c: Context,
-  getRequestIp: (c: Context) => string | null,
+  guard: RequestGuard,
+  presentedKey: string | undefined,
 ): Response | Promise<Response> | undefined {
   // A remote caller must not learn the route exists.
-  if (!isLoopbackAddress(getRequestIp(c))) return c.notFound()
+  if (!isLoopbackAddress(guard.getRequestIp(c))) return c.notFound()
   const origin = c.req.header("origin")
   if (origin !== undefined && origin !== "null") {
     consola.warn(
-      `figjam: refused a request from origin ${origin}; only the Figma plugin frame (Origin: null) and local tools may use ${c.req.path}`,
+      `figjam: refused a request from origin ${origin}; only the staged Figma plugin and local tools may use ${c.req.path}`,
     )
     return c.json(
       {
@@ -124,7 +137,32 @@ function refuseRequest(
       403,
     )
   }
+  // Opaque browser origins are not proof that the caller is Figma. The staged
+  // panel also has a fresh per-process capability; no-Origin local diagnostics
+  // remain usable without it.
+  if (
+    origin === "null"
+    && (guard.relayKey === "" || presentedKey !== guard.relayKey)
+  ) {
+    return c.json(
+      {
+        error: {
+          type: "forbidden",
+          code: "RELAY_KEY_REJECTED",
+          message: "This FigJam relay request is not authorized.",
+        },
+      },
+      403,
+    )
+  }
   return undefined
+}
+
+function requestedProtocols(c: Context): Array<string> {
+  return (c.req.header("sec-websocket-protocol") ?? "")
+    .split(",")
+    .map((protocol) => protocol.trim())
+    .filter(Boolean)
 }
 
 /** What a panel says about itself (a profile and the Maximal port its manifest allows) against what this Maximal is. */
@@ -151,12 +189,29 @@ function warnAboutPanel(
   }
 }
 
+function relayData(port: number, verbose: boolean): FigjamRelayData {
+  return {
+    target: `ws://127.0.0.1:${port}/plugin`,
+    verbose,
+    queue: [],
+    queueBytes: 0,
+    closed: false,
+  }
+}
+
+function noteDiscovery(verbose: boolean, message: string): void {
+  if (verbose) consola.info(message)
+  else consola.debug(message)
+}
+
 export interface FigjamRoutesOptions {
   /** Injectable so tests can simulate other callers. */
   getRequestIp?: (c: Context) => string | null
   /** Injectable so tests needn't run the plugin. */
   availability?: () => BridgeAvailability
   profile?: FigjamProfile
+  /** The per-process capability stamped into the staged panel. */
+  relayKey?: string
   /** The port Maximal serves on, for noticing a manifest built for another. */
   maximalPort?: () => number
 }
@@ -167,18 +222,17 @@ export function createFigjamRoutes(options: FigjamRoutesOptions = {}): Hono {
     options.availability ?? (() => bridgeAvailability(getPluginGateway()))
   const maximalPort = options.maximalPort ?? currentProxyPort
   const profile = options.profile ?? resolveFigjamProfile()
+  const relayKey = options.relayKey ?? process.env[FIGJAM_RELAY_KEY_ENV] ?? ""
+  const guard = { getRequestIp, relayKey }
   const verbose = isVerboseProfile(profile)
-  const note = (message: string): void => {
-    if (verbose) consola.info(message)
-    else consola.debug(message)
-  }
-
-  const refuse = (c: Context) => refuseRequest(c, getRequestIp)
-
   const app = new Hono()
 
   app.get("/bridge.json", (c) => {
-    const refusal = refuse(c)
+    const refusal = refuseRequest(
+      c,
+      guard,
+      c.req.header(FIGJAM_RELAY_KEY_HEADER),
+    )
     if (refusal) return refusal
 
     // What the panel says about itself, for diagnostics only.
@@ -186,7 +240,8 @@ export function createFigjamRoutes(options: FigjamRoutesOptions = {}): Hono {
     const panel = c.req.query("panel")
 
     const state = availability()
-    note(
+    noteDiscovery(
+      verbose,
       `figjam: discovery from a panel${panel && /^[\w.+-]{1,32}$/.test(panel) ? ` ${panel}` : ""}: ${state.available ? "bridge available" : `unavailable (${state.reason})`}`,
     )
     const common = {
@@ -206,7 +261,10 @@ export function createFigjamRoutes(options: FigjamRoutesOptions = {}): Hono {
   })
 
   app.get("/plugin", (c) => {
-    const refusal = refuse(c)
+    const protocols = requestedProtocols(c)
+    const selectedProtocol =
+      relayKey !== "" && protocols.includes(relayKey) ? relayKey : undefined
+    const refusal = refuseRequest(c, guard, selectedProtocol)
     if (refusal) return refusal
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
       return c.json(
@@ -239,12 +297,16 @@ export function createFigjamRoutes(options: FigjamRoutesOptions = {}): Hono {
         501,
       )
     }
-    const data: FigjamRelayData = {
-      target: `ws://127.0.0.1:${state.port}/plugin`,
-      verbose,
-      queue: [],
+    const data = relayData(state.port, verbose)
+    const headers =
+      selectedProtocol === undefined ? undefined : (
+        { "Sec-WebSocket-Protocol": selectedProtocol }
+      )
+    const upgradeOptions = {
+      data,
+      ...(headers === undefined ? {} : { headers }),
     }
-    if (!server.upgrade(c.req.raw, { data })) {
+    if (!server.upgrade(c.req.raw, upgradeOptions)) {
       consola.warn("figjam: the panel's WebSocket upgrade failed")
       return c.json(
         {

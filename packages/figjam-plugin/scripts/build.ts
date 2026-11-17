@@ -37,6 +37,7 @@ const VERSION_LINE = /^var PLUGIN_VERSION = "[^"\n]*"$/m
 const PANEL_BUILD_LINE = /^const PANEL_BUILD = .*;$/m
 /** A development profile id: what a Maximal dev profile calls itself (`a-z0-9-`). */
 const PROFILE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/
+const RELAY_KEY = /^[\w-]{43}$/
 
 export const DEFAULT_MAXIMAL_PORT = 4141
 
@@ -61,6 +62,8 @@ export interface BuildOptions {
    * "Maximal Agent (dev)" plugin. Ignored by release builds.
    */
   profile?: string
+  /** Per-process capability for opaque-origin discovery and relay upgrades. */
+  relayKey?: string
 }
 
 export interface BuildResult {
@@ -96,8 +99,8 @@ export function stampVersion(code: string, version: string): string {
  * the profile the plugin was built for (empty for the shared plugin). The
  * panel uses them to default its address, to explain a manifest that doesn't
  * allow the origin it is using, and to refuse a Maximal that belongs to
- * another profile. `dev` turns on the panel's console diagnostics. Nothing
- * secret goes in.
+ * another profile. `dev` turns on the panel's console diagnostics. The relay
+ * key is stamped only into this panel file, never the manifest or build log.
  */
 export function stampPanel(
   html: string,
@@ -114,6 +117,7 @@ export function stampPanel(
     bridgePort: options.bridgePort,
     profile: options.release ? "" : options.profile,
     dev: !options.release,
+    relayKey: options.release ? "" : options.relayKey,
   }
   return html.replace(
     PANEL_BUILD_LINE,
@@ -173,11 +177,16 @@ function resolveOptions(
       `A plugin profile id is lowercase letters, digits and dashes (up to 40), got "${profile}".`,
     )
   }
+  const relayKey = options.relayKey ?? ""
+  if (relayKey !== "" && !RELAY_KEY.test(relayKey)) {
+    throw new Error("A FigJam relay key must be 32 bytes of base64url text.")
+  }
   return {
     release: options.release ?? false,
     maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
     bridgePort: options.bridgePort ?? 0,
     profile,
+    relayKey,
   }
 }
 

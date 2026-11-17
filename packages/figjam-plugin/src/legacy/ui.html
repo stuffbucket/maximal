@@ -446,8 +446,9 @@
 
 // Stamped by the build (scripts/build.ts): the Maximal and bridge ports this
 // plugin's manifest allows, the Maximal profile it was built for ("" = the
-// shared plugin) and whether it is a development build. No secrets.
-const PANEL_BUILD = {"maximalPort":4141,"bridgePort":0,"profile":"","dev":true};
+// shared plugin) and whether it is a development build. The relay capability
+// is stamped only into this panel file and is never logged or returned.
+const PANEL_BUILD = {"maximalPort":4141,"bridgePort":0,"profile":"","dev":true,"relayKey":""};
 const DEFAULT_BASE = `http://localhost:${PANEL_BUILD.maximalPort}`;
 const PREFERRED_MODELS = ["claude-sonnet", "claude-opus", "claude-fable", "gpt-6", "gpt-5"];
 const MAX_STEPS = 30;
@@ -2669,7 +2670,10 @@ async function discoverBridge() {
   if (pluginInfo.version) query.set("panel", String(pluginInfo.version).slice(0, 32));
   let res;
   try {
-    res = await fetch(`${origin}/figjam/bridge.json?${query}`, { signal: AbortSignal.timeout(4000) });
+    res = await fetch(`${origin}/figjam/bridge.json?${query}`, {
+      headers: { "x-maximal-figjam-relay-key": PANEL_BUILD.relayKey },
+      signal: AbortSignal.timeout(4000),
+    });
   } catch (error) {
     throw discoveryError("unreachable", `Can't ask Maximal at ${origin} about the bridge (${error.name === "TimeoutError" ? "no answer in 4s" : "network blocked or Maximal not running"})`);
   }
@@ -2694,7 +2698,7 @@ async function discoverBridge() {
   }
   const path = body.panel && typeof body.panel.path === "string" && /^\/figjam\/[a-z0-9\/_-]{1,40}$/.test(body.panel.path) ? body.panel.path : BRIDGE_PATH;
   const label = `localhost:${port}${path}`;
-  return { url: `ws://${label}`, label };
+  return { url: `ws://${label}`, label, protocol: PANEL_BUILD.relayKey };
 }
 
 let bridgeGen = 0; // bumped whenever discovery's answer would be stale
@@ -2731,7 +2735,7 @@ function openBridge() {
 function connectBridge(found) {
   let ws;
   try {
-    ws = new WebSocket(found.url);
+    ws = found.protocol ? new WebSocket(found.url, found.protocol) : new WebSocket(found.url);
   } catch (error) {
     devLog("error", `could not open the bridge socket at ${found.label}: ${error.message}`);
     setNet("bridge", "blocked", { error: error.message });

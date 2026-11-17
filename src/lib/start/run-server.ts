@@ -19,6 +19,7 @@ import { type AccountType } from "~/lib/auth/auth-types"
 import { refreshAllowanceAtStartup } from "~/lib/budget/runtime"
 import { mergeConfigWithDefaults } from "~/lib/config/config"
 import { figjamRelay } from "~/lib/figjam/relay"
+import { initializeFigjamRelayKey } from "~/lib/figjam/relay-key"
 import { initProxyFromEnv } from "~/lib/http/proxy"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
 import { ensurePaths } from "~/lib/platform/paths"
@@ -69,6 +70,10 @@ export interface RunServerOptions {
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
+  // Replace any inherited value before the routes are imported or plugin child
+  // processes spawn. The staged FigJam panel is the only consumer.
+  initializeFigjamRelayKey()
+
   // Work around unjs/consola#357 until a release includes PR #359.
   consola.options.throttle = 0
 

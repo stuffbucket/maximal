@@ -275,6 +275,52 @@ describe("FigJam plugin: setup", () => {
     expect(await readFile(codePath, "utf8")).toBe(current)
   })
 
+  test("rebuilds a partial staged folder, while an absent folder still needs setup", async () => {
+    const relayKey = "a".repeat(43)
+    const first = await load({}, undefined, { relayKey })
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const dir = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR)
+    const uiPath = path.join(dir, "ui.html")
+    await rm(uiPath)
+    expect(existsSync(dir)).toBe(true)
+
+    const second = await load({}, undefined, { relayKey })
+    await waitFor(statusIs(second, "ready"))
+    expect((await readFile(uiPath, "utf8")).toLowerCase()).toStartWith(
+      "<!doctype html>",
+    )
+  })
+
+  test("stages the per-process relay key only in ui.html and rebuilds when it changes", async () => {
+    const firstKey = "a".repeat(43)
+    const first = await load({}, undefined, { relayKey: firstKey })
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    const dir = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR)
+    expect(await readFile(path.join(dir, "ui.html"), "utf8")).toContain(
+      firstKey,
+    )
+    expect(
+      await readFile(path.join(dir, "manifest.json"), "utf8"),
+    ).not.toContain(firstKey)
+    expect(JSON.stringify(first.testbed.host.logs)).not.toContain(firstKey)
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const secondKey = "b".repeat(43)
+    const second = await load({}, undefined, { relayKey: secondKey })
+    await waitFor(statusIs(second, "ready"))
+    const ui = await readFile(path.join(dir, "ui.html"), "utf8")
+    expect(ui).toContain(secondKey)
+    expect(ui).not.toContain(firstKey)
+  })
+
   test("rebuilds on start when the panel or manifest differ in content, though version and ports match", async () => {
     const first = await load()
     await waitFor(statusIs(first, "plugin-not-built"))

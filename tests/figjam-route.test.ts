@@ -6,6 +6,7 @@
  */
 
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
+import type { ServerWebSocket } from "bun"
 
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import consola from "consola"
@@ -16,7 +17,16 @@ import path from "node:path"
 import { serve } from "srvx"
 
 import { isVerboseProfile, resolveFigjamProfile } from "~/lib/figjam/profile"
-import { createFigjamRelay } from "~/lib/figjam/relay"
+import {
+  createFigjamRelay,
+  FIGJAM_RELAY_BACKPRESSURE_LIMIT,
+  FIGJAM_RELAY_PAYLOAD_LIMIT,
+  type FigjamRelayData,
+} from "~/lib/figjam/relay"
+import {
+  FIGJAM_RELAY_KEY_HEADER,
+  initializeFigjamRelayKey,
+} from "~/lib/figjam/relay-key"
 import {
   type BridgeAvailability,
   BRIDGE_PORT_FACT,
@@ -61,6 +71,18 @@ const reason = (gateway: PluginGateway | undefined) => {
 }
 
 describe("the parent and the plugin agree", () => {
+  test("startup replaces an inherited relay key with a fresh protocol-safe key", () => {
+    const env: Record<string, string | undefined> = {
+      MAXIMAL_FIGJAM_RELAY_KEY: "inherited",
+    }
+    const first = initializeFigjamRelayKey(env)
+    const second = initializeFigjamRelayKey(env)
+    expect(first).toMatch(/^[\w-]{43}$/)
+    expect(second).toMatch(/^[\w-]{43}$/)
+    expect(second).not.toBe(first)
+    expect(env.MAXIMAL_FIGJAM_RELAY_KEY).toBe(second)
+  })
+
   test("on the status fact that carries the bridge port", () => {
     expect(BRIDGE_PORT_FACT).toBe(PLUGIN_PORT_FACT)
   })
@@ -139,6 +161,7 @@ describe("bridgeAvailability", () => {
 })
 
 const up: BridgeAvailability = { available: true, port: 4151 }
+const RELAY_KEY = "r".repeat(43)
 
 function discovery(
   options: Parameters<typeof createFigjamRoutes>[0] = {},
@@ -150,6 +173,7 @@ function discovery(
       getRequestIp: () => "127.0.0.1",
       availability: () => up,
       profile: { kind: "development", id: "ab12cd34ef56" },
+      relayKey: RELAY_KEY,
       maximalPort: () => 52_000,
       ...options,
     }),
@@ -158,7 +182,11 @@ function discovery(
 }
 
 describe("GET /figjam/bridge.json", () => {
-  test("says the bridge is available and where the panel socket is, without any port or path", async () => {
+  test("says the bridge is available without exposing its port, path or relay key", async () => {
+    const info = spyOn(consola, "info")
+    cleanups.push(() => {
+      info.mockRestore()
+    })
     const res = await discovery().request("/figjam/bridge.json")
     expect(res.status).toBe(200)
     const text = await res.text()
@@ -171,7 +199,9 @@ describe("GET /figjam/bridge.json", () => {
     })
     // The bridge's own port, URLs, tokens and file paths are never answered.
     expect(text).not.toContain("4151")
+    expect(text).not.toContain(RELAY_KEY)
     expect(text).not.toMatch(/ws:\/\/|http:\/\/|token|\/Users|figjam\/pairing/i)
+    expect(JSON.stringify(info.mock.calls)).not.toContain(RELAY_KEY)
   })
 
   test("explains why it is unavailable, with a 503", async () => {
@@ -192,16 +222,21 @@ describe("GET /figjam/bridge.json", () => {
     expect(res.status).toBe(404)
   })
 
-  test("accepts the Figma plugin frame (Origin: null) and no origin, refuses web origins", async () => {
+  test("requires the relay key for Origin: null, while no-Origin diagnostics remain usable", async () => {
     const app = discovery()
-    const get = (origin?: string) =>
+    const get = (origin?: string, key?: string) =>
       app.request("/figjam/bridge.json", {
-        headers: origin === undefined ? {} : { origin },
+        headers: {
+          ...(origin === undefined ? {} : { origin }),
+          ...(key === undefined ? {} : { [FIGJAM_RELAY_KEY_HEADER]: key }),
+        },
       })
     expect((await get()).status).toBe(200)
-    expect((await get("null")).status).toBe(200)
-    expect((await get("https://example.com")).status).toBe(403)
-    expect((await get("http://localhost:3000")).status).toBe(403)
+    expect((await get("null")).status).toBe(403)
+    expect((await get("null", "forged")).status).toBe(403)
+    expect((await get("null", RELAY_KEY)).status).toBe(200)
+    expect((await get("https://example.com", RELAY_KEY)).status).toBe(403)
+    expect((await get("http://localhost:3000", RELAY_KEY)).status).toBe(403)
   })
 
   test("a panel built for another profile or port is warned about, not refused", async () => {
@@ -289,6 +324,128 @@ function opened(ws: WebSocket): Promise<void> {
   })
 }
 
+class FakeUpstream extends EventTarget {
+  binaryType = "blob"
+  bufferedAmount = 0
+  readyState: number = WebSocket.CONNECTING
+  readonly sent: Array<string | ArrayBufferLike | Blob | ArrayBufferView> = []
+  readonly closes: Array<{ code?: number; reason?: string }> = []
+
+  send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+    this.sent.push(data)
+  }
+
+  close(code?: number, reason?: string): void {
+    this.closes.push({ code, reason })
+    this.readyState = WebSocket.CLOSING
+  }
+}
+
+function fakeDownstream(sendResult = 1): {
+  socket: ServerWebSocket<FigjamRelayData>
+  closes: Array<{ code: number; reason: string }>
+} {
+  const closes: Array<{ code: number; reason: string }> = []
+  const data: FigjamRelayData = {
+    target: "ws://127.0.0.1:4151/plugin",
+    verbose: false,
+    queue: [],
+    queueBytes: 0,
+    closed: false,
+  }
+  return {
+    socket: {
+      data,
+      send: () => sendResult,
+      close: (code: number, reason: string) => {
+        closes.push({ code, reason })
+      },
+    } as unknown as ServerWebSocket<FigjamRelayData>,
+    closes,
+  }
+}
+
+function upstreamClose(code: number, reason = ""): Event {
+  const event = new Event("close")
+  Object.defineProperties(event, {
+    code: { value: code },
+    reason: { value: reason },
+  })
+  return event
+}
+
+describe("FigJam relay flow control", () => {
+  test("keeps the 64 MiB payload allowance and configures bounded Bun backpressure", () => {
+    const relay = createFigjamRelay()
+    expect(relay.maxPayloadLength).toBe(FIGJAM_RELAY_PAYLOAD_LIMIT)
+    expect(relay.backpressureLimit).toBe(FIGJAM_RELAY_BACKPRESSURE_LIMIT)
+    expect(relay.closeOnBackpressureLimit).toBe(true)
+  })
+
+  test("closes both peers when the pre-upstream queue exceeds its byte bound", () => {
+    const upstream = new FakeUpstream()
+    const relay = createFigjamRelay(() => upstream as unknown as WebSocket, {
+      backpressureLimit: 8,
+    })
+    const { socket, closes } = fakeDownstream()
+    void relay.open?.(socket)
+    void relay.message(socket, "12345678")
+    expect(socket.data.queueBytes).toBe(8)
+    void relay.message(socket, "x")
+    expect(closes).toEqual([
+      { code: 1013, reason: "FigJam relay backpressure limit exceeded." },
+    ])
+    expect(upstream.closes).toEqual([
+      { code: 1013, reason: "FigJam relay backpressure limit exceeded." },
+    ])
+    expect(socket.data.queue).toEqual([])
+  })
+
+  test("caps upstream bufferedAmount instead of silently dropping a frame", () => {
+    const upstream = new FakeUpstream()
+    upstream.readyState = WebSocket.OPEN
+    upstream.bufferedAmount = 8
+    const relay = createFigjamRelay(() => upstream as unknown as WebSocket, {
+      backpressureLimit: 8,
+    })
+    const { socket, closes } = fakeDownstream()
+    void relay.open?.(socket)
+    void relay.message(socket, "x")
+    expect(upstream.sent).toEqual([])
+    expect(closes[0]?.code).toBe(1013)
+    expect(upstream.closes[0]?.code).toBe(1013)
+  })
+
+  test("an intentional downstream close makes late upstream error and 1006 quiet", () => {
+    const warn = spyOn(consola, "warn")
+    cleanups.push(() => {
+      warn.mockRestore()
+    })
+    const upstream = new FakeUpstream()
+    const relay = createFigjamRelay(() => upstream as unknown as WebSocket)
+    const { socket, closes } = fakeDownstream()
+    void relay.open?.(socket)
+    void relay.close?.(socket, 1000, "done")
+    upstream.dispatchEvent(new Event("error"))
+    upstream.dispatchEvent(upstreamClose(1006))
+    expect(warn).not.toHaveBeenCalled()
+    expect(closes).toEqual([])
+    expect(upstream.closes).toEqual([{ code: 1000, reason: "done" }])
+  })
+
+  test("closes the upstream when Bun reports downstream backpressure", () => {
+    const upstream = new FakeUpstream()
+    upstream.readyState = WebSocket.OPEN
+    const relay = createFigjamRelay(() => upstream as unknown as WebSocket)
+    const { socket, closes } = fakeDownstream(-1)
+    void relay.open?.(socket)
+    const message = new MessageEvent("message", { data: "from bridge" })
+    upstream.dispatchEvent(message)
+    expect(closes[0]?.code).toBe(1013)
+    expect(upstream.closes[0]?.code).toBe(1013)
+  })
+})
+
 describe("GET /figjam/plugin (relay)", () => {
   test("relays frames both ways, including ones sent before the bridge socket opens, and its close code", async () => {
     const stub = stubBridge()
@@ -342,6 +499,30 @@ describe("GET /figjam/plugin (relay)", () => {
       },
     )
     expect(foreign.status).toBe(403)
+  })
+
+  test("rejects a forged Origin: null socket and echoes the correct relay protocol", async () => {
+    const stub = stubBridge()
+    const front = frontServer({
+      availability: () => ({ available: true, port: stub.port }),
+    })
+    const origin = await frontOrigin(front)
+    const url = `ws://127.0.0.1:${origin.port}${FIGJAM_PANEL_PATH}`
+
+    const forged = new WebSocket(url, { headers: { origin: "null" } })
+    expect(
+      String(await opened(forged).catch((error: unknown) => error)),
+    ).toContain("did not open")
+
+    const ws = new WebSocket(url, {
+      protocols: [RELAY_KEY],
+      headers: { origin: "null" },
+    })
+    await opened(ws)
+    expect(ws.protocol).toBe(RELAY_KEY)
+    ws.send("authorized")
+    expect(await nextMessage(ws)).toBe("echo:authorized")
+    ws.close()
   })
 
   test("a panel pairs with the real bridge through the relay", async () => {

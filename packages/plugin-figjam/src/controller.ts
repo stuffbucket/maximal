@@ -14,7 +14,7 @@ import {
   pluginIdentity,
   renderPlugin,
 } from "@stuffbucket/maximal-figjam-plugin/build"
-import { readFile } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import path from "node:path"
 
 import type { FigjamConfig } from "./manifest"
@@ -47,6 +47,8 @@ export interface FigjamPluginOptions {
   profile?: FigjamProfile
   /** How many ports the bridge tries from the configured one (default: its own). */
   portAttempts?: number
+  /** Test seam; production reads the capability installed by `runServer`. */
+  relayKey?: string
 }
 
 interface PairRequest {
@@ -95,15 +97,24 @@ async function inspectFolder(
   options: Parameters<typeof renderPlugin>[0],
 ): Promise<{ folder: PluginFolder; differs: Array<string> }> {
   const expected = await renderPlugin(options)
+  try {
+    if (!(await stat(dir)).isDirectory()) {
+      return { folder: "stale", differs: Object.keys(expected) }
+    }
+  } catch {
+    // A wholly absent folder means the person has never staged/imported it.
+    return { folder: "missing", differs: Object.keys(expected) }
+  }
   const differs: Array<string> = []
   for (const [name, contents] of Object.entries(expected)) {
-    let actual: string
     try {
-      actual = await readFile(path.join(dir, name), "utf8")
+      const actual = await readFile(path.join(dir, name), "utf8")
+      if (actual !== contents) differs.push(name)
     } catch {
-      return { folder: "missing", differs: [name] }
+      // A folder with only some build outputs is an interrupted/stale staging,
+      // not first-time setup. Rebuild it automatically below.
+      differs.push(name)
     }
-    if (actual !== contents) differs.push(name)
   }
   return { folder: differs.length === 0 ? "current" : "stale", differs }
 }
@@ -155,11 +166,17 @@ export class FigjamController {
   }
 
   /** What the Figma plugin is built from: Maximal's port now, and this profile. */
-  #buildOptions(): { maximalPort: number; profile?: string } {
+  #buildOptions(): {
+    maximalPort: number
+    profile?: string
+    relayKey: string
+  } {
     const profile = pluginProfileId(this.#profile)
     return {
       maximalPort: this.#ctx.host.maximalPort(),
       ...(profile === undefined ? {} : { profile }),
+      relayKey:
+        this.#options.relayKey ?? process.env.MAXIMAL_FIGJAM_RELAY_KEY ?? "",
     }
   }
 
@@ -331,6 +348,7 @@ export class FigjamController {
       maximalPort: options.maximalPort,
       bridgePort: 0,
       profile: options.profile ?? "",
+      relayKey: options.relayKey,
     }).name
   }
 

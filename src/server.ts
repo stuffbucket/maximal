@@ -87,8 +87,9 @@ server.use(
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
     // /mcp/* (plugin MCP endpoints) applies these same rules in its own route.
     // /figjam/* is the FigJam panel's discovery and socket; the handlers
-    // enforce loopback and the Figma plugin frame's Origin themselves, and the
-    // panel's own pairing token authenticates the socket.
+    // enforce loopback, browser Origin and the staged panel's per-process relay
+    // key themselves. The panel's own pairing token then authenticates it to
+    // the bridge.
     allowUnauthenticatedPrefixes: ["/ui", "/mcp", "/figjam"],
     requireAuthPrefixes: ["/settings/api"],
     // The dashboard at /ui/dashboard fetches these endpoints from the

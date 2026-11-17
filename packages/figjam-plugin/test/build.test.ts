@@ -32,17 +32,23 @@ describe("build", () => {
     ])
   })
 
-  test("starts ui.html with the doctype", async () => {
-    const html = await readFile(path.join(outDir, "ui.html"), "utf8")
-    const withoutBom = html.codePointAt(0) === 0xfeff ? html.slice(1) : html
-    expect(withoutBom.startsWith("<!doctype html>")).toBe(true)
-  })
-
   test("stamps the package version into code.js", async () => {
     const code = await readFile(path.join(outDir, "code.js"), "utf8")
     expect(code).toContain(
       `var PLUGIN_VERSION = ${JSON.stringify(await readPackageVersion())}`,
     )
+  })
+
+  test("ui.html starts with a doctype after an optional UTF-8 BOM", async () => {
+    const bytes = await readFile(path.join(outDir, "ui.html"))
+    const start =
+      bytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])) ? 3 : 0
+    expect(
+      bytes
+        .subarray(start, start + 15)
+        .toString("utf8")
+        .toLowerCase(),
+    ).toBe("<!doctype html>")
   })
 
   test("refuses a source without exactly one version line", () => {
@@ -103,6 +109,7 @@ describe("panel build line and profiles", () => {
       bridgePort: 4153,
       profile: "ab12cd34ef56",
       dev: true,
+      relayKey: "",
     })
   })
 
@@ -111,6 +118,20 @@ describe("panel build line and profiles", () => {
     expect(html).toContain("/figjam/bridge.json")
     expect(html).not.toMatch(/ws:\/\/localhost:4150/)
     expect(html).not.toMatch(/localhost:4150/)
+  })
+
+  test("stamps the relay key only into ui.html", async () => {
+    const relayKey = "a".repeat(43)
+    const files = await renderPlugin({ relayKey })
+    expect(panelBuild(files["ui.html"])).toMatchObject({ relayKey })
+    expect(files["ui.html"]).toContain(
+      '"x-maximal-figjam-relay-key": PANEL_BUILD.relayKey',
+    )
+    expect(files["ui.html"]).toContain(
+      "new WebSocket(found.url, found.protocol)",
+    )
+    expect(files["manifest.json"]).not.toContain(relayKey)
+    expect(files["code.js"]).not.toContain(relayKey)
   })
 
   test("the panel's script parses", async () => {
@@ -158,6 +179,7 @@ describe("panel build line and profiles", () => {
         maximalPort: 4141,
         bridgePort: 4150,
         profile: "",
+        relayKey: "",
       }),
     ).toThrow("found 0")
   })
