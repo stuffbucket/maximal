@@ -9,6 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -25,7 +26,10 @@ import {
   enableClaudeDesktopRouting,
   reconcileClaudeDesktopOnBoot,
 } from "~/apps/claude-desktop/reconcile"
-import { profileIdForDirectory } from "~/apps/profile-identity"
+import {
+  currentProfileId,
+  profileIdForDirectory,
+} from "~/apps/profile-identity"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { setListeningPort } from "~/lib/start/proxy-port"
 
@@ -203,30 +207,229 @@ describe("Take over from another gateway", () => {
     expect(configLibraryConflict(home)).toBe("foreign-gateway-profile")
   })
 
-  test("keeps an edited Maximal profile intact and switches back to it", () => {
-    const { profileId: edited } = applyConfigLibraryProfile(home)
-    const editedPath = path.join(libDir(), `${edited}.json`)
-    const profile = { ...readJson(editedPath), inferenceGatewayApiKey: "mine" }
-    fs.writeFileSync(editedPath, JSON.stringify(profile, null, 2))
+  for (const [name, edit] of [
+    [
+      "another workspace folder",
+      (profile: Record<string, unknown>) => {
+        profile.allowedWorkspaceFolders = ["/mine"]
+      },
+    ],
+    [
+      "an extra field",
+      (profile: Record<string, unknown>) => {
+        profile.customHeader = "x"
+      },
+    ],
+  ] as const) {
+    test(`keeps a Maximal profile with ${name} intact and switches back to it`, () => {
+      const { profileId: edited } = applyConfigLibraryProfile(home)
+      const editedPath = path.join(libDir(), `${edited}.json`)
+      const profile = readJson(editedPath)
+      edit(profile)
+      fs.writeFileSync(editedPath, JSON.stringify(profile, null, 2))
+      expect(configLibraryConflict(home)).toBe("foreign-gateway-profile")
+
+      const result = applyConfigLibraryProfile(
+        home,
+        gatewayProfile(home),
+        TAKE_OVER,
+      )
+
+      expect(result).toMatchObject({ wrote: true, conflict: null })
+      expect(result.profileId).not.toBe(edited)
+      expect(readJson(editedPath)).toEqual(profile)
+      expect(readJson(statePath()).prior).toMatchObject({ appliedId: edited })
+
+      disableClaudeDesktopRouting(home)
+
+      expect(readJson(metaPath()).appliedId).toBe(edited)
+      expect(readJson(editedPath)).toEqual(profile)
+    })
+  }
+
+  test("repairs the marker's own entry in place when only its key changed", () => {
+    fs.mkdirSync(getClaude3pDir(home), { recursive: true })
+    fs.writeFileSync(topPath(), JSON.stringify({ unrelated: 1 }))
+    const { profileId } = applyConfigLibraryProfile(home)
+    const priorBefore = readJson(statePath()).prior
+    const ownPath = path.join(libDir(), `${profileId}.json`)
+    // Desktop wrote back a copy carrying a key that has since rotated away.
+    fs.writeFileSync(
+      ownPath,
+      JSON.stringify(
+        { ...readJson(ownPath), inferenceGatewayApiKey: "mxl_rotated_away" },
+        null,
+        2,
+      ),
+    )
     expect(configLibraryConflict(home)).toBe("foreign-gateway-profile")
 
-    const result = applyConfigLibraryProfile(
-      home,
-      gatewayProfile(home),
-      TAKE_OVER,
-    )
+    const result = enableClaudeDesktopRouting(home, TAKE_OVER)
 
-    expect(result).toMatchObject({ wrote: true, conflict: null })
-    expect(result.profileId).not.toBe(edited)
-    expect(readJson(editedPath)).toEqual(profile)
-    expect(readJson(statePath()).prior).toMatchObject({ appliedId: edited })
+    expect(result).toMatchObject({ wrote: true, conflict: null, profileId })
+    expect(readJson(metaPath()).entries).toEqual([
+      { id: profileId, name: "maximal" },
+    ])
+    expect(readJson(ownPath)).toEqual({ ...gatewayProfile(home) })
+    expect(readJson(statePath()).prior).toEqual(priorBefore)
 
     disableClaudeDesktopRouting(home)
 
-    expect(readJson(metaPath()).appliedId).toBe(edited)
-    expect(readJson(editedPath)).toEqual(profile)
+    expect(readJson(metaPath())).toEqual({ appliedId: "", entries: [] })
+    expect(readJson(topPath())).toEqual({ unrelated: 1 })
+  })
+
+  test("a late Take over keeps the first snapshot, so disable removes Maximal's top-level keys", () => {
+    fs.mkdirSync(getClaude3pDir(home), { recursive: true })
+    fs.writeFileSync(topPath(), JSON.stringify({ unrelated: 1 }))
+    const { profileId } = applyConfigLibraryProfile(home)
+    // Later the person picks their own gateway in Desktop.
+    fs.writeFileSync(
+      path.join(libDir(), "corp.json"),
+      JSON.stringify(CORP_GATEWAY),
+    )
+    fs.writeFileSync(
+      metaPath(),
+      JSON.stringify({
+        appliedId: "corp",
+        entries: [
+          { id: profileId, name: "maximal" },
+          { id: "corp", name: "Work" },
+        ],
+      }),
+    )
+    expect(configLibraryConflict(home)).toBe("foreign-gateway-profile")
+
+    const result = enableClaudeDesktopRouting(home, TAKE_OVER)
+
+    expect(result).toMatchObject({ wrote: true, profileId })
+    expect(readJson(statePath()).prior).toEqual({
+      appliedId: "corp",
+      hadPreferences: false,
+    })
+
+    disableClaudeDesktopRouting(home)
+
+    expect(readJson(metaPath())).toEqual({
+      appliedId: "corp",
+      entries: [{ id: "corp", name: "Work" }],
+    })
+    expect(readJson(topPath())).toEqual({ unrelated: 1 })
   })
 })
+
+/** The reporting machine's state, minus the earlier entry Desktop copied
+ *  from: an ownerless marker whose own `maximal` entry now carries a gateway
+ *  and key no remaining Maximal write explains. */
+function seedOrphanedMarkerEntry(): void {
+  fs.mkdirSync(libDir(), { recursive: true })
+  const stalePath = path.join(libDir(), "stale.json")
+  fs.writeFileSync(
+    stalePath,
+    `${JSON.stringify(
+      {
+        ...gatewayProfile(home, "http://127.0.0.1:6002"),
+        inferenceGatewayApiKey: "mxl_stale_copy",
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  const fingerprint = createHash("sha256")
+    .update(fs.readFileSync(stalePath))
+    .digest("hex")
+  fs.writeFileSync(
+    metaPath(),
+    JSON.stringify({
+      appliedId: "stale",
+      entries: [{ id: "stale", name: "maximal" }],
+    }),
+  )
+  fs.writeFileSync(
+    topPath(),
+    JSON.stringify({
+      deploymentMode: "3p",
+      preferences: { coworkWebSearchEnabled: true },
+    }),
+  )
+  fs.writeFileSync(
+    statePath(),
+    JSON.stringify({
+      profileId: "stale",
+      fingerprint,
+      prior: { appliedId: "", hadPreferences: false },
+    }),
+  )
+  fs.writeFileSync(
+    stalePath,
+    JSON.stringify(
+      {
+        ...gatewayProfile(home, "http://127.0.0.1:6001"),
+        inferenceGatewayApiKey: "mxl_vanished_copy",
+      },
+      null,
+      2,
+    ),
+  )
+}
+
+describe("Take over of the marker's own stale entry", () => {
+  test("repairs it in place, never snapshotting it as a duplicate to restore", () => {
+    seedOrphanedMarkerEntry()
+    expect(configLibraryConflict(home)).toBe("foreign-gateway-profile")
+
+    const result = enableClaudeDesktopRouting(home, TAKE_OVER)
+
+    expect(result).toMatchObject({
+      wrote: true,
+      conflict: null,
+      profileId: "stale",
+    })
+    expect(readJson(metaPath()).entries).toEqual([
+      { id: "stale", name: "maximal" },
+    ])
+    expect(readJson(statePath()).prior).toEqual({
+      appliedId: "",
+      hadPreferences: false,
+    })
+    expect(enableClaudeDesktopRouting(home, TAKE_OVER)).toMatchObject({
+      wrote: false,
+      conflict: null,
+      profileId: "stale",
+    })
+
+    disableClaudeDesktopRouting(home)
+
+    expect(readJson(metaPath())).toEqual({ appliedId: "", entries: [] })
+    expect(readJson(topPath())).toEqual({})
+  })
+})
+
+/** Another profile holds the marker; the person then picked their own
+ *  gateway in Desktop. */
+function seedOtherMarkerWithCorpApplied(): string {
+  fs.mkdirSync(getClaude3pDir(home), { recursive: true })
+  fs.writeFileSync(topPath(), JSON.stringify({ unrelated: 1 }))
+  const { profileId } = applyConfigLibraryProfile(home)
+  const state = readJson(statePath())
+  state.ownerProfileId = profileIdForDirectory(path.join(home, "other"))
+  fs.writeFileSync(statePath(), JSON.stringify(state))
+  fs.writeFileSync(
+    path.join(libDir(), "corp.json"),
+    JSON.stringify(CORP_GATEWAY),
+  )
+  fs.writeFileSync(
+    metaPath(),
+    JSON.stringify({
+      appliedId: "corp",
+      entries: [
+        { id: profileId, name: "maximal" },
+        { id: "corp", name: "Work" },
+      ],
+    }),
+  )
+  return profileId
+}
 
 describe("Take over does not bypass validation or other profiles", () => {
   test("an applied profile Maximal can't read", () => {
@@ -236,7 +439,7 @@ describe("Take over does not bypass validation or other profiles", () => {
 
     expect(
       applyConfigLibraryProfile(home, gatewayProfile(home), TAKE_OVER),
-    ).toMatchObject({ wrote: false, conflict: "foreign-gateway-profile" })
+    ).toMatchObject({ wrote: false, conflict: "unreadable-profile" })
     expect(snapshotTree()).toEqual(before)
   })
 
@@ -253,7 +456,7 @@ describe("Take over does not bypass validation or other profiles", () => {
 
     expect(
       applyConfigLibraryProfile(home, gatewayProfile(home), TAKE_OVER),
-    ).toMatchObject({ wrote: false, conflict: "foreign-gateway-profile" })
+    ).toMatchObject({ wrote: false, conflict: "unreadable-profile" })
     expect(snapshotTree()).toEqual(before)
   })
 
@@ -308,4 +511,124 @@ describe("Take over does not bypass validation or other profiles", () => {
     ).toMatchObject({ wrote: false, conflict: "cleanup-required" })
     expect(snapshotTree()).toEqual(before)
   })
+
+  test("Take over alone never takes another profile's marker, even with its gateway off", () => {
+    seedOtherMarkerWithCorpApplied()
+    const before = snapshotTree()
+
+    expect(configLibraryConflict(home)).toBe("other-maximal-config")
+    expect(enableClaudeDesktopRouting(home, TAKE_OVER)).toMatchObject({
+      wrote: false,
+      conflict: "other-maximal-config",
+    })
+    expect(
+      enableClaudeDesktopRouting(home, { overrideOtherMaximal: true }),
+    ).toMatchObject({ wrote: false, conflict: "foreign-gateway-profile" })
+    expect(snapshotTree()).toEqual(before)
+  })
+
+  test("both explicit overrides reuse the other profile's entry and keep its snapshot", () => {
+    const otherEntry = seedOtherMarkerWithCorpApplied()
+
+    const result = enableClaudeDesktopRouting(home, {
+      overrideOtherMaximal: true,
+      overrideForeignGateway: true,
+    })
+
+    expect(result).toMatchObject({
+      wrote: true,
+      conflict: null,
+      profileId: otherEntry,
+    })
+    expect(readJson(statePath())).toMatchObject({
+      ownerProfileId: currentProfileId(),
+      prior: { appliedId: "corp", hadPreferences: false },
+    })
+    disableClaudeDesktopRouting(home)
+    expect(readJson(metaPath()).appliedId).toBe("corp")
+    expect(readJson(topPath())).toEqual({ unrelated: 1 })
+  })
+
+  test("an ownerless marker from another copy isn't taken silently either", () => {
+    seedOrphanedMarkerEntry()
+    // Its entry still traces to that copy's own write (port 6002).
+    fs.writeFileSync(
+      path.join(libDir(), "stale.json"),
+      `${JSON.stringify(
+        {
+          ...gatewayProfile(home, "http://127.0.0.1:6002"),
+          inferenceGatewayApiKey: "mxl_stale_copy",
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    fs.writeFileSync(path.join(libDir(), "plain.json"), JSON.stringify({}))
+    fs.writeFileSync(
+      metaPath(),
+      JSON.stringify({
+        appliedId: "plain",
+        entries: [
+          { id: "stale", name: "maximal" },
+          { id: "plain", name: "Work" },
+        ],
+      }),
+    )
+    const before = snapshotTree()
+
+    expect(configLibraryConflict(home)).toBe("other-maximal-config")
+    expect(enableClaudeDesktopRouting(home, TAKE_OVER).wrote).toBe(false)
+    expect(snapshotTree()).toEqual(before)
+  })
 })
+
+describe("boot keeps the marker owner's intent", () => {
+  test("a stale copy's entry applied while this profile holds the marker", () => {
+    const { profileId } = applyConfigLibraryProfile(home)
+    fs.writeFileSync(
+      path.join(libDir(), "orphan.json"),
+      JSON.stringify(
+        {
+          ...gatewayProfile(home, "http://127.0.0.1:6001"),
+          inferenceGatewayApiKey: "mxl_orphan",
+        },
+        null,
+        2,
+      ),
+    )
+    fs.writeFileSync(
+      metaPath(),
+      JSON.stringify({
+        appliedId: "orphan",
+        entries: [
+          { id: profileId, name: "maximal" },
+          { id: "orphan", name: "maximal" },
+        ],
+      }),
+    )
+    writeConfig({ ...getConfig(), apps: { claudeDesktop: { enabled: true } } })
+    const before = snapshotTree()
+
+    expect(configLibraryConflict(home)).toBe("other-maximal-config")
+    reconcileClaudeDesktopOnBoot(true, home)
+
+    expect(getConfig().apps?.claudeDesktop?.enabled).toBe(true)
+    expect(snapshotTree()).toEqual(before)
+  })
+
+  test("another profile's marker still clears this profile's stale intent", () => {
+    seedOtherMarkerWithCorpAppliedForBoot()
+    writeConfig({ ...getConfig(), apps: { claudeDesktop: { enabled: true } } })
+
+    reconcileClaudeDesktopOnBoot(true, home)
+
+    expect(getConfig().apps?.claudeDesktop?.enabled).toBe(false)
+  })
+})
+
+function seedOtherMarkerWithCorpAppliedForBoot(): void {
+  applyConfigLibraryProfile(home)
+  const state = readJson(statePath())
+  state.ownerProfileId = profileIdForDirectory(path.join(home, "other"))
+  fs.writeFileSync(statePath(), JSON.stringify(state))
+}

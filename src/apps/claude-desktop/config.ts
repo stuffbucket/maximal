@@ -161,6 +161,7 @@ export type ConfigLibraryConflict =
   | "cleanup-required"
   | "foreign-gateway-profile"
   | "other-maximal-config"
+  | "unreadable-profile"
 
 function profileMatches(
   existing: Record<string, unknown> | null,
@@ -479,6 +480,38 @@ class Library {
     return entry ? this.entryOwnership(entry, values) : null
   }
 
+  /** Who the marker says owns routing: its recorded owner, or for an older
+   *  ownerless marker, the attribution of its own entry. Whatever Desktop
+   *  has applied, only an explicit transfer may take another copy's marker. */
+  markerOwnership(
+    values: GatewayProfileValues,
+  ): "ours" | "other-maximal" | null {
+    return this.routingStateOwnership() ?? this.stateEntryOwnership(values)
+  }
+
+  /**
+   * The applied entry is the marker's own `maximal` entry with exactly the
+   * fields Maximal writes, but its gateway URL or key no longer traces to a
+   * Maximal write (the sibling it was copied from is gone, or a key
+   * rotated). An explicit Take over repairs it in place under the marker's
+   * snapshot rather than keeping a dead duplicate to switch back to. Any
+   * other edit keeps it the user's.
+   */
+  appliedMarkerArtifact(values: GatewayProfileValues): MetaEntry | null {
+    const entry = this.meta.entries.find(
+      (item) => item.id === this.meta.appliedId,
+    )
+    if (
+      !entry
+      || entry.name !== OWNED_ENTRY_NAME
+      || this.state?.profileId !== entry.id
+      || !SAFE_PROFILE_ID.test(entry.id)
+    ) {
+      return null
+    }
+    return isMaximalArtifactShape(this.profile(entry.id), values) ? entry : null
+  }
+
   /** Someone else's selection we mustn't switch away from on our own: a
    *  readable gateway profile (`foreign`, which an explicit take over may
    *  switch from), or a profile we can't read or safely address
@@ -585,13 +618,14 @@ function applyConflict(
     return "cleanup-required"
   }
   if (
-    lib.appliedOwnership(values) === "other-maximal"
+    (lib.markerOwnership(values) === "other-maximal"
+      || lib.appliedOwnership(values) === "other-maximal")
     && options.overrideOtherMaximal !== true
   ) {
     return "other-maximal-config"
   }
   const block = lib.appliedBlock(values)
-  if (block === "unreadable") return "foreign-gateway-profile"
+  if (block === "unreadable") return "unreadable-profile"
   return block === "foreign" && options.overrideForeignGateway !== true ?
       "foreign-gateway-profile"
     : null
@@ -626,10 +660,12 @@ export function applyConfigLibraryProfile(
     }
   }
 
-  const ourEntry = lib.reusableEntry(
-    values,
-    options.overrideOtherMaximal === true,
-  )
+  const repair =
+    options.overrideForeignGateway === true ?
+      lib.appliedMarkerArtifact(values)
+    : null
+  const ourEntry =
+    repair ?? lib.reusableEntry(values, options.overrideOtherMaximal === true)
   const profileId = ourEntry?.id ?? randomUUID()
   const ensuredWorkspaceFolders = ensureWorkspaceFolders(
     values.allowedWorkspaceFolders,
@@ -640,12 +676,9 @@ export function applyConfigLibraryProfile(
     return { ...unchanged, wrote: false, conflict: null }
   }
 
-  // Snapshot what we're replacing on the switch to us; re-applying over our
-  // own profile keeps the original snapshot.
-  const prior =
-    appliedOwnership ?
-      (lib.state?.prior ?? LEGACY_PRIOR)
-    : snapshotPrior(meta.appliedId, top)
+  // Re-applying over a Maximal profile (or repairing the marker's own entry)
+  // keeps the marker's snapshot; see `priorFor` for a switch from elsewhere.
+  const prior = priorFor(lib, Boolean(appliedOwnership || repair), top)
 
   const profilePath = lib.profilePath(profileId)
   atomicWriteJson(profilePath, values, readJsonText(profilePath))
@@ -671,6 +704,23 @@ export function applyConfigLibraryProfile(
   atomicWriteJson(lib.statePath, state, lib.stateRaw)
 
   return { ...unchanged, wrote: true, conflict: null }
+}
+
+/**
+ * What disable restores. Over a Maximal profile, the marker's snapshot as
+ * is. Switching to us from someone else's selection while a marker exists
+ * keeps the marker's first top-level snapshot (those keys are still
+ * Maximal's) and only records the selection to switch back to. With no
+ * marker, snapshot what's there now.
+ */
+function priorFor(
+  lib: Library,
+  overMaximalProfile: boolean,
+  top: Record<string, unknown>,
+): RoutingState["prior"] {
+  if (overMaximalProfile) return lib.state?.prior ?? LEGACY_PRIOR
+  if (lib.state) return { ...lib.state.prior, appliedId: lib.meta.appliedId }
+  return snapshotPrior(lib.meta.appliedId, top)
 }
 
 function readPreferences(
@@ -716,6 +766,17 @@ export function isConfigLibraryApplied(
   }
   if (!profileMatches(lib.profile(lib.meta.appliedId), values)) return false
   return readJsonObject(lib.topPath)?.deploymentMode === "3p"
+}
+
+/** Who the routing marker says owns Desktop routing. Boot uses it to tell a
+ *  real hand-off to another copy from a stale copy's entry being applied
+ *  while this profile still holds the marker. */
+export function routingMarkerOwnership(
+  home: string = os.homedir(),
+  values: GatewayProfileValues = gatewayProfile(home),
+): "ours" | "other-maximal" | null {
+  const lib = new Library(getClaude3pDir(home))
+  return lib.stateUnreadable ? null : lib.markerOwnership(values)
 }
 
 /** Whether this Maximal profile may update its Desktop MCP entry. */

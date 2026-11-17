@@ -390,9 +390,7 @@ describe("ownership is never inferred loosely", () => {
   it("refuses to switch away from an applied profile it can't read", () => {
     seedUserProfile("broken", {})
     fs.writeFileSync(path.join(libDir(), "broken.json"), "{ not json")
-    expect(applyConfigLibraryProfile(home).conflict).toBe(
-      "foreign-gateway-profile",
-    )
+    expect(applyConfigLibraryProfile(home).conflict).toBe("unreadable-profile")
   })
 
   it("keeps _meta.json fields it doesn't know about", () => {

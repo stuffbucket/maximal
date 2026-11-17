@@ -22,6 +22,7 @@ import {
   DESKTOP_KEY_LABEL,
   revertConfigLibraryProfile,
   type RevertResult,
+  routingMarkerOwnership,
 } from "./config"
 
 export function claudeDesktopRoutingIntended(): boolean {
@@ -87,11 +88,15 @@ function reapply(
   try {
     const result = applyWithKey(home)
     if (result.conflict) {
-      if (result.conflict === "other-maximal-config") {
-        setClaudeDesktopRoutingIntent(false)
-      }
+      // Only a marker held by another copy hands routing off. A stale copy's
+      // entry being applied while this profile holds the marker keeps the
+      // intent, so this profile resumes once Desktop is switched back.
+      const handedOff =
+        result.conflict === "other-maximal-config"
+        && routingMarkerOwnership(home) !== "ours"
+      if (handedOff) setClaudeDesktopRoutingIntent(false)
       consola.warn(
-        result.conflict === "other-maximal-config" ?
+        handedOff ?
           "claude-desktop: another Maximal profile owns routing; disabled stale local intent"
         : "claude-desktop: routing intent is on, but another gateway profile is applied — left it untouched",
       )
