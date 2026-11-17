@@ -3,11 +3,10 @@ import { type Page, expect, test } from "@playwright/test"
 const BASE = process.env.UI_HARNESS_URL ?? "http://127.0.0.1:4747"
 const APPS = `${BASE}/ui/settings/#apps`
 const DESKTOP_TOGGLE = "**/settings/api/apps/claude-desktop/toggle"
-const TITLE = "Restart Claude Desktop"
-const RELAUNCH =
-  "Quit and reopen Claude Desktop for this change to take effect."
+const TITLE = "Restart Claude"
+const RELAUNCH = "Quit and reopen Claude for this change to take effect."
 const SIGN_IN_NOTE =
-  "If Claude Desktop asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude Desktop completely, reopen it, and try again."
+  "If Claude asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude completely, reopen it, and try again."
 
 // Any Settings width can be checked: UI_VIEWPORT_WIDTH=772 (the minimum) or wider.
 test.use({
@@ -190,7 +189,7 @@ async function connectOverOtherProfile(page: Page) {
   await desktop.getByRole("button", { name: "Connect" }).click()
   const connect = dialog(page)
   await expect(connect).toHaveAccessibleName(
-    "Connect Claude Desktop (Cowork, Code) to this Maximal profile?",
+    "Connect Claude to this Maximal profile?",
   )
   const applied = page.waitForResponse(DESKTOP_TOGGLE)
   await connect.getByRole("button", { name: "Connect" }).click()
@@ -239,11 +238,24 @@ test("after connecting over another Maximal profile: a backdrop click puts focus
   await expect(desktop.getByRole("checkbox")).toBeFocused()
 })
 
-test("no dialog when the connection is refused", async ({ page }) => {
-  await answerToggle(page, {
-    ...DESKTOP_ENTRY,
-    enabled: false,
-    conflict: "foreign-gateway-profile",
+test("a refused transfer keeps the dialog open and the next step carries both confirmed overrides", async ({
+  page,
+}) => {
+  const sent: Array<Record<string, unknown>> = []
+  await page.route(DESKTOP_TOGGLE, (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>
+    sent.push(body)
+    const both =
+      body.overrideOtherMaximal === true && body.overrideForeignGateway === true
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...DESKTOP_ENTRY,
+        enabled: both,
+        conflict: both ? null : "foreign-gateway-profile",
+      }),
+    })
   })
   await page.route("**/settings/api/apps", (route) =>
     route.request().method() === "GET" ?
@@ -269,10 +281,181 @@ test("no dialog when the connection is refused", async ({ page }) => {
   const refused = page.waitForResponse(DESKTOP_TOGGLE)
   await dialog(page).getByRole("button", { name: "Connect" }).click()
   await refused
-  // The Connect dialog closes on the answer; nothing about restarting opens.
-  await expect(dialog(page)).toHaveCount(0)
-  await expect(desktop.getByRole("button", { name: "Connect" })).toBeVisible()
+  // Still open: nothing changed, and the gateway that's left is explained.
+  await expect(dialog(page)).toHaveAccessibleName("Connect Claude")
+  await expect(dialog(page)).toContainText("Nothing was changed.")
   await expect(page.getByText(RELAUNCH)).toHaveCount(0)
+
+  const applied = page.waitForResponse(DESKTOP_TOGGLE)
+  await dialog(page).getByRole("button", { name: "Take over" }).click()
+  await applied
+  expect(sent).toEqual([
+    { enabled: true, overrideOtherMaximal: true },
+    { enabled: true, overrideOtherMaximal: true, overrideForeignGateway: true },
+  ])
+  await expect(dialog(page)).toHaveAccessibleName(TITLE)
+})
+
+test("a failed Take over keeps the dialog open with the error", async ({
+  page,
+}) => {
+  await page.route("**/settings/api/apps", (route) =>
+    route.request().method() === "GET" ?
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          apps: [
+            {
+              ...DESKTOP_ENTRY,
+              enabled: false,
+              conflict: "foreign-gateway-profile",
+            },
+          ],
+        }),
+      })
+    : route.fallback(),
+  )
+  await answerToggle(page, { error: { message: "Disk is read-only" } }, 500)
+  await openApps(page)
+  const desktop = card(page, "claude-desktop")
+
+  await desktop.getByRole("button", { name: "Connect" }).click()
+  const failed = page.waitForResponse(DESKTOP_TOGGLE)
+  await dialog(page).getByRole("button", { name: "Take over" }).click()
+  await failed
+
+  await expect(dialog(page)).toHaveAccessibleName("Connect Claude")
+  await expect(dialog(page).getByRole("alert")).toContainText(
+    "Couldn’t connect Claude",
+  )
+  await expect(
+    dialog(page).getByRole("button", { name: "Take over" }),
+  ).toBeEnabled()
+  await expect(page.getByText(RELAUNCH)).toHaveCount(0)
+})
+
+test("an unreadable configuration offers no Take over", async ({ page }) => {
+  await page.route("**/settings/api/apps", (route) =>
+    route.request().method() === "GET" ?
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          apps: [
+            {
+              ...DESKTOP_ENTRY,
+              enabled: false,
+              conflict: "unreadable-profile",
+            },
+          ],
+        }),
+      })
+    : route.fallback(),
+  )
+  await openApps(page)
+
+  await card(page, "claude-desktop")
+    .getByRole("button", { name: "Connect" })
+    .click()
+  await expect(dialog(page)).toContainText(
+    "Maximal can’t read the configuration Claude is using",
+  )
+  await expect(dialog(page).getByRole("button")).toHaveText(["Close"])
+})
+
+/**
+ * Claude Desktop is on a gateway Maximal didn't set up. Records every toggle
+ * request body; the list says so until a Take over is applied.
+ */
+async function openTakeOver(page: Page) {
+  const sent: Array<Record<string, unknown>> = []
+  let taken = false
+  await page.route("**/settings/api/apps", (route) => {
+    if (taken || route.request().method() !== "GET") return route.fallback()
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        apps: [
+          {
+            ...DESKTOP_ENTRY,
+            enabled: false,
+            conflict: "foreign-gateway-profile",
+          },
+        ],
+      }),
+    })
+  })
+  await page.route(DESKTOP_TOGGLE, (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>
+    sent.push(body)
+    taken = body.overrideForeignGateway === true
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...DESKTOP_ENTRY,
+        enabled: taken,
+        conflict: taken ? null : "foreign-gateway-profile",
+      }),
+    })
+  })
+  await openApps(page)
+  const desktop = card(page, "claude-desktop")
+  await desktop.getByRole("button", { name: "Connect" }).click()
+  await expect(dialog(page)).toHaveAccessibleName("Connect Claude")
+  return { desktop, sent }
+}
+
+test("another gateway: Take over on the left, Close on the right and focused", async ({
+  page,
+}) => {
+  await openTakeOver(page)
+  const takeOver = dialog(page)
+
+  await expect(takeOver).toContainText(
+    "Maximal found another gateway in Claude and didn’t change it.",
+  )
+  await expect(takeOver).not.toContainText("Cowork")
+  await expect(takeOver.getByRole("button")).toHaveText(["Take over", "Close"])
+  await expect(takeOver.getByRole("button", { name: "Close" })).toBeFocused()
+  const [left, right] = await Promise.all([
+    takeOver.getByRole("button", { name: "Take over" }).boundingBox(),
+    takeOver.getByRole("button", { name: "Close" }).boundingBox(),
+  ])
+  expect(left?.x ?? Number.POSITIVE_INFINITY).toBeLessThan(right?.x ?? 0)
+  await page.screenshot({ path: "test-results/desktop-take-over-dialog.png" })
+})
+
+test("another gateway: Enter and Escape close without taking over", async ({
+  page,
+}) => {
+  const { desktop, sent } = await openTakeOver(page)
+  await page.keyboard.press("Enter")
+  await expect(dialog(page)).toHaveCount(0)
+
+  await desktop.getByRole("button", { name: "Connect" }).click()
+  await expect(dialog(page)).toHaveAccessibleName("Connect Claude")
+  await page.keyboard.press("Escape")
+  await expect(dialog(page)).toHaveCount(0)
+
+  expect(sent).toEqual([])
+  await expect(desktop.getByRole("button", { name: "Connect" })).toBeVisible()
+})
+
+test("another gateway: Take over asks for exactly that override and the restart dialog follows", async ({
+  page,
+}) => {
+  const { desktop, sent } = await openTakeOver(page)
+  const applied = page.waitForResponse(DESKTOP_TOGGLE)
+  await dialog(page).getByRole("button", { name: "Take over" }).click()
+  await applied
+
+  expect(sent).toEqual([{ enabled: true, overrideForeignGateway: true }])
+  await expect(dialog(page)).toHaveAccessibleName(TITLE)
+  await dialog(page).getByRole("button", { name: "Got it" }).click()
+  await expect(desktop.getByRole("checkbox")).toBeChecked()
 })
 
 test("no dialog when the request fails", async ({ page }) => {
@@ -322,7 +505,8 @@ test("the Claude Code Windows restart dialog is unchanged and carries no Desktop
   await expect(dialog(page).getByRole("heading")).toHaveText(
     "Restart Claude Code to finish",
   )
-  await expect(dialog(page)).not.toContainText("Claude Desktop")
+  await expect(dialog(page)).not.toContainText(RELAUNCH)
+  await expect(dialog(page)).not.toContainText(SIGN_IN_NOTE)
   await expect(
     dialog(page).getByRole("button", { name: "Keep on" }),
   ).toBeFocused()

@@ -182,6 +182,7 @@ appsRoutes.post("/claude-desktop/toggle", async (c) => {
       }
       const result = await app.enable({
         overrideOtherMaximal: parsed.data.overrideOtherMaximal,
+        overrideForeignGateway: parsed.data.overrideForeignGateway,
       })
       if (!result.success) {
         return jsonApp(c, await app.getDetails(result.conflict ?? null))

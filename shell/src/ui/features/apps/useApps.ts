@@ -29,6 +29,8 @@ export interface MutationResult {
 
 export interface ToggleAppOptions {
   overrideOtherMaximal?: boolean;
+  /** Claude Desktop only: the explicit Take over from another gateway. */
+  overrideForeignGateway?: boolean;
 }
 
 interface UseApps {
@@ -156,6 +158,9 @@ export function useApps(): UseApps {
           enabled,
           ...(options?.overrideOtherMaximal
             ? { overrideOtherMaximal: true }
+            : {}),
+          ...(options?.overrideForeignGateway && appId === "claude-desktop"
+            ? { overrideForeignGateway: true }
             : {}),
         },
       });

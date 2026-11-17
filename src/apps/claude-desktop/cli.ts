@@ -4,8 +4,8 @@ import path from "node:path"
 
 import type { AppCli, AppCliOp } from "../index"
 
-import { generateManagedProfile } from "./config"
 import { claudeAppInstalled, claudeAppCandidates } from "./detect"
+import { generateManagedProfile } from "./managed-profile"
 import { enableClaudeDesktopRouting } from "./reconcile"
 
 const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"

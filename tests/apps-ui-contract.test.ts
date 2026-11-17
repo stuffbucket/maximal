@@ -55,7 +55,7 @@ describe("Apps shell contract", () => {
     expect(row).toContain("import { Switch }")
     expect(row).toContain('t("apps-connect")')
     expect(row).toContain("<HarnessTypeIcon appId={app.id} />")
-    expect(row).toContain('"Claude Desktop (Cowork, Code)"')
+    expect(row).toContain('"Claude"')
     expect(glyphs).toContain("function TerminalGlyph")
     expect(glyphs).toContain("function WindowGlyph")
     expect(row).not.toContain("Checkbox")
@@ -200,8 +200,11 @@ describe("Claude Desktop restart dialog", () => {
       "setRestartNotice(desktopRestartChange(app.id, true, result))",
     )
     expect(row).toContain("<DesktopRestartDialog")
-    // Not an inline banner, and not a confirm/cancel prompt.
-    expect(row).not.toContain("<Callout")
+    // Not an inline banner, and not a confirm/cancel prompt. The row's only
+    // callout is a refused Connect, inside the Connect dialog's own body.
+    expect(row).not.toContain("apps-desktop-relaunch")
+    expect(row.match(/<Callout/g) ?? []).toHaveLength(1)
+    expect(row).toContain("<Callout tone={connectProblem.tone}")
     expect(row).not.toContain("relaunchNoticeShown")
     const dialog = source("shell/src/ui/features/apps/DesktopRestartDialog.tsx")
     expect(dialog).toContain("<NoticeDialog")
@@ -231,12 +234,12 @@ describe("Claude Desktop restart dialog", () => {
       string,
       string
     >
-    expect(base["apps-desktop-restart-title"]).toBe("Restart Claude Desktop")
+    expect(base["apps-desktop-restart-title"]).toBe("Restart Claude")
     expect(base["apps-desktop-relaunch"]).toBe(
-      "Quit and reopen Claude Desktop for this change to take effect.",
+      "Quit and reopen Claude for this change to take effect.",
     )
     expect(base["apps-desktop-signin-note"]).toBe(
-      "If Claude Desktop asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude Desktop completely, reopen it, and try again.",
+      "If Claude asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude completely, reopen it, and try again.",
     )
     expect(base["apps-desktop-restart-ok"]).toBe("Got it")
     for (const locale of FULL_LOCALES) {

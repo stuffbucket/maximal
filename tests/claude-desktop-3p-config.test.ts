@@ -16,11 +16,11 @@ import {
   applyConfigLibraryProfile,
   CLAUDE_3P_PREF_DOMAIN,
   gatewayProfile,
-  generateManagedProfile,
   getClaude3pDir,
   isConfigLibraryApplied,
   revertConfigLibraryProfile,
 } from "~/apps/claude-desktop/config"
+import { generateManagedProfile } from "~/apps/claude-desktop/managed-profile"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { setListeningPort } from "~/lib/start/proxy-port"
 
@@ -390,9 +390,7 @@ describe("ownership is never inferred loosely", () => {
   it("refuses to switch away from an applied profile it can't read", () => {
     seedUserProfile("broken", {})
     fs.writeFileSync(path.join(libDir(), "broken.json"), "{ not json")
-    expect(applyConfigLibraryProfile(home).conflict).toBe(
-      "foreign-gateway-profile",
-    )
+    expect(applyConfigLibraryProfile(home).conflict).toBe("unreadable-profile")
   })
 
   it("keeps _meta.json fields it doesn't know about", () => {

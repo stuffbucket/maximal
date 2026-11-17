@@ -90,17 +90,17 @@ describe("desktopRestartChange", () => {
 describe("desktopRestartCopy", () => {
   test("after enabling: restart guidance plus the sign-in recovery note", () => {
     expect(desktopRestartCopy("enabled")).toEqual({
-      title: "Restart Claude Desktop",
-      body: "Quit and reopen Claude Desktop for this change to take effect.",
-      note: "If Claude Desktop asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude Desktop completely, reopen it, and try again.",
+      title: "Restart Claude",
+      body: "Quit and reopen Claude for this change to take effect.",
+      note: "If Claude asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude completely, reopen it, and try again.",
       action: "Got it",
     })
   })
 
   test("after disabling: the same guidance without the sign-in note", () => {
     expect(desktopRestartCopy("disabled")).toEqual({
-      title: "Restart Claude Desktop",
-      body: "Quit and reopen Claude Desktop for this change to take effect.",
+      title: "Restart Claude",
+      body: "Quit and reopen Claude for this change to take effect.",
       note: null,
       action: "Got it",
     })

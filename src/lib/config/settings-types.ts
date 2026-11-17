@@ -457,6 +457,7 @@ export const AppEntry = z.object({
       "foreign-base-url",
       "foreign-api-key-helper",
       "foreign-gateway-profile",
+      "unreadable-profile",
       "other-maximal-config",
       "cleanup-required",
     ])
@@ -484,6 +485,8 @@ export type ClaudeCodeToggleRequest = z.infer<typeof ClaudeCodeToggleRequest>
 export const ClaudeDesktopToggleRequest = z.object({
   enabled: z.boolean(),
   overrideOtherMaximal: z.boolean().optional(),
+  /** Take over from a gateway Maximal didn't set up (explicit confirmation). */
+  overrideForeignGateway: z.boolean().optional(),
 })
 export type ClaudeDesktopToggleRequest = z.infer<
   typeof ClaudeDesktopToggleRequest

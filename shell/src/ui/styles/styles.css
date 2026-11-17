@@ -2263,6 +2263,12 @@ html[data-os="macos"] .topbar {
   margin-bottom: 0;
 }
 
+/* A callout in a dialog (e.g. a refused Connect) sits above the text it
+   qualifies, with the same step as between paragraphs. */
+.confirm-dialog__body > .callout {
+  margin-bottom: var(--space-2);
+}
+
 .confirm-dialog__actions {
   display: flex;
   justify-content: flex-end;
