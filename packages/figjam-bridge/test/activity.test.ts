@@ -1,6 +1,13 @@
 // Tool use through the bridge is reported as counts, times and the tool's
 // name, never its input: events on start and end, and `status().activity`.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  setSystemTime,
+  test,
+} from "bun:test"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -78,6 +85,7 @@ describe("bridge tool activity", () => {
     expect(handle.status().activity).toEqual({
       inFlight: 0,
       startedAtMs: null,
+      expiresAtMs: null,
       lastActivityAtMs: null,
       lastTool: null,
     })
@@ -122,16 +130,65 @@ describe("bridge tool activity", () => {
     })
   })
 
+  test("overlap reports the completing label and expires each stale call", async () => {
+    const base = Date.now()
+    const offset = received.length
+    setSystemTime(new Date(base))
+    try {
+      const first = fetch(`http://127.0.0.1:${handle.port}/tool`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: "get_first", input: {} }),
+      })
+      await until(() => received.length === offset + 1)
+
+      setSystemTime(new Date(base + 4 * 60_000))
+      const second = fetch(`http://127.0.0.1:${handle.port}/tool`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: "get_second", input: {} }),
+      })
+      await until(() => received.length === offset + 2)
+      expect(handle.status().activity).toMatchObject({
+        inFlight: 2,
+        startedAtMs: base,
+        expiresAtMs: base + 9 * 60_000,
+        lastTool: "get_second",
+      })
+
+      answers.get(received[offset].id)?.()
+      expect((await first).status).toBe(200)
+      expect(handle.status().activity).toMatchObject({
+        inFlight: 1,
+        startedAtMs: base + 4 * 60_000,
+        expiresAtMs: base + 9 * 60_000,
+        lastTool: "get_first",
+      })
+
+      setSystemTime(new Date(base + 9 * 60_000))
+      expect(handle.status().activity).toMatchObject({
+        inFlight: 0,
+        startedAtMs: null,
+        expiresAtMs: null,
+      })
+      answers.get(received[offset + 1].id)?.()
+      expect((await second).status).toBe(200)
+    } finally {
+      setSystemTime()
+    }
+  })
+
   test("a tool name is bounded", async () => {
     const long = `get_${"x".repeat(200)}`
+    const offset = received.length
     const call = fetch(`http://127.0.0.1:${handle.port}/tool`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
       body: JSON.stringify({ name: long, input: {} }),
     })
-    await until(() => received.length === 2)
+    await until(() => received.length === offset + 1)
     expect(handle.status().activity.lastTool).toHaveLength(80)
-    answers.get(received[1].id)?.()
+    answers.get(received[offset].id)?.()
     await call
   })
 })

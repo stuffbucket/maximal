@@ -57,7 +57,7 @@ describe("connectorActivity", () => {
         active_calls: 2,
         started_at_ms: NOW - 4000,
         last_activity_at_ms: NOW - 1000,
-        expires_at_ms: NOW - 4000 + MAX_CALL_MS,
+        expires_at_ms: NOW - 1000 + MAX_CALL_MS,
         last_tool: "search_files",
       },
     ])
@@ -101,6 +101,21 @@ describe("connectorActivity", () => {
     expect(connectorActivity({ nowMs: NOW })).toEqual([])
   })
 
+  test("overlapping calls remain until the newest call's deadline", () => {
+    beginConnectorCall("workiq", "old", NOW - MAX_CALL_MS + 1000)
+    beginConnectorCall("workiq", "new", NOW - 1000)
+
+    expect(connectorActivity({ nowMs: NOW })[0]).toMatchObject({
+      active_calls: 2,
+      started_at_ms: NOW - MAX_CALL_MS + 1000,
+      expires_at_ms: NOW - 1000 + MAX_CALL_MS,
+    })
+    expect(connectorActivity({ nowMs: NOW + 1000 })[0]).toMatchObject({
+      active_calls: 1,
+      started_at_ms: NOW - 1000,
+    })
+  })
+
   test("a call that never ends stops counting at its deadline", () => {
     beginConnectorCall("workiq", "stuck", NOW - MAX_CALL_MS - 1)
     expect(connectorActivity({ nowMs: NOW })).toEqual([])
@@ -131,6 +146,7 @@ describe("connectorActivity", () => {
       startedAtMs: number | null
       lastActivityAtMs: number
       lastTool?: string
+      expiresAtMs?: number | null
     }) =>
       connectorActivity({
         nowMs: NOW,
@@ -155,6 +171,20 @@ describe("connectorActivity", () => {
         last_tool: "get_board",
       },
     ])
+    expect(
+      reported({
+        activeCalls: 2,
+        startedAtMs: NOW - MAX_CALL_MS - 1000,
+        lastActivityAtMs: NOW - 1000,
+        lastTool: "find_nodes",
+        expiresAtMs: NOW + 2000,
+      })[0],
+    ).toMatchObject({
+      state: "running",
+      active_calls: 2,
+      expires_at_ms: NOW + 2000,
+      last_tool: "find_nodes",
+    })
     expect(
       reported({
         activeCalls: 0,

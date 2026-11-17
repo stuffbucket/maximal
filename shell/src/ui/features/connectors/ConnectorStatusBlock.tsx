@@ -13,6 +13,8 @@ import type { ConnectorLine } from "./connector-state";
 import { ConnectorText } from "./ConnectorText";
 import type { ConnectorMutationResult } from "./useConnectors";
 
+const SUBMITTED_REQUEST_TIMEOUT_MS = 5000;
+
 interface ConnectorStatusBlockProps {
   line: ConnectorLine;
   /** The connector's own report; absent while it is still starting. */
@@ -49,24 +51,38 @@ export function ConnectorStatusBlock({ line, status, onAction }: ConnectorStatus
   const [failed, setFailed] = useState<{ problem: Problem; actionId: string } | null>(null);
 
   // The plugin's own questions (a panel asking to pair), each asked in a dialog.
-  // An answered one is hidden at once; the status catches up a moment later.
+  // A submitted one is hidden while the asynchronous action catches up. If the
+  // request remains in status, reveal it again rather than suppressing it forever.
   const [reviewing, setReviewing] = useState(false);
-  const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
+  const [submitted, setSubmitted] = useState<ReadonlySet<string>>(new Set());
+  const submittedRef = useRef(new Set<string>());
+  const submittedTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const answering = useRef(new Set<string>());
   const lineRef = useRef<HTMLParagraphElement>(null);
   const refocusLine = useRef(false);
   const attention = status?.attention;
-  const requests = (attention?.requests ?? []).filter((request) => !answered.has(request.approve.id));
+  const requests = (attention?.requests ?? []).filter((request) => !submitted.has(request.approve.id));
   const current = requests[0];
   const waitingIds = (attention?.requests ?? []).map((request) => request.approve.id).join("\n");
 
   useEffect(() => {
-    // Forget answers the status has moved past.
-    const live = new Set(waitingIds.split("\n"));
-    setAnswered((previous) => {
-      const kept = [...previous].filter((id) => live.has(id));
-      return kept.length === previous.size ? previous : new Set(kept);
-    });
+    // Once status has moved past a submitted request, its local suppression is
+    // no longer needed. This also cancels the fallback that would reveal it.
+    const live = new Set(waitingIds === "" ? [] : waitingIds.split("\n"));
+    let changed = false;
+    for (const id of submittedRef.current) {
+      if (live.has(id)) continue;
+      submittedRef.current.delete(id);
+      clearTimeout(submittedTimers.current.get(id));
+      submittedTimers.current.delete(id);
+      changed = true;
+    }
+    if (changed) setSubmitted(new Set(submittedRef.current));
   }, [waitingIds]);
+
+  useEffect(() => () => {
+    for (const timer of submittedTimers.current.values()) clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     // The Review button went with the last question; keep focus in the page.
@@ -89,13 +105,27 @@ export function ConnectorStatusBlock({ line, status, onAction }: ConnectorStatus
   };
 
   const answer = async (request: PluginAttentionRequest, verdict: "approve" | "decline"): Promise<void> => {
-    const ok = await run(request[verdict].id);
-    if (ok) {
-      refocusLine.current = true;
-      setAnswered((previous) => new Set(previous).add(request.approve.id));
-    } else {
-      // The problem shows on the page, not under the dialog.
-      setReviewing(false);
+    const requestId = request.approve.id;
+    if (answering.current.has(requestId) || submittedRef.current.has(requestId)) return;
+    answering.current.add(requestId);
+    try {
+      const ok = await run(request[verdict].id);
+      if (ok) {
+        refocusLine.current = true;
+        submittedRef.current.add(requestId);
+        setSubmitted(new Set(submittedRef.current));
+        const timer = setTimeout(() => {
+          submittedTimers.current.delete(requestId);
+          if (!submittedRef.current.delete(requestId)) return;
+          setSubmitted(new Set(submittedRef.current));
+        }, SUBMITTED_REQUEST_TIMEOUT_MS);
+        submittedTimers.current.set(requestId, timer);
+      } else {
+        // The problem shows on the page, not under the dialog.
+        setReviewing(false);
+      }
+    } finally {
+      answering.current.delete(requestId);
     }
   };
 

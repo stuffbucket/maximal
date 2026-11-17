@@ -98,25 +98,39 @@ function runningCalls(
   ledger: Ledger | undefined,
   reported: Readonly<PluginActivity> | undefined,
   nowMs: number,
-): { count: number; startedAtMs: number | null } {
+): { count: number; startedAtMs: number | null; expiresAtMs: number | null } {
   const starts: Array<number> = []
+  const deadlines: Array<number> = []
   if (ledger) {
     for (const [call, startedAt] of ledger.calls) {
-      if (nowMs - startedAt >= MAX_CALL_MS) ledger.calls.delete(call)
-      else starts.push(startedAt)
+      const deadline = startedAt + MAX_CALL_MS
+      if (nowMs >= deadline) ledger.calls.delete(call)
+      else {
+        starts.push(startedAt)
+        deadlines.push(deadline)
+      }
     }
   }
   let count = starts.length
-  if (
-    reported
-    && reported.activeCalls > 0
-    && reported.startedAtMs !== null
-    && nowMs - reported.startedAtMs < MAX_CALL_MS
-  ) {
-    count += reported.activeCalls
-    starts.push(reported.startedAtMs)
+  if (reported && reported.activeCalls > 0 && reported.startedAtMs !== null) {
+    // Older plugins do not report an aggregate deadline. Newer ones can keep
+    // overlapping calls visible until the newest call's deadline, but never
+    // claim more than one full call window from the current observation.
+    const deadline = Math.min(
+      reported.expiresAtMs ?? reported.startedAtMs + MAX_CALL_MS,
+      nowMs + MAX_CALL_MS,
+    )
+    if (nowMs < deadline) {
+      count += reported.activeCalls
+      starts.push(reported.startedAtMs)
+      deadlines.push(deadline)
+    }
   }
-  return { count, startedAtMs: starts.length > 0 ? Math.min(...starts) : null }
+  return {
+    count,
+    startedAtMs: starts.length > 0 ? Math.min(...starts) : null,
+    expiresAtMs: deadlines.length > 0 ? Math.max(...deadlines) : null,
+  }
 }
 
 /** When a call last began or ended, and the tool then, from whichever of the
@@ -159,10 +173,7 @@ export function connectorActivity(options: {
       active_calls: running.count,
       started_at_ms: running.startedAtMs,
       last_activity_at_ms: last.atMs,
-      expires_at_ms:
-        running.startedAtMs === null ?
-          last.atMs + LINGER_MS
-        : running.startedAtMs + MAX_CALL_MS,
+      expires_at_ms: running.expiresAtMs ?? last.atMs + LINGER_MS,
       last_tool: last.tool === null ? null : toolLabel(last.tool),
     })
   }

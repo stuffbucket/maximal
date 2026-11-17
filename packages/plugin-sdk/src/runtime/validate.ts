@@ -514,10 +514,29 @@ function checkStatusActivity(pluginId: string, activity: unknown): void {
     || !isCount(activity.lastActivityAtMs)
     || (activity.lastTool !== undefined
       && typeof activity.lastTool !== "string")
+    || (activity.expiresAtMs !== undefined
+      && activity.expiresAtMs !== null
+      && !isCount(activity.expiresAtMs))
   ) {
     invalidStatus(
       pluginId,
-      "activity needs activeCalls, startedAtMs (or null), lastActivityAtMs and an optional lastTool.",
+      "activity needs activeCalls, startedAtMs (or null), lastActivityAtMs and optional lastTool and expiresAtMs fields.",
+    )
+  }
+  const running = activity.activeCalls > 0
+  if (running !== (activity.startedAtMs !== null)) {
+    invalidStatus(
+      pluginId,
+      "activity startedAtMs must be set exactly when activeCalls is positive.",
+    )
+  }
+  if (
+    activity.expiresAtMs !== undefined
+    && running !== (activity.expiresAtMs !== null)
+  ) {
+    invalidStatus(
+      pluginId,
+      "activity expiresAtMs must be set exactly when activeCalls is positive.",
     )
   }
 }

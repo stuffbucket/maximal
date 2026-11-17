@@ -49,6 +49,7 @@ export function toPluginActivity(
     startedAtMs: number | null
     lastActivityAtMs: number | null
     lastTool: string | null
+    expiresAtMs?: number | null
   },
   nowMs: number = Date.now(),
 ): PluginActivity | undefined {
@@ -61,6 +62,11 @@ export function toPluginActivity(
     startedAtMs: inFlight > 0 ? bridge.startedAtMs : null,
     lastActivityAtMs,
     ...(lastTool === null ? {} : { lastTool: displayName(lastTool) }),
+    ...(bridge.expiresAtMs === undefined ?
+      {}
+    : {
+        expiresAtMs: inFlight > 0 ? bridge.expiresAtMs : null,
+      }),
   }
 }
 

@@ -32,6 +32,12 @@ describe("build", () => {
     ])
   })
 
+  test("starts ui.html with the doctype", async () => {
+    const html = await readFile(path.join(outDir, "ui.html"), "utf8")
+    const withoutBom = html.codePointAt(0) === 0xfeff ? html.slice(1) : html
+    expect(withoutBom.startsWith("<!doctype html>")).toBe(true)
+  })
+
   test("stamps the package version into code.js", async () => {
     const code = await readFile(path.join(outDir, "code.js"), "utf8")
     expect(code).toContain(

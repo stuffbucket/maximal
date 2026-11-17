@@ -51,13 +51,15 @@ import type { Server, ServerWebSocket } from "bun"
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
 import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs"
-import { mkdir } from "node:fs/promises"
+  chmod,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  stat,
+  unlink,
+} from "node:fs/promises"
 import path from "node:path"
 
 import {
@@ -178,10 +180,15 @@ let seq = 0
 let lastTool: string | null = null
 let lastToolAt: number | null = null
 const MAX_TOOL_NAME = 80
+const TOOL_ACTIVITY_TTL_MS = 5 * 60 * 1000
+
+function toolName(entry: Pending): string {
+  return entry.name.slice(0, MAX_TOOL_NAME)
+}
 
 function beginTool(id: string, entry: Pending): void {
   pending.set(id, entry)
-  lastTool = entry.name.slice(0, MAX_TOOL_NAME)
+  lastTool = toolName(entry)
   lastToolAt = entry.started
   emit({ type: "tool-started", name: lastTool, board: entry.board.id })
 }
@@ -189,22 +196,26 @@ function beginTool(id: string, entry: Pending): void {
 function endTool(id: string): void {
   const entry = pending.get(id)
   if (!entry || !pending.delete(id)) return
+  lastTool = toolName(entry)
   lastToolAt = Date.now()
   emit({
     type: "tool-finished",
-    name: entry.name.slice(0, MAX_TOOL_NAME),
+    name: lastTool,
     board: entry.board.id,
   })
 }
 
 function toolActivity() {
-  let startedAtMs: number | null = null
-  for (const entry of pending.values())
-    if (startedAtMs === null || entry.started < startedAtMs)
-      startedAtMs = entry.started
+  const now = Date.now()
+  const fresh = [...pending.values()].filter(
+    (entry) => now < entry.started + TOOL_ACTIVITY_TTL_MS,
+  )
+  const starts = fresh.map((entry) => entry.started)
   return {
-    inFlight: pending.size,
-    startedAtMs,
+    inFlight: fresh.length,
+    startedAtMs: starts.length > 0 ? Math.min(...starts) : null,
+    expiresAtMs:
+      starts.length > 0 ? Math.max(...starts) + TOOL_ACTIVITY_TTL_MS : null,
     lastActivityAtMs: lastToolAt,
     lastTool,
   }
@@ -322,22 +333,43 @@ function ago(at: number): string {
   return `at ${new Date(at).toLocaleTimeString()}`
 }
 const clientsPath = () => path.join(DATA_DIR, "figjam", "clients.json")
+const clientsLockPath = () => `${clientsPath()}.lock`
+const CLIENTS_LOCK_TIMEOUT_MS = 10_000
+const INCOMPLETE_LOCK_STALE_MS = 30_000
 let clients: Array<PairedClient> = []
 
-function loadClients(): Array<PairedClient> {
+interface ClientsLockOwner {
+  pid: number
+  token: string
+  createdAtMs: number
+}
+
+function errorCode(error: unknown): string | undefined {
+  return isObject(error) && typeof error.code === "string" ?
+      error.code
+    : undefined
+}
+
+async function readClients(): Promise<Array<PairedClient>> {
+  let source: string
   try {
-    if (!existsSync(clientsPath())) return []
-    const value = JSON.parse(readFileSync(clientsPath(), "utf8")) as {
-      clients?: Array<unknown>
-    }
-    return Array.isArray(value.clients) ?
-        value.clients.filter(
-          (c): c is PairedClient =>
-            isObject(c)
-            && typeof c.hash === "string"
-            && typeof c.id === "string",
-        )
-      : []
+    source = await readFile(clientsPath(), "utf8")
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return []
+    throw error
+  }
+  const value = JSON.parse(source) as { clients?: Array<unknown> }
+  return Array.isArray(value.clients) ?
+      value.clients.filter(
+        (c): c is PairedClient =>
+          isObject(c) && typeof c.hash === "string" && typeof c.id === "string",
+      )
+    : []
+}
+
+async function loadClients(): Promise<Array<PairedClient>> {
+  try {
+    return await readClients()
   } catch (error) {
     log(
       `couldn't read ${clientsPath()}: ${error instanceof Error ? error.message : String(error)}`,
@@ -346,28 +378,192 @@ function loadClients(): Array<PairedClient> {
   }
 }
 
-function saveClients(): void {
+async function writeClients(next: Array<PairedClient>): Promise<void> {
   const file = clientsPath()
-  mkdirSync(path.dirname(file), { recursive: true })
-  writeFileSync(file, `${JSON.stringify({ clients }, null, 2)}\n`, {
-    mode: 0o600,
-  })
-  chmodSync(file, 0o600)
+  await mkdir(path.dirname(file), { recursive: true })
+  const temp = `${file}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    handle = await open(temp, "wx", 0o600)
+    await handle.writeFile(`${JSON.stringify({ clients: next }, null, 2)}\n`)
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    await rename(temp, file)
+    await chmod(file, 0o600)
+  } finally {
+    await handle?.close().catch(() => {})
+    await unlink(temp).catch((error: unknown) => {
+      if (errorCode(error) !== "ENOENT") throw error
+    })
+  }
+}
+
+function lockOwner(value: unknown): ClientsLockOwner | undefined {
+  if (
+    !isObject(value)
+    || !Number.isInteger(value.pid)
+    || typeof value.pid !== "number"
+    || value.pid <= 0
+    || typeof value.token !== "string"
+    || !/^[a-f0-9]{32}$/.test(value.token)
+    || typeof value.createdAtMs !== "number"
+  )
+    return undefined
+  return {
+    pid: value.pid,
+    token: value.token,
+    createdAtMs: value.createdAtMs,
+  }
+}
+
+async function readLockOwner(
+  lock: string,
+): Promise<ClientsLockOwner | undefined> {
+  try {
+    return lockOwner(
+      JSON.parse(await readFile(path.join(lock, "owner.json"), "utf8")),
+    )
+  } catch {
+    return undefined
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return errorCode(error) !== "ESRCH"
+  }
+}
+
+/**
+ * Move an abandoned lock aside without letting two cleaners remove a newer
+ * owner's lock. The deterministic tombstone stays as a fence for contenders
+ * that observed the old owner before the rename.
+ */
+async function clearStaleClientsLock(lock: string): Promise<boolean> {
+  let details: Awaited<ReturnType<typeof stat>>
+  try {
+    details = await stat(lock)
+  } catch (error) {
+    return errorCode(error) === "ENOENT"
+  }
+  const owner = await readLockOwner(lock)
+  const stale =
+    owner ?
+      !processIsAlive(owner.pid)
+    : Date.now() - details.mtimeMs > INCOMPLETE_LOCK_STALE_MS
+  if (!stale) return false
+  const fingerprint =
+    owner?.token
+    ?? createHash("sha256")
+      .update(`${details.dev}:${details.ino}:${details.mtimeMs}`)
+      .digest("hex")
+      .slice(0, 32)
+  try {
+    await rename(lock, `${lock}.stale-${fingerprint}`)
+    return true
+  } catch (error) {
+    if (["EEXIST", "ENOENT", "ENOTEMPTY"].includes(errorCode(error) ?? ""))
+      return false
+    throw error
+  }
+}
+
+async function acquireClientsLock(): Promise<() => Promise<void>> {
+  const lock = clientsLockPath()
+  await mkdir(path.dirname(lock), { recursive: true })
+  const owner: ClientsLockOwner = {
+    pid: process.pid,
+    token: randomBytes(16).toString("hex"),
+    createdAtMs: Date.now(),
+  }
+  const deadline = Date.now() + CLIENTS_LOCK_TIMEOUT_MS
+  while (true) {
+    try {
+      await mkdir(lock, { mode: 0o700 })
+      try {
+        const ownerFile = path.join(lock, "owner.json")
+        const handle = await open(ownerFile, "wx", 0o600)
+        try {
+          await handle.writeFile(`${JSON.stringify(owner)}\n`)
+          await handle.sync()
+        } finally {
+          await handle.close()
+        }
+      } catch (error) {
+        await rm(lock, { recursive: true, force: true })
+        throw error
+      }
+      return async () => {
+        const current = await readLockOwner(lock)
+        if (current?.token === owner.token)
+          await rm(lock, { recursive: true, force: true })
+      }
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") throw error
+      if (await clearStaleClientsLock(lock)) continue
+      if (Date.now() >= deadline)
+        throw new Error(`Timed out waiting for ${lock}.`)
+      await Bun.sleep(10 + Math.floor(Math.random() * 20))
+    }
+  }
+}
+
+async function changeClients<T>(
+  change: (current: Array<PairedClient>) => {
+    next: Array<PairedClient>
+    result: T
+  },
+): Promise<T> {
+  const release = await acquireClientsLock()
+  try {
+    const current = await readClients()
+    const { next, result } = change(current)
+    if (next !== current) await writeClients(next)
+    clients = next
+    return result
+  } finally {
+    await release()
+  }
 }
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest()
 
 // Constant-time: compares against every stored hash, no early exit.
-function clientForToken(candidate: unknown): PairedClient | undefined {
-  if (typeof candidate !== "string" || !candidate) return undefined
+function matchingClient(
+  current: Array<PairedClient>,
+  candidate: string,
+): PairedClient | undefined {
   const h = sha256(candidate.trim())
   let found: PairedClient | undefined
-  for (const c of clients) {
+  for (const c of current) {
     const stored = Buffer.from(c.hash, "hex")
     if (stored.length === h.length && timingSafeEqual(stored, h) && !found)
       found = c
   }
   return found
+}
+
+async function authenticateClient(
+  candidate: unknown,
+): Promise<PairedClient | undefined> {
+  if (typeof candidate !== "string" || !candidate) return undefined
+  const now = new Date().toISOString()
+  return changeClients((current) => {
+    const found = matchingClient(current, candidate)
+    if (!found) return { next: current, result: undefined }
+    const newer =
+      Date.parse(found.lastSeen) > Date.parse(now) ? found.lastSeen : now
+    if (newer === found.lastSeen) return { next: current, result: found }
+    const updated = { ...found, lastSeen: newer }
+    return {
+      next: current.map((client) => (client === found ? updated : client)),
+      result: updated,
+    }
+  })
 }
 
 const str = (v: unknown): string | null =>
@@ -609,19 +805,23 @@ function explainMissing(
   )
 }
 
-function approvePairRequest(r: PairRequest): PairedClient {
+async function approvePairRequest(r: PairRequest): Promise<PairedClient> {
   dropPairRequest(r)
   const token = randomBytes(32).toString("base64url")
   const now = new Date().toISOString()
-  const client: PairedClient = {
-    id: `c${randomBytes(4).toString("hex")}`,
-    hash: sha256(token).toString("hex"),
-    label: `${r.user ? `${r.user} · ` : ""}${r.name} · first paired on "${r.board}"`,
-    createdAt: now,
-    lastSeen: now,
-  }
-  clients.push(client)
-  saveClients()
+  const client = await changeClients((current) => {
+    let id: string
+    do id = `c${randomBytes(4).toString("hex")}`
+    while (current.some((entry) => entry.id === id))
+    const added: PairedClient = {
+      id,
+      hash: sha256(token).toString("hex"),
+      label: `${r.user ? `${r.user} · ` : ""}${r.name} · first paired on "${r.board}"`,
+      createdAt: now,
+      lastSeen: now,
+    }
+    return { next: [...current, added], result: added }
+  })
   remember(r.name, {
     outcome: "approved",
     at: Date.now(),
@@ -642,11 +842,15 @@ function approvePairRequest(r: PairRequest): PairedClient {
   return client
 }
 
-function forgetClient(clientId: string): boolean {
-  const before = clients.length
-  clients = clients.filter((c) => c.id !== clientId)
-  if (clients.length === before) return false
-  saveClients()
+async function forgetClient(clientId: string): Promise<boolean> {
+  const forgotten = await changeClients((current) => {
+    const next = current.filter((client) => client.id !== clientId)
+    return {
+      next: next.length === current.length ? current : next,
+      result: next.length !== current.length,
+    }
+  })
+  if (!forgotten) return false
   for (const b of boards.values()) {
     if (b.clientId !== clientId) continue
     boards.delete(b.id)
@@ -686,7 +890,7 @@ async function pairAction(
   }
   const r = found.request
   if (action === "approve") {
-    const client = approvePairRequest(r)
+    const client = await approvePairRequest(r)
     return {
       ok: true,
       status: 200,
@@ -735,7 +939,7 @@ async function handlePair(request: Request, url: URL): Promise<Response> {
   if (url.pathname === "/pair/forget") {
     const id = str(body.clientId)
     if (!id) return json({ ok: false, error: "Body must be {clientId}." }, 400)
-    return forgetClient(id) ?
+    return (await forgetClient(id)) ?
         json({ ok: true })
       : json({ ok: false, error: `No paired client ${id}.` }, 404)
   }
@@ -1477,7 +1681,7 @@ function listen(hostname: string, port: number) {
             failPending(had, "The board said hello again.")
           }
           ws.data.id = undefined
-          const client = clientForToken(msg.token)
+          const client = await authenticateClient(msg.token)
           if (!client) {
             // Not an error: an unknown or revoked token is just a new request.
             startPairRequest(ws, msg, msg.token ? "unknown-token" : "no-token")
@@ -1486,8 +1690,6 @@ function listen(hostname: string, port: number) {
           const own =
             ws.data.pairId ? pairRequests.get(ws.data.pairId) : undefined
           if (own) dropPairRequest(own)
-          client.lastSeen = new Date().toISOString()
-          saveClients()
           ws.send(
             JSON.stringify({
               type: "paired",
@@ -1503,7 +1705,7 @@ function listen(hostname: string, port: number) {
         if (!b || b.ws !== ws) return
         if (msg.type === "unpair") {
           // The panel's "Forget": revoke its token and close.
-          forgetClient(b.clientId)
+          await forgetClient(b.clientId)
           return
         }
         if (msg.type === "chats") {
@@ -1759,7 +1961,7 @@ export interface BridgeHandle {
   /** Denies the named pending request (or the only one pending). */
   deny: (name?: string) => Promise<PairResult>
   /** Revokes a paired client; false when there is no such client. */
-  forget: (clientId: string) => boolean
+  forget: (clientId: string) => Promise<boolean>
 }
 
 export interface BridgeOptions {
@@ -1850,7 +2052,7 @@ export async function startBridge(
     loadPairingToken({ dataDir: DATA_DIR }) // create it on first start
     chats = new ChatStore(path.join(DATA_DIR, "figjam", "chats.sqlite"))
     chatsOpen = true
-    clients = loadClients()
+    clients = await loadClients()
     server = listenFrom(
       opts.hostname ?? "127.0.0.1",
       preferredPort,

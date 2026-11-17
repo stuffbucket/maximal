@@ -128,10 +128,10 @@ describe("startBridge", () => {
     expect(result).toMatchObject({ ok: false, status: 404 })
   })
 
-  test("forget revokes a paired client", () => {
+  test("forget revokes a paired client", async () => {
     const [client] = handle.status().clients
-    expect(handle.forget(client.id)).toBe(true)
-    expect(handle.forget(client.id)).toBe(false)
+    expect(await handle.forget(client.id)).toBe(true)
+    expect(await handle.forget(client.id)).toBe(false)
     expect(handle.status().clients).toEqual([])
   })
 

@@ -315,6 +315,8 @@ export interface PluginActivity {
   lastActivityAtMs: number
   /** The tool of the latest call: its name only. */
   lastTool?: string
+  /** When the newest running call must stop being shown; null when none runs. */
+  expiresAtMs?: number | null
 }
 
 /** What a plugin needs the person to look at now; see `PluginStatus.attention`. */
