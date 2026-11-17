@@ -178,17 +178,22 @@ bridge with `FIGJAM_PLUGIN_OUT`, to keep them apart.
 ### Who can connect
 
 1. **Relay key.** Each bridge has a relay key: 32 random bytes, new for each
-   process that owns it. Maximal makes one when it starts (`runServer`, before
-   any plugin generation spawns) and hands it to every plugin generation
-   through `MAXIMAL_FIGJAM_RELAY_KEY`, replacing any inherited value. So a
+   process that owns it. Maximal makes one as the first step of `runServer`,
+   before any plugin generation spawns, and sets it in its own environment as
+   `MAXIMAL_FIGJAM_RELAY_KEY`, replacing any inherited value. Plugin
+   generations inherit it from there. So a
    Retry, a FigJam settings change, or an unrelated plugin inventory or
    settings reload (each starts a new generation) keeps the key and the
    plugin already imported; only restarting Maximal changes it. A plugin
    generation started without that parent (tests, another host) makes a key
    of its own. `figjam:bridge` makes one per run. The key
-   lives in memory, in the environment Maximal passes its plugin generations
-   (and anything they start), and in the `ui.html` the host writes (mode
-   0600; never the manifest, a log, the status or the HTTP API). The panel
+   lives in memory; in Maximal's own process environment, which every process
+   Maximal starts inherits (plugin generations, and also anything else it
+   launches, such as clients and MCP servers, all running as the same user);
+   and in the `ui.html` the host writes (mode
+   0600; never the manifest, a log, the status or the HTTP API). It guards
+   against web pages, not other processes of the same user, which could read
+   that `ui.html` anyway. The panel
    offers it as its
    WebSocket subprotocol, and the bridge refuses an upgrade to `/plugin`
    without it (403) before any socket or pairing request exists. The Figma
