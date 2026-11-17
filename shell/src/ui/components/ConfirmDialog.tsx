@@ -1,5 +1,7 @@
 import { useId, useRef, type ReactNode } from "react";
 
+import { t } from "../../i18n";
+
 import { ModalDialog } from "./ModalDialog";
 
 interface ConfirmDialogProps {
@@ -81,7 +83,7 @@ export function ConfirmDialog({
               onClick={onConfirmClick}
               disabled={busy}
             >
-              {busy ? "Working…" : confirmLabel}
+              {busy ? t("common-working") : confirmLabel}
             </button>
           </div>
         </div>

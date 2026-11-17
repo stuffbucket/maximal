@@ -4,6 +4,7 @@ import { t } from "../../../i18n";
 import type { AppEntry, AppId } from "../../../proxy/client";
 import { openUrl, revealPath } from "../../../tauri/shell";
 import { Button } from "../../components/Button";
+import { Callout } from "../../components/Callout";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NoticeDialog } from "../../components/NoticeDialog";
 import { Switch } from "../../components/Switch";
@@ -61,6 +62,8 @@ function conflictDetail(app: AppEntry): string {
       return t("apps-conflict-cleanup-detail", { appName });
     case "foreign-gateway-profile":
       return t("apps-conflict-gateway-profile", { appName });
+    case "unreadable-profile":
+      return t("apps-conflict-unreadable-profile", { appName });
     case null:
       return "";
   }
@@ -101,6 +104,13 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   );
   const restartDialogWasOpen = useRef(false);
   const rowRef = useRef<HTMLTableRowElement>(null);
+  // Overrides confirmed since the Connect dialog opened.
+  const granted = useRef<ToggleAppOptions>({});
+  const [connectProblem, setConnectProblem] = useState<{
+    tone: "error" | "notice";
+    title: string;
+    detail?: string;
+  } | null>(null);
 
   const displayName = harnessName(app);
   const comingSoon = app.kind === "coming-soon";
@@ -157,19 +167,44 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
       return;
     }
     if (canTransfer || canTakeOver) {
-      setConnecting(true);
-      const result = await onToggle(
-        true,
-        canTransfer
+      // Each override was confirmed in its own dialog; a second step (a
+      // transfer that then meets another gateway, or the reverse) sends
+      // both, never more than the person agreed to while this was open.
+      granted.current = {
+        ...granted.current,
+        ...(canTransfer
           ? { overrideOtherMaximal: true }
-          : { overrideForeignGateway: true },
-      );
+          : { overrideForeignGateway: true }),
+      };
+      setConnecting(true);
+      setConnectProblem(null);
+      const result = await onToggle(true, granted.current);
       setConnecting(false);
-      if (result.ok) setConnectOpen(false);
-      setRestartNotice(desktopRestartChange(app.id, true, result));
+      if (result.ok && result.applied) {
+        setConnectOpen(false);
+        setRestartNotice(desktopRestartChange(app.id, true, result));
+        return;
+      }
+      // Refused or failed: stay open, say so, and let the (possibly new)
+      // conflict below explain what's left.
+      setConnectProblem(
+        result.ok
+          ? { tone: "notice", title: t("apps-override-refused") }
+          : {
+              tone: "error",
+              title: t("apps-override-failed", { appName: displayName }),
+              detail: result.error,
+            },
+      );
       return;
     }
     setConnectOpen(false);
+  };
+
+  const openConnect = (): void => {
+    granted.current = {};
+    setConnectProblem(null);
+    setConnectOpen(true);
   };
 
   const confirmDisable = async (): Promise<void> => {
@@ -196,6 +231,16 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
     : canTransfer
       ? t("apps-connect")
       : t("common-close");
+  const connectDialogBody = (
+    <>
+      {connectProblem && (
+        <Callout tone={connectProblem.tone} title={connectProblem.title}>
+          {connectProblem.detail}
+        </Callout>
+      )}
+      <p>{connectBody}</p>
+    </>
+  );
 
   return (
     <tr ref={rowRef} className="harness-row" data-app-id={app.id}>
@@ -230,7 +275,7 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setConnectOpen(true)}
+            onClick={openConnect}
           >
             {t("apps-connect")}
           </Button>
@@ -259,7 +304,7 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
             }}
             busy={connecting}
           >
-            <p>{connectBody}</p>
+            {connectDialogBody}
           </NoticeDialog>
         )}
 
@@ -267,7 +312,7 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
           <ConfirmDialog
             open={connectOpen}
             title={connectTitle}
-            body={<p>{connectBody}</p>}
+            body={connectDialogBody}
             confirmLabel={connectConfirmLabel}
             cancelLabel={hasConflict && !canTransfer ? null : t("apps-cancel")}
             busy={connecting}

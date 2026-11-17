@@ -200,8 +200,11 @@ describe("Claude Desktop restart dialog", () => {
       "setRestartNotice(desktopRestartChange(app.id, true, result))",
     )
     expect(row).toContain("<DesktopRestartDialog")
-    // Not an inline banner, and not a confirm/cancel prompt.
-    expect(row).not.toContain("<Callout")
+    // Not an inline banner, and not a confirm/cancel prompt. The row's only
+    // callout is a refused Connect, inside the Connect dialog's own body.
+    expect(row).not.toContain("apps-desktop-relaunch")
+    expect(row.match(/<Callout/g) ?? []).toHaveLength(1)
+    expect(row).toContain("<Callout tone={connectProblem.tone}")
     expect(row).not.toContain("relaunchNoticeShown")
     const dialog = source("shell/src/ui/features/apps/DesktopRestartDialog.tsx")
     expect(dialog).toContain("<NoticeDialog")

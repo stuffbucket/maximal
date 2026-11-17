@@ -253,6 +253,50 @@ export const DesktopTakeOverApplied: Story = {
   parameters: { docs: { story: { inline: false, height: "360px" } } },
 };
 
+/** A refused Take over keeps the dialog open and says nothing changed. */
+export const DesktopTakeOverRefused: Story = {
+  args: {
+    app: takeOverApp,
+    onToggle: fn(async () => ({ ok: true, applied: false })),
+  },
+  play: async ({ args, canvasElement }) => {
+    const dialog = await openTakeOver(canvasElement);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Take over" }),
+    );
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent("Nothing was changed."),
+    );
+    await expect(dialog).toBeVisible();
+    await expect(args.onToggle).toHaveBeenCalledWith(true, {
+      overrideForeignGateway: true,
+    });
+  },
+  parameters: { docs: { story: { inline: false, height: "420px" } } },
+};
+
+/** A configuration Maximal can't read is never offered a Take over. */
+export const DesktopUnreadableProfile: Story = {
+  args: {
+    app: { ...claudeDesktop, enabled: false, conflict: "unreadable-profile" },
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: /connect/i }),
+    );
+    const dialog = await within(document.body).findByRole("dialog", {
+      name: "Connect Claude",
+    });
+    await expect(
+      within(dialog)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Close"]);
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+};
+
 /** A refused enable says nothing about restarting: the row offers Connect. */
 export const DesktopEnableRefused: Story = {
   args: {

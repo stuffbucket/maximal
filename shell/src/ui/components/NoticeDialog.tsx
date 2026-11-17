@@ -1,5 +1,7 @@
 import { useId, useRef, type ReactNode } from "react";
 
+import { t } from "../../i18n";
+
 import { ModalDialog } from "./ModalDialog";
 
 interface NoticeSecondaryAction {
@@ -74,7 +76,7 @@ export function NoticeDialog({
                 onClick={() => void secondaryAction.onAction()}
                 disabled={busy}
               >
-                {busy ? "Working…" : secondaryAction.label}
+                {busy ? t("common-working") : secondaryAction.label}
               </button>
             )}
             <button

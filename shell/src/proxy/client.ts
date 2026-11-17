@@ -166,6 +166,7 @@ export type AppConflict =
   | "foreign-base-url"
   | "foreign-api-key-helper"
   | "foreign-gateway-profile"
+  | "unreadable-profile"
   | "other-maximal-config"
   | "cleanup-required";
 

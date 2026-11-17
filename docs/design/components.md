@@ -132,6 +132,10 @@ one of its buttons, nor move focus off the safe first action. Two small shapes s
   Escape, the backdrop or Enter on the focused primary. While it runs, both
   buttons and dismissal wait.
 
+A dialog whose action the server refuses or that fails stays open: a
+`Callout` (notice for a refusal, error for a failure) goes at the top of its
+body, above whatever the dialog now explains, and nothing is retried.
+
 **Updates.** Every Settings way into an update — the title bar's icon
 (`btn--primary btn--icon`, named "Update Maximal to X.Y.Z" by `aria-label`
 and tooltip, shown only while one is offered), System → Version and updates'

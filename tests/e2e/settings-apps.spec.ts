@@ -238,11 +238,24 @@ test("after connecting over another Maximal profile: a backdrop click puts focus
   await expect(desktop.getByRole("checkbox")).toBeFocused()
 })
 
-test("no dialog when the connection is refused", async ({ page }) => {
-  await answerToggle(page, {
-    ...DESKTOP_ENTRY,
-    enabled: false,
-    conflict: "foreign-gateway-profile",
+test("a refused transfer keeps the dialog open and the next step carries both confirmed overrides", async ({
+  page,
+}) => {
+  const sent: Array<Record<string, unknown>> = []
+  await page.route(DESKTOP_TOGGLE, (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>
+    sent.push(body)
+    const both =
+      body.overrideOtherMaximal === true && body.overrideForeignGateway === true
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...DESKTOP_ENTRY,
+        enabled: both,
+        conflict: both ? null : "foreign-gateway-profile",
+      }),
+    })
   })
   await page.route("**/settings/api/apps", (route) =>
     route.request().method() === "GET" ?
@@ -268,10 +281,87 @@ test("no dialog when the connection is refused", async ({ page }) => {
   const refused = page.waitForResponse(DESKTOP_TOGGLE)
   await dialog(page).getByRole("button", { name: "Connect" }).click()
   await refused
-  // The Connect dialog closes on the answer; nothing about restarting opens.
-  await expect(dialog(page)).toHaveCount(0)
-  await expect(desktop.getByRole("button", { name: "Connect" })).toBeVisible()
+  // Still open: nothing changed, and the gateway that's left is explained.
+  await expect(dialog(page)).toHaveAccessibleName("Connect Claude")
+  await expect(dialog(page)).toContainText("Nothing was changed.")
   await expect(page.getByText(RELAUNCH)).toHaveCount(0)
+
+  const applied = page.waitForResponse(DESKTOP_TOGGLE)
+  await dialog(page).getByRole("button", { name: "Take over" }).click()
+  await applied
+  expect(sent).toEqual([
+    { enabled: true, overrideOtherMaximal: true },
+    { enabled: true, overrideOtherMaximal: true, overrideForeignGateway: true },
+  ])
+  await expect(dialog(page)).toHaveAccessibleName(TITLE)
+})
+
+test("a failed Take over keeps the dialog open with the error", async ({
+  page,
+}) => {
+  await page.route("**/settings/api/apps", (route) =>
+    route.request().method() === "GET" ?
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          apps: [
+            {
+              ...DESKTOP_ENTRY,
+              enabled: false,
+              conflict: "foreign-gateway-profile",
+            },
+          ],
+        }),
+      })
+    : route.fallback(),
+  )
+  await answerToggle(page, { error: { message: "Disk is read-only" } }, 500)
+  await openApps(page)
+  const desktop = card(page, "claude-desktop")
+
+  await desktop.getByRole("button", { name: "Connect" }).click()
+  const failed = page.waitForResponse(DESKTOP_TOGGLE)
+  await dialog(page).getByRole("button", { name: "Take over" }).click()
+  await failed
+
+  await expect(dialog(page)).toHaveAccessibleName("Connect Claude")
+  await expect(dialog(page).getByRole("alert")).toContainText(
+    "Couldn’t connect Claude",
+  )
+  await expect(
+    dialog(page).getByRole("button", { name: "Take over" }),
+  ).toBeEnabled()
+  await expect(page.getByText(RELAUNCH)).toHaveCount(0)
+})
+
+test("an unreadable configuration offers no Take over", async ({ page }) => {
+  await page.route("**/settings/api/apps", (route) =>
+    route.request().method() === "GET" ?
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          apps: [
+            {
+              ...DESKTOP_ENTRY,
+              enabled: false,
+              conflict: "unreadable-profile",
+            },
+          ],
+        }),
+      })
+    : route.fallback(),
+  )
+  await openApps(page)
+
+  await card(page, "claude-desktop")
+    .getByRole("button", { name: "Connect" })
+    .click()
+  await expect(dialog(page)).toContainText(
+    "Maximal can’t read the configuration Claude is using",
+  )
+  await expect(dialog(page).getByRole("button")).toHaveText(["Close"])
 })
 
 /**
