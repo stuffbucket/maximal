@@ -187,6 +187,16 @@ html[data-os="macos"] .topbar {
   background: var(--border-subtle);
 }
 
+/* The browser-access mount adds no box (so no extra utilities gap) until it
+   holds the access icon; its dialog lives in the top layer. */
+.topbar__browser-access {
+  display: contents;
+}
+
+.topbar__browser-access[hidden] {
+  display: none;
+}
+
 /* Update offered and the full tab row would otherwise not fit (the narrow
    end of Settings' width range): the update icon's width comes out of the
    title bar's own spacing, not the tabs. The utilities close up, the
@@ -2257,6 +2267,26 @@ html[data-os="macos"] .topbar {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* Browser access (a plain browser against a headless Maximal): the key
+   field, with a refused key as a caption under it. */
+.browser-auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.browser-auth__field label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.browser-auth__error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--status-error);
 }
 
 /* Default: a subtle fade-in. Respect reduced-motion as a hard contract. */

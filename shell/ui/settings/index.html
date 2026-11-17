@@ -172,6 +172,11 @@
           </div>
 
           <div class="topbar__utilities">
+            <!-- Plain browser only (a headless Maximal that requires API
+                 keys): the access icon (Connect / Disconnect browser) and its
+                 dialog, mounted by browser-auth-island.tsx. The native app
+                 supplies its own key and hides this. -->
+            <div id="browser-auth-root" class="topbar__browser-access"></div>
             <!-- Shown by main.ts only when a newer release is available: a
                  compact icon so it never takes width from the Settings tabs.
                  Its name ("Update Maximal to X.Y.Z") is set as aria-label and

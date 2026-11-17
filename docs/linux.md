@@ -75,6 +75,20 @@ Check on it with `systemctl --user status maximal` and read its log with
 <http://127.0.0.1:4141/ui/settings/> from the same machine (over an SSH tunnel
 from elsewhere: `ssh -L 4141:127.0.0.1:4141 <host>`).
 
+If Settings asks to connect the browser, enter an existing **Maximal API key**,
+not a GitHub or Microsoft token. On the machine running the service,
+`maximal api claude-code` prints Claude Code's key; any client listed by
+`maximal api list` works, and the client name is required. Treat the key as a
+password: don't put it in a URL or share it. The browser checks the key before
+keeping it in that tab's session storage. Reloading keeps access; the title
+bar's **Disconnect browser** icon forgets the key without signing out of GitHub
+or any connector. Closing the tab normally clears it (browser session
+restoration can bring session storage back, and password managers may keep
+their own copy). A revoked key asks for access again rather than a restart.
+For ongoing use, create a named key for the browser in Settings → API keys.
+Any enabled API key has full Settings access, and activity is attributed to
+its client name.
+
 The service listens on 127.0.0.1 only. Use either the service or the tray app,
 not both: the tray app takes over port 4141 from a running service. To change
 how the service starts (another port, `--account-type enterprise`, or `HOST`

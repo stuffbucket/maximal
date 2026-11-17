@@ -29,6 +29,36 @@ while mounted.
   observability bundle's Sessions surface, and `/ui/rules/` (and the old
   `/ui/budget/`) to the Rules section (`/ui/settings/#rules`).
 
+### Browser access to a headless service
+
+The native window's Settings calls carry the shell's per-launch key. Settings
+opened in a plain browser against a Maximal that requires API keys gets
+Maximal's key challenge (a 401 with its `WWW-Authenticate` realm) instead, and
+opens the **Connect this browser to Maximal** dialog (a `.confirm-dialog`,
+`shell/src/ui/features/browser-auth/`). It asks for an existing Maximal API
+key in a password field labelled as one, so it isn't mistaken for a GitHub or
+Microsoft sign-in, and names the command that prints one. The key is checked
+with a read-only call before it is kept, and only in the tab's
+`sessionStorage`. A refused key is a caption under the field; Maximal not
+answering, or session storage blocked, is an error `Callout`. Cancel and
+Escape close it.
+
+While access is missing, sections show a `ProblemCallout` ("This browser isn't
+connected to Maximal", one **Connect browser** action) rather than a GitHub
+sign-in error or "Restart Maximal", and the title bar's utilities gain a ghost
+icon button (`btn--icon`, key glyph, named by `aria-label` and tooltip) that
+reopens the dialog. Once connected the same icon (unplug glyph) is
+**Disconnect browser**, which forgets only the tab's key. A 401 Maximal
+forwards from GitHub keeps its own meaning (sign in on Account) and leaves the
+key alone. Like the update icon, the access icon counts toward
+`.topbar--compact`, so it never takes width from the tabs.
+
+Connecting reloads the page at the same address, so every section and live
+stream starts over with the key; a write that was refused is never sent again.
+Browser calls and the live event stream (read with `fetch`) send the key in a
+header, never in a URL. None of this exists in the native window, whose
+credentials are unchanged.
+
 ## Where they diverge
 
 | Concern        | Dashboard                                                | Sessions                                         | Rules                                                                   | Settings                                                                          |
