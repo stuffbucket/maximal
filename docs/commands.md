@@ -169,7 +169,7 @@ bun run app:ui
 ```
 
 `shell/src/main.ts`'s `safeInvoke()` already swallows Tauri-only `invoke()`
-calls when running in a plain browser, so the "Reveal in Finder" buttons
+calls when running in a plain browser, so the "Open Logs" and "Open Config" buttons
 no-op gracefully — everything else works.
 
 ## Storybook (UI catalog)

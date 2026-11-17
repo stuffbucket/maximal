@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { t } from "../../../i18n";
 import type { AppEntry, AppId } from "../../../proxy/client";
@@ -8,6 +8,8 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Switch } from "../../components/Switch";
 import { isWindows } from "../../platform";
 
+import { desktopRestartChange, type DesktopChange } from "./desktop-restart";
+import { DesktopRestartDialog } from "./DesktopRestartDialog";
 import { TerminalGlyph, WindowGlyph } from "./glyphs";
 import { HarnessIcon } from "./HarnessIcon";
 import type { MutationResult, ToggleAppOptions } from "./useApps";
@@ -88,6 +90,14 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   const [connecting, setConnecting] = useState(false);
   const [restartWarnOpen, setRestartWarnOpen] = useState(false);
   const [disabling, setDisabling] = useState(false);
+  // Claude Desktop reads its gateway profile at launch, so a change in
+  // either direction only reaches an already-running Desktop after it is
+  // quit and reopened. Said in a dialog once the change has been applied.
+  const [restartNotice, setRestartNotice] = useState<DesktopChange | null>(
+    null,
+  );
+  const restartDialogWasOpen = useRef(false);
+  const rowRef = useRef<HTMLTableRowElement>(null);
 
   const displayName = harnessName(app);
   const comingSoon = app.kind === "coming-soon";
@@ -100,12 +110,37 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
     app.installs.find((install) => install.kind === "desktop") ??
     app.installs[0];
 
+  // The browser hands focus back to whatever opened the restart dialog. After
+  // a Connect that control is gone (the switch replaced it), so land on the
+  // switch instead of leaving focus on the page — or on the just-closed
+  // dialog itself, where a backdrop press leaves it.
+  useEffect(() => {
+    if (restartNotice !== null) {
+      restartDialogWasOpen.current = true;
+      return;
+    }
+    if (!restartDialogWasOpen.current) return;
+    restartDialogWasOpen.current = false;
+    const active = document.activeElement;
+    if (
+      active === null ||
+      active === document.body ||
+      (active instanceof HTMLDialogElement && !active.open)
+    ) {
+      rowRef.current?.querySelector<HTMLInputElement>(".switch input")?.focus();
+    }
+  }, [restartNotice]);
+
   const handleToggle = (next: boolean): void => {
     if (!next && needsWindowsRestartWarning) {
       setRestartWarnOpen(true);
       return;
     }
-    void onToggle(next);
+    void applyToggle(next);
+  };
+
+  const applyToggle = async (next: boolean): Promise<void> => {
+    setRestartNotice(desktopRestartChange(app.id, next, await onToggle(next)));
   };
 
   const confirmConnect = async (): Promise<void> => {
@@ -119,6 +154,7 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
       const result = await onToggle(true, { overrideOtherMaximal: true });
       setConnecting(false);
       if (result.ok) setConnectOpen(false);
+      setRestartNotice(desktopRestartChange(app.id, true, result));
       return;
     }
     setConnectOpen(false);
@@ -148,7 +184,7 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
       : t("common-close");
 
   return (
-    <tr className="harness-row" data-app-id={app.id}>
+    <tr ref={rowRef} className="harness-row" data-app-id={app.id}>
       <td>
         <div className="harness-row__identity">
           <span className="harness-row__icon" aria-hidden="true">
@@ -203,6 +239,18 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
             busy={connecting}
             onConfirm={confirmConnect}
             onCancel={() => setConnectOpen(false)}
+          />
+        )}
+
+        {/* Claude Desktop only: after an applied enable or disable (from the
+            switch or a Connect), a dialog says a running Desktop must be quit
+            and reopened. A refusal turns the switch into Connect instead; a
+            failed request shows the panel problem. Informational — the change
+            is already made. */}
+        {app.id === "claude-desktop" && (
+          <DesktopRestartDialog
+            change={restartNotice}
+            onDismiss={() => setRestartNotice(null)}
           />
         )}
 

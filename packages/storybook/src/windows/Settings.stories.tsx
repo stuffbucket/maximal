@@ -6,7 +6,7 @@ import { scenarioIds, scenarioLabel } from "../mock/fetch-mock";
 
 /**
  * The real, shipped Settings window — vanilla sections (Account, Endpoint,
- * Logs, Diagnostics) and React islands together — in an iframe at its Tauri
+ * System) and React islands together — in an iframe at its Tauri
  * default size, against the mock sidecar. Pick any section × scenario from
  * the controls; theme and locale follow the toolbar.
  *
@@ -92,9 +92,9 @@ export const FigJamPortInUse = connector("figjam-port-in-use", "figjam");
 export const Endpoint = at("endpoint");
 export const ApiClients = at("api-clients");
 export const Models = at("models");
-export const Logs = at("logs");
 export const Diagnostics = at("diagnostics");
 export const DiagnosticsUpdateAvailable = at("diagnostics", "update-available");
+export const DiagnosticsUpdateAvailableApt = at("diagnostics", "update-available-apt");
 export const FreshInstall: Story = {
   ...at("apps", "fresh-install"),
   tags: ["asset", "journey", "funnel-configuration"],

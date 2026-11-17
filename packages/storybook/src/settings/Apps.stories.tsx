@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import type { AppEntry } from "../../../../shell/src/proxy/client";
 import { AppsPanel } from "../../../../shell/src/ui/features/apps/AppsPanel";
@@ -140,6 +140,78 @@ export const OtherMaximalConnectDialog: Story = {
     await userEvent.click(
       within(canvasElement).getByRole("button", { name: /connect/i }),
     );
+  },
+};
+
+// ---- Claude Desktop restart dialog (after an applied change) ---------------
+
+const claudeDesktop: AppEntry = {
+  ...claudeCode,
+  id: "claude-desktop",
+  name: "Claude Desktop",
+  installs: [
+    {
+      path: "/Applications/Claude.app",
+      version: null,
+      source: "unknown",
+      kind: "desktop",
+    },
+  ],
+};
+
+const RESTART_TITLE = "Restart Claude Desktop";
+const restartDialog = (): HTMLElement =>
+  within(document.body).getByRole("dialog", { name: RESTART_TITLE });
+
+/** Flip the row's switch; the server applies it, so the dialog opens. */
+const toggleDesktop = (enabledBefore: boolean): Story => ({
+  args: {
+    app: { ...claudeDesktop, enabled: enabledBefore },
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole("checkbox"));
+    await waitFor(() => expect(restartDialog()).toBeVisible());
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+});
+
+/** After enabling: restart guidance plus the sign-in recovery note. */
+export const DesktopRestartAfterEnable = toggleDesktop(false);
+/** After disabling: the same guidance, no sign-in note. */
+export const DesktopRestartAfterDisable = toggleDesktop(true);
+
+/** Connecting over another Maximal profile's setting is an enable too. */
+export const DesktopRestartAfterConnect: Story = {
+  args: {
+    app: { ...claudeDesktop, enabled: false, conflict: "other-maximal-config" },
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: /connect/i }),
+    );
+    const connect = await within(document.body).findByRole("dialog");
+    await userEvent.click(
+      within(connect).getByRole("button", { name: /connect/i }),
+    );
+    await waitFor(() => expect(restartDialog()).toBeVisible());
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+};
+
+/** A refused enable says nothing about restarting: the row offers Connect. */
+export const DesktopEnableRefused: Story = {
+  args: {
+    app: { ...claudeDesktop, enabled: false },
+    onToggle: fn(async () => ({ ok: true, applied: false })),
+  },
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole("checkbox"));
+    await waitFor(() => expect(args.onToggle).toHaveBeenCalledWith(true));
+    await expect(
+      within(document.body).queryByRole("dialog", { name: RESTART_TITLE }),
+    ).toBeNull();
   },
 };
 

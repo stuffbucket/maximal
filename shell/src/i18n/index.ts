@@ -29,7 +29,7 @@
  *       are kept in sync with THIS catalog by tests/i18n-catalog-parity.test.ts)
  *
  * Rule (why this can't back us into a corner): a term is NEVER concatenated
- * into a sentence — it is passed as an ICU argument (`Reveal logs in
+ * into a sentence — it is passed as an ICU argument (`Open the folder in
  * {fileManager}`) so word order stays translatable across languages.
  */
 import { IntlMessageFormat } from "intl-messageformat";

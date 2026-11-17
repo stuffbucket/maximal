@@ -8,7 +8,6 @@ export type SettingsSection =
   | "api-clients"
   | "models"
   | "rules"
-  | "logs"
   | "diagnostics";
 
 export const SETTINGS_SECTIONS: Array<SettingsSection> = [
@@ -19,7 +18,6 @@ export const SETTINGS_SECTIONS: Array<SettingsSection> = [
   "api-clients",
   "models",
   "rules",
-  "logs",
   "diagnostics",
 ];
 

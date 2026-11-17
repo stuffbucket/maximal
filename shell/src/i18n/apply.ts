@@ -39,9 +39,9 @@ const I18N_ATTRS: ReadonlyArray<{ attr: string; dataset: keyof DOMStringMap }> =
 /**
  * Populate every `[data-i18n]` element's text and every `[data-i18n-<attr>]`
  * element's attribute from the localized catalog. The key auto-injects the
- * current `os` and resolved `{fileManager}` noun, so a button marked
- * `data-i18n="reveal-logs"` renders "Reveal logs in Finder" / "… in File
- * Explorer" / "… in Files" per OS. General on purpose: any element carrying an
+ * current `os` and resolved `{fileManager}` noun, so a message can name the
+ * Finder / File Explorer / Files per OS without extra wiring. General on
+ * purpose: any element carrying an
  * attribute is filled, so future catalog-backed labels need no extra wiring.
  *
  * Idempotent + re-runnable: the locale picker calls it again on every change to
