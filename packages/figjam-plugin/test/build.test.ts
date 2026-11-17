@@ -423,6 +423,17 @@ describe("panel ports", () => {
     expect(result.code, result.output).toBe(0)
   })
 
+  test("refuses a panel with a second script element, whatever its case", async () => {
+    const extraDir = path.join(outDir, "extra-script")
+    await buildPlugin({ outDir: extraDir, relayKey: KEY })
+    const uiPath = path.join(extraDir, "ui.html")
+    const ui = await readFile(uiPath, "utf8")
+    await writeFile(uiPath, `${ui}\n<SCRIPT>void 0</SCRIPT>\n`)
+    const result = run(extraDir, { maximalPort: 4141, bridgePort: 4150 })
+    expect(result.code).not.toBe(0)
+    expect(result.output).toContain("exactly one script element, found 2")
+  })
+
   test("non-default ports reach the panel's connections and status text", async () => {
     const customDir = path.join(outDir, "custom-ports")
     await buildPlugin({
