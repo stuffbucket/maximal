@@ -11,13 +11,20 @@ import type {
 import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
 import {
   buildPlugin,
-  readPackageVersion,
+  pluginIdentity,
+  renderPlugin,
 } from "@stuffbucket/maximal-figjam-plugin/build"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import type { FigjamConfig } from "./manifest"
 
+import {
+  type FigjamProfile,
+  isVerbose,
+  pluginProfileId,
+  resolveProfile,
+} from "./profile"
 import {
   composeStatus,
   displayName,
@@ -36,6 +43,10 @@ export const FIGMA_PLUGIN_DIR = "figma-plugin"
 export interface FigjamPluginOptions {
   /** Where the bridge keeps its files (default: Maximal's data directory). */
   dataDir?: string
+  /** Which Maximal this is (default: from `MAXIMAL_INSTANCE_ID`). */
+  profile?: FigjamProfile
+  /** How many ports the bridge tries from the configured one (default: its own). */
+  portAttempts?: number
 }
 
 interface PairRequest {
@@ -59,10 +70,11 @@ function lifecycleAborted(context?: PluginLifecycleContext): boolean {
 function describeStartFailure(error: unknown, port: number): StartFailure {
   const message = errorMessage(error)
   if (/EADDRINUSE|in use/i.test(message)) {
+    // The bridge already walked upward from `port`, so every candidate was taken.
     return {
       code: "port-in-use",
-      summary: `Port ${port} is already in use`,
-      detail: `Another program is listening on port ${port}, possibly a FigJam bridge started with "bun run figjam:bridge". Stop it, or choose another bridge port in this plugin's settings.`,
+      summary: `No free port from ${port} up`,
+      detail: `${message} Another program is listening on each of them, possibly FigJam bridges started with "bun run figjam:bridge". Stop one, or choose another bridge port in this plugin's settings.`,
     }
   }
   return {
@@ -72,35 +84,28 @@ function describeStartFailure(error: unknown, port: number): StartFailure {
   }
 }
 
-/** Whether the files in `dir` exist and match this build and these ports. */
+/**
+ * Whether the files in `dir` exist, and whether they are exactly what a build
+ * with these options writes. The comparison is by content (every file), not by
+ * version or port strings, so an edited panel, a new profile id or a hand-edit
+ * all count as stale. `differs` names the files that are not current.
+ */
 async function inspectFolder(
   dir: string,
-  ports: { bridge: number; maximal: number },
-): Promise<PluginFolder> {
-  const read = (name: string) => readFile(path.join(dir, name), "utf8")
-  let manifest: string
-  let code: string
-  try {
-    const [manifestText, codeText] = await Promise.all([
-      read("manifest.json"),
-      read("code.js"),
-      read("ui.html"),
-    ])
-    manifest = manifestText
-    code = codeText
-  } catch {
-    return "missing"
+  options: Parameters<typeof renderPlugin>[0],
+): Promise<{ folder: PluginFolder; differs: Array<string> }> {
+  const expected = await renderPlugin(options)
+  const differs: Array<string> = []
+  for (const [name, contents] of Object.entries(expected)) {
+    let actual: string
+    try {
+      actual = await readFile(path.join(dir, name), "utf8")
+    } catch {
+      return { folder: "missing", differs: [name] }
+    }
+    if (actual !== contents) differs.push(name)
   }
-  // The manifest names both ports in its dev domains, and code.js its version.
-  const expected = [
-    `ws://localhost:${ports.bridge}`,
-    `http://localhost:${ports.maximal}`,
-  ].map((domain) => JSON.stringify(domain))
-  const version = await readPackageVersion()
-  const current =
-    code.includes(`var PLUGIN_VERSION = ${JSON.stringify(version)}`)
-    && expected.every((domain) => manifest.includes(domain))
-  return current ? "current" : "stale"
+  return { folder: differs.length === 0 ? "current" : "stale", differs }
 }
 
 /**
@@ -113,6 +118,8 @@ export class FigjamController {
   readonly #config: FigjamConfig
   readonly #options: FigjamPluginOptions
   readonly #pluginDir: string
+  readonly #profile: FigjamProfile
+  readonly #verbose: boolean
   readonly #requests = new Map<string, PairRequest>()
   #tail: Promise<void> = Promise.resolve()
   #handle: BridgeHandle | undefined
@@ -131,7 +138,29 @@ export class FigjamController {
     this.#ctx = ctx
     this.#config = config
     this.#options = options
+    this.#profile = options.profile ?? resolveProfile()
+    this.#verbose = isVerbose(this.#profile)
     this.#pluginDir = path.join(ctx.storage.dir, FIGMA_PLUGIN_DIR)
+  }
+
+  /**
+   * Development detail (binds, pairing transitions, why a folder is stale).
+   * A production Maximal keeps it at debug level, which is normally dropped;
+   * warnings and errors are logged the same everywhere. Never pass a token.
+   */
+  #note(message: string): void {
+    const { logger } = this.#ctx.host
+    if (this.#verbose) logger.info(message)
+    else logger.debug(message)
+  }
+
+  /** What the Figma plugin is built from: Maximal's port now, and this profile. */
+  #buildOptions(): { maximalPort: number; profile?: string } {
+    const profile = pluginProfileId(this.#profile)
+    return {
+      maximalPort: this.#ctx.host.maximalPort(),
+      ...(profile === undefined ? {} : { profile }),
+    }
   }
 
   /** Register actions and status without acquiring the exclusive bridge port. */
@@ -203,10 +232,12 @@ export class FigjamController {
       await previousStop
       context?.signal.throwIfAborted()
       if (this.#disposed) return
-      const { dataDir } = this.#options
+      const { dataDir, portAttempts } = this.#options
       const started = await startBridge({
         port: this.#config.port,
         ...(dataDir === undefined ? {} : { dataDir }),
+        ...(portAttempts === undefined ? {} : { portAttempts }),
+        ...(this.#verbose ? { verbose: true } : {}),
         onEvent: (event) => this.#onEvent(event),
       })
       if (this.#shouldStop(context)) {
@@ -215,6 +246,16 @@ export class FigjamController {
         return
       }
       this.#handle = started
+      if (started.port === started.preferredPort) {
+        this.#note(
+          `The FigJam bridge is listening on 127.0.0.1:${started.port} (profile ${this.#profile.id}).`,
+        )
+      } else {
+        // Worth saying everywhere: the Figma plugin has to follow the move.
+        this.#ctx.host.logger.info(
+          `The FigJam bridge's port ${started.preferredPort} was taken, so it is listening on 127.0.0.1:${started.port} (profile ${this.#profile.id}).`,
+        )
+      }
     } catch (error) {
       this.#startFailure = describeStartFailure(error, this.#config.port)
       this.#ctx.host.logger.warn(
@@ -240,10 +281,16 @@ export class FigjamController {
   /** Learn what the plugin folder holds, and bring a stale one up to date. */
   async #checkFolder(): Promise<void> {
     try {
-      this.#folder = await inspectFolder(this.#pluginDir, {
-        bridge: this.#config.port,
-        maximal: this.#ctx.host.maximalPort(),
-      })
+      const { folder, differs } = await inspectFolder(
+        this.#pluginDir,
+        this.#buildOptions(),
+      )
+      this.#folder = folder
+      if (folder !== "current") {
+        this.#note(
+          `The Figma plugin folder is ${folder} (${differs.join(", ")}): ${this.#pluginDir}`,
+        )
+      }
     } catch (error) {
       this.#ctx.host.logger.warn(
         `Could not check the Figma plugin: ${errorMessage(error)}`,
@@ -259,12 +306,12 @@ export class FigjamController {
     this.#buildError = undefined
     this.#render()
     try {
-      await buildPlugin({
-        outDir: this.#pluginDir,
-        bridgePort: this.#handle?.port ?? this.#config.port,
-        maximalPort: this.#ctx.host.maximalPort(),
-      })
+      const options = this.#buildOptions()
+      await buildPlugin({ outDir: this.#pluginDir, ...options })
       this.#folder = "current"
+      this.#note(
+        `Built the Figma plugin (${this.#pluginName()}; allows only Maximal at localhost:${options.maximalPort}) in ${this.#pluginDir}`,
+      )
     } catch (error) {
       this.#buildError = errorMessage(error)
       this.#ctx.host.logger.error(
@@ -276,8 +323,20 @@ export class FigjamController {
     }
   }
 
+  /** The name Figma lists this profile's development plugin under. */
+  #pluginName(): string {
+    const options = this.#buildOptions()
+    return pluginIdentity({
+      release: false,
+      maximalPort: options.maximalPort,
+      bridgePort: 0,
+      profile: options.profile ?? "",
+    }).name
+  }
+
   #onEvent(event: BridgeEvent): void {
     if (this.#disposed) return
+    this.#logEvent(event)
     if (event.type === "tool-started" || event.type === "tool-finished") {
       this.#renderActivitySoon()
       return
@@ -301,6 +360,42 @@ export class FigjamController {
       this.#activityTimer = undefined
       this.#render()
     }, ACTIVITY_RENDER_MS)
+  }
+
+  /** Pairing and connection transitions, by panel name only (no tokens, no ids). */
+  #logEvent(event: BridgeEvent): void {
+    if (event.type === "tool-started" || event.type === "tool-finished") return
+    const name = displayName(event.name)
+    // eslint-disable-next-line default-case -- exhaustive over non-tool BridgeEvent
+    switch (event.type) {
+      case "pair-requested": {
+        this.#note(`FigJam panel "${name}" asked to pair.`)
+        break
+      }
+      case "paired": {
+        this.#note(`FigJam panel "${name}" is paired.`)
+        break
+      }
+      case "pair-denied": {
+        this.#note(`FigJam panel "${name}" was denied.`)
+        break
+      }
+      case "pair-expired": {
+        // A request nobody answered: the person may have missed it.
+        this.#ctx.host.logger.warn(
+          `FigJam panel "${name}" asked to pair, but nobody approved it in time.`,
+        )
+        break
+      }
+      case "board-connected": {
+        this.#note(`FigJam panel "${name}" connected.`)
+        break
+      }
+      case "board-disconnected": {
+        this.#note(`FigJam panel "${name}" disconnected.`)
+        break
+      }
+    }
   }
 
   #notify(name: string): void {
@@ -374,6 +469,7 @@ export class FigjamController {
         this.#handle && view ?
           {
             port: this.#handle.port,
+            preferredPort: this.#handle.preferredPort,
             boards: view.boards.map((board) => {
               const title: unknown = Reflect.get(board, "name")
               return typeof title === "string" && title !== "" ?
@@ -391,6 +487,7 @@ export class FigjamController {
       folder: this.#folder,
       buildError: this.#buildError,
       manifestPath: path.join(this.#pluginDir, "manifest.json"),
+      pluginName: this.#pluginName(),
       registered: new Set(this.#requests.keys()),
     })
     const activity = view ? toPluginActivity(view.activity) : undefined

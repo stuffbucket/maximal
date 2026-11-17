@@ -1004,7 +1004,10 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
     { label: "Connected boards", value: boards },
     { label: "Waiting for approval", value: pending },
   ]
-  const manifestFact = { label: "Figma plugin manifest", value: FIGJAM_MANIFEST_PATH }
+  const manifestFacts = [
+    { label: "Figma plugin", value: "Maximal Agent (dev)" },
+    { label: "Figma plugin manifest", value: FIGJAM_MANIFEST_PATH },
+  ]
   const rebuild = { id: "setup", label: "Rebuild the Figma plugin", kind: "secondary" as const }
   switch (stage) {
     case "needs-setup":
@@ -1021,7 +1024,7 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
         code: "ready",
         summary: "Ready for FigJam panels",
         detail: FIGJAM_IMPORT_INSTRUCTIONS,
-        facts: [...facts("None", "None"), manifestFact],
+        facts: [...facts("None", "None"), ...manifestFacts],
         actions: [rebuild],
       }
     case "connected":
@@ -1030,7 +1033,7 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
         code: "ready",
         summary: "Connected to 2 FigJam boards",
         detail: FIGJAM_IMPORT_INSTRUCTIONS,
-        facts: [...facts("Roadmap workshop, Retro board", "None"), manifestFact],
+        facts: [...facts("Roadmap workshop, Retro board", "None"), ...manifestFacts],
         actions: [rebuild],
       }
     case "pairing":
@@ -1043,7 +1046,7 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
         code: "ready",
         summary: "A FigJam panel is waiting for approval",
         detail: FIGJAM_IMPORT_INSTRUCTIONS,
-        facts: [...facts("None", names.join(", ")), manifestFact],
+        facts: [...facts("None", names.join(", ")), ...manifestFacts],
         actions: [rebuild],
         attention: {
           summary: waiting.length === 1
@@ -1072,8 +1075,8 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
       return {
         state: "error",
         code: "port-in-use",
-        summary: `Port ${FIGJAM_PORT} is already in use`,
-        detail: `Another program is listening on port ${FIGJAM_PORT}, possibly a FigJam bridge started with "bun run figjam:bridge". Stop it, or choose another bridge port in this plugin's settings.`,
+        summary: `No free port from ${FIGJAM_PORT} up`,
+        detail: `Ports ${FIGJAM_PORT}-${FIGJAM_PORT + 63} are all in use (EADDRINUSE). Another program is listening on each of them, possibly FigJam bridges started with "bun run figjam:bridge". Stop one, or choose another bridge port in this plugin's settings.`,
         actions: [{ id: "retry", label: "Try again" }],
       }
   }
@@ -1101,7 +1104,7 @@ export const figjamConfigSchema: PluginDetailView["configSchema"] = {
       default: FIGJAM_PORT,
       title: "Bridge port",
       description:
-        "The local WebSocket port the FigJam panel connects to. Set up the Figma plugin again after changing it.",
+        "The local port of the bridge's HTTP API, for the figjam command-line tool and coding agents. The FigJam panel doesn't use it: it connects through Maximal. When the port is taken, the next free one is used.",
     },
   },
 }

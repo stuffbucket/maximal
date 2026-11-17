@@ -5,11 +5,12 @@ import { watch } from "node:fs"
  *
  * Today the sources are the single-file `src/legacy/code.js` and
  * `src/legacy/ui.html`, copied through unchanged except for the version
- * stamp. Splitting them into modules happens behind this same entry point.
+ * stamp (code.js) and the build line (ui.html: ports, profile). Splitting them into modules happens behind this same entry point.
  *
  *   bun scripts/build.ts                 # dev build → dist/dev
  *   bun scripts/build.ts --release       # release build → dist/release
  *   bun scripts/build.ts --out <dir>     # write somewhere else
+ *   bun scripts/build.ts --profile <id>  # a profile-specific dev plugin id and name
  *   bun scripts/build.ts --watch         # rebuild when src/ changes
  */
 import { mkdir, rename, writeFile } from "node:fs/promises"
@@ -33,9 +34,11 @@ function embeddedText(source: unknown, name: string): string {
 const PACKAGE_DIR = path.resolve(import.meta.dir, "..")
 const SOURCE_DIR = path.join(PACKAGE_DIR, "src")
 const VERSION_LINE = /^var PLUGIN_VERSION = "[^"\n]*"$/m
+const PANEL_BUILD_LINE = /^const PANEL_BUILD = .*;$/m
+/** A development profile id: what a Maximal dev profile calls itself (`a-z0-9-`). */
+const PROFILE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/
 
 export const DEFAULT_MAXIMAL_PORT = 4141
-export const DEFAULT_BRIDGE_PORT = 4150
 
 export interface BuildOptions {
   /** Folder to write into. Created if missing. */
@@ -44,8 +47,20 @@ export interface BuildOptions {
   release?: boolean
   /** Maximal's port, which the panel calls for models and messages. */
   maximalPort?: number
-  /** The bridge's WebSocket port, for coding agents driving the board. */
+  /**
+   * A standalone bridge's WebSocket port (`bun run figjam:bridge`). Leave it
+   * out when Maximal runs the bridge: the panel then reaches it through
+   * Maximal's own origin, so the manifest allows nothing but Maximal.
+   */
   bridgePort?: number
+  /**
+   * A Maximal development profile's id (`a-z0-9-`). It makes the dev plugin's
+   * id and name profile-specific, so two profiles imported into one Figma
+   * keep separate `clientStorage` (tokens, saved settings) and the panel can
+   * tell when it reaches the wrong profile's Maximal. Omit for the shared
+   * "Maximal Agent (dev)" plugin. Ignored by release builds.
+   */
+  profile?: string
 }
 
 export interface BuildResult {
@@ -53,6 +68,9 @@ export interface BuildResult {
   version: string
   files: Array<string>
 }
+
+/** Every build option with its default filled in. */
+export type ResolvedBuildOptions = Required<Omit<BuildOptions, "outDir">>
 
 export function readPackageVersion(): Promise<string> {
   return Promise.resolve(packageJson.version)
@@ -72,12 +90,59 @@ export function stampVersion(code: string, version: string): string {
   )
 }
 
+/**
+ * The panel source with its build line set: the Maximal port the manifest
+ * allows, a standalone bridge's port (0 when Maximal relays the bridge), and
+ * the profile the plugin was built for (empty for the shared plugin). The
+ * panel uses them to default its address, to explain a manifest that doesn't
+ * allow the origin it is using, and to refuse a Maximal that belongs to
+ * another profile. `dev` turns on the panel's console diagnostics. Nothing
+ * secret goes in.
+ */
+export function stampPanel(
+  html: string,
+  options: ResolvedBuildOptions,
+): string {
+  const matches = html.match(new RegExp(PANEL_BUILD_LINE.source, "gm")) ?? []
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected exactly one PANEL_BUILD line in ui.html, found ${matches.length}.`,
+    )
+  }
+  const build = {
+    maximalPort: options.maximalPort,
+    bridgePort: options.bridgePort,
+    profile: options.release ? "" : options.profile,
+    dev: !options.release,
+  }
+  return html.replace(
+    PANEL_BUILD_LINE,
+    () => `const PANEL_BUILD = ${JSON.stringify(build)};`,
+  )
+}
+
+/** The plugin's identity: shared, or specific to one Maximal dev profile. */
+export function pluginIdentity(options: ResolvedBuildOptions): {
+  id: string
+  name: string
+} {
+  if (options.release) {
+    return { id: "maximal-figjam-agent", name: "Maximal Agent" }
+  }
+  if (options.profile === "") {
+    return { id: "maximal-figjam-agent-dev", name: "Maximal Agent (dev)" }
+  }
+  return {
+    id: `maximal-figjam-agent-dev-${options.profile}`,
+    name: `Maximal Agent (dev ${options.profile.slice(0, 8)})`,
+  }
+}
+
 export function pluginManifest(
-  options: Required<Omit<BuildOptions, "outDir">>,
+  options: ResolvedBuildOptions,
 ): Record<string, unknown> {
   return {
-    name: options.release ? "Maximal Agent" : "Maximal Agent (dev)",
-    id: options.release ? "maximal-figjam-agent" : "maximal-figjam-agent-dev",
+    ...pluginIdentity(options),
     api: "1.0.0",
     main: "code.js",
     ui: "ui.html",
@@ -88,11 +153,44 @@ export function pluginManifest(
       allowedDomains: ["https://api.figma.com"],
       devAllowedDomains: [
         `http://localhost:${options.maximalPort}`,
-        `ws://localhost:${options.bridgePort}`,
+        `ws://localhost:${options.maximalPort}`,
+        ...(options.bridgePort > 0 ?
+          [`ws://localhost:${options.bridgePort}`]
+        : []),
       ],
       reasoning:
-        "The agent's model calls go to Maximal, a proxy running on this computer. An optional local bridge lets a coding agent on this computer drive the board. Reading and posting the board's comments uses Figma's REST API with a personal access token the user saves in the plugin's settings.",
+        "The agent's model calls go to Maximal, a proxy running on this computer. An optional local bridge, reached through Maximal, lets a coding agent on this computer drive the board. Reading and posting the board's comments uses Figma's REST API with a personal access token the user saves in the plugin's settings.",
     },
+  }
+}
+
+function resolveOptions(
+  options: Omit<BuildOptions, "outDir">,
+): ResolvedBuildOptions {
+  const profile = options.profile ?? ""
+  if (profile !== "" && !PROFILE_ID.test(profile)) {
+    throw new Error(
+      `A plugin profile id is lowercase letters, digits and dashes (up to 40), got "${profile}".`,
+    )
+  }
+  return {
+    release: options.release ?? false,
+    maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
+    bridgePort: options.bridgePort ?? 0,
+    profile,
+  }
+}
+
+/** The exact files a build writes, by name. Pure: nothing touches the disk. */
+export async function renderPlugin(
+  options: Omit<BuildOptions, "outDir">,
+): Promise<Record<"code.js" | "manifest.json" | "ui.html", string>> {
+  const version = await readPackageVersion()
+  const resolved = resolveOptions(options)
+  return {
+    "code.js": stampVersion(embeddedText(codeSource, "code.js"), version),
+    "ui.html": stampPanel(embeddedText(uiSource, "ui.html"), resolved),
+    "manifest.json": `${JSON.stringify(pluginManifest(resolved), null, 2)}\n`,
   }
 }
 
@@ -104,24 +202,19 @@ async function writeAtomic(file: string, contents: string): Promise<void> {
 }
 
 export async function buildPlugin(options: BuildOptions): Promise<BuildResult> {
-  const version = await readPackageVersion()
-  const resolved = {
-    release: options.release ?? false,
-    maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
-    bridgePort: options.bridgePort ?? DEFAULT_BRIDGE_PORT,
-  }
-  await mkdir(options.outDir, { recursive: true })
-  const files = {
-    "code.js": stampVersion(embeddedText(codeSource, "code.js"), version),
-    "ui.html": embeddedText(uiSource, "ui.html"),
-    "manifest.json": `${JSON.stringify(pluginManifest(resolved), null, 2)}\n`,
-  }
+  const { outDir, ...rest } = options
+  const files = await renderPlugin(rest)
+  await mkdir(outDir, { recursive: true })
   await Promise.all(
     Object.entries(files).map(([name, contents]) =>
-      writeAtomic(path.join(options.outDir, name), contents),
+      writeAtomic(path.join(outDir, name), contents),
     ),
   )
-  return { outDir: options.outDir, version, files: Object.keys(files) }
+  return {
+    outDir,
+    version: await readPackageVersion(),
+    files: Object.keys(files),
+  }
 }
 
 function parseArgs(argv: Array<string>): BuildOptions & { watch: boolean } {
@@ -142,6 +235,7 @@ function parseArgs(argv: Array<string>): BuildOptions & { watch: boolean } {
     release,
     maximalPort: port("--maximal-port"),
     bridgePort: port("--bridge-port"),
+    profile: value("--profile"),
     watch: argv.includes("--watch"),
   }
 }

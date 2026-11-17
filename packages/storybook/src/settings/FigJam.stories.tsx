@@ -70,7 +70,7 @@ export const DialogPairing = dialog({ scenario: "figjam-pairing" }, async ({ can
 export const DialogPairingTwo = dialog({ scenario: "figjam-pairing-two" }, async ({ canvasElement }) => {
   await within(canvasElement).findByText("1 more request is waiting.");
 });
-/** Port 4150 is already in use: the error with "Try again". */
+/** No free port from 4150 up: the error with "Try again". */
 export const DialogPortInUse = dialog({ scenario: "figjam-port-in-use" });
 
 /** Setting up the Figma plugin moves the dialog from needs-setup to ready. */

@@ -16,6 +16,9 @@ export interface StartFailure {
   detail: string
 }
 
+/** The status fact that carries the port the bridge is bound to (read by the discovery route). */
+export const BRIDGE_PORT_FACT = "Port"
+
 /** Id of the action that builds (or rebuilds) the Figma plugin files. */
 export const SETUP_ACTION = "setup"
 
@@ -85,6 +88,8 @@ export interface StatusInput {
   bridge:
     | {
         port: number
+        /** The port that was asked for; differs from `port` when it was taken. */
+        preferredPort: number
         boards: ReadonlyArray<string>
         pending: ReadonlyArray<PairPending>
       }
@@ -93,6 +98,8 @@ export interface StatusInput {
   folder: PluginFolder
   buildError: string | undefined
   manifestPath: string
+  /** The name Figma lists the development plugin under (profile-specific). */
+  pluginName: string
   /** Names of the panels whose Approve and Deny actions are registered. */
   registered: ReadonlySet<string>
 }
@@ -207,7 +214,15 @@ function composeBase(input: StatusInput): PluginStatus {
     }
   }
   const facts = [
-    { label: "Port", value: String(bridge.port) },
+    { label: BRIDGE_PORT_FACT, value: String(bridge.port) },
+    ...(bridge.preferredPort === bridge.port ?
+      []
+    : [
+        {
+          label: "Preferred port (in use)",
+          value: String(bridge.preferredPort),
+        },
+      ]),
     { label: "Connected boards", value: nameList(bridge.boards) },
     { label: "Waiting for approval", value: nameList(pendingNames(bridge)) },
   ]
@@ -248,6 +263,7 @@ function composeBase(input: StatusInput): PluginStatus {
       : IMPORT_INSTRUCTIONS,
     facts: [
       ...facts,
+      { label: "Figma plugin", value: input.pluginName },
       { label: "Figma plugin manifest", value: input.manifestPath },
     ],
     actions: [

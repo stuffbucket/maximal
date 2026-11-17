@@ -15,12 +15,21 @@ import {
 import { loadPlugin, waitFor } from "@stuffbucket/maximal-plugin-sdk/testing"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
 import {
   createFigjamPlugin,
+  type FigjamPluginOptions,
   FIGMA_PLUGIN_DIR,
   IMPORT_INSTRUCTIONS,
 } from "../src/index"
@@ -62,9 +71,10 @@ afterEach(async () => {
 async function load(
   config: Record<string, unknown> = {},
   maximalPort?: number,
+  pluginOptions: FigjamPluginOptions = {},
 ): Promise<Loaded> {
   const loaded = await loadPlugin(
-    createFigjamPlugin({ dataDir }),
+    createFigjamPlugin({ dataDir, ...pluginOptions }),
     { port, ...config },
     { storageDir, ...(maximalPort === undefined ? {} : { maximalPort }) },
   )
@@ -169,6 +179,27 @@ function openPanel(name: string): Panel {
   }
 }
 
+const manifestOf = async (): Promise<{ id: string; name: string }> =>
+  JSON.parse(
+    await readFile(
+      path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "manifest.json"),
+      "utf8",
+    ),
+  ) as { id: string; name: string }
+
+async function setUp(profile: FigjamPluginOptions["profile"]) {
+  const loaded = await load({}, undefined, { profile })
+  await waitFor(statusIs(loaded, "plugin-not-built"))
+  await loaded.runAction("setup")
+  await waitFor(statusIs(loaded, "ready"))
+  return loaded
+}
+
+const lines = (loaded: Loaded, level: string) =>
+  loaded.testbed.host.logs
+    .filter((record) => record.level === level)
+    .map((record) => record.message)
+
 describe("FigJam plugin: setup", () => {
   test("needs setup until the Figma plugin is built, then shows the manifest", async () => {
     const loaded = await load()
@@ -192,9 +223,11 @@ describe("FigJam plugin: setup", () => {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       networkAccess: { devAllowedDomains: Array<string> }
     }
-    expect(manifest.networkAccess.devAllowedDomains).toContain(
-      `ws://localhost:${port}`,
-    )
+    expect(manifest.networkAccess.devAllowedDomains).toEqual([
+      "http://localhost:4141",
+      "ws://localhost:4141",
+    ])
+    expect(JSON.stringify(manifest)).not.toContain(String(port))
   })
 
   test("tells the Figma plugin the port Maximal serves on, and ignores an old maximalPort setting", async () => {
@@ -209,12 +242,10 @@ describe("FigJam plugin: setup", () => {
         "utf8",
       ),
     ) as { networkAccess: { devAllowedDomains: Array<string> } }
-    expect(manifest.networkAccess.devAllowedDomains).toContain(
+    expect(manifest.networkAccess.devAllowedDomains).toEqual([
       "http://localhost:5141",
-    )
-    expect(manifest.networkAccess.devAllowedDomains).not.toContain(
-      "http://localhost:4999",
-    )
+      "ws://localhost:5141",
+    ])
   })
 
   test("rebuilds on start when the folder is stale", async () => {
@@ -242,6 +273,125 @@ describe("FigJam plugin: setup", () => {
     const second = await load()
     await waitFor(statusIs(second, "ready"))
     expect(await readFile(codePath, "utf8")).toBe(current)
+  })
+
+  test("rebuilds on start when the panel or manifest differ in content, though version and ports match", async () => {
+    const first = await load()
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const dir = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR)
+    const uiPath = path.join(dir, "ui.html")
+    const manifestPath = path.join(dir, "manifest.json")
+    const ui = await readFile(uiPath, "utf8")
+    const manifest = await readFile(manifestPath, "utf8")
+    await writeFile(uiPath, `${ui}<!-- edited -->\n`)
+    await writeFile(
+      manifestPath,
+      manifest.replace("ws://localhost:4141", "ws://localhost:4150"),
+    )
+
+    const second = await load()
+    await waitFor(statusIs(second, "ready"))
+    expect(await readFile(uiPath, "utf8")).toBe(ui)
+    expect(await readFile(manifestPath, "utf8")).toBe(manifest)
+  })
+
+  test("leaves a current folder alone, even when the bridge had to move ports", async () => {
+    const first = await load()
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const manifestPath = path.join(
+      storageDir,
+      "figjam",
+      FIGMA_PLUGIN_DIR,
+      "manifest.json",
+    )
+    const before = await readFile(manifestPath, "utf8")
+    const marker = new Date(Date.now() - 60_000)
+    await utimes(manifestPath, marker, marker)
+
+    const blocker = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: { data() {} },
+    })
+    cleanups.push(() => {
+      blocker.stop(true)
+    })
+    const second = await load()
+    await waitFor(statusIs(second, "ready"))
+    expect(Number(fact(second, "Port"))).toBeGreaterThan(port)
+    expect(fact(second, "Preferred port (in use)")).toBe(String(port))
+    expect(await readFile(manifestPath, "utf8")).toBe(before)
+    // Not rewritten: the bridge's port is not part of the Figma plugin.
+    expect((await stat(manifestPath)).mtimeMs).toBeCloseTo(marker.getTime(), -3)
+  })
+})
+
+describe("FigJam plugin: profiles", () => {
+  test("a development profile gets its own plugin id and name, and says so in the status", async () => {
+    const loaded = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    expect(await manifestOf()).toEqual({
+      ...(await manifestOf()),
+      id: "maximal-figjam-agent-dev-ab12cd34ef56",
+      name: "Maximal Agent (dev ab12cd34)",
+    })
+    expect(fact(loaded, "Figma plugin")).toBe("Maximal Agent (dev ab12cd34)")
+    const ui = await readFile(
+      path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html"),
+      "utf8",
+    )
+    expect(ui).toContain('"profile":"ab12cd34ef56"')
+  })
+
+  test("production keeps the shared plugin id", async () => {
+    await setUp({ kind: "production", id: "production" })
+    expect((await manifestOf()).id).toBe("maximal-figjam-agent-dev")
+  })
+
+  test("a changed profile rebuilds the folder in the same place", async () => {
+    const first = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+    const second = await load({}, undefined, {
+      profile: { kind: "development", id: "0f0f0f0f0f0f" },
+    })
+    await waitFor(statusIs(second, "ready"))
+    expect((await manifestOf()).id).toBe(
+      "maximal-figjam-agent-dev-0f0f0f0f0f0f",
+    )
+  })
+
+  test("development logs the bind, and pairing, by name only; production stays quiet", async () => {
+    const dev = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    const panel = openPanel("log-lynx")
+    await panel.next("pair-pending")
+    await waitFor(() =>
+      lines(dev, "info").some((line) => line.includes('"log-lynx" asked')),
+    )
+    expect(
+      lines(dev, "info").some((line) => line.includes("listening on")),
+    ).toBe(true)
+    expect(lines(dev, "info").join("\n")).not.toMatch(/token/i)
+    await dev.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const prod = await load({}, undefined, {
+      profile: { kind: "production", id: "production" },
+    })
+    await waitFor(statusIs(prod, "ready"))
+    expect(lines(prod, "info")).toEqual([])
+    expect(
+      lines(prod, "debug").some((line) => line.includes("listening")),
+    ).toBe(true)
   })
 })
 
@@ -375,7 +525,7 @@ describe("FigJam plugin: the port", () => {
     await waitFor(() => portIsFree(port))
   })
 
-  test("a taken port is an error, and Try again works once it is free", async () => {
+  test("a taken port moves the bridge to the next free one, and the status says so", async () => {
     const blocker = Bun.listen({
       hostname: "127.0.0.1",
       port,
@@ -385,10 +535,31 @@ describe("FigJam plugin: the port", () => {
       blocker.stop(true)
     })
     const loaded = await load()
+    await waitFor(statusIs(loaded, "plugin-not-built"))
+    expect(Number(fact(loaded, "Port"))).toBeGreaterThan(port)
+    expect(fact(loaded, "Preferred port (in use)")).toBe(String(port))
+    expect(
+      loaded.testbed.host.logs.some(
+        (record) =>
+          record.level === "info" && record.message.includes("was taken"),
+      ),
+    ).toBe(true)
+  })
+
+  test("when no port is free the status is an error, and Try again works once one is", async () => {
+    const blocker = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: { data() {} },
+    })
+    cleanups.push(() => {
+      blocker.stop(true)
+    })
+    const loaded = await load({}, undefined, { portAttempts: 1 })
     await waitFor(statusIs(loaded, "port-in-use"))
     expect(status(loaded)).toMatchObject({
       state: "error",
-      summary: `Port ${port} is already in use`,
+      summary: `No free port from ${port} up`,
       actions: [{ id: "retry", label: "Try again" }],
     })
 

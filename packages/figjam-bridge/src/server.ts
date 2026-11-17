@@ -72,6 +72,8 @@ const BRIDGE_VERSION = "0.7.0"
 const TIMEOUT_MS = 120_000
 // Set by startBridge: this process hosts at most one bridge at a time.
 let PORT = 4150
+let PREFERRED_PORT = 4150
+let VERBOSE = false
 let DATA_DIR = ""
 let EXPORT_DIR = ""
 let BRIDGE_STARTED_AT = 0
@@ -210,6 +212,13 @@ function toolActivity() {
 
 const log = (line: string) =>
   console.log(`${new Date().toISOString().slice(11, 19)} ${line}`)
+
+// Development-only detail (bind attempts, hello outcomes, refused callers).
+// Off unless startBridge is given `verbose` or FIGJAM_BRIDGE_DEBUG=1, so a
+// production bridge logs only what it always has. Never log a token here.
+const debug = (line: string) => {
+  if (VERBOSE) log(`debug ${line}`)
+}
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status })
@@ -395,6 +404,13 @@ function startPairRequest(
   hello: HelloMsg,
   reason: "no-token" | "unknown-token",
 ): void {
+  // An unknown token usually means the panel was paired with another bridge
+  // profile (or its pairing was revoked): worth a line when developing.
+  if (reason === "unknown-token") {
+    debug(
+      "hello carried a token this bridge does not know (another profile, or the pairing was forgotten); treating it as a new pairing request",
+    )
+  }
   const info = isObject(hello.board) ? hello.board : {}
   const boardId = str(info.boardId)
   // The panel's instance name is what the user confirms in the CLI. Older
@@ -1243,13 +1259,18 @@ function listen(hostname: string, port: number) {
       }
 
       // The HTTP API is for CLIs and agents only: no browser, and the token.
-      if (origin !== null)
+      if (origin !== null) {
+        debug(`refused HTTP request from origin ${origin}: ${url.pathname}`)
         return json({ error: "Browser requests are not accepted." }, 403)
+      }
       const authed = tokenMatches(bearer(request))
       if (url.pathname === "/status" && request.method === "GET" && !authed) {
         return json({ ok: true, version: BRIDGE_VERSION, paired: false })
       }
       if (!authed) {
+        debug(
+          `refused HTTP ${request.method} ${url.pathname}: missing or wrong admin token`,
+        )
         return json(
           {
             error: `Unauthorized: send Authorization: Bearer <token> (the bridge admin token: the figjam CLI sends it; it's in ${pairingTokenPath(DATA_DIR)}).`,
@@ -1274,6 +1295,7 @@ function listen(hostname: string, port: number) {
           bridge: {
             version: BRIDGE_VERSION,
             port: PORT,
+            preferredPort: PREFERRED_PORT,
             exports: EXPORT_DIR,
             chats: chats.path,
           },
@@ -1711,6 +1733,8 @@ export type PairResult = Json & { ok: boolean; status: number }
 
 export interface BridgeStatus {
   port: number
+  /** The port that was asked for (differs from `port` when it was taken). */
+  preferredPort: number
   version: string
   /** Connected boards (GET /status). */
   boards: Array<BoardSummary>
@@ -1723,7 +1747,10 @@ export interface BridgeStatus {
 }
 
 export interface BridgeHandle {
+  /** The port actually bound: the preferred one, or the next free one above it. */
   readonly port: number
+  /** The port that was asked for; differs from `port` when it was taken. */
+  readonly preferredPort: number
   /** Closes every socket and the listener, and frees the port. Idempotent. */
   stop: () => Promise<void>
   status: () => BridgeStatus
@@ -1736,13 +1763,64 @@ export interface BridgeHandle {
 }
 
 export interface BridgeOptions {
-  /** Default FIGJAM_BRIDGE_PORT, else 4150. 0 picks a free port. */
+  /**
+   * The preferred port: default FIGJAM_BRIDGE_PORT, else 4150. When it is
+   * taken the bridge walks upward to the next free port (see `portAttempts`)
+   * and reports the one it got as `BridgeHandle.port`. 0 picks any free port.
+   */
   port?: number
+  /** How many consecutive ports to try from `port` (default 64; 1 = no walking). */
+  portAttempts?: number
+  /** Log development detail too. Default: FIGJAM_BRIDGE_DEBUG=1. */
+  verbose?: boolean
   /** Default 127.0.0.1. */
   hostname?: string
   /** Default $COPILOT_API_HOME, else the platform data dir. */
   dataDir?: string
   onEvent?: (event: BridgeEvent) => void
+}
+
+/** How many consecutive ports `startBridge` tries, starting at the preferred one. */
+export const DEFAULT_PORT_ATTEMPTS = 64
+
+function isAddressInUse(error: unknown): boolean {
+  const code: unknown =
+    typeof error === "object" && error !== null ?
+      Reflect.get(error, "code")
+    : undefined
+  if (code === "EADDRINUSE") return true
+  return error instanceof Error && /EADDRINUSE|in use/i.test(error.message)
+}
+
+/**
+ * Listens on `preferred` when it is free, else on the next free port above
+ * it. Port 0 means "any free port" and never walks. Only "address in use"
+ * moves on; any other failure (permissions, a bad hostname) is thrown as is.
+ */
+function listenFrom(hostname: string, preferred: number, attempts: number) {
+  if (preferred === 0) return listen(hostname, 0)
+  const last = Math.min(65_535, preferred + Math.max(1, attempts) - 1)
+  let lastError: unknown
+  for (let candidate = preferred; candidate <= last; candidate++) {
+    try {
+      const bound = listen(hostname, candidate)
+      if (candidate !== preferred) {
+        log(`port ${preferred} is in use; the bridge is using ${candidate}`)
+      }
+      debug(`bound ${hostname}:${candidate} (preferred ${preferred})`)
+      return bound
+    } catch (error) {
+      if (!isAddressInUse(error)) {
+        debug(`could not bind ${hostname}:${candidate}: ${String(error)}`)
+        throw error
+      }
+      debug(`port ${candidate} is in use`)
+      lastError = error
+    }
+  }
+  throw new Error(`Ports ${preferred}-${last} are all in use (EADDRINUSE).`, {
+    cause: lastError,
+  })
 }
 
 let running = false
@@ -1757,7 +1835,13 @@ export async function startBridge(
   if (running) throw new Error("A FigJam bridge is already running here.")
   running = true
   let server: Server<SocketData>
+  const preferredPort = Number(
+    opts.port ?? process.env.FIGJAM_BRIDGE_PORT ?? 4150,
+  )
+  let chatsOpen = false
+  PREFERRED_PORT = preferredPort
   try {
+    VERBOSE = opts.verbose ?? process.env.FIGJAM_BRIDGE_DEBUG === "1"
     DATA_DIR = opts.dataDir ?? defaultDataDir()
     EXPORT_DIR = path.join(DATA_DIR, "figjam", "exports")
     await mkdir(path.join(DATA_DIR, "figjam"), { recursive: true })
@@ -1765,12 +1849,16 @@ export async function startBridge(
     emit = opts.onEvent ?? (() => {})
     loadPairingToken({ dataDir: DATA_DIR }) // create it on first start
     chats = new ChatStore(path.join(DATA_DIR, "figjam", "chats.sqlite"))
+    chatsOpen = true
     clients = loadClients()
-    server = listen(
+    server = listenFrom(
       opts.hostname ?? "127.0.0.1",
-      opts.port ?? Number(process.env.FIGJAM_BRIDGE_PORT ?? 4150),
+      preferredPort,
+      opts.portAttempts ?? DEFAULT_PORT_ATTEMPTS,
     )
   } catch (error) {
+    // Don't leave the chat database open when no port could be bound.
+    if (chatsOpen) chats.close()
     // eslint-disable-next-line require-atomic-updates -- the flag only guards against a second start; a failed start releases it.
     running = false
     throw error
@@ -1786,6 +1874,7 @@ export async function startBridge(
   let stopped = false
   const handle: BridgeHandle = {
     port: PORT,
+    preferredPort,
     async stop() {
       if (stopped) return
       stopped = true
@@ -1807,6 +1896,7 @@ export async function startBridge(
     },
     status: () => ({
       port: PORT,
+      preferredPort,
       version: BRIDGE_VERSION,
       boards: boardSummaries(),
       ...pairList(),

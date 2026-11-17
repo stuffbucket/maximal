@@ -1,4 +1,4 @@
-<!doctype html>
+`Bridge isn't reachable`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -410,7 +410,7 @@
     <h2 id="settingsTitle">Settings</h2>
     <label class="field"><span>Maximal</span><input id="baseUrl" spellcheck="false" /></label>
     <label class="field"><span>API key</span><input id="apiKey" type="password" placeholder="Only if required" spellcheck="false" /></label>
-    <label class="check-row"><input type="checkbox" id="remote" /><span>Let Claude Code drive this board<small id="bridgeStatus">Connects to the bridge on localhost:4150</small></span></label>
+    <label class="check-row"><input type="checkbox" id="remote" /><span>Let Claude Code drive this board<small id="bridgeStatus">Connects to the bridge Maximal reports</small></span></label>
     <div class="bridge-row"><button type="button" class="btn" id="bridgeAct" hidden></button></div>
     <label class="check-row"><input type="checkbox" id="allowRunCode" /><span>Allow run_code<small>Agents may run arbitrary Plugin API code on this board</small></span></label>
     <div class="field" role="group" aria-labelledby="figmaTokenLabel">
@@ -444,10 +444,20 @@
 <script>
 "use strict";
 
-const DEFAULT_BASE = "http://localhost:4141";
+// Stamped by the build (scripts/build.ts): the Maximal and bridge ports this
+// plugin's manifest allows, the Maximal profile it was built for ("" = the
+// shared plugin) and whether it is a development build. No secrets.
+const PANEL_BUILD = {"maximalPort":4141,"bridgePort":0,"profile":"","dev":true};
+const DEFAULT_BASE = `http://localhost:${PANEL_BUILD.maximalPort}`;
 const PREFERRED_MODELS = ["claude-sonnet", "claude-opus", "claude-fable", "gpt-6", "gpt-5"];
 const MAX_STEPS = 30;
-const BRIDGE_URL = "ws://localhost:4150/plugin";
+// Development builds explain connection trouble in the console (Figma's
+// Plugins > Development > Open console). Release builds stay quiet. Never
+// pass a token or an API key to this.
+function devLog(level, ...parts) {
+  if (!PANEL_BUILD.dev) return;
+  try { console[level]("[maximal-figjam]", ...parts); } catch { /* no console */ }
+}
 // Maximal runs on this computer, so the panel only calls a loopback host.
 const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
@@ -1316,7 +1326,8 @@ let netSince = 0; // when the current bridge trouble started; 0 = healthy
 let netTimer = null;
 let netShown = null; // the bridge issue the input is showing, if any
 let netSaid = ""; // key of the last state announced
-const BRIDGE_IDLE = "Connects to the bridge on localhost:4150";
+const BRIDGE_IDLE = "Connects to the bridge Maximal reports";
+let bridgeWhere = ""; // where the bridge was last reached, for the status line
 
 function setNet(part, s, extra) {
   net[part] = Object.assign({}, extra, { s });
@@ -1373,7 +1384,7 @@ function bridgeStatus() {
   if (!settings.remote) return settings.bridgeToken ? paired : { text: BRIDGE_IDLE, act: "" };
   switch (b.s) {
     case "connected": return { text: `Paired with this computer ✓ · ${SESSION}`, act: "forget" };
-    case "connecting": return { text: `${b.attempt ? "Reconnecting" : "Connecting"} to the bridge on localhost:4150…`, act: "" };
+    case "connecting": return { text: `${b.attempt ? "Reconnecting" : "Connecting"} to the bridge${bridgeWhere ? ` on ${bridgeWhere}` : ""}…`, act: "" };
     case "pending": return { text: `Waiting for approval${b.expiresAt ? ` (${mmss(b.expiresAt)})` : ""}. ${APPROVE_HINT(b.name || SESSION)}`, act: "ask" };
     case "denied": return { text: "Pairing was denied.", act: "ask" };
     case "expired": return { text: "The approval request timed out.", act: "ask" };
@@ -1382,7 +1393,8 @@ function bridgeStatus() {
     case "retrying": {
       const why = b.why === "pair-name-in-use" ? `Another request already uses the name ${SESSION}`
         : b.why === "pair-busy" ? "The bridge has too many pending requests"
-        : "Bridge isn't running on localhost:4150";
+        : b.why === "discovery" ? (b.detail || "Maximal didn't say where the bridge is")
+        : `The bridge isn't answering${bridgeWhere ? ` on ${bridgeWhere}` : ""}`;
       return { text: `${why} · ${countdown(b)} (attempt ${b.attempt})`, act: "retry" };
     }
     case "blocked": return { text: `Bridge blocked: ${b.error}`, act: "retry" };
@@ -1685,6 +1697,7 @@ async function connect() {
     const why = error.name === "TimeoutError" ? "no answer in 8s" : error.message;
     const unreachable = error.name === "TimeoutError" || error instanceof TypeError;
     const badAddress = error.name === "AddressError";
+    devLog("warn", `Maximal at ${settings.baseUrl} unreachable or refused: ${why}. This plugin was built for ${DEFAULT_BASE}${PANEL_BUILD.profile ? ` (profile ${PANEL_BUILD.profile})` : ""}.`);
     let short;
     if (badAddress) short = "Maximal's address isn't on this computer — check Settings";
     else if (unreachable) short = `Maximal isn't running on ${host} · retrying…`;
@@ -2620,22 +2633,121 @@ function storeBridgeToken(token, clientId) {
   saveSettings();
 }
 
+// Where the bridge is reached: through Maximal's own origin, on the port the
+// manifest allows (ws://localhost:<maximalPort>/figjam/plugin). Maximal relays
+// to the bridge it runs, wherever that listens, so the bridge's own port never
+// matters to the panel and never goes stale in the manifest. The metadata
+// endpoint (/figjam/bridge.json) says whether the bridge is up and which
+// profile this Maximal is, so a switched-off FigJam or the wrong profile is
+// explained instead of timing out. A standalone bridge (a plugin built with
+// --bridge-port) is connected to directly. Errors carry `fatal` when retrying
+// cannot help until the person acts.
+const BRIDGE_PATH = "/figjam/plugin";
+
+function discoveryError(code, message, fatal) {
+  const error = new Error(message);
+  error.code = code;
+  error.fatal = Boolean(fatal);
+  return error;
+}
+
+async function discoverBridge() {
+  if (PANEL_BUILD.bridgePort > 0) {
+    const label = `localhost:${PANEL_BUILD.bridgePort}`;
+    return { url: `ws://${label}/plugin`, label };
+  }
+  const origin = maximalOrigin(settings.baseUrl);
+  if (!origin) throw discoveryError("address", "Maximal's address isn't on this computer. Check it in Settings.", true);
+  const port = Number(new URL(origin).port);
+  if (port !== PANEL_BUILD.maximalPort) {
+    devLog("warn", `Maximal's address (port ${port}) is not the one this plugin's manifest allows (localhost:${PANEL_BUILD.maximalPort}); Figma will probably block the connection. Rebuild the plugin in Maximal and run it again, or fix the address in Settings.`);
+  }
+  // Our own profile and the port the manifest allows ride along so Maximal can
+  // log a mismatch in development. They are not secret.
+  const query = new URLSearchParams({ maximalPort: String(PANEL_BUILD.maximalPort) });
+  if (PANEL_BUILD.profile) query.set("profile", PANEL_BUILD.profile);
+  if (pluginInfo.version) query.set("panel", String(pluginInfo.version).slice(0, 32));
+  let res;
+  try {
+    res = await fetch(`${origin}/figjam/bridge.json?${query}`, { signal: AbortSignal.timeout(4000) });
+  } catch (error) {
+    throw discoveryError("unreachable", `Can't ask Maximal at ${origin} about the bridge (${error.name === "TimeoutError" ? "no answer in 4s" : "network blocked or Maximal not running"})`);
+  }
+  if (res.status === 404) {
+    throw discoveryError("too-old", `${origin} doesn't offer the FigJam bridge relay. Update Maximal.`);
+  }
+  let body = null;
+  try { body = await res.json(); } catch { /* not JSON */ }
+  if (!body || body.service !== "maximal-figjam-bridge") {
+    throw discoveryError("not-maximal", `${origin} answered, but not like Maximal's FigJam bridge (HTTP ${res.status})`);
+  }
+  const theirs = body.profile && typeof body.profile.id === "string" ? body.profile.id : "";
+  if (PANEL_BUILD.profile && theirs !== PANEL_BUILD.profile) {
+    throw discoveryError("wrong-profile", `This plugin was built for Maximal profile ${PANEL_BUILD.profile}, but ${origin} is profile ${theirs || "unknown"}. Re-import the plugin from that profile's manifest, or fix Maximal's address in Settings.`, true);
+  }
+  if (!res.ok || !body.available) {
+    const reason = typeof body.reason === "string" ? body.reason : `HTTP ${res.status}`;
+    const say = reason === "disabled" ? "FigJam is switched off in Maximal's Integrations"
+      : reason === "starting" ? "Maximal's FigJam bridge is still starting"
+      : `Maximal's FigJam bridge isn't available (${reason.slice(0, 60)})`;
+    throw discoveryError(`unavailable:${reason}`, say);
+  }
+  const path = body.panel && typeof body.panel.path === "string" && /^\/figjam\/[a-z0-9\/_-]{1,40}$/.test(body.panel.path) ? body.panel.path : BRIDGE_PATH;
+  const label = `localhost:${port}${path}`;
+  return { url: `ws://${label}`, label };
+}
+
+let bridgeGen = 0; // bumped whenever discovery's answer would be stale
+let bridgeFinding = false; // a discovery request is in flight
+
 function openBridge() {
   clearTimeout(bridgeRetry);
   if (!settings.remote) return setNet("bridge", "off");
-  if (bridge || pairStop) return;
+  if (bridge || pairStop || bridgeFinding) return;
+  const gen = ++bridgeGen;
+  bridgeFinding = true;
+  setNet("bridge", "connecting", { attempt: bridgeFails });
+  discoverBridge().then(
+    (found) => {
+      bridgeFinding = false;
+      if (gen !== bridgeGen || !settings.remote || bridge || pairStop) return;
+      bridgeWhere = found.label;
+      devLog("info", `connecting to the bridge at ${found.label}`);
+      connectBridge(found);
+    },
+    (error) => {
+      bridgeFinding = false;
+      if (gen !== bridgeGen || !settings.remote || bridge || pairStop) return;
+      devLog("warn", `bridge discovery failed [${error.code || "error"}]: ${error.message}`);
+      if (error.fatal) return setNet("bridge", "blocked", { error: error.message });
+      bridgeFails++;
+      const delay = backoff(bridgeFails);
+      setNet("bridge", "retrying", { attempt: bridgeFails, nextAt: Date.now() + delay, why: "discovery", detail: error.message });
+      bridgeRetry = setTimeout(openBridge, delay);
+    },
+  );
+}
+
+function connectBridge(found) {
   let ws;
   try {
-    ws = new WebSocket(BRIDGE_URL);
+    ws = new WebSocket(found.url);
   } catch (error) {
+    devLog("error", `could not open the bridge socket at ${found.label}: ${error.message}`);
     setNet("bridge", "blocked", { error: error.message });
     return;
   }
   bridge = ws;
   bridgePaired = false;
   let ended = null; // the pair-* / unpaired message that precedes a close
+  let opened = false;
   setNet("bridge", "connecting", { attempt: bridgeFails });
+  ws.onerror = () => {
+    if (!opened) devLog("warn", `bridge socket at ${found.label} failed before opening: Maximal may have stopped or restarted, FigJam may be switched off, or the manifest doesn't allow ${found.url.split("/").slice(0, 3).join("/")} (rebuild the plugin in Maximal and run it again)`);
+  };
   ws.onopen = () => {
+    opened = true;
+    devLog("info", `bridge socket open at ${found.label}; sending hello as ${SESSION}${settings.bridgeToken ? " with a saved pairing" : " (not paired yet)"}`);
     const hello = { type: "hello", session: SESSION, board: fileInfo, plugin: pluginInfo, tools: allTools };
     if (settings.bridgeToken) hello.token = settings.bridgeToken;
     if (pluginInfo.user) hello.user = pluginInfo.user;
@@ -2651,13 +2763,18 @@ function openBridge() {
       bridgeFails = 0;
       expiredOnce = false;
       bridgeDropNoted = false;
+      devLog("info", `paired with the bridge as ${SESSION}`);
       setNet("bridge", "connected");
       if (!storeOnline) refreshChats();
       return;
     }
     if (msg.type === "pair-pending") {
       // A revoked token (or a new bridge data dir): drop it and wait as new.
-      if (msg.reason === "unknown-token" && settings.bridgeToken) storeBridgeToken("", "");
+      if (msg.reason === "unknown-token" && settings.bridgeToken) {
+        devLog("warn", "the bridge doesn't know this panel's saved pairing (revoked, or this is a different Maximal profile's bridge); asking to pair again");
+        storeBridgeToken("", "");
+      }
+      devLog("info", `waiting for approval as ${msg.name || SESSION}`);
       setNet("bridge", "pending", { name: msg.name || SESSION, expiresAt: msg.expiresInSec ? Date.now() + msg.expiresInSec * 1000 : 0 });
       return;
     }
@@ -2691,6 +2808,7 @@ function openBridge() {
     }
     if (!settings.remote) return setNet("bridge", "off");
     const why = ended ? ended.type : PAIR_CLOSE[event.code];
+    devLog(why === "pair-denied" || why === "unpaired" || event.code === 4000 ? "info" : "warn", `bridge socket at ${found.label} closed (code ${event.code}${event.reason ? `, ${String(event.reason).slice(0, 80)}` : ""})${why ? ` after ${why}` : ""}`);
     // Replaced by a newer request from this board: stay quiet, don't fight it.
     if (event.code === 4000) { pairStop = true; return setNet("bridge", "replaced"); }
     if (why === "pair-denied") { pairStop = true; return setNet("bridge", "denied"); }
@@ -2710,6 +2828,8 @@ function openBridge() {
 
 function closeBridge() {
   clearTimeout(bridgeRetry);
+  bridgeGen++;
+  bridgeFinding = false;
   const ws = bridge;
   bridge = null;
   bridgePaired = false;

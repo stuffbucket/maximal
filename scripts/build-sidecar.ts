@@ -17,6 +17,7 @@ import {
   resolveSidecarVersion,
 } from "./build-sidecar-version"
 import { buildPluginBuiltIns } from "./build-plugin-builtins"
+import { packageSources } from "./build-sidecar-sources"
 
 interface BinaryBuild {
   args: Array<string>
@@ -73,8 +74,9 @@ const builds: Array<BinaryBuild> = [
       join(REPO, "src"),
       join(REPO, "package.json"),
       join(REPO, "bun.lock"),
-      // The plugin workspaces are compiled into the sidecar too.
-      ...pluginPackageSources(),
+      // The plugin workspaces (plugin-*, figjam-*, connector-kit) are compiled
+      // into the sidecar too.
+      ...packageSources(join(REPO, "packages")),
     ],
     args: [
       "build",
@@ -140,27 +142,6 @@ function targetTriple(): string {
     return triple
   }
   return hostTriple()
-}
-
-/** `src/` and `package.json` of every `packages/plugin-*` workspace and the connector kit. */
-function pluginPackageSources(): Array<string> {
-  const packages = join(REPO, "packages")
-  let entries: ReturnType<typeof readdirSync>
-  try {
-    entries = readdirSync(packages, { withFileTypes: true })
-  } catch {
-    return []
-  }
-  return entries
-    .filter(
-      (entry) =>
-        entry.isDirectory()
-        && (entry.name.startsWith("plugin-") || entry.name === "connector-kit"),
-    )
-    .flatMap((entry) => [
-      join(packages, entry.name, "src"),
-      join(packages, entry.name, "package.json"),
-    ])
 }
 
 function hostTriple(): string {
