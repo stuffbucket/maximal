@@ -122,7 +122,7 @@ one of its buttons, nor move focus off the safe first action. Two small shapes s
   the action (primary, or destructive for `tone="danger"`). Escape and the
   backdrop are Cancel.
 - **`NoticeDialog`** tells the person what to do after something already
-  happened (e.g. "Restart Claude Desktop" once routing was switched): one
+  happened (e.g. "Restart Claude" once routing was switched): one
   primary action ("Got it", first focus), no Cancel and nothing to undo.
   Escape and the backdrop acknowledge it the same way. It may carry one
   explicit **secondary action** when there is a deliberate way past what

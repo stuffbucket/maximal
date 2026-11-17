@@ -3,11 +3,10 @@ import { type Page, expect, test } from "@playwright/test"
 const BASE = process.env.UI_HARNESS_URL ?? "http://127.0.0.1:4747"
 const APPS = `${BASE}/ui/settings/#apps`
 const DESKTOP_TOGGLE = "**/settings/api/apps/claude-desktop/toggle"
-const TITLE = "Restart Claude Desktop"
-const RELAUNCH =
-  "Quit and reopen Claude Desktop for this change to take effect."
+const TITLE = "Restart Claude"
+const RELAUNCH = "Quit and reopen Claude for this change to take effect."
 const SIGN_IN_NOTE =
-  "If Claude Desktop asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude Desktop completely, reopen it, and try again."
+  "If Claude asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude completely, reopen it, and try again."
 
 // Any Settings width can be checked: UI_VIEWPORT_WIDTH=772 (the minimum) or wider.
 test.use({
@@ -416,7 +415,8 @@ test("the Claude Code Windows restart dialog is unchanged and carries no Desktop
   await expect(dialog(page).getByRole("heading")).toHaveText(
     "Restart Claude Code to finish",
   )
-  await expect(dialog(page)).not.toContainText("Claude Desktop")
+  await expect(dialog(page)).not.toContainText(RELAUNCH)
+  await expect(dialog(page)).not.toContainText(SIGN_IN_NOTE)
   await expect(
     dialog(page).getByRole("button", { name: "Keep on" }),
   ).toBeFocused()

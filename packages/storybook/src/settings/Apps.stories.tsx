@@ -159,7 +159,7 @@ const claudeDesktop: AppEntry = {
   ],
 };
 
-const RESTART_TITLE = "Restart Claude Desktop";
+const RESTART_TITLE = "Restart Claude";
 const restartDialog = (): HTMLElement =>
   within(document.body).getByRole("dialog", { name: RESTART_TITLE });
 

@@ -231,12 +231,12 @@ describe("Claude Desktop restart dialog", () => {
       string,
       string
     >
-    expect(base["apps-desktop-restart-title"]).toBe("Restart Claude Desktop")
+    expect(base["apps-desktop-restart-title"]).toBe("Restart Claude")
     expect(base["apps-desktop-relaunch"]).toBe(
-      "Quit and reopen Claude Desktop for this change to take effect.",
+      "Quit and reopen Claude for this change to take effect.",
     )
     expect(base["apps-desktop-signin-note"]).toBe(
-      "If Claude Desktop asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude Desktop completely, reopen it, and try again.",
+      "If Claude asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude completely, reopen it, and try again.",
     )
     expect(base["apps-desktop-restart-ok"]).toBe("Got it")
     for (const locale of FULL_LOCALES) {
