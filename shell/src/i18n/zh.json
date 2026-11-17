@@ -182,6 +182,8 @@
   "apps-conflict-base-url": "{appName} 已有由你或其他工具设置的自定义 ANTHROPIC_BASE_URL，因此 Maximal 未作更改。移除该设置，然后重新开启路由。",
   "apps-conflict-api-key-helper": "{appName} 已有由你或其他工具设置的自定义 apiKeyHelper，因此 Maximal 未作更改。移除该设置，然后重新开启路由。",
   "apps-conflict-gateway-profile": "{appName} 已在使用由你或其他工具设置的网关，因此 Maximal 未作切换。在 {appName} 中选择其他配置，然后重新开启路由。",
+  "apps-take-over": "接管",
+  "apps-takeover-body": "Maximal 在 {appName} 中发现了另一个网关，并未更改它。接管会将 {appName} 切换到 Maximal 并保留另一个网关，因此关闭路由后会切换回它。",
   "apps-conflict-cleanup-title": "需要手动清理",
   "apps-conflict-cleanup-detail": "Maximal 已停止路由 {appName}，但保留了设置后发生更改的配置。请检查该应用的设置，并手动移除 Maximal 路由条目，然后再试。",
   "apps-codex-shared-setting": "CLI 和桌面应用共享同一项设置。",

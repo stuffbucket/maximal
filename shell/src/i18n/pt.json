@@ -182,6 +182,8 @@
   "apps-conflict-base-url": "O {appName} já tem um valor personalizado de ANTHROPIC_BASE_URL definido por você ou por outra ferramenta, por isso o Maximal não o alterou. Remova essa configuração e ative o roteamento novamente.",
   "apps-conflict-api-key-helper": "O {appName} já tem um valor personalizado de apiKeyHelper definido por você ou por outra ferramenta, por isso o Maximal não o alterou. Remova essa configuração e ative o roteamento novamente.",
   "apps-conflict-gateway-profile": "O {appName} já usa um gateway configurado por você ou por outra ferramenta, por isso o Maximal não o trocou. Escolha outra configuração no {appName} e ative o roteamento novamente.",
+  "apps-take-over": "Assumir",
+  "apps-takeover-body": "O Maximal encontrou outro gateway no {appName} e não o alterou. Assumir muda o {appName} para o Maximal e mantém o outro gateway, então desativar o roteamento volta para ele.",
   "apps-conflict-cleanup-title": "Limpeza manual necessária",
   "apps-conflict-cleanup-detail": "O Maximal parou de rotear o {appName}, mas preservou as configurações alteradas após a instalação. Revise as configurações do aplicativo e remova manualmente a entrada de roteamento do Maximal antes de tentar novamente.",
   "apps-codex-shared-setting": "A CLI e o aplicativo de desktop compartilham a mesma configuração.",

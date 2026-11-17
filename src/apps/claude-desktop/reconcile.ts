@@ -70,12 +70,7 @@ function applyWithKey(
   home: string | undefined,
   options: ApplyConfigLibraryOptions = {},
 ): ApplyConfigLibraryResult {
-  const conflict = configLibraryConflict(home)
-  if (
-    !conflict
-    || (conflict === "other-maximal-config"
-      && options.overrideOtherMaximal === true)
-  ) {
+  if (!configLibraryConflict(home, undefined, options)) {
     ensureApiKey(DESKTOP_KEY_LABEL)
   }
   return applyConfigLibraryProfile(home, undefined, options)

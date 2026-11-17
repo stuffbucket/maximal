@@ -183,6 +183,54 @@ function isOurGatewayShape(profile: Record<string, unknown> | null): boolean {
   )
 }
 
+/** The two fields that differ between Maximal copies (port and key). */
+const ROUTING_FIELDS: ReadonlySet<string> = new Set([
+  "inferenceGatewayBaseUrl",
+  "inferenceGatewayApiKey",
+])
+
+/** Exactly the fields Maximal writes, nothing more, every one except the
+ *  gateway URL and key equal to this copy's values: a profile any Maximal
+ *  copy wrote, whichever copy. Any other edit is the user's. */
+function isMaximalArtifactShape(
+  profile: Record<string, unknown> | null,
+  values: GatewayProfileValues,
+): profile is Record<string, unknown> {
+  if (!profile || !isOurGatewayShape(profile)) return false
+  const keys = Object.keys(values) as Array<keyof GatewayProfileValues>
+  if (
+    Object.keys(profile).length !== keys.length
+    || !keys.every((key) => Object.hasOwn(profile, key))
+  ) {
+    return false
+  }
+  if (
+    typeof profile.inferenceGatewayApiKey !== "string"
+    || profile.inferenceGatewayApiKey === ""
+  ) {
+    return false
+  }
+  return keys.every(
+    (key) =>
+      ROUTING_FIELDS.has(key)
+      || JSON.stringify(profile[key]) === JSON.stringify(values[key]),
+  )
+}
+
+function routingPair(profile: {
+  inferenceGatewayBaseUrl?: unknown
+  inferenceGatewayApiKey?: unknown
+}): string {
+  return JSON.stringify([
+    profile.inferenceGatewayBaseUrl,
+    profile.inferenceGatewayApiKey,
+  ])
+}
+
+function sha256(content: string | Buffer): string {
+  return createHash("sha256").update(content).digest("hex")
+}
+
 function isLegacyGatewayProfile(
   profile: Record<string, unknown> | null,
 ): boolean {
@@ -235,10 +283,37 @@ export function atomicWriteJson(
 
 function fileFingerprint(file: string): string | null {
   try {
-    return createHash("sha256").update(fs.readFileSync(file)).digest("hex")
+    return sha256(fs.readFileSync(file))
   } catch {
     return null
   }
+}
+
+/**
+ * Does the profile still say what the marker recorded? Claude Desktop
+ * rewrites library profiles in its own formatting (no trailing newline, and
+ * possibly another key order), so besides the exact bytes, the parsed
+ * content serialized the way Maximal writes it also counts. Any change to a
+ * value still breaks the match.
+ */
+function fingerprintMatches(
+  file: string,
+  fingerprint: string,
+  keyOrder: Array<string>,
+): boolean {
+  if (fileFingerprint(file) === fingerprint) return true
+  const parsed = readJsonObject(file)
+  if (!parsed) return false
+  const candidates: Array<Record<string, unknown>> = [parsed]
+  if (
+    Object.keys(parsed).length === keyOrder.length
+    && keyOrder.every((key) => Object.hasOwn(parsed, key))
+  ) {
+    candidates.push(Object.fromEntries(keyOrder.map((k) => [k, parsed[k]])))
+  }
+  return candidates.some(
+    (value) => sha256(`${JSON.stringify(value, null, 2)}\n`) === fingerprint,
+  )
 }
 
 /** Desktop's config library, read once, with ownership resolved. */
@@ -337,10 +412,7 @@ class Library {
     const profile = this.profile(entry.id)
     const stateOwnership = this.stateOwnership(entry, values)
     if (stateOwnership) {
-      if (
-        fileFingerprint(this.profilePath(entry.id)) !== this.state?.fingerprint
-        || !isOurGatewayShape(profile)
-      ) {
+      if (!isOurGatewayShape(profile) || !this.isUnedited(entry, values)) {
         return null
       }
       return stateOwnership
@@ -388,7 +460,7 @@ class Library {
       return (
         (ownership === "ours"
           || (allowOtherMaximal && ownership === "other-maximal"))
-        && this.isUnedited(entry)
+        && this.isUnedited(entry, values)
       )
     })
     return (
@@ -407,31 +479,69 @@ class Library {
     return entry ? this.entryOwnership(entry, values) : null
   }
 
-  /** Someone else's selection we mustn't switch away from: a gateway, or
-   *  a profile we can't read or safely address, so can't rule one out. */
-  appliedBlocksSwitch(values: GatewayProfileValues): boolean {
+  /** Someone else's selection we mustn't switch away from on our own: a
+   *  readable gateway profile (`foreign`, which an explicit take over may
+   *  switch from), or a profile we can't read or safely address
+   *  (`unreadable`, so can't rule one out and never switch from). */
+  appliedBlock(values: GatewayProfileValues): "foreign" | "unreadable" | null {
     const id = this.meta.appliedId
-    if (!id || this.appliedOwnership(values)) return false
-    if (!SAFE_PROFILE_ID.test(id)) return true
-    if (!fs.existsSync(this.profilePath(id))) return false
+    if (!id || this.appliedOwnership(values)) return null
+    if (!SAFE_PROFILE_ID.test(id)) return "unreadable"
+    if (!fs.existsSync(this.profilePath(id))) return null
     const profile = this.profile(id)
-    return profile === null || profile.inferenceProvider !== undefined
+    if (profile === null) return "unreadable"
+    return profile.inferenceProvider === undefined ? null : "foreign"
   }
 
-  /** Deleting or overwriting is safe only for a profile exactly as we wrote
-   *  it. A legacy profile predates fingerprints, so its exact shape stands
-   *  in; any other profile without a matching fingerprint is left alone. */
-  isUnedited(entry: MetaEntry): boolean {
+  /** Deleting or overwriting is safe only for a profile exactly as Maximal
+   *  wrote it. The marker's profile qualifies when it still matches the
+   *  marker's fingerprint, or when it is a stale Maximal artifact (below). A
+   *  legacy profile predates fingerprints, so its exact shape stands in; any
+   *  other profile is left alone. */
+  isUnedited(entry: MetaEntry, values: GatewayProfileValues): boolean {
     if (!SAFE_PROFILE_ID.test(entry.id)) return false
     if (this.state?.profileId === entry.id) {
       return (
-        fileFingerprint(this.profilePath(entry.id)) === this.state.fingerprint
+        fingerprintMatches(
+          this.profilePath(entry.id),
+          this.state.fingerprint,
+          Object.keys(values),
+        ) || this.isStaleMaximalArtifact(entry, values)
       )
     }
     return (
       entry.name === LEGACY_ENTRY_NAME
       && isLegacyGatewayProfile(this.profile(entry.id))
     )
+  }
+
+  /**
+   * The marker's profile no longer says what the marker recorded, yet it is
+   * still exactly a Maximal artifact: our entry name, exactly the fields
+   * Maximal writes, and a gateway URL and key that a Maximal write produced,
+   * either this copy's own or another `maximal` entry's in the library. That
+   * is what Claude Desktop leaves when it writes a stale copy of an earlier
+   * Maximal profile back over ours. A user's edit (another gateway or key,
+   * folder, flag, extra field, or a renamed entry) never matches.
+   */
+  isStaleMaximalArtifact(
+    entry: MetaEntry,
+    values: GatewayProfileValues,
+  ): boolean {
+    if (entry.name !== OWNED_ENTRY_NAME || this.state?.profileId !== entry.id) {
+      return false
+    }
+    const profile = this.profile(entry.id)
+    if (!isMaximalArtifactShape(profile, values)) return false
+    const pair = routingPair(profile)
+    if (pair === routingPair(values)) return true
+    return this.meta.entries.some((other) => {
+      if (other.id === entry.id || other.name !== OWNED_ENTRY_NAME) return false
+      const sibling = this.profile(other.id)
+      return (
+        isMaximalArtifactShape(sibling, values) && routingPair(sibling) === pair
+      )
+    })
   }
 
   writeMeta(appliedId: string, entries: Array<MetaEntry>): void {
@@ -444,7 +554,12 @@ class Library {
 }
 
 export interface ApplyConfigLibraryOptions {
+  /** Replace routing owned by another valid Maximal profile. */
   overrideOtherMaximal?: boolean
+  /** Switch Desktop away from a readable gateway profile Maximal doesn't
+   *  own. That profile is never written; the snapshot switches back on
+   *  revert. Unreadable files and other profiles' markers still refuse. */
+  overrideForeignGateway?: boolean
 }
 
 export interface ApplyConfigLibraryResult {
@@ -459,7 +574,7 @@ export interface ApplyConfigLibraryResult {
 function applyConflict(
   lib: Library,
   values: GatewayProfileValues,
-  allowOtherMaximal: boolean,
+  options: ApplyConfigLibraryOptions,
 ): ConfigLibraryConflict | null {
   if (lib.stateUnreadable) return "cleanup-required"
   const stateOwner = lib.routingStateOwnership()
@@ -469,10 +584,17 @@ function applyConflict(
   ) {
     return "cleanup-required"
   }
-  if (lib.appliedOwnership(values) === "other-maximal" && !allowOtherMaximal) {
+  if (
+    lib.appliedOwnership(values) === "other-maximal"
+    && options.overrideOtherMaximal !== true
+  ) {
     return "other-maximal-config"
   }
-  return lib.appliedBlocksSwitch(values) ? "foreign-gateway-profile" : null
+  const block = lib.appliedBlock(values)
+  if (block === "unreadable") return "foreign-gateway-profile"
+  return block === "foreign" && options.overrideForeignGateway !== true ?
+      "foreign-gateway-profile"
+    : null
 }
 
 export function applyConfigLibraryProfile(
@@ -490,13 +612,10 @@ export function applyConfigLibraryProfile(
   const { meta } = lib
   const appliedOwnership = lib.appliedOwnership(values)
   // Switching away from someone else's gateway would silently take over
-  // their routing. Non-gateway profiles carry no routing, so switching from
-  // one is safe — the snapshot below switches back on revert.
-  const conflict = applyConflict(
-    lib,
-    values,
-    options.overrideOtherMaximal === true,
-  )
+  // their routing, so it needs an explicit take over. Non-gateway profiles
+  // carry no routing, so switching from one is safe. Either way the snapshot
+  // below switches back on revert.
+  const conflict = applyConflict(lib, values, options)
   if (conflict) {
     return {
       dir: lib.dir,
@@ -577,13 +696,14 @@ function snapshotPrior(
   }
 }
 
-/** Would enable be refused? Lets callers skip side effects (like minting a
- *  key) for an enable that won't take effect. */
+/** Would enable (with these overrides) be refused? Lets callers skip side
+ *  effects (like minting a key) for an enable that won't take effect. */
 export function configLibraryConflict(
   home: string = os.homedir(),
   values: GatewayProfileValues = gatewayProfile(home),
+  options: ApplyConfigLibraryOptions = {},
 ): ConfigLibraryConflict | null {
-  return applyConflict(new Library(getClaude3pDir(home)), values, false)
+  return applyConflict(new Library(getClaude3pDir(home)), values, options)
 }
 
 export function isConfigLibraryApplied(
@@ -664,13 +784,14 @@ function revertCandidates(
 function removeOwnedProfiles(
   lib: Library,
   candidates: Array<MetaEntry>,
+  values: GatewayProfileValues,
 ): { kept: Array<string>; removed: Set<string> } {
   const kept: Array<string> = []
   const removed = new Set<string>()
   for (const entry of candidates) {
     if (!SAFE_PROFILE_ID.test(entry.id)) continue
     const profilePath = lib.profilePath(entry.id)
-    if (!lib.isUnedited(entry)) {
+    if (!lib.isUnedited(entry, values)) {
       kept.push(profilePath)
       continue
     }
@@ -727,6 +848,7 @@ export function revertConfigLibraryProfile(
   const { kept, removed } = removeOwnedProfiles(
     lib,
     revertCandidates(lib, values, ownership),
+    values,
   )
 
   const entries = meta.entries.filter((e) => !removed.has(e.id))
@@ -800,110 +922,4 @@ function ensureWorkspaceFolders(folders: Array<string>): Array<string> {
     }
   }
   return created
-}
-
-function plistEscape(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-}
-
-function plistValue(v: unknown, indent: number): string {
-  const pad = "  ".repeat(indent)
-  if (typeof v === "string") return `${pad}<string>${plistEscape(v)}</string>`
-  if (typeof v === "boolean") return `${pad}<${v ? "true" : "false"}/>`
-  if (Array.isArray(v)) {
-    const items = v.map((x) => plistValue(x, indent + 1)).join("\n")
-    return `${pad}<array>\n${items}\n${pad}</array>`
-  }
-  if (typeof v === "object" && v !== null) {
-    const body = Object.entries(v)
-      .map(
-        ([k, val]) =>
-          `${pad}  <key>${plistEscape(k)}</key>\n${plistValue(val, indent + 1)}`,
-      )
-      .join("\n")
-    return `${pad}<dict>\n${body}\n${pad}</dict>`
-  }
-  throw new Error(`unsupported plist value: ${typeof v}`)
-}
-
-export interface ManagedProfileOptions {
-  profileUUID?: string
-  payloadUUID?: string
-  scope?: "User" | "System"
-}
-
-/**
- * A managed profile is generated once and pushed to many machines, each with
- * its own local proxy and keys — so it carries a placeholder, never this
- * machine's key. Fleets either run without key enforcement or provision
- * per-machine keys through their MDM.
- */
-const MANAGED_PLACEHOLDER_KEY = "anything"
-
-export function generateManagedProfile(
-  home: string = os.homedir(),
-  values: GatewayProfileValues = {
-    ...gatewayProfile(home),
-    inferenceGatewayApiKey: MANAGED_PLACEHOLDER_KEY,
-  },
-  opts: ManagedProfileOptions = {},
-): string {
-  const profileUUID = opts.profileUUID ?? randomUUID()
-  const payloadUUID = opts.payloadUUID ?? randomUUID()
-  const scope = opts.scope ?? "User"
-  const settings = plistValue(values, 8)
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>PayloadContent</key>
-  <array>
-    <dict>
-      <key>PayloadType</key>
-      <string>com.apple.ManagedClient.preferences</string>
-      <key>PayloadVersion</key>
-      <integer>1</integer>
-      <key>PayloadIdentifier</key>
-      <string>com.maximal.claude3p.mcx</string>
-      <key>PayloadUUID</key>
-      <string>${payloadUUID}</string>
-      <key>PayloadEnabled</key>
-      <true/>
-      <key>PayloadContent</key>
-      <dict>
-        <key>${CLAUDE_3P_PREF_DOMAIN}</key>
-        <dict>
-          <key>Forced</key>
-          <array>
-            <dict>
-              <key>mcx_preference_settings</key>
-${settings}
-            </dict>
-          </array>
-        </dict>
-      </dict>
-    </dict>
-  </array>
-  <key>PayloadType</key>
-  <string>Configuration</string>
-  <key>PayloadVersion</key>
-  <integer>1</integer>
-  <key>PayloadIdentifier</key>
-  <string>com.maximal.claude3p</string>
-  <key>PayloadUUID</key>
-  <string>${profileUUID}</string>
-  <key>PayloadDisplayName</key>
-  <string>maximal — Claude Desktop third-party gateway</string>
-  <key>PayloadDescription</key>
-  <string>Routes Claude Desktop (Cowork 3P) at the local maximal gateway (${plistEscape(values.inferenceGatewayBaseUrl)}). No Anthropic sign-in required.</string>
-  <key>PayloadOrganization</key>
-  <string>maximal</string>
-  <key>PayloadScope</key>
-  <string>${scope}</string>
-</dict>
-</plist>
-`
 }

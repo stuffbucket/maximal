@@ -182,6 +182,8 @@
   "apps-conflict-base-url": "{appName} possède déjà une valeur ANTHROPIC_BASE_URL personnalisée, définie par vous ou un autre outil. Maximal ne l’a donc pas modifiée. Supprimez ce réglage, puis réactivez le routage.",
   "apps-conflict-api-key-helper": "{appName} possède déjà une valeur apiKeyHelper personnalisée, définie par vous ou un autre outil. Maximal ne l’a donc pas modifiée. Supprimez ce réglage, puis réactivez le routage.",
   "apps-conflict-gateway-profile": "{appName} utilise déjà une passerelle configurée par vous ou un autre outil. Maximal ne l’a donc pas remplacée. Choisissez une autre configuration dans {appName}, puis réactivez le routage.",
+  "apps-take-over": "Prendre le relais",
+  "apps-takeover-body": "Maximal a trouvé une autre passerelle dans {appName} et ne l’a pas modifiée. Prendre le relais bascule {appName} vers Maximal et conserve l’autre passerelle : désactiver le routage y revient.",
   "apps-conflict-cleanup-title": "Nettoyage manuel requis",
   "apps-conflict-cleanup-detail": "Maximal a arrêté le routage de {appName}, mais a conservé les réglages modifiés après la configuration. Vérifiez les réglages de l’application et supprimez manuellement l’entrée de routage de Maximal avant de réessayer.",
   "apps-codex-shared-setting": "La CLI et l’application de bureau partagent le même réglage.",

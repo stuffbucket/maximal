@@ -182,6 +182,8 @@
   "apps-conflict-base-url": "Für {appName} ist bereits eine benutzerdefinierte ANTHROPIC_BASE_URL festgelegt, entweder von Ihnen oder einem anderen Tool. Daher hat Maximal sie nicht geändert. Entfernen Sie diese Einstellung und aktivieren Sie das Routing erneut.",
   "apps-conflict-api-key-helper": "Für {appName} ist bereits ein benutzerdefinierter apiKeyHelper festgelegt, entweder von Ihnen oder einem anderen Tool. Daher hat Maximal ihn nicht geändert. Entfernen Sie diese Einstellung und aktivieren Sie das Routing erneut.",
   "apps-conflict-gateway-profile": "{appName} verwendet bereits ein Gateway, das von Ihnen oder einem anderen Tool eingerichtet wurde. Daher hat Maximal es nicht umgestellt. Wählen Sie in {appName} eine andere Konfiguration aus und aktivieren Sie das Routing erneut.",
+  "apps-take-over": "Übernehmen",
+  "apps-takeover-body": "Maximal hat in {appName} ein anderes Gateway gefunden und es nicht geändert. „Übernehmen“ stellt {appName} auf Maximal um und behält das andere Gateway, sodass beim Deaktivieren des Routings wieder darauf umgestellt wird.",
   "apps-conflict-cleanup-title": "Manuelle Bereinigung erforderlich",
   "apps-conflict-cleanup-detail": "Maximal hat das Routing für {appName} beendet, aber Einstellungen beibehalten, die nach der Einrichtung geändert wurden. Prüfen Sie die App-Einstellungen und entfernen Sie den Maximal-Routing-Eintrag manuell, bevor Sie es erneut versuchen.",
   "apps-codex-shared-setting": "CLI und Desktop-App verwenden dieselbe Einstellung.",

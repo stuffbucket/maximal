@@ -5,6 +5,7 @@ import type { AppEntry, AppId } from "../../../proxy/client";
 import { openUrl, revealPath } from "../../../tauri/shell";
 import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { NoticeDialog } from "../../components/NoticeDialog";
 import { Switch } from "../../components/Switch";
 import { isWindows } from "../../platform";
 
@@ -33,6 +34,11 @@ const HARNESS_NAMES: Partial<Record<AppId, string>> = {
   "claude-desktop": "Claude Desktop (Cowork, Code)",
 };
 
+/** Ownership dialogs name the product people see, not the row's long name. */
+const CONFLICT_DIALOG_NAMES: Partial<Record<AppId, string>> = {
+  "claude-desktop": "Claude",
+};
+
 interface HarnessRowProps {
   app: AppEntry;
   onToggle: (
@@ -45,8 +51,12 @@ function harnessName(app: AppEntry): string {
   return HARNESS_NAMES[app.id] ?? app.name;
 }
 
+function conflictDialogName(app: AppEntry): string {
+  return CONFLICT_DIALOG_NAMES[app.id] ?? harnessName(app);
+}
+
 function conflictDetail(app: AppEntry): string {
-  const appName = harnessName(app);
+  const appName = conflictDialogName(app);
   switch (app.conflict) {
     case "other-maximal-config":
       return t("apps-override-body", { appName });
@@ -100,11 +110,16 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   const rowRef = useRef<HTMLTableRowElement>(null);
 
   const displayName = harnessName(app);
+  const dialogName = conflictDialogName(app);
   const comingSoon = app.kind === "coming-soon";
   const notInstalled = app.status === "not-installed";
   const hasConflict = !notInstalled && app.conflict !== null;
   const needsConnection = notInstalled || hasConflict;
   const canTransfer = app.conflict === "other-maximal-config";
+  // Only Claude Desktop can switch away from a gateway it didn't set up
+  // without changing it (the other profile stays saved for disable).
+  const canTakeOver =
+    app.id === "claude-desktop" && app.conflict === "foreign-gateway-profile";
   const needsWindowsRestartWarning = app.id === "claude-code" && isWindows();
   const preferredInstall =
     app.installs.find((install) => install.kind === "desktop") ??
@@ -149,9 +164,14 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
       await openOfficialInstructions(app);
       return;
     }
-    if (canTransfer) {
+    if (canTransfer || canTakeOver) {
       setConnecting(true);
-      const result = await onToggle(true, { overrideOtherMaximal: true });
+      const result = await onToggle(
+        true,
+        canTransfer
+          ? { overrideOtherMaximal: true }
+          : { overrideForeignGateway: true },
+      );
       setConnecting(false);
       if (result.ok) setConnectOpen(false);
       setRestartNotice(desktopRestartChange(app.id, true, result));
@@ -170,13 +190,15 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   const connectTitle = notInstalled
     ? t("apps-download-title", { appName: displayName })
     : canTransfer
-      ? t("apps-override-title", { appName: displayName })
-      : t("apps-connect-title", { appName: displayName });
+      ? t("apps-override-title", { appName: dialogName })
+      : t("apps-connect-title", { appName: dialogName });
   const connectBody = notInstalled
     ? t("apps-download-body", { appName: displayName })
     : canTransfer
-      ? t("apps-override-body", { appName: displayName })
-      : conflictDetail(app);
+      ? t("apps-override-body", { appName: dialogName })
+      : canTakeOver
+        ? t("apps-takeover-body", { appName: dialogName })
+        : conflictDetail(app);
   const connectConfirmLabel = notInstalled
     ? t("apps-download-confirm")
     : canTransfer
@@ -229,7 +251,27 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
           />
         )}
 
-        {!comingSoon && needsConnection && (
+        {!comingSoon && needsConnection && canTakeOver && (
+          // Maximal left the other gateway alone; Close (the default, first
+          // focus, Escape and the backdrop) keeps it that way. Take over is
+          // the explicit alternative.
+          <NoticeDialog
+            open={connectOpen}
+            title={connectTitle}
+            actionLabel={t("common-close")}
+            onDismiss={() => setConnectOpen(false)}
+            secondaryAction={{
+              label: t("apps-take-over"),
+              tone: "danger",
+              onAction: confirmConnect,
+            }}
+            busy={connecting}
+          >
+            <p>{connectBody}</p>
+          </NoticeDialog>
+        )}
+
+        {!comingSoon && needsConnection && !canTakeOver && (
           <ConfirmDialog
             open={connectOpen}
             title={connectTitle}

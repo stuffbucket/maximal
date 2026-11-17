@@ -109,7 +109,10 @@ await mock.module("~/apps/claude-desktop/config", () => ({
     home: string = ROUTE_3P_HOME,
     ...rest: Array<unknown>
   ) => (realIsApplied as (...a: Array<unknown>) => unknown)(home, ...rest),
-  configLibraryConflict: (home: string = ROUTE_3P_HOME) => realConflict(home),
+  configLibraryConflict: (
+    home: string = ROUTE_3P_HOME,
+    ...rest: Array<unknown>
+  ) => (realConflict as (...a: Array<unknown>) => unknown)(home, ...rest),
   getClaude3pDir: (home: string = ROUTE_3P_HOME, ...rest: Array<unknown>) =>
     (realGetDir as (...a: Array<unknown>) => unknown)(home, ...rest),
 }))
@@ -655,7 +658,95 @@ describe("POST /apps/claude-desktop/toggle", () => {
     })
     expect(actualDesktop.isConfigLibraryApplied(ROUTE_3P_HOME)).toBe(true)
   })
+})
 
+describe("POST /apps/claude-desktop/toggle: stale Maximal ownership", () => {
+  test("offers the transfer, not a foreign gateway, when Desktop rewrote an older Maximal's profile", async () => {
+    const app = buildApp()
+    setListeningPort(5252)
+    await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    const dir = actualDesktop.getClaude3pDir(ROUTE_3P_HOME)
+    const lib = path.join(dir, "configLibrary")
+    const metaPath = path.join(lib, "_meta.json")
+    const statePath = path.join(dir, "maximal-routing.json")
+    const readObject = (file: string) =>
+      // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse expects text in TypeScript
+      JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>
+    // A pre-ownership build's marker: no version, no owner.
+    const {
+      version: _version,
+      ownerProfileId: _owner,
+      ...v1
+    } = readObject(statePath)
+    fs.writeFileSync(statePath, `${JSON.stringify(v1, null, 2)}\n`)
+    const meta = readObject(metaPath) as {
+      appliedId: string
+      entries: Array<{ id: string; name: string }>
+    }
+    const appliedPath = path.join(lib, `${meta.appliedId}.json`)
+    // Desktop writes an earlier Maximal copy's profile back over ours, in its
+    // own formatting.
+    const earlier = {
+      ...readObject(appliedPath),
+      inferenceGatewayBaseUrl: "http://127.0.0.1:6001",
+      inferenceGatewayApiKey: "mxl_earlier_copy",
+    }
+    fs.writeFileSync(
+      path.join(lib, "earlier.json"),
+      JSON.stringify(earlier, null, 2),
+    )
+    fs.writeFileSync(
+      metaPath,
+      JSON.stringify({
+        ...meta,
+        entries: [{ id: "earlier", name: "maximal" }, ...meta.entries],
+      }),
+    )
+    fs.writeFileSync(appliedPath, JSON.stringify(earlier, null, 2))
+    setListeningPort(5151)
+
+    const desktopRow = async () => {
+      const body = (await (await app.request("/apps")).json()) as {
+        apps: Array<{ id: string; enabled: boolean; conflict: string | null }>
+      }
+      return body.apps.find((entry) => entry.id === "claude-desktop")
+    }
+    expect(await desktopRow()).toMatchObject({
+      enabled: false,
+      conflict: "other-maximal-config",
+    })
+    const before = fs.readFileSync(appliedPath, "utf8")
+    const refused = await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    expect(await refused.json()).toMatchObject({
+      enabled: false,
+      conflict: "other-maximal-config",
+    })
+    expect(fs.readFileSync(appliedPath, "utf8")).toBe(before)
+
+    const transferred = await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true, overrideOtherMaximal: true }),
+    })
+    expect(await transferred.json()).toMatchObject({
+      enabled: true,
+      conflict: null,
+    })
+    expect(await desktopRow()).toMatchObject({ enabled: true, conflict: null })
+    expect(readObject(metaPath).appliedId).toBe(meta.appliedId)
+    expect(readObject(path.join(lib, "earlier.json"))).toEqual(earlier)
+  })
+})
+
+describe("POST /apps/claude-desktop/toggle: another gateway", () => {
   test("override leaves a foreign gateway profile alone and reports why", async () => {
     const lib = path.join(
       actualDesktop.getClaude3pDir(ROUTE_3P_HOME),
@@ -695,6 +786,48 @@ describe("POST /apps/claude-desktop/toggle", () => {
     expect(body.conflict).toBe("foreign-gateway-profile")
     // The refused enable isn't recorded as the user's intent.
     expect(getConfig().apps?.claudeDesktop?.enabled).not.toBe(true)
+  })
+
+  test("Take over switches from a foreign gateway, and disable switches back", async () => {
+    const lib = path.join(
+      actualDesktop.getClaude3pDir(ROUTE_3P_HOME),
+      "configLibrary",
+    )
+    fs.mkdirSync(lib, { recursive: true })
+    const corp = JSON.stringify({
+      inferenceProvider: "gateway",
+      inferenceGatewayBaseUrl: "https://llm.corp.example",
+    })
+    fs.writeFileSync(path.join(lib, "corp.json"), corp)
+    fs.writeFileSync(
+      path.join(lib, "_meta.json"),
+      JSON.stringify({
+        appliedId: "corp",
+        entries: [{ id: "corp", name: "Work" }],
+      }),
+    )
+    const app = buildApp()
+    const toggle = (body: Record<string, boolean>) =>
+      app.request("/apps/claude-desktop/toggle", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+
+    const taken = await toggle({ enabled: true, overrideForeignGateway: true })
+
+    expect(await taken.json()).toMatchObject({ enabled: true, conflict: null })
+    expect(getConfig().apps?.claudeDesktop?.enabled).toBe(true)
+    expect(fs.readFileSync(path.join(lib, "corp.json"), "utf8")).toBe(corp)
+
+    await toggle({ enabled: false })
+
+    const meta = actualDesktop.readJsonObject(path.join(lib, "_meta.json"))
+    expect(meta).toEqual({
+      appliedId: "corp",
+      entries: [{ id: "corp", name: "Work" }],
+    })
+    expect(fs.readFileSync(path.join(lib, "corp.json"), "utf8")).toBe(corp)
   })
 
   test("disable reverts proxy config and persists enabled=false", async () => {

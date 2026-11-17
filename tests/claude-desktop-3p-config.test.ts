@@ -16,11 +16,11 @@ import {
   applyConfigLibraryProfile,
   CLAUDE_3P_PREF_DOMAIN,
   gatewayProfile,
-  generateManagedProfile,
   getClaude3pDir,
   isConfigLibraryApplied,
   revertConfigLibraryProfile,
 } from "~/apps/claude-desktop/config"
+import { generateManagedProfile } from "~/apps/claude-desktop/managed-profile"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { setListeningPort } from "~/lib/start/proxy-port"
 

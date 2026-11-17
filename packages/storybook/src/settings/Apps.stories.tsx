@@ -200,6 +200,59 @@ export const DesktopRestartAfterConnect: Story = {
   parameters: { docs: { story: { inline: false, height: "360px" } } },
 };
 
+const takeOverApp: AppEntry = {
+  ...claudeDesktop,
+  enabled: false,
+  conflict: "foreign-gateway-profile",
+};
+
+const openTakeOver = async (canvasElement: HTMLElement): Promise<HTMLElement> => {
+  await userEvent.click(
+    within(canvasElement).getByRole("button", { name: /connect/i }),
+  );
+  return within(document.body).findByRole("dialog", { name: "Connect Claude" });
+};
+
+/** Another gateway is applied: Maximal left it alone. Close is the default
+ *  (right, first focus); Take over is the explicit alternative on the left. */
+export const DesktopTakeOverDialog: Story = {
+  args: {
+    app: takeOverApp,
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ args, canvasElement }) => {
+    const dialog = await openTakeOver(canvasElement);
+    await expect(
+      within(dialog)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Take over", "Close"]);
+    await expect(within(dialog).getByRole("button", { name: "Close" })).toHaveFocus();
+    await expect(dialog).not.toHaveTextContent("Cowork");
+    await expect(args.onToggle).not.toHaveBeenCalled();
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+};
+
+/** Take over is an enable that switches away from the other gateway. */
+export const DesktopTakeOverApplied: Story = {
+  args: {
+    app: takeOverApp,
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ args, canvasElement }) => {
+    const dialog = await openTakeOver(canvasElement);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Take over" }),
+    );
+    await waitFor(() => expect(restartDialog()).toBeVisible());
+    await expect(args.onToggle).toHaveBeenCalledWith(true, {
+      overrideForeignGateway: true,
+    });
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+};
+
 /** A refused enable says nothing about restarting: the row offers Connect. */
 export const DesktopEnableRefused: Story = {
   args: {

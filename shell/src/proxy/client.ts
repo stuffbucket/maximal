@@ -335,7 +335,11 @@ type Endpoint =
       kind: "claude-desktop-toggle";
       method: "POST";
       path: "/settings/api/apps/claude-desktop/toggle";
-      body: { enabled: boolean; overrideOtherMaximal?: boolean };
+      body: {
+        enabled: boolean;
+        overrideOtherMaximal?: boolean;
+        overrideForeignGateway?: boolean;
+      };
     }
   | {
       kind: "claude-code-install-status";

@@ -182,6 +182,8 @@
   "apps-conflict-base-url": "{appName} ha già un valore ANTHROPIC_BASE_URL personalizzato, impostato da te o da un altro strumento, quindi Maximal non lo ha modificato. Rimuovi questa impostazione, quindi riattiva l’instradamento.",
   "apps-conflict-api-key-helper": "{appName} ha già un valore apiKeyHelper personalizzato, impostato da te o da un altro strumento, quindi Maximal non lo ha modificato. Rimuovi questa impostazione, quindi riattiva l’instradamento.",
   "apps-conflict-gateway-profile": "{appName} usa già un gateway configurato da te o da un altro strumento, quindi Maximal non lo ha cambiato. Scegli un’altra configurazione in {appName}, quindi riattiva l’instradamento.",
+  "apps-take-over": "Subentra",
+  "apps-takeover-body": "Maximal ha trovato un altro gateway in {appName} e non lo ha modificato. Subentrando, {appName} passa a Maximal e l’altro gateway viene conservato, quindi disattivando l’instradamento si torna a quello.",
   "apps-conflict-cleanup-title": "Pulizia manuale necessaria",
   "apps-conflict-cleanup-detail": "Maximal ha interrotto l’instradamento di {appName}, ma ha mantenuto le impostazioni modificate dopo la configurazione. Controlla le impostazioni dell’app e rimuovi manualmente la voce di instradamento di Maximal prima di riprovare.",
   "apps-codex-shared-setting": "La CLI e l’app desktop condividono la stessa impostazione.",

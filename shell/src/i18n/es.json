@@ -182,6 +182,8 @@
   "apps-conflict-base-url": "{appName} ya tiene un valor personalizado de ANTHROPIC_BASE_URL configurado por usted u otra herramienta, por lo que Maximal no lo cambió. Quite esa configuración y vuelva a activar el enrutamiento.",
   "apps-conflict-api-key-helper": "{appName} ya tiene un valor personalizado de apiKeyHelper configurado por usted u otra herramienta, por lo que Maximal no lo cambió. Quite esa configuración y vuelva a activar el enrutamiento.",
   "apps-conflict-gateway-profile": "{appName} ya usa una puerta de enlace configurada por usted u otra herramienta, por lo que Maximal no la cambió. Elija otra configuración en {appName} y vuelva a activar el enrutamiento.",
+  "apps-take-over": "Tomar el control",
+  "apps-takeover-body": "Maximal encontró otra puerta de enlace en {appName} y no la cambió. Tomar el control cambia {appName} a Maximal y conserva la otra puerta de enlace, así que al desactivar el enrutamiento se vuelve a ella.",
   "apps-conflict-cleanup-title": "Se requiere una limpieza manual",
   "apps-conflict-cleanup-detail": "Maximal dejó de enrutar {appName}, pero conservó la configuración modificada después de la instalación. Revise la configuración de la aplicación y quite manualmente la entrada de enrutamiento de Maximal antes de volver a intentarlo.",
   "apps-codex-shared-setting": "La CLI y la aplicación de escritorio comparten la misma configuración.",

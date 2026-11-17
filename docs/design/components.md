@@ -124,7 +124,13 @@ one of its buttons, nor move focus off the safe first action. Two small shapes s
 - **`NoticeDialog`** tells the person what to do after something already
   happened (e.g. "Restart Claude Desktop" once routing was switched): one
   primary action ("Got it", first focus), no Cancel and nothing to undo.
-  Escape and the backdrop acknowledge it the same way.
+  Escape and the backdrop acknowledge it the same way. It may carry one
+  explicit **secondary action** when there is a deliberate way past what
+  happened (e.g. "Take over" when Maximal left another gateway alone): a
+  ghost button before the primary (ghost destructive when it changes
+  something the person set up), never first focus, never triggered by
+  Escape, the backdrop or Enter on the focused primary. While it runs, both
+  buttons and dismissal wait.
 
 **Updates.** Every Settings way into an update — the title bar's icon
 (`btn--primary btn--icon`, named "Update Maximal to X.Y.Z" by `aria-label`

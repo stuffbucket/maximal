@@ -182,6 +182,8 @@
   "apps-conflict-base-url": "{appName} には、あなたまたは別のツールが設定したカスタムの ANTHROPIC_BASE_URL がすでにあるため、Maximal は変更しませんでした。その設定を削除してから、ルーティングをもう一度オンにしてください。",
   "apps-conflict-api-key-helper": "{appName} には、あなたまたは別のツールが設定したカスタムの apiKeyHelper がすでにあるため、Maximal は変更しませんでした。その設定を削除してから、ルーティングをもう一度オンにしてください。",
   "apps-conflict-gateway-profile": "{appName} は、あなたまたは別のツールが設定したゲートウェイをすでに使用しているため、Maximal は切り替えませんでした。{appName} で別の構成を選択してから、ルーティングをもう一度オンにしてください。",
+  "apps-take-over": "引き継ぐ",
+  "apps-takeover-body": "Maximal は {appName} で別のゲートウェイを見つけましたが、変更していません。引き継ぐと {appName} は Maximal に切り替わり、別のゲートウェイは保持されるため、ルーティングをオフにすると元に戻ります。",
   "apps-conflict-cleanup-title": "手動でのクリーンアップが必要です",
   "apps-conflict-cleanup-detail": "Maximal は {appName} のルーティングを停止しましたが、セットアップ後に変更された設定は保持しました。もう一度試す前にアプリの設定を確認し、Maximal のルーティング項目を手動で削除してください。",
   "apps-codex-shared-setting": "CLI とデスクトップアプリは同じ設定を共有します。",
