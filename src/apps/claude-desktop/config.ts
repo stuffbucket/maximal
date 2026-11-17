@@ -19,6 +19,20 @@ import {
 import { parseJsonText } from "~/lib/platform/json-text"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
+import {
+  isClaudeSealedKey,
+  keyFingerprintFor,
+  keyFingerprintMatches,
+  managedFingerprint,
+} from "./marker-evidence"
+import {
+  hasExactFields,
+  isMaximalArtifactShape,
+  isOurGatewayShape,
+  profileMatches,
+  routingPair,
+} from "./profile-shape"
+
 const USERDATA_3P_SUFFIX = "-3p"
 
 export const CLAUDE_3P_PREF_DOMAIN = "com.anthropic.claudefordesktop"
@@ -133,6 +147,8 @@ const LEGACY_GATEWAY_KEY = "anything"
  */
 const ROUTING_STATE_FILE = "maximal-routing.json"
 
+const HEX_DIGEST = /^[0-9a-f]{64}$/
+
 const RoutingStateSchema = z.object({
   version: z.literal(2).optional(),
   ownerProfileId: z.string().optional(),
@@ -140,6 +156,11 @@ const RoutingStateSchema = z.object({
   /** sha256 of the profile file as we wrote it — an edit means it's no
    *  longer ours to delete or overwrite. */
   fingerprint: z.string(),
+  /** Evidence that survives Claude sealing the key (see marker-evidence):
+   *  the managed fields except the key, and an HMAC of the plaintext key
+   *  under this profile's own secret. Absent from older markers. */
+  managedFingerprint: z.string().regex(HEX_DIGEST).optional(),
+  keyFingerprint: z.string().regex(HEX_DIGEST).optional(),
   prior: z.object({
     appliedId: z.string(),
     /** Absent key = it was absent before; restore by deleting. */
@@ -162,71 +183,6 @@ export type ConfigLibraryConflict =
   | "foreign-gateway-profile"
   | "other-maximal-config"
   | "unreadable-profile"
-
-function profileMatches(
-  existing: Record<string, unknown> | null,
-  values: GatewayProfileValues,
-): boolean {
-  if (!existing) return false
-  return (Object.keys(values) as Array<keyof GatewayProfileValues>).every(
-    (k) => JSON.stringify(existing[k]) === JSON.stringify(values[k]),
-  )
-}
-
-/** The gateway shape only we write: a 127.0.0.1 gateway with the
- *  deployment-mode chooser hidden. */
-function isOurGatewayShape(profile: Record<string, unknown> | null): boolean {
-  return (
-    profile?.inferenceProvider === "gateway"
-    && profile.disableDeploymentModeChooser === true
-    && typeof profile.inferenceGatewayBaseUrl === "string"
-    && /^http:\/\/127\.0\.0\.1:\d+$/.test(profile.inferenceGatewayBaseUrl)
-  )
-}
-
-/** The two fields that differ between Maximal copies (port and key). */
-const ROUTING_FIELDS: ReadonlySet<string> = new Set([
-  "inferenceGatewayBaseUrl",
-  "inferenceGatewayApiKey",
-])
-
-/** Exactly the fields Maximal writes, nothing more, every one except the
- *  gateway URL and key equal to this copy's values: a profile any Maximal
- *  copy wrote, whichever copy. Any other edit is the user's. */
-function isMaximalArtifactShape(
-  profile: Record<string, unknown> | null,
-  values: GatewayProfileValues,
-): profile is Record<string, unknown> {
-  if (!profile || !isOurGatewayShape(profile)) return false
-  const keys = Object.keys(values) as Array<keyof GatewayProfileValues>
-  if (
-    Object.keys(profile).length !== keys.length
-    || !keys.every((key) => Object.hasOwn(profile, key))
-  ) {
-    return false
-  }
-  if (
-    typeof profile.inferenceGatewayApiKey !== "string"
-    || profile.inferenceGatewayApiKey === ""
-  ) {
-    return false
-  }
-  return keys.every(
-    (key) =>
-      ROUTING_FIELDS.has(key)
-      || JSON.stringify(profile[key]) === JSON.stringify(values[key]),
-  )
-}
-
-function routingPair(profile: {
-  inferenceGatewayBaseUrl?: unknown
-  inferenceGatewayApiKey?: unknown
-}): string {
-  return JSON.stringify([
-    profile.inferenceGatewayBaseUrl,
-    profile.inferenceGatewayApiKey,
-  ])
-}
 
 function sha256(content: string | Buffer): string {
   return createHash("sha256").update(content).digest("hex")
@@ -445,8 +401,57 @@ class Library {
     return (
       entry?.name === OWNED_ENTRY_NAME
       && this.entryOwnership(entry, values) === "ours"
-      && profileMatches(this.profile(entry.id), values)
+      && this.profileCurrent(entry, values)
       && top.deploymentMode === "3p"
+    )
+  }
+
+  /**
+   * The marker's own profile as Maximal wrote it, except that Claude sealed
+   * the key: exactly the managed fields, every one but the key equal to what
+   * the marker recorded, and the key in Claude's sealed form. Needs the
+   * evidence a current build records; an older marker stays conservative,
+   * and the key's shape alone never proves anything.
+   */
+  sealedMaximalProfile(
+    entry: MetaEntry,
+    values: GatewayProfileValues,
+  ): boolean {
+    const { state } = this
+    if (
+      state?.version !== 2
+      || !state.ownerProfileId
+      || !state.managedFingerprint
+      || !state.keyFingerprint
+      || entry.name !== OWNED_ENTRY_NAME
+      || state.profileId !== entry.id
+    ) {
+      return false
+    }
+    const profile = this.profile(entry.id)
+    if (!profile || !hasExactFields(profile, values)) return false
+    return (
+      isClaudeSealedKey(profile.inferenceGatewayApiKey)
+      && managedFingerprint(profile, Object.keys(values))
+        === state.managedFingerprint
+    )
+  }
+
+  /** The profile says what we'd write now: byte-for-byte values, or sealed
+   *  by Claude with the marker recording exactly these fields and this key.
+   *  A rotated key or a new port is not current, so it is rewritten. */
+  profileCurrent(entry: MetaEntry, values: GatewayProfileValues): boolean {
+    if (profileMatches(this.profile(entry.id), values)) return true
+    const { state } = this
+    return (
+      state?.keyFingerprint !== undefined
+      && this.sealedMaximalProfile(entry, values)
+      && managedFingerprint({ ...values }, Object.keys(values))
+        === state.managedFingerprint
+      && keyFingerprintMatches(
+        state.keyFingerprint,
+        values.inferenceGatewayApiKey,
+      )
     )
   }
 
@@ -516,7 +521,9 @@ class Library {
           this.profilePath(entry.id),
           this.state.fingerprint,
           Object.keys(values),
-        ) || this.isStaleMaximalArtifact(entry, values)
+        )
+        || this.isStaleMaximalArtifact(entry, values)
+        || this.sealedMaximalProfile(entry, values)
       )
     }
     return (
@@ -673,11 +680,14 @@ export function applyConfigLibraryProfile(
   top.preferences = { ...readPreferences(top), coworkWebSearchEnabled: true }
   atomicWriteJson(lib.topPath, top, lib.topRaw)
 
+  const keyFingerprint = keyFingerprintFor(values.inferenceGatewayApiKey)
   const state: RoutingState = {
     version: 2,
     ownerProfileId: currentProfileId(),
     profileId,
     fingerprint: fileFingerprint(profilePath) ?? "",
+    managedFingerprint: managedFingerprint({ ...values }, Object.keys(values)),
+    ...(keyFingerprint ? { keyFingerprint } : {}),
     prior,
   }
   atomicWriteJson(lib.statePath, state, lib.stateRaw)
@@ -743,7 +753,10 @@ export function isConfigLibraryApplied(
   if (lib.stateUnreadable || lib.appliedOwnership(values) !== "ours") {
     return false
   }
-  if (!profileMatches(lib.profile(lib.meta.appliedId), values)) return false
+  const applied = lib.meta.entries.find(
+    (entry) => entry.id === lib.meta.appliedId,
+  )
+  if (!applied || !lib.profileCurrent(applied, values)) return false
   return readJsonObject(lib.topPath)?.deploymentMode === "3p"
 }
 
