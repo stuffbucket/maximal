@@ -483,6 +483,26 @@ function checkStatusAttention(pluginId: string, attention: unknown): void {
   checkStatusActions(pluginId, attention.actions)
 }
 
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+function checkStatusActivity(pluginId: string, activity: unknown): void {
+  if (
+    !isRecord(activity)
+    || !isCount(activity.activeCalls)
+    || (activity.startedAtMs !== null && !isCount(activity.startedAtMs))
+    || !isCount(activity.lastActivityAtMs)
+    || (activity.lastTool !== undefined
+      && typeof activity.lastTool !== "string")
+  ) {
+    invalidStatus(
+      pluginId,
+      "activity needs activeCalls, startedAtMs (or null), lastActivityAtMs and an optional lastTool.",
+    )
+  }
+}
+
 /** Validate and deep-copy a status (frozen). */
 export function normalizeStatus(
   pluginId: string,
@@ -502,6 +522,8 @@ export function normalizeStatus(
   if (status.actions !== undefined) checkStatusActions(pluginId, status.actions)
   if (status.attention !== undefined)
     checkStatusAttention(pluginId, status.attention)
+  if (status.activity !== undefined)
+    checkStatusActivity(pluginId, status.activity)
   const copy = structuredClone(status) as unknown as PluginStatus
   return deepFreeze(copy)
 }

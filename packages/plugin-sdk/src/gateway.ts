@@ -394,6 +394,7 @@ export type {
   ElicitRequest,
   ElicitResult,
   JsonSchemaObject,
+  PluginActivity,
   PluginKind,
   PluginManifest,
   PluginStatus,

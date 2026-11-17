@@ -99,12 +99,42 @@ const Session = z.object({
   }),
 })
 
+/** The connectors whose tool use the Sessions view lists. */
+export const ConnectorActivityId = z.enum(["workiq", "figjam"])
+
+/**
+ * A connector in use right now. It is not a session: no model, tokens or
+ * cache, and nothing in `flow_per_min` or the session counts comes from it.
+ * It carries a count, times and the latest tool's name; never a call's
+ * arguments or results.
+ */
+const ConnectorActivity = z.object({
+  connector: ConnectorActivityId,
+  /** running = a call is in progress; recent = the last one just ended. */
+  state: z.enum(["running", "recent"]),
+  /** Calls in progress (0 when recent). */
+  active_calls: z.number(),
+  /** When the oldest running call began; null when recent. */
+  started_at_ms: z.number().nullable(),
+  last_activity_at_ms: z.number(),
+  /** Past this the row is gone, whatever the next poll says. */
+  expires_at_ms: z.number(),
+  /** The latest tool's name, bounded; null when unknown. */
+  last_tool: z.string().nullable(),
+})
+
 export const SessionsResponse = z.object({
   /** Whole system: tokens not read from a cache in the trailing 60 s, plus
    *  an estimate of those streamed so far by requests in flight. */
   flow_per_min: z.number(),
   sessions: z.array(Session),
+  /** Connectors in use now. Optional while older sidecars can still serve a
+   *  newer embedded Dashboard during an update. */
+  connector_activity: z.array(ConnectorActivity).optional(),
 })
 
 export type SessionsResponse = z.infer<typeof SessionsResponse>
+export type ConnectorActivityView = NonNullable<
+  SessionsResponse["connector_activity"]
+>[number]
 export type SessionView = SessionsResponse["sessions"][number]

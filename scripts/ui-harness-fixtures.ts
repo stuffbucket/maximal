@@ -1305,6 +1305,36 @@ function figjamSession(now: number): SessionView {
   )
 }
 
+/** The live sessions plus connectors in use: Work IQ with a call running and
+ *  FigJam whose last call just ended. They are listed apart from the sessions
+ *  and change none of their counts. */
+function connectorActivitySessions(): SessionsResponse {
+  const now = Date.now()
+  return {
+    ...liveSessions(),
+    connector_activity: [
+      {
+        connector: "workiq",
+        state: "running",
+        active_calls: 2,
+        started_at_ms: now - 4_000,
+        last_activity_at_ms: now - 1_000,
+        expires_at_ms: now + 296_000,
+        last_tool: "search_mail",
+      },
+      {
+        connector: "figjam",
+        state: "recent",
+        active_calls: 0,
+        started_at_ms: null,
+        last_activity_at_ms: now - 3_000,
+        expires_at_ms: now + 7_000,
+        last_tool: "get_board",
+      },
+    ],
+  }
+}
+
 /** The live-sessions scenario: every state the Dashboard's sessions view draws.
  *  One streaming session, three warm ones with different cache confidence
  *  (observed, requested, estimated), one about to go cold, two cold (one
@@ -1953,6 +1983,11 @@ export const SCENARIOS = {
       ...busyDashboard,
       sessions: () => ({ flow_per_min: 3_100, sessions: [figjamSession(Date.now())] }),
     },
+  },
+
+  "connector-activity": {
+    ...healthy("Dashboard · live sessions with Work IQ running and FigJam just used"),
+    dashboard: { ...busyDashboard, sessions: connectorActivitySessions },
   },
 
   "connectors-off": {

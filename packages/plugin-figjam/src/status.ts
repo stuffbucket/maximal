@@ -1,4 +1,5 @@
 import type {
+  PluginActivity,
   PluginAttention,
   PluginAttentionRequest,
   PluginStatus,
@@ -30,6 +31,34 @@ export function displayName(name: string): string {
   // eslint-disable-next-line no-control-regex -- stripping control characters is the point
   const clean = name.replaceAll(/[\u0000-\u001F\u007F]/g, " ").trim()
   return clean.length > 60 ? `${clean.slice(0, 59)}…` : clean || "unnamed"
+}
+
+/** Tool use older than this is left out of the status. */
+const ACTIVITY_KEEP_MS = 60_000
+
+/**
+ * The status's `activity` from the bridge's tool counters: the tool's name
+ * and times only. Left out when no call is running and the last one is old.
+ */
+export function toPluginActivity(
+  bridge: {
+    inFlight: number
+    startedAtMs: number | null
+    lastActivityAtMs: number | null
+    lastTool: string | null
+  },
+  nowMs: number = Date.now(),
+): PluginActivity | undefined {
+  const { inFlight, lastActivityAtMs, lastTool } = bridge
+  if (lastActivityAtMs === null) return undefined
+  if (inFlight === 0 && nowMs - lastActivityAtMs > ACTIVITY_KEEP_MS)
+    return undefined
+  return {
+    activeCalls: inFlight,
+    startedAtMs: inFlight > 0 ? bridge.startedAtMs : null,
+    lastActivityAtMs,
+    ...(lastTool === null ? {} : { lastTool: displayName(lastTool) }),
+  }
 }
 
 const nameList = (names: ReadonlyArray<string>): string =>

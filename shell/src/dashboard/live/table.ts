@@ -13,12 +13,14 @@ import type { SessionsResponse } from "../../../../src/lib/token-usage/sessions-
 import { resolveLocale, t } from "../../i18n";
 import {
   COLD_ROWS,
+  type ConnectorActivity,
   type Session,
   clockFormatter,
   coldRows,
   contextMeter,
   downgradedText,
   formatCountdown,
+  liveConnectors,
   sortSessions,
 } from "./rows";
 
@@ -93,6 +95,15 @@ function setText(node: HTMLElement, text: string): void {
   node.hidden = text === "";
 }
 
+/** One connector's compact row: it is not a session, so it has no cells. */
+interface ConnectorRow {
+  tr: HTMLTableRowElement;
+  name: HTMLElement;
+  kind: HTMLElement;
+  state: HTMLElement;
+  tool: HTMLElement;
+}
+
 const isOther = (s: Session): boolean => s.id.startsWith("other:");
 
 function formatAgo(ms: number, locale: string): string {
@@ -152,6 +163,7 @@ export function mountSessionTable(
   let revealFocus: string | null = null;
 
   const rows = new Map<string, Row>();
+  const connectorRows = new Map<ConnectorActivity["connector"], ConnectorRow>();
   let shownSelected: string | null = null;
   let shownPreview: string | null = null;
   let lastArgs: Parameters<SessionTable["update"]> | null = null;
@@ -268,6 +280,44 @@ export function mountSessionTable(
       total,
       filled: null,
     };
+  }
+
+  /** A connector's row: one line across the table, apart from the sessions'
+   *  own cells, so it can't be mistaken for a session. */
+  function buildConnectorRow(): ConnectorRow {
+    const tr = el("tr", "connector-row");
+    const td = el("td", "connector-cell");
+    td.colSpan = COLUMNS.length;
+    const icon = el("span", "connector-icon");
+    icon.innerHTML = `<i data-lucide="plug" aria-hidden="true"></i>`;
+    const name = el("span", "connector-name");
+    const kind = el("span", "connector-meta");
+    const state = el("span", "connector-state");
+    const tool = el("span", "connector-meta connector-tool");
+    td.append(icon, name, kind, state, tool);
+    tr.append(td);
+    return { tr, name, kind, state, tool };
+  }
+
+  function fillConnectorRow(
+    row: ConnectorRow,
+    c: ConnectorActivity,
+    clock: (ms: number, nowMs: number) => string,
+    nowMs: number,
+  ): void {
+    row.tr.dataset.connector = c.connector;
+    row.tr.dataset.connectorState = c.state;
+    const name = t("dashboard-connectors-name", { connector: c.connector });
+    setText(row.name, name);
+    setText(row.kind, t("dashboard-connectors-kind"));
+    row.tr.title = t("dashboard-connectors-note");
+    setText(
+      row.state,
+      c.state === "running" ?
+        t("dashboard-connectors-state-running", { count: c.active_calls })
+      : t("dashboard-connectors-state-recent", { time: clock(c.last_activity_at_ms, nowMs) }),
+    );
+    setText(row.tool, c.last_tool === null ? "" : t("dashboard-connectors-tool", { tool: c.last_tool }));
   }
 
   /** Place a tick at `at` percent of the meter, or hide it. */
@@ -405,6 +455,24 @@ export function mountSessionTable(
         order.push(row.tr);
       };
       above.forEach(place);
+      // Connectors in use sit at the bottom of the live rows, before the cold
+      // ones. They are not sessions and add to no count.
+      const connectors = liveConnectors(view, nowMs);
+      const presentConnectors = new Set<string>();
+      for (const c of connectors) {
+        let row = connectorRows.get(c.connector);
+        if (!row) {
+          row = buildConnectorRow();
+          connectorRows.set(c.connector, row);
+          added = true;
+        }
+        fillConnectorRow(row, c, clock, nowMs);
+        presentConnectors.add(c.connector);
+        order.push(row.tr);
+      }
+      for (const id of connectorRows.keys()) {
+        if (!presentConnectors.has(id)) connectorRows.delete(id);
+      }
       if (below.length > 0) {
         setText(dividerCell, t("dashboard-sessions-cold-divider"));
         order.push(divider);

@@ -9,7 +9,7 @@ import { SessionsResponse } from "../../../../src/lib/token-usage/sessions-schem
 import { fetchJson } from "../fetch-json";
 import { t } from "../../i18n";
 import { mountLiveCard } from "./card";
-import { liveSessions } from "./rows";
+import { liveConnectors, liveSessions } from "./rows";
 import { mountSessionTable } from "./table";
 
 const SESSIONS_PATH = "/token-usage/sessions";
@@ -18,6 +18,10 @@ const POLL_MS = 2_000;
  *  stop the polling. */
 const FETCH_TIMEOUT_MS = POLL_MS * 5;
 const TICK_MS = 1_000;
+
+/** Whether the table has anything to show: a session, or a connector in use. */
+const hasRows = (view: SessionsResponse, nowMs: number): boolean =>
+  view.sessions.length > 0 || liveConnectors(view, nowMs).length > 0;
 
 /**
  * Start the live card and the session table inside `container` (the
@@ -83,7 +87,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
     sessionsError.hidden = !sessionsErrorVisible;
     sessionsErrorTitle.textContent = sessionsErrorVisible ? t("dashboard-error-generic") : "";
     sessionsErrorMessage.textContent = message ?? "";
-    const hasSessions = (latest?.sessions.length ?? 0) > 0;
+    const hasSessions = latest !== null && hasRows(latest, Date.now());
     sessionsEmpty.hidden = sessionsErrorVisible || hasSessions;
     card.showError(message);
   }
@@ -94,7 +98,7 @@ export function startLiveSessions(container: HTMLElement): () => void {
     if (!latest) return;
     const now = Date.now();
     const view = liveSessions(latest, now);
-    const hasSessions = view.sessions.length > 0;
+    const hasSessions = hasRows(view, now);
     sessionsEmpty.hidden = sessionsErrorVisible || hasSessions;
     sessionsTable.hidden = !hasSessions;
 

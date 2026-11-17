@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-import type { SessionView } from "../src/lib/token-usage/sessions-schema"
+import type {
+  SessionsResponse,
+  SessionView,
+} from "../src/lib/token-usage/sessions-schema"
 
 import {
   COLD_ROWS,
@@ -9,6 +12,7 @@ import {
   contextMeter,
   downgradedText,
   formatCountdown,
+  liveConnectors,
   liveSessions,
   sortSessions,
 } from "../shell/src/dashboard/live/rows"
@@ -336,5 +340,53 @@ describe("coldRows", () => {
   test("shows them all once expanded, or when they fit", () => {
     expect(coldRows(cold, true)).toEqual({ shown: cold, hidden: 0 })
     expect(coldRows(cold.slice(0, 20), false).hidden).toBe(0)
+  })
+})
+
+const connector = (
+  id: "workiq" | "figjam",
+  expires: number,
+): NonNullable<SessionsResponse["connector_activity"]>[number] => ({
+  connector: id,
+  state: "running",
+  active_calls: 1,
+  started_at_ms: NOW - 1000,
+  last_activity_at_ms: NOW - 1000,
+  expires_at_ms: expires,
+  last_tool: null,
+})
+
+describe("liveConnectors", () => {
+  test("an older sidecar sends none", () => {
+    expect(liveConnectors({ flow_per_min: 0, sessions: [] }, NOW)).toEqual([])
+  })
+
+  test("keeps the server's order and drops a row at its expiry, without a poll", () => {
+    const view: SessionsResponse = {
+      flow_per_min: 0,
+      sessions: [],
+      connector_activity: [
+        connector("workiq", NOW + 5000),
+        connector("figjam", NOW + 1),
+      ],
+    }
+    expect(liveConnectors(view, NOW).map((c) => c.connector)).toEqual([
+      "workiq",
+      "figjam",
+    ])
+    expect(liveConnectors(view, NOW + 1).map((c) => c.connector)).toEqual([
+      "workiq",
+    ])
+    expect(liveConnectors(view, NOW + 5000)).toEqual([])
+  })
+
+  test("connectors are not sessions: they never reach the session order or expiry", () => {
+    const view: SessionsResponse = {
+      flow_per_min: 0,
+      sessions: [session("s", "streaming", { rate: 1, last: NOW })],
+      connector_activity: [connector("workiq", NOW + 5000)],
+    }
+    expect(ids(sortSessions(view.sessions).above)).toEqual(["s"])
+    expect(liveSessions(view, NOW)).toBe(view)
   })
 })

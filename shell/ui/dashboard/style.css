@@ -1217,6 +1217,47 @@ html[data-embedded="true"] .lang-picker {
 .session-more__cell {
   padding: var(--space-2) var(--space-3);
 }
+/* A connector in use (Work IQ, FigJam): one quiet line across the table. It
+   is not a session, so it has no cells, no selection and no hover. */
+.connector-row > td {
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  box-shadow: inset 0 calc(var(--border-width-hairline) * -1) 0
+    var(--border-subtle);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.connector-icon {
+  display: inline-block;
+  margin-right: var(--space-2);
+  vertical-align: middle;
+}
+.connector-icon svg {
+  display: block;
+  width: 1em;
+  height: 1em;
+}
+.connector-name {
+  color: var(--text-strong);
+  font-weight: var(--weight-md);
+}
+.connector-state {
+  color: var(--text-base-color);
+}
+.connector-row[data-connector-state="running"] .connector-state {
+  color: var(--text-strong);
+}
+.connector-meta {
+  font-size: var(--text-xs);
+}
+.connector-meta::before,
+.connector-state::before {
+  margin-inline: var(--space-2);
+  content: "·";
+}
+.connector-tool {
+  font-family: var(--font-mono);
+}
 .session-context {
   display: flex;
   align-items: center;
@@ -1298,11 +1339,13 @@ html[data-embedded="true"] .lang-picker {
     text-align: right;
   }
   .session-divider,
-  .session-more {
+  .session-more,
+  .connector-row {
     display: block;
   }
   .session-divider > td,
-  .session-more > td {
+  .session-more > td,
+  .connector-row > td {
     display: block;
   }
   .session-meta {

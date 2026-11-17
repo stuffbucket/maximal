@@ -171,6 +171,42 @@ const agentSeen = new Map<string, number>()
 let chats!: ChatStore
 const pending = new Map<string, Pending>()
 let seq = 0
+// Tool use, for `BridgeStatus.activity`: the latest tool's name and when a
+// call last began or ended. Never a call's input or result.
+let lastTool: string | null = null
+let lastToolAt: number | null = null
+const MAX_TOOL_NAME = 80
+
+function beginTool(id: string, entry: Pending): void {
+  pending.set(id, entry)
+  lastTool = entry.name.slice(0, MAX_TOOL_NAME)
+  lastToolAt = entry.started
+  emit({ type: "tool-started", name: lastTool, board: entry.board.id })
+}
+
+function endTool(id: string): void {
+  const entry = pending.get(id)
+  if (!entry || !pending.delete(id)) return
+  lastToolAt = Date.now()
+  emit({
+    type: "tool-finished",
+    name: entry.name.slice(0, MAX_TOOL_NAME),
+    board: entry.board.id,
+  })
+}
+
+function toolActivity() {
+  let startedAtMs: number | null = null
+  for (const entry of pending.values())
+    if (startedAtMs === null || entry.started < startedAtMs)
+      startedAtMs = entry.started
+  return {
+    inFlight: pending.size,
+    startedAtMs,
+    lastActivityAtMs: lastToolAt,
+    lastTool,
+  }
+}
 
 const log = (line: string) =>
   console.log(`${new Date().toISOString().slice(11, 19)} ${line}`)
@@ -1320,7 +1356,7 @@ function listen(hostname: string, port: number) {
           const id = `r${++seq}`
           return new Promise<Response>((resolve) => {
             const timer = setTimeout(() => {
-              pending.delete(id)
+              endTool(id)
               resolve(
                 json(
                   {
@@ -1331,7 +1367,7 @@ function listen(hostname: string, port: number) {
                 ),
               )
             }, TIMEOUT_MS)
-            pending.set(id, {
+            beginTool(id, {
               resolve,
               timer,
               name,
@@ -1470,7 +1506,7 @@ function listen(hostname: string, port: number) {
         if (msg.type === "tool-result" && msg.id) {
           const entry = pending.get(msg.id)
           if (!entry || entry.board !== b) return
-          pending.delete(msg.id)
+          endTool(msg.id)
           clearTimeout(entry.timer)
           log(
             `${label(b)} ${msg.ok ? "ok " : "err"} ${entry.name} (${Date.now() - entry.started} ms)`,
@@ -1649,7 +1685,7 @@ function failPending(b: Board, error: string): void {
     if (entry.board !== b) continue
     clearTimeout(entry.timer)
     entry.resolve(json({ ok: false, board: b.id, error }, 503))
-    pending.delete(id)
+    endTool(id)
   }
 }
 
@@ -1663,6 +1699,8 @@ export type BridgeEvent =
       name: string
       board?: string
     }
+  /** A tool call began or ended on a board: its name only, never its input. */
+  | { type: "tool-started" | "tool-finished"; name: string; board: string }
 
 export type BoardSummary = ReturnType<typeof summary>
 export type PendingPairing = ReturnType<typeof pairView>
@@ -1680,6 +1718,8 @@ export interface BridgeStatus {
   pending: Array<PendingPairing>
   /** Paired panel installs (GET /pair). */
   clients: Array<PairedClientView>
+  /** Tool calls through the bridge: counts, times and the latest tool's name. */
+  activity: ReturnType<typeof toolActivity>
 }
 
 export interface BridgeHandle {
@@ -1756,6 +1796,8 @@ export async function startBridge(
       pairRequests.clear()
       pairHistory.clear()
       pending.clear()
+      lastTool = null
+      lastToolAt = null
       boards.clear()
       states.clear()
       agentSeen.clear()
@@ -1768,6 +1810,7 @@ export async function startBridge(
       version: BRIDGE_VERSION,
       boards: boardSummaries(),
       ...pairList(),
+      activity: toolActivity(),
     }),
     approve: (name) => pairAction("approve", name),
     deny: (name) => pairAction("deny", name),

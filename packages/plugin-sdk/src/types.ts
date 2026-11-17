@@ -296,6 +296,25 @@ export interface PluginStatus {
    * item that has gone stale still reaches the right target.
    */
   attention?: PluginAttention
+  /**
+   * Set while the plugin is serving tool calls of its own (a FigJam board
+   * being read or changed) so the app can show that it is in use. It carries
+   * counts, times and a tool name only: never a call's arguments or results.
+   * Omit it, or leave it out of the next status, when nothing is running.
+   */
+  activity?: PluginActivity
+}
+
+/** Live tool use inside a plugin; see `PluginStatus.activity`. */
+export interface PluginActivity {
+  /** Tool calls running now. */
+  activeCalls: number
+  /** When the oldest running call began (ms since the epoch); null when none runs. */
+  startedAtMs: number | null
+  /** When a call last began or ended (ms since the epoch). */
+  lastActivityAtMs: number
+  /** The tool of the latest call: its name only. */
+  lastTool?: string
 }
 
 /** What a plugin needs the person to look at now; see `PluginStatus.attention`. */

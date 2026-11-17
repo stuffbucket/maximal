@@ -26,6 +26,7 @@ import {
   RETRY_ACTION,
   SETUP_ACTION,
   type StartFailure,
+  toPluginActivity,
 } from "./status"
 
 /** Folder inside the plugin's storage that holds the Figma development plugin. */
@@ -44,6 +45,9 @@ interface PairRequest {
 // The bridge keeps its state at module level, so one runs per process. A
 // reload starts the new bridge only after the old one has let go of its port.
 let previousStop: Promise<void> = Promise.resolve()
+
+/** Tool events arrive in bursts; the status follows them at most this often. */
+const ACTIVITY_RENDER_MS = 250
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -117,6 +121,7 @@ export class FigjamController {
   #building = false
   #buildError: string | undefined
   #disposed = false
+  #activityTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(
     ctx: Context,
@@ -177,6 +182,8 @@ export class FigjamController {
         throw error
       }
       if (this.#handle === handle) this.#handle = undefined
+      clearTimeout(this.#activityTimer)
+      this.#activityTimer = undefined
       for (const request of this.#requests.values()) request.dispose()
       this.#requests.clear()
       this.#render()
@@ -271,6 +278,10 @@ export class FigjamController {
 
   #onEvent(event: BridgeEvent): void {
     if (this.#disposed) return
+    if (event.type === "tool-started" || event.type === "tool-finished") {
+      this.#renderActivitySoon()
+      return
+    }
     if (event.type === "pair-requested" && !this.#requests.has(event.name)) {
       this.#notify(event.name)
     }
@@ -281,6 +292,15 @@ export class FigjamController {
         `Could not refresh the FigJam status: ${errorMessage(error)}`,
       )
     }
+  }
+
+  /** Show tool use in the status, folding a burst of calls into one update. */
+  #renderActivitySoon(): void {
+    if (this.#activityTimer !== undefined) return
+    this.#activityTimer = setTimeout(() => {
+      this.#activityTimer = undefined
+      this.#render()
+    }, ACTIVITY_RENDER_MS)
   }
 
   #notify(name: string): void {
@@ -348,32 +368,32 @@ export class FigjamController {
   #render(): void {
     if (this.#disposed) return
     const view = this.#handle?.status()
-    this.#ctx.surface.setStatus(
-      composeStatus({
-        startFailure: this.#startFailure,
-        bridge:
-          this.#handle && view ?
-            {
-              port: this.#handle.port,
-              boards: view.boards.map((board) => {
-                const title: unknown = Reflect.get(board, "name")
-                return typeof title === "string" && title !== "" ?
-                    title
-                  : board.id
-              }),
-              pending: view.pending.map((request) => ({
-                name: request.name,
-                board: request.board,
-                user: request.user,
-              })),
-            }
-          : undefined,
-        building: this.#building,
-        folder: this.#folder,
-        buildError: this.#buildError,
-        manifestPath: path.join(this.#pluginDir, "manifest.json"),
-        registered: new Set(this.#requests.keys()),
-      }),
-    )
+    const status = composeStatus({
+      startFailure: this.#startFailure,
+      bridge:
+        this.#handle && view ?
+          {
+            port: this.#handle.port,
+            boards: view.boards.map((board) => {
+              const title: unknown = Reflect.get(board, "name")
+              return typeof title === "string" && title !== "" ?
+                  title
+                : board.id
+            }),
+            pending: view.pending.map((request) => ({
+              name: request.name,
+              board: request.board,
+              user: request.user,
+            })),
+          }
+        : undefined,
+      building: this.#building,
+      folder: this.#folder,
+      buildError: this.#buildError,
+      manifestPath: path.join(this.#pluginDir, "manifest.json"),
+      registered: new Set(this.#requests.keys()),
+    })
+    const activity = view ? toPluginActivity(view.activity) : undefined
+    this.#ctx.surface.setStatus(activity ? { ...status, activity } : status)
   }
 }

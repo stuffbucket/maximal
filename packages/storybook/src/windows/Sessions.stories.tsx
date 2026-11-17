@@ -42,6 +42,15 @@ export const LiveSessions: Story = {
   tags: ["asset", "journey", "funnel-engagement"],
 };
 /**
+ * Work IQ with a tool call running and FigJam just used, listed after the live
+ * sessions and before the cold ones. They are connector rows, not sessions:
+ * no model, tokens or cache.
+ */
+export const ConnectorActivity: Story = {
+  tags: ["asset"],
+  args: { scenario: "connector-activity" },
+};
+/**
  * A real FigJam panel session: a normal session id with the client "other",
  * labelled with the board it belongs to. It is not the folded "Other requests"
  * row, so it shows its own tokens, cache and context.
