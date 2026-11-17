@@ -99,7 +99,11 @@ The manifest is FigJam-only (`editorType: ["figjam"]`), uses
 sandbox can read `figma.fileKey`. Network access is limited to Figma's REST
 API (`https://api.figma.com`, for comments) through `allowedDomains`, and to
 Maximal (`http://localhost:4141`) and the bridge (`ws://localhost:4150`)
-through `devAllowedDomains`. Change the ports with the build flags.
+through `devAllowedDomains`. Change the ports with the build flags. The build
+stamps the same two ports into the panel's `PANEL_BUILD` line, so the panel's
+model calls, bridge socket and the bridge address in its status text always
+match the manifest allowlist. A Maximal address saved by an older panel (the
+old `4141` default) follows the build's port.
 
 ## Comments
 
@@ -199,7 +203,10 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
 - `figjam-plugin` builds into a temp folder, checks the manifest and the
   version stamp, then runs the stub tests in `test/sandbox/*.mjs` under Node.
   Each stub loads the built `code.js` in a `vm` context with a fake `figma`
-  global. They need Node rather than Bun, because Bun's `vm` doesn't keep a
+  global. `panel-ports.mjs` does the same for the built `ui.html` with fake
+  browser globals and checks, for default and non-default ports, that Maximal
+  calls, the bridge socket and the status text use the stamped ports and
+  agree with the manifest. They need Node rather than Bun, because Bun's `vm` doesn't keep a
   context's top-level `var` bindings in sync with the context object.
 - `plugin-figjam` runs the plugin conformance suite, then the real bridge on a
   spare port with a temporary data directory: a fake panel asks to pair, and
@@ -207,7 +214,9 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
   actions and the `attention` that carries them (with action ids that stay
   the same for the same panel name), that approving pairs the panel, that the
   host's Maximal port reaches the built manifest's `devAllowedDomains`, the
-  stale-folder rebuild (changed content with the same version and ports, and a missing file), the port-in-use error and that stopping the plugin
+  stale-folder rebuild (changed content with the same version and ports, a
+  missing file, and a panel stamped with other ports), the port-in-use error
+  and that stopping the plugin
   frees the port. It runs with
   `bun run plugins:test`.
 - `figjam-bridge` starts a bridge on a spare port with a temporary data

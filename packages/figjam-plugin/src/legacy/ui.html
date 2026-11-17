@@ -410,7 +410,7 @@
     <h2 id="settingsTitle">Settings</h2>
     <label class="field"><span>Maximal</span><input id="baseUrl" spellcheck="false" /></label>
     <label class="field"><span>API key</span><input id="apiKey" type="password" placeholder="Only if required" spellcheck="false" /></label>
-    <label class="check-row"><input type="checkbox" id="remote" /><span>Let Claude Code drive this board<small id="bridgeStatus">Connects to the bridge on localhost:4150</small></span></label>
+    <label class="check-row"><input type="checkbox" id="remote" /><span>Let Claude Code drive this board<small id="bridgeStatus">Connects to the bridge on this computer</small></span></label>
     <div class="bridge-row"><button type="button" class="btn" id="bridgeAct" hidden></button></div>
     <label class="check-row"><input type="checkbox" id="allowRunCode" /><span>Allow run_code<small>Agents may run arbitrary Plugin API code on this board</small></span></label>
     <div class="field" role="group" aria-labelledby="figmaTokenLabel">
@@ -444,10 +444,16 @@
 <script>
 "use strict";
 
-const DEFAULT_BASE = "http://localhost:4141";
+// The build (scripts/build.ts) rewrites this line with the ports the manifest's
+// devAllowedDomains allow, so the panel only dials what the manifest permits.
+// These are the defaults an unstamped source runs with.
+const PANEL_BUILD = {"maximalPort":4141,"bridgePort":4150};
+const LEGACY_BASE = "http://localhost:4141"; // the address older panels saved
+const DEFAULT_BASE = `http://localhost:${PANEL_BUILD.maximalPort}`;
 const PREFERRED_MODELS = ["claude-sonnet", "claude-opus", "claude-fable", "gpt-6", "gpt-5"];
 const MAX_STEPS = 30;
-const BRIDGE_URL = "ws://localhost:4150/plugin";
+const BRIDGE_HOST = `localhost:${PANEL_BUILD.bridgePort}`;
+const BRIDGE_URL = `ws://${BRIDGE_HOST}/plugin`;
 // Maximal runs on this computer, so the panel only calls a loopback host.
 const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
@@ -665,6 +671,9 @@ window.onmessage = (event) => {
   if (!msg) return;
   if (msg.type === "init") {
     settings = Object.assign({}, settings, msg.settings);
+    // Only the stamped address is in the manifest's allowlist, so a default
+    // saved by an older panel on another port could never connect.
+    if (settings.baseUrl === LEGACY_BASE) settings.baseUrl = DEFAULT_BASE;
     fileInfo = msg.file || {};
     boardId = msg.boardId || fileInfo.boardId || "";
     selection = msg.selection || [];
@@ -1316,7 +1325,7 @@ let netSince = 0; // when the current bridge trouble started; 0 = healthy
 let netTimer = null;
 let netShown = null; // the bridge issue the input is showing, if any
 let netSaid = ""; // key of the last state announced
-const BRIDGE_IDLE = "Connects to the bridge on localhost:4150";
+const BRIDGE_IDLE = `Connects to the bridge on ${BRIDGE_HOST}`;
 
 function setNet(part, s, extra) {
   net[part] = Object.assign({}, extra, { s });
@@ -1373,7 +1382,7 @@ function bridgeStatus() {
   if (!settings.remote) return settings.bridgeToken ? paired : { text: BRIDGE_IDLE, act: "" };
   switch (b.s) {
     case "connected": return { text: `Paired with this computer ✓ · ${SESSION}`, act: "forget" };
-    case "connecting": return { text: `${b.attempt ? "Reconnecting" : "Connecting"} to the bridge on localhost:4150…`, act: "" };
+    case "connecting": return { text: `${b.attempt ? "Reconnecting" : "Connecting"} to the bridge on ${BRIDGE_HOST}…`, act: "" };
     case "pending": return { text: `Waiting for approval${b.expiresAt ? ` (${mmss(b.expiresAt)})` : ""}. ${APPROVE_HINT(b.name || SESSION)}`, act: "ask" };
     case "denied": return { text: "Pairing was denied.", act: "ask" };
     case "expired": return { text: "The approval request timed out.", act: "ask" };
@@ -1382,7 +1391,7 @@ function bridgeStatus() {
     case "retrying": {
       const why = b.why === "pair-name-in-use" ? `Another request already uses the name ${SESSION}`
         : b.why === "pair-busy" ? "The bridge has too many pending requests"
-        : "Bridge isn't running on localhost:4150";
+        : `Bridge isn't running on ${BRIDGE_HOST}`;
       return { text: `${why} · ${countdown(b)} (attempt ${b.attempt})`, act: "retry" };
     }
     case "blocked": return { text: `Bridge blocked: ${b.error}`, act: "retry" };

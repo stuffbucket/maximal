@@ -5,7 +5,8 @@ import { watch } from "node:fs"
  *
  * Today the sources are the single-file `src/legacy/code.js` and
  * `src/legacy/ui.html`, copied through unchanged except for the version
- * stamp. Splitting them into modules happens behind this same entry point.
+ * stamp and the ports stamped into the panel (`PANEL_BUILD`). Splitting them
+ * into modules happens behind this same entry point.
  *
  *   bun scripts/build.ts                 # dev build → dist/dev
  *   bun scripts/build.ts --release       # release build → dist/release
@@ -33,6 +34,7 @@ function embeddedText(source: unknown, name: string): string {
 const PACKAGE_DIR = path.resolve(import.meta.dir, "..")
 const SOURCE_DIR = path.join(PACKAGE_DIR, "src")
 const VERSION_LINE = /^var PLUGIN_VERSION = "[^"\n]*"$/m
+const PANEL_BUILD_LINE = /^const PANEL_BUILD = .*;$/m
 
 export const DEFAULT_MAXIMAL_PORT = 4141
 export const DEFAULT_BRIDGE_PORT = 4150
@@ -70,6 +72,46 @@ export function stampVersion(code: string, version: string): string {
     VERSION_LINE,
     `var PLUGIN_VERSION = ${JSON.stringify(version)}`,
   )
+}
+
+function assertPort(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new RangeError(
+      `The ${name} must be a port from 1 to 65535, got ${value}.`,
+    )
+  }
+}
+
+/** The `PANEL_BUILD` line stamped into the panel for these ports. */
+export function panelBuildLine(ports: {
+  maximalPort: number
+  bridgePort: number
+}): string {
+  assertPort("Maximal port", ports.maximalPort)
+  assertPort("bridge port", ports.bridgePort)
+  const build = {
+    maximalPort: ports.maximalPort,
+    bridgePort: ports.bridgePort,
+  }
+  return `const PANEL_BUILD = ${JSON.stringify(build)};`
+}
+
+/**
+ * The panel source with its `PANEL_BUILD` line set to the ports the manifest
+ * allows, so the panel dials exactly the origins in `devAllowedDomains`.
+ */
+export function stampPanel(
+  html: string,
+  ports: { maximalPort: number; bridgePort: number },
+): string {
+  const line = panelBuildLine(ports)
+  const matches = html.match(new RegExp(PANEL_BUILD_LINE.source, "gm")) ?? []
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected exactly one PANEL_BUILD line in ui.html, found ${matches.length}.`,
+    )
+  }
+  return html.replace(PANEL_BUILD_LINE, () => line)
 }
 
 export function pluginManifest(
@@ -121,7 +163,7 @@ export async function renderPlugin(
   const resolved = resolveOptions(options)
   return {
     "code.js": stampVersion(embeddedText(codeSource, "code.js"), version),
-    "ui.html": embeddedText(uiSource, "ui.html"),
+    "ui.html": stampPanel(embeddedText(uiSource, "ui.html"), resolved),
     "manifest.json": `${JSON.stringify(pluginManifest(resolved), null, 2)}\n`,
   }
 }

@@ -213,6 +213,37 @@ describe("FigJam plugin: setup", () => {
     expect(manifest.networkAccess.devAllowedDomains).not.toContain(
       "http://localhost:4999",
     )
+    // The panel dials the same ports the manifest allows.
+    const ui = await readFile(
+      path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html"),
+      "utf8",
+    )
+    expect(ui).toContain(
+      `const PANEL_BUILD = {"maximalPort":5141,"bridgePort":${port}};`,
+    )
+  })
+
+  test("rebuilds on start when the panel was stamped with other ports", async () => {
+    const first = await load()
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const uiPath = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html")
+    const current = await readFile(uiPath, "utf8")
+    // Same version, same manifest, but a panel built for other ports.
+    const stale = current.replace(
+      /^const PANEL_BUILD = .*;$/m,
+      'const PANEL_BUILD = {"maximalPort":1,"bridgePort":2};',
+    )
+    expect(stale).not.toBe(current)
+    await writeFile(uiPath, stale)
+
+    const second = await load()
+    await waitFor(statusIs(second, "ready"))
+    expect(await readFile(uiPath, "utf8")).toBe(current)
   })
 
   test("rebuilds on start when the folder is stale", async () => {

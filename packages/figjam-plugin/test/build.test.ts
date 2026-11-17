@@ -22,6 +22,7 @@ import {
   buildPlugin,
   inspectPlugin,
   readPackageVersion,
+  stampPanel,
   stampVersion,
 } from "../scripts/build"
 
@@ -270,4 +271,79 @@ describe("sandbox", () => {
       expect(run.exitCode, output).toBe(0)
     })
   }
+})
+
+// The built panel runs against fake browser globals and must dial the same
+// ports the manifest allows: the defaults, and non-default values for both.
+describe("panel ports", () => {
+  const script = path.join(import.meta.dir, "sandbox", "panel-ports.mjs")
+  const run = (
+    dir: string,
+    ports: { maximalPort: number; bridgePort: number },
+    saved?: string,
+  ) => {
+    const result = Bun.spawnSync(
+      [
+        "node",
+        script,
+        dir,
+        String(ports.maximalPort),
+        String(ports.bridgePort),
+        ...(saved ? [saved] : []),
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    )
+    return {
+      code: result.exitCode,
+      output: `${result.stdout.toString()}${result.stderr.toString()}`,
+    }
+  }
+
+  test("default build connects to 4141 and 4150", () => {
+    const result = run(outDir, { maximalPort: 4141, bridgePort: 4150 })
+    expect(result.code, result.output).toBe(0)
+  })
+
+  test("non-default ports reach the panel's connections and status text", async () => {
+    const customDir = path.join(outDir, "custom-ports")
+    await buildPlugin({
+      outDir: customDir,
+      maximalPort: 5141,
+      bridgePort: 5150,
+    })
+    const ui = await readFile(path.join(customDir, "ui.html"), "utf8")
+    expect(ui).toContain(
+      'const PANEL_BUILD = {"maximalPort":5141,"bridgePort":5150};',
+    )
+    const result = run(customDir, { maximalPort: 5141, bridgePort: 5150 })
+    expect(result.code, result.output).toBe(0)
+  })
+
+  test("a default address saved by an older panel follows the build's port", async () => {
+    const customDir = path.join(outDir, "custom-saved")
+    await buildPlugin({
+      outDir: customDir,
+      maximalPort: 4999,
+      bridgePort: 4998,
+    })
+    const result = run(
+      customDir,
+      { maximalPort: 4999, bridgePort: 4998 },
+      "http://localhost:4141",
+    )
+    expect(result.code, result.output).toBe(0)
+  })
+
+  test("refuses ports that aren't ports", () => {
+    const line = "const PANEL_BUILD = {};"
+    expect(() =>
+      stampPanel(line, { maximalPort: 0, bridgePort: 4150 }),
+    ).toThrow("Maximal port")
+    expect(() =>
+      stampPanel(line, { maximalPort: 4141, bridgePort: Number.NaN }),
+    ).toThrow("bridge port")
+    expect(() =>
+      stampPanel("<html></html>", { maximalPort: 4141, bridgePort: 4150 }),
+    ).toThrow("found 0")
+  })
 })
