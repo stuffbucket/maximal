@@ -299,7 +299,7 @@ export const PanelLoaded: Story = {
     ).toEqual([
       "ChatGPT",
       "Claude Code",
-      "Claude Desktop (Cowork, Code)",
+      "Claude",
       "Codex CLI",
       "Copilot CLI",
       "Pi",

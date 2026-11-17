@@ -55,7 +55,7 @@ describe("Apps shell contract", () => {
     expect(row).toContain("import { Switch }")
     expect(row).toContain('t("apps-connect")')
     expect(row).toContain("<HarnessTypeIcon appId={app.id} />")
-    expect(row).toContain('"Claude Desktop (Cowork, Code)"')
+    expect(row).toContain('"Claude"')
     expect(glyphs).toContain("function TerminalGlyph")
     expect(glyphs).toContain("function WindowGlyph")
     expect(row).not.toContain("Checkbox")

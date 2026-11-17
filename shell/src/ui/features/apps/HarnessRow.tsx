@@ -30,12 +30,9 @@ const HARNESS_TYPES: Record<AppId, "terminal" | "window"> = {
   "copilot-cli": "terminal",
 };
 
+/** Anthropic calls the desktop app "Claude"; ids and config paths keep
+ *  `claude-desktop`. */
 const HARNESS_NAMES: Partial<Record<AppId, string>> = {
-  "claude-desktop": "Claude Desktop (Cowork, Code)",
-};
-
-/** Ownership dialogs name the product people see, not the row's long name. */
-const CONFLICT_DIALOG_NAMES: Partial<Record<AppId, string>> = {
   "claude-desktop": "Claude",
 };
 
@@ -51,12 +48,8 @@ function harnessName(app: AppEntry): string {
   return HARNESS_NAMES[app.id] ?? app.name;
 }
 
-function conflictDialogName(app: AppEntry): string {
-  return CONFLICT_DIALOG_NAMES[app.id] ?? harnessName(app);
-}
-
 function conflictDetail(app: AppEntry): string {
-  const appName = conflictDialogName(app);
+  const appName = harnessName(app);
   switch (app.conflict) {
     case "other-maximal-config":
       return t("apps-override-body", { appName });
@@ -110,7 +103,6 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   const rowRef = useRef<HTMLTableRowElement>(null);
 
   const displayName = harnessName(app);
-  const dialogName = conflictDialogName(app);
   const comingSoon = app.kind === "coming-soon";
   const notInstalled = app.status === "not-installed";
   const hasConflict = !notInstalled && app.conflict !== null;
@@ -190,14 +182,14 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   const connectTitle = notInstalled
     ? t("apps-download-title", { appName: displayName })
     : canTransfer
-      ? t("apps-override-title", { appName: dialogName })
-      : t("apps-connect-title", { appName: dialogName });
+      ? t("apps-override-title", { appName: displayName })
+      : t("apps-connect-title", { appName: displayName });
   const connectBody = notInstalled
     ? t("apps-download-body", { appName: displayName })
     : canTransfer
-      ? t("apps-override-body", { appName: dialogName })
+      ? t("apps-override-body", { appName: displayName })
       : canTakeOver
-        ? t("apps-takeover-body", { appName: dialogName })
+        ? t("apps-takeover-body", { appName: displayName })
         : conflictDetail(app);
   const connectConfirmLabel = notInstalled
     ? t("apps-download-confirm")

@@ -8,6 +8,8 @@ Routing ownership is profile-aware. A Maximal profile reconciles and reverts onl
 
 ## Claude Desktop ownership
 
+Settings names the app **Claude**, as Anthropic does, in its Harnesses row and its Connect, transfer and Take over dialogs; the `claude-desktop` id, API-key label and `Claude-3p` paths are unchanged.
+
 Claude Desktop routing is a `maximal` entry in Desktop's config library (`Claude-3p/configLibrary/`) plus a `maximal-routing.json` marker beside it, which records the profile id, a SHA-256 fingerprint of the profile as Maximal wrote it, the prior selection, and (since profile ownership) `version: 2` with the owning Maximal profile's id. A marker without an owner, written by an older build, is attributed by comparing the profile's gateway URL with this copy's.
 
 Desktop rewrites library profiles in its own formatting (two-space JSON, no trailing newline) and can write an earlier profile's values back over the applied one. So the marker's profile still counts as Maximal's when either:
