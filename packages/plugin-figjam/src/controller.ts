@@ -9,10 +9,7 @@ import type {
   PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
 
-import {
-  createRelayKey,
-  startBridge,
-} from "@stuffbucket/maximal-figjam-bridge/server"
+import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
 import {
   buildPlugin,
   inspectPlugin,
@@ -22,6 +19,7 @@ import path from "node:path"
 
 import type { FigjamConfig } from "./manifest"
 
+import { generationRelayKey } from "./relay-key"
 import {
   composeStatus,
   displayName,
@@ -53,13 +51,15 @@ interface PairRequest {
 // reload starts the new bridge only after the old one has let go of its port.
 let previousStop: Promise<void> = Promise.resolve()
 
-// One relay key per process hosting the bridge, in memory only. Every bridge
-// this process starts uses it, so a Retry, a config reload or a resumed
-// handoff keeps the panels already written working; a new process (Maximal
-// restarted, a new plugin generation) makes a new key and rewrites the plugin.
-// The copy stamped into the plugin folder opens nothing once this process ends.
+// One relay key per owning Maximal process, in memory only (see relay-key.ts).
+// Every bridge this generation starts uses it, so a Retry, a config reload or
+// a resumed handoff keeps the panels already written working, and the next
+// generation (a plugin inventory or settings reload) inherits the same key
+// from the parent. Only a new owning process (Maximal restarted) makes a new
+// key and rewrites the plugin. The copy stamped into the plugin folder opens
+// nothing once that process ends.
 let processRelayKey: string | undefined
-const relayKey = (): string => (processRelayKey ??= createRelayKey())
+const relayKey = (): string => (processRelayKey ??= generationRelayKey())
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)

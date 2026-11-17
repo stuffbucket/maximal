@@ -1397,7 +1397,7 @@ function bridgeStatus() {
     case "retrying": {
       const why = b.why === "pair-name-in-use" ? `Another request already uses the name ${SESSION}`
         : b.why === "pair-busy" ? "The bridge has too many pending requests"
-        : `Can't reach the bridge on ${BRIDGE_HOST} (if Maximal restarted, run the plugin again)`;
+        : `Can't reach the bridge on ${BRIDGE_HOST} (if Maximal or the bridge restarted, run the plugin again)`;
       return { text: `${why} · ${countdown(b)} (attempt ${b.attempt})`, act: "retry" };
     }
     case "blocked": return { text: `Bridge blocked: ${b.error}`, act: "retry" };

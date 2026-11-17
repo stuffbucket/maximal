@@ -22,4 +22,5 @@ export {
   type FigjamConfig,
 } from "./manifest"
 export { createFigjamPlugin } from "./plugin"
+export { initializeFigjamRelayKey } from "./relay-key"
 export { IMPORT_INSTRUCTIONS } from "./status"

@@ -35,9 +35,9 @@ build embeds them (text imports, so a compiled Maximal can write the plugin with
    their previous contents (or removed if they did not exist), so the folder
    is left as it was. A crash or power loss between renames can still leave a
    mix of old and new files; the next start finds the folder stale and
-   rebuilds it. The relay key is new for each process that hosts the bridge,
-   so after Maximal restarts, run the plugin again in Figma (a paired panel
-   reconnects without asking again).
+   rebuilds it. The relay key lasts as long as the Maximal process (plugin
+   reloads keep it; see Who can connect), so after Maximal restarts, run the
+   plugin again in Figma (a paired panel reconnects without asking again).
 3. In the Figma desktop app: **Plugins → Development → Import plugin from
    manifest…**, then choose that `manifest.json`. Run **Maximal Agent (dev)**
    on a FigJam board and tick **Let Claude Code drive this board** in its
@@ -169,13 +169,27 @@ bun run figjam -- get_board '{}' --board <name>
 with the bridge's port and relay key. Import that `manifest.json`; after
 restarting the bridge, run the plugin again.
 
+`bun run figjam:build` writes to the same `dist/dev` by default, without a
+key. Whichever ran last wins: a `figjam:build` (or `--watch` rebuild) after
+starting the bridge leaves a panel that can't connect, and starting the
+bridge overwrites an unkeyed build. Run `figjam:build` with `--out`, or the
+bridge with `FIGJAM_PLUGIN_OUT`, to keep them apart.
+
 ### Who can connect
 
 1. **Relay key.** Each bridge has a relay key: 32 random bytes, new for each
-   process that hosts it (Maximal's FigJam plugin keeps one per process, so a
-   Retry or settings change keeps it; `figjam:bridge` makes one per run). It
-   lives in memory and in the `ui.html` the host writes (mode 0600; never the
-   manifest, a log, the status or the HTTP API). The panel offers it as its
+   process that owns it. Maximal makes one when it starts (`runServer`, before
+   any plugin generation spawns) and hands it to every plugin generation
+   through `MAXIMAL_FIGJAM_RELAY_KEY`, replacing any inherited value. So a
+   Retry, a FigJam settings change, or an unrelated plugin inventory or
+   settings reload (each starts a new generation) keeps the key and the
+   plugin already imported; only restarting Maximal changes it. A plugin
+   generation started without that parent (tests, another host) makes a key
+   of its own. `figjam:bridge` makes one per run. The key
+   lives in memory, in the environment Maximal passes its plugin generations
+   (and anything they start), and in the `ui.html` the host writes (mode
+   0600; never the manifest, a log, the status or the HTTP API). The panel
+   offers it as its
    WebSocket subprotocol, and the bridge refuses an upgrade to `/plugin`
    without it (403) before any socket or pairing request exists. The Figma
    plugin iframe's origin is the opaque `null`, which any sandboxed frame on
@@ -265,7 +279,10 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
   stale-folder rebuild (changed content with the same version and ports, a
   missing file, a panel stamped with other ports, and another relay key), the
   port-in-use error and that stopping the plugin
-  frees the port. It runs with
+  frees the port. `relay-key.test.ts` runs two plugin generations as separate
+  processes (what a plugin inventory or settings reload does) and checks they
+  stamp the parent's key and leave the imported plugin unchanged, and that
+  without the parent's key each would make its own. It runs with
   `bun run plugins:test`.
 - `figjam-bridge` starts a bridge on a spare port with a temporary data
   directory and drives pairing the way the panel and the CLI do, both as a
