@@ -95,16 +95,20 @@ jobs:
           bun run build:ui
 
       # This matches the release-profile Rust compilation without producing a
-      # package. Linux deliberately clears externalBin: the desktop package uses
-      # /usr/bin/maximal from the separate maximal package. Do not create empty
-      # sidecar placeholders, which could hide a configuration regression.
+      # package. The override must mirror the linux-deb job in release.yml:
+      # Linux clears externalBin (the desktop package uses /usr/bin/maximal from
+      # the separate maximal package) and clears resources (plugin-builtins is
+      # shipped by that same package, so the desktop build has no copy and
+      # tauri-build would fail on the missing path). Do not create empty sidecar
+      # or resource placeholders, which could hide a configuration regression.
+      # tests/release-workflow-contract.test.ts compares the two overrides.
       - name: Compile the Linux shell
         if: steps.rust.outputs.cache-hit != 'true'
         working-directory: shell
         run: |
           set -euo pipefail
           bun run tauri build --no-bundle \
-            --config '{"build":{"beforeBuildCommand":""},"bundle":{"externalBin":[]}}'
+            --config '{"build":{"beforeBuildCommand":""},"bundle":{"externalBin":[],"resources":[]}}'
 
       - name: Save Cargo registry + target
         if: >-
