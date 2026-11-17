@@ -10,6 +10,7 @@
 
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import { initializeFigjamRelayKey } from "@stuffbucket/maximal-plugin-figjam"
 import consola from "consola"
 import { serve } from "srvx"
 
@@ -68,6 +69,12 @@ export interface RunServerOptions {
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
+  // One FigJam relay key for this Maximal process, replacing any inherited
+  // value, set before plugin generations spawn so every generation (each
+  // inventory or settings reload) inherits the same key and the Figma plugin
+  // already written keeps connecting.
+  initializeFigjamRelayKey()
+
   // Work around unjs/consola#357 until a release includes PR #359.
   consola.options.throttle = 0
 

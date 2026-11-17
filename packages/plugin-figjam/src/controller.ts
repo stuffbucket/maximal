@@ -12,17 +12,19 @@ import type {
 import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
 import {
   buildPlugin,
-  readPackageVersion,
+  inspectPlugin,
+  type PluginBuildOptions,
 } from "@stuffbucket/maximal-figjam-plugin/build"
-import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import type { FigjamConfig } from "./manifest"
 
+import { generationRelayKey } from "./relay-key"
 import {
   composeStatus,
   displayName,
   pairActionIds,
+  type PendingPanel,
   type PluginFolder,
   RETRY_ACTION,
   SETUP_ACTION,
@@ -49,6 +51,16 @@ interface PairRequest {
 // reload starts the new bridge only after the old one has let go of its port.
 let previousStop: Promise<void> = Promise.resolve()
 
+// One relay key per owning Maximal process, in memory only (see relay-key.ts).
+// Every bridge this generation starts uses it, so a Retry, a config reload or
+// a resumed handoff keeps the panels already written working, and the next
+// generation (a plugin inventory or settings reload) inherits the same key
+// from the parent. Only a new owning process (Maximal restarted) makes a new
+// key and rewrites the plugin. The copy stamped into the plugin folder opens
+// nothing once that process ends.
+let processRelayKey: string | undefined
+const relayKey = (): string => (processRelayKey ??= generationRelayKey())
+
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
@@ -70,37 +82,6 @@ function describeStartFailure(error: unknown, port: number): StartFailure {
     summary: "The FigJam bridge could not start",
     detail: message,
   }
-}
-
-/** Whether the files in `dir` exist and match this build and these ports. */
-async function inspectFolder(
-  dir: string,
-  ports: { bridge: number; maximal: number },
-): Promise<PluginFolder> {
-  const read = (name: string) => readFile(path.join(dir, name), "utf8")
-  let manifest: string
-  let code: string
-  try {
-    const [manifestText, codeText] = await Promise.all([
-      read("manifest.json"),
-      read("code.js"),
-      read("ui.html"),
-    ])
-    manifest = manifestText
-    code = codeText
-  } catch {
-    return "missing"
-  }
-  // The manifest names both ports in its dev domains, and code.js its version.
-  const expected = [
-    `ws://localhost:${ports.bridge}`,
-    `http://localhost:${ports.maximal}`,
-  ].map((domain) => JSON.stringify(domain))
-  const version = await readPackageVersion()
-  const current =
-    code.includes(`var PLUGIN_VERSION = ${JSON.stringify(version)}`)
-    && expected.every((domain) => manifest.includes(domain))
-  return current ? "current" : "stale"
 }
 
 /**
@@ -203,6 +184,7 @@ export class FigjamController {
       const { dataDir } = this.#options
       const started = await startBridge({
         port: this.#config.port,
+        relayKey: relayKey(),
         ...(dataDir === undefined ? {} : { dataDir }),
         onEvent: (event) => this.#onEvent(event),
       })
@@ -234,13 +216,16 @@ export class FigjamController {
     return run
   }
 
-  /** Learn what the plugin folder holds, and bring a stale one up to date. */
+  /**
+   * Learn what the plugin folder holds, and bring a stale one up to date. The
+   * managed files are compared byte for byte with what a build would write,
+   * so a source, manifest or security change rebuilds even when the version
+   * and ports are unchanged, and so does a folder holding another process's
+   * relay key.
+   */
   async #checkFolder(): Promise<void> {
     try {
-      this.#folder = await inspectFolder(this.#pluginDir, {
-        bridge: this.#config.port,
-        maximal: this.#ctx.host.maximalPort(),
-      })
+      this.#folder = await inspectPlugin(this.#pluginDir, this.#buildOptions())
     } catch (error) {
       this.#ctx.host.logger.warn(
         `Could not check the Figma plugin: ${errorMessage(error)}`,
@@ -250,17 +235,26 @@ export class FigjamController {
     if (this.#folder === "stale") await this.#build()
   }
 
+  /**
+   * The options the generated plugin is built with. The start-time check and
+   * every build (start or manual) both read this, so a folder is judged
+   * against exactly what a rebuild would write.
+   */
+  #buildOptions(): PluginBuildOptions {
+    return {
+      bridgePort: this.#handle?.port ?? this.#config.port,
+      maximalPort: this.#ctx.host.maximalPort(),
+      relayKey: relayKey(),
+    }
+  }
+
   async #build(): Promise<void> {
     if (this.#building || this.#disposed) return
     this.#building = true
     this.#buildError = undefined
     this.#render()
     try {
-      await buildPlugin({
-        outDir: this.#pluginDir,
-        bridgePort: this.#handle?.port ?? this.#config.port,
-        maximalPort: this.#ctx.host.maximalPort(),
-      })
+      await buildPlugin({ outDir: this.#pluginDir, ...this.#buildOptions() })
       this.#folder = "current"
     } catch (error) {
       this.#buildError = errorMessage(error)
@@ -276,7 +270,7 @@ export class FigjamController {
   #onEvent(event: BridgeEvent): void {
     if (this.#disposed) return
     if (event.type === "pair-requested" && !this.#requests.has(event.name)) {
-      this.#notify(event.name)
+      this.#notify(event)
     }
     try {
       this.#sync()
@@ -287,13 +281,15 @@ export class FigjamController {
     }
   }
 
-  #notify(name: string): void {
-    const shown = displayName(name)
+  #notify(event: { name: string; board?: string }): void {
+    const shown = displayName(event.name)
+    const board =
+      event.board === undefined ? undefined : displayName(event.board)
     try {
       this.#ctx.surface.notify({
         code: "figjam-pair-requested",
-        message: `A FigJam panel ("${shown}") wants to connect.`,
-        params: { name: shown },
+        message: `A FigJam panel ("${shown}")${board === undefined ? "" : ` on board "${board}"`} wants to connect.`,
+        params: { name: shown, ...(board === undefined ? {} : { board }) },
       })
     } catch (error) {
       this.#ctx.host.logger.warn(
@@ -383,7 +379,14 @@ export class FigjamController {
                     title
                   : board.id
               }),
-              pending: view.pending.map((request) => request.name),
+              pending: view.pending.map(
+                (request): PendingPanel => ({
+                  name: request.name,
+                  board: request.board,
+                  fileKey: request.fileKey,
+                  user: request.user,
+                }),
+              ),
             }
           : undefined,
         building: this.#building,
