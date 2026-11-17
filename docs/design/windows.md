@@ -56,7 +56,9 @@ key alone. Like the update icon, the access icon counts toward
 Connecting reloads the page at the same address, so every section and live
 stream starts over with the key; a write that was refused is never sent again.
 Browser calls and the live event stream (read with `fetch`) send the key in a
-header, never in a URL. None of this exists in the native window, whose
+header, never in a URL. Like EventSource, that stream ends on an HTTP error
+and reconnects only after a network failure or a drop, waiting longer each
+time up to a cap. None of this exists in the native window, whose
 credentials are unchanged.
 
 ## Where they diverge

@@ -13,6 +13,7 @@ import {
 } from "../shell/src/proxy/browser-auth"
 import {
   createEventStreamParser,
+  retryDelay,
   subscribeBrowserEvents,
 } from "../shell/src/proxy/browser-events"
 
@@ -375,6 +376,196 @@ describe("browser live events", () => {
     subscription.close()
     expect(urls).toEqual(["/settings/api/events?key=shell-key"])
     expect(calls).toHaveLength(0)
+  })
+})
+
+/** A timer the test drives: records each wait, runs a retry only when told. */
+function manualTimer() {
+  const waits: Array<number> = []
+  const pending: Array<{ run: () => void; cancelled: boolean }> = []
+  return {
+    waits,
+    pending,
+    schedule: (run: () => void, ms: number) => {
+      waits.push(ms)
+      const entry = { run, cancelled: false }
+      pending.push(entry)
+      return () => {
+        entry.cancelled = true
+      }
+    },
+    /** Run the latest retry, even if cancelled (a timer that raced close). */
+    fire: () => pending.at(-1)?.run(),
+  }
+}
+
+async function until(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !condition(); i++) await Bun.sleep(1)
+  expect(condition()).toBe(true)
+}
+
+const endedStream = (): Response =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.close()
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  )
+
+describe("browser live-event retries", () => {
+  for (const status of [400, 404, 500, 503]) {
+    test(`an HTTP ${status} ends the subscription without retrying`, async () => {
+      saveBrowserApiKey("good-key")
+      const timer = manualTimer()
+      let errors = 0
+      stubFetch(() => Response.json({ error: "nope" }, { status }))
+      const subscription = subscribeBrowserEvents(
+        { onEvent: () => {}, onError: () => errors++ },
+        { schedule: timer.schedule },
+      )
+      cleanups.push(() => subscription.close())
+      await until(() => errors === 1)
+      await Bun.sleep(5)
+      expect(calls).toHaveLength(1)
+      expect(timer.waits).toEqual([])
+      expect(browserApiKey()).toBe("good-key")
+    })
+  }
+
+  test("network failures back off, doubling up to the cap", async () => {
+    const timer = manualTimer()
+    let errors = 0
+    stubFetch(() => {
+      throw new TypeError("Failed to fetch")
+    })
+    const subscription = subscribeBrowserEvents(
+      { onEvent: () => {}, onError: () => errors++ },
+      {
+        retryDelayMs: 100,
+        maxRetryDelayMs: 800,
+        random: () => 1,
+        schedule: timer.schedule,
+      },
+    )
+    cleanups.push(() => subscription.close())
+    for (let n = 1; n <= 5; n++) {
+      await until(() => errors === n)
+      if (n < 5) timer.fire()
+    }
+    expect(timer.waits).toEqual([100, 200, 400, 800, 800])
+    expect(calls).toHaveLength(5)
+  })
+
+  test("jitter only ever shortens a wait, by at most half", () => {
+    expect(retryDelay(0, 1000, 30_000, () => 0)).toBe(500)
+    expect(retryDelay(0, 1000, 30_000, () => 0.999_999)).toBe(1000)
+    expect(retryDelay(10, 1000, 30_000, () => 0)).toBe(15_000)
+    expect(retryDelay(80, 1000, 30_000, () => 0.999_999)).toBe(30_000)
+  })
+
+  test("a stream that stayed up starts the backoff over; a brief one doesn't", async () => {
+    const timer = manualTimer()
+    let clock = 0
+    let errors = 0
+    const replies: Array<() => Response> = [
+      () => {
+        throw new TypeError("Failed to fetch")
+      },
+      () => {
+        throw new TypeError("Failed to fetch")
+      },
+      endedStream,
+      endedStream,
+    ]
+    let opens = 0
+    stubFetch(() => replies[calls.length - 1]())
+    const subscription = subscribeBrowserEvents(
+      {
+        onEvent: () => {},
+        onOpen: () => {
+          opens++
+          // The first stream stays up past the threshold; the second drops at once.
+          if (opens === 1) clock += 1000
+        },
+        onError: () => errors++,
+      },
+      {
+        retryDelayMs: 100,
+        maxRetryDelayMs: 800,
+        stableMs: 1000,
+        random: () => 1,
+        now: () => clock,
+        schedule: timer.schedule,
+      },
+    )
+    cleanups.push(() => subscription.close())
+    for (let n = 1; n <= 4; n++) {
+      await until(() => errors === n)
+      if (n < 4) timer.fire()
+    }
+    expect(timer.waits).toEqual([100, 200, 100, 200])
+  })
+
+  test("close cancels a pending retry, and a timer that races it sends nothing", async () => {
+    const timer = manualTimer()
+    let errors = 0
+    stubFetch(() => {
+      throw new TypeError("Failed to fetch")
+    })
+    const subscription = subscribeBrowserEvents(
+      { onEvent: () => {}, onError: () => errors++ },
+      { schedule: timer.schedule },
+    )
+    await until(() => errors === 1)
+    subscription.close()
+    expect(timer.pending[0].cancelled).toBe(true)
+    timer.fire()
+    await Bun.sleep(5)
+    expect(calls).toHaveLength(1)
+    expect(errors).toBe(1)
+  })
+
+  test("close while the key resolves sends no request", async () => {
+    const key = Promise.withResolvers<string | undefined>()
+    let errors = 0
+    stubFetch(endedStream)
+    const subscription = subscribeBrowserEvents(
+      { onEvent: () => {}, onError: () => errors++ },
+      { resolveKey: () => key.promise },
+    )
+    subscription.close()
+    key.resolve("late-key")
+    await Bun.sleep(5)
+    expect(calls).toHaveLength(0)
+    expect(errors).toBe(0)
+  })
+
+  test("close mid-stream neither reports an error nor reconnects", async () => {
+    const timer = manualTimer()
+    const opened = Promise.withResolvers<undefined>()
+    let errors = 0
+    stubFetch(
+      () =>
+        new Response(new ReadableStream(), {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    )
+    const subscription = subscribeBrowserEvents(
+      {
+        onEvent: () => {},
+        onOpen: () => opened.resolve(undefined),
+        onError: () => errors++,
+      },
+      { schedule: timer.schedule },
+    )
+    await opened.promise
+    subscription.close()
+    await Bun.sleep(5)
+    expect(errors).toBe(0)
+    expect(timer.waits).toEqual([])
+    expect(calls).toHaveLength(1)
   })
 })
 
