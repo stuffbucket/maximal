@@ -3,7 +3,7 @@
  * gateway.
  */
 
-import { createHash, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -20,6 +20,8 @@ import { parseJsonText } from "~/lib/platform/json-text"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 import {
+  fileFingerprint,
+  fingerprintMatches,
   isClaudeSealedKey,
   keyFingerprintFor,
   keyFingerprintMatches,
@@ -184,10 +186,6 @@ export type ConfigLibraryConflict =
   | "other-maximal-config"
   | "unreadable-profile"
 
-function sha256(content: string | Buffer): string {
-  return createHash("sha256").update(content).digest("hex")
-}
-
 function isLegacyGatewayProfile(
   profile: Record<string, unknown> | null,
 ): boolean {
@@ -236,41 +234,6 @@ export function atomicWriteJson(
     label: "Claude Desktop config",
     ...(expectedContent !== undefined ? { expectedContent } : {}),
   })
-}
-
-function fileFingerprint(file: string): string | null {
-  try {
-    return sha256(fs.readFileSync(file))
-  } catch {
-    return null
-  }
-}
-
-/**
- * Does the profile still say what the marker recorded? Claude Desktop
- * rewrites library profiles in its own formatting (no trailing newline, and
- * possibly another key order), so besides the exact bytes, the parsed
- * content serialized the way Maximal writes it also counts. Any change to a
- * value still breaks the match.
- */
-function fingerprintMatches(
-  file: string,
-  fingerprint: string,
-  keyOrder: Array<string>,
-): boolean {
-  if (fileFingerprint(file) === fingerprint) return true
-  const parsed = readJsonObject(file)
-  if (!parsed) return false
-  const candidates: Array<Record<string, unknown>> = [parsed]
-  if (
-    Object.keys(parsed).length === keyOrder.length
-    && keyOrder.every((key) => Object.hasOwn(parsed, key))
-  ) {
-    candidates.push(Object.fromEntries(keyOrder.map((k) => [k, parsed[k]])))
-  }
-  return candidates.some(
-    (value) => sha256(`${JSON.stringify(value, null, 2)}\n`) === fingerprint,
-  )
 }
 
 /** Desktop's config library, read once, with ownership resolved. */
@@ -517,11 +480,10 @@ class Library {
     if (!SAFE_PROFILE_ID.test(entry.id)) return false
     if (this.state?.profileId === entry.id) {
       return (
-        fingerprintMatches(
-          this.profilePath(entry.id),
-          this.state.fingerprint,
-          Object.keys(values),
-        )
+        fingerprintMatches(this.profilePath(entry.id), this.profile(entry.id), {
+          fingerprint: this.state.fingerprint,
+          keyOrder: Object.keys(values),
+        })
         || this.isStaleMaximalArtifact(entry, values)
         || this.sealedMaximalProfile(entry, values)
       )
@@ -658,6 +620,7 @@ export function applyConfigLibraryProfile(
   const top = readJsonObject(lib.topPath) ?? {}
   const unchanged = { dir: lib.dir, profileId, ensuredWorkspaceFolders }
   if (appliedOwnership === "ours" && lib.isCurrent(ourEntry, values, top)) {
+    if (ourEntry) backfillMarkerEvidence(lib, ourEntry, values)
     return { ...unchanged, wrote: false, conflict: null }
   }
 
@@ -680,19 +643,73 @@ export function applyConfigLibraryProfile(
   top.preferences = { ...readPreferences(top), coworkWebSearchEnabled: true }
   atomicWriteJson(lib.topPath, top, lib.topRaw)
 
-  const keyFingerprint = keyFingerprintFor(values.inferenceGatewayApiKey)
   const state: RoutingState = {
     version: 2,
     ownerProfileId: currentProfileId(),
     profileId,
     fingerprint: fileFingerprint(profilePath) ?? "",
-    managedFingerprint: managedFingerprint({ ...values }, Object.keys(values)),
-    ...(keyFingerprint ? { keyFingerprint } : {}),
+    ...markerEvidence(values),
     prior,
   }
   atomicWriteJson(lib.statePath, state, lib.stateRaw)
 
   return { ...unchanged, wrote: true, conflict: null }
+}
+
+/** The evidence a marker records for `values` (see marker-evidence). */
+function markerEvidence(
+  values: GatewayProfileValues,
+): Pick<RoutingState, "managedFingerprint" | "keyFingerprint"> {
+  const keyFingerprint = keyFingerprintFor(values.inferenceGatewayApiKey)
+  return {
+    managedFingerprint: managedFingerprint({ ...values }, Object.keys(values)),
+    ...(keyFingerprint ? { keyFingerprint } : {}),
+  }
+}
+
+/**
+ * A profile already current in plaintext needs no write, but an older
+ * marker over it lacks the evidence (or holds stale key evidence) that keeps
+ * it recognized once Claude seals the key. Rewrite only the marker, and only
+ * while the profile's bytes are exactly what that marker recorded and the
+ * profile is this copy's: an edited profile or another profile's marker is
+ * never touched.
+ */
+function backfillMarkerEvidence(
+  lib: Library,
+  entry: MetaEntry,
+  values: GatewayProfileValues,
+): void {
+  const { state } = lib
+  if (
+    !state
+    || state.profileId !== entry.id
+    || fileFingerprint(lib.profilePath(entry.id)) !== state.fingerprint
+  ) {
+    return
+  }
+  const owner = currentProfileId()
+  const evidence = markerEvidence(values)
+  const keyCurrent =
+    state.keyFingerprint !== undefined
+    && keyFingerprintMatches(
+      state.keyFingerprint,
+      values.inferenceGatewayApiKey,
+    )
+  if (
+    state.version === 2
+    && state.ownerProfileId === owner
+    && state.managedFingerprint === evidence.managedFingerprint
+    && (keyCurrent || evidence.keyFingerprint === undefined)
+  ) {
+    return
+  }
+  const { keyFingerprint: _stale, ...rest } = state
+  atomicWriteJson(
+    lib.statePath,
+    { ...rest, version: 2, ownerProfileId: owner, ...evidence },
+    lib.stateRaw,
+  )
 }
 
 /**

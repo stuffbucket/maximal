@@ -25,7 +25,10 @@ import {
   enableClaudeDesktopRouting,
   reconcileClaudeDesktopOnBoot,
 } from "~/apps/claude-desktop/reconcile"
-import { profileIdForDirectory } from "~/apps/profile-identity"
+import {
+  currentProfileId,
+  profileIdForDirectory,
+} from "~/apps/profile-identity"
 import { generateApiKey } from "~/lib/auth/api-key-helper"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { PATHS } from "~/lib/platform/paths"
@@ -210,8 +213,8 @@ describe("Claude seals the key of Maximal's own profile", () => {
   })
 })
 
-describe("the marker holds no secret", () => {
-  test("neither the key nor an unkeyed hash of it, and the secret stays private", () => {
+describe("the key evidence adds nothing secret to the marker", () => {
+  test("neither the key nor an unkeyed hash of the key, and the secret stays private", () => {
     enableWithTop({})
     const marker = fs.readFileSync(statePath(), "utf8")
     const parsed = readJson(statePath())
@@ -398,5 +401,194 @@ describe("another profile's sealed profile stays theirs", () => {
     ).toMatchObject({ wrote: true, conflict: null, profileId: id })
     expect(readJson(profilePath(id)).inferenceGatewayApiKey).toBe(key)
     expect(readJson(metaPath()).entries).toEqual([{ id, name: "maximal" }])
+  })
+})
+
+/** Turn the fresh marker into one an older build wrote: no evidence, and
+ *  for `ownerless`, no version or owner either. */
+function makeMarkerPreEvidence(ownerless = false): void {
+  const drop = new Set([
+    "managedFingerprint",
+    "keyFingerprint",
+    ...(ownerless ? ["version", "ownerProfileId"] : []),
+  ])
+  const marker = Object.fromEntries(
+    Object.entries(readJson(statePath())).filter(([field]) => !drop.has(field)),
+  )
+  fs.writeFileSync(statePath(), `${JSON.stringify(marker, null, 2)}\n`)
+}
+
+const readSecret = (): string => fs.readFileSync(secretPath(), "utf8").trim()
+
+describe("upgrading: an older marker over a current profile gets the evidence", () => {
+  test.each([
+    ["a pre-evidence marker", false],
+    ["an ownerless older marker", true],
+  ] as Array<[string, boolean]>)(
+    "%s: boot backfills only the marker, then Claude seals and later boots write nothing",
+    (_name, ownerless) => {
+      const id = enableWithTop({ unrelated: 1 })
+      makeMarkerPreEvidence(ownerless)
+      const profileBefore = fs.readFileSync(profilePath(id), "utf8")
+      const metaBefore = fs.readFileSync(metaPath(), "utf8")
+      const topBefore = fs.readFileSync(topPath(), "utf8")
+      const priorBefore = readJson(statePath()).prior
+      expect(isConfigLibraryApplied(home)).toBe(true)
+
+      reconcileClaudeDesktopOnBoot(true, home)
+
+      const marker = readJson(statePath())
+      expect(marker).toMatchObject({
+        version: 2,
+        ownerProfileId: currentProfileId(),
+        profileId: id,
+        prior: priorBefore,
+      })
+      expect(marker.managedFingerprint).toMatch(/^[0-9a-f]{64}$/)
+      expect(marker.keyFingerprint).toMatch(/^[0-9a-f]{64}$/)
+      expect(fs.readFileSync(profilePath(id), "utf8")).toBe(profileBefore)
+      expect(fs.readFileSync(metaPath(), "utf8")).toBe(metaBefore)
+      expect(fs.readFileSync(topPath(), "utf8")).toBe(topBefore)
+
+      const backfilled = fs.readFileSync(statePath(), "utf8")
+      reconcileClaudeDesktopOnBoot(true, home)
+      expect(fs.readFileSync(statePath(), "utf8")).toBe(backfilled)
+
+      claudeSeals(id)
+      const sealed = snapshotTree()
+      expect(isConfigLibraryApplied(home)).toBe(true)
+      expect(configLibraryConflict(home)).toBeNull()
+      reconcileClaudeDesktopOnBoot(true, home)
+      reconcileClaudeDesktopOnBoot(true, home)
+      expect(snapshotTree()).toEqual(sealed)
+    },
+  )
+
+  test("stale key evidence over a current profile is refreshed, not rewritten", () => {
+    const id = enableWithTop({})
+    const marker = readJson(statePath())
+    marker.keyFingerprint = "0".repeat(64)
+    fs.writeFileSync(statePath(), `${JSON.stringify(marker, null, 2)}\n`)
+    const profileBefore = fs.readFileSync(profilePath(id), "utf8")
+
+    reconcileClaudeDesktopOnBoot(true, home)
+
+    expect(readJson(statePath()).keyFingerprint).not.toBe("0".repeat(64))
+    expect(fs.readFileSync(profilePath(id), "utf8")).toBe(profileBefore)
+    claudeSeals(id)
+    expect(isConfigLibraryApplied(home)).toBe(true)
+  })
+
+  test("another profile's older marker is never backfilled", () => {
+    enableWithTop({})
+    makeMarkerPreEvidence()
+    const marker = readJson(statePath())
+    marker.ownerProfileId = profileIdForDirectory(path.join(home, "other"))
+    fs.writeFileSync(statePath(), JSON.stringify(marker))
+    const before = snapshotTree()
+
+    reconcileClaudeDesktopOnBoot(true, home)
+    applyConfigLibraryProfile(home)
+
+    expect(snapshotTree()).toEqual(before)
+  })
+
+  test("an older marker over a profile the person edited is never backfilled", () => {
+    const id = enableWithTop({})
+    makeMarkerPreEvidence()
+    const profile = readJson(profilePath(id))
+    profile.allowedWorkspaceFolders = ["/mine"]
+    fs.writeFileSync(profilePath(id), JSON.stringify(profile, null, 2))
+    const before = snapshotTree()
+
+    reconcileClaudeDesktopOnBoot(true, home)
+
+    expect(snapshotTree()).toEqual(before)
+  })
+
+  test("an older marker whose bytes no longer match is left as it is", () => {
+    // Conservative by design: only the exact bytes the marker recorded
+    // prove the plaintext profile is the one it describes.
+    const id = enableWithTop({})
+    makeMarkerPreEvidence()
+    const profile = readJson(profilePath(id))
+    fs.writeFileSync(profilePath(id), JSON.stringify(profile, null, 2))
+    const marker = fs.readFileSync(statePath(), "utf8")
+
+    reconcileClaudeDesktopOnBoot(true, home)
+
+    expect(fs.readFileSync(statePath(), "utf8")).toBe(marker)
+  })
+})
+
+describe("the marker secret recovers from a crash or corruption", () => {
+  afterEach(() => {
+    fs.rmSync(secretPath(), { force: true })
+  })
+
+  test.each([
+    ["an empty file (a crash mid-write)", ""],
+    ["garbage", "not a secret\n"],
+    ["a short hex value", "abc123\n"],
+  ])("%s is replaced with an owner-only secret", (_name, content) => {
+    fs.mkdirSync(path.dirname(secretPath()), { recursive: true })
+    fs.writeFileSync(secretPath(), content)
+
+    enableWithTop({})
+
+    expect(readSecret()).toMatch(/^[0-9a-f]{64}$/)
+    expect(fs.statSync(secretPath()).mode & 0o777).toBe(0o600)
+    expect(readJson(statePath()).keyFingerprint).toMatch(/^[0-9a-f]{64}$/)
+    expect(isConfigLibraryApplied(home)).toBe(true)
+  })
+
+  test("a temp file a crash left behind doesn't get in the way", () => {
+    fs.rmSync(secretPath(), { force: true })
+    fs.mkdirSync(path.dirname(secretPath()), { recursive: true })
+    fs.writeFileSync(`${secretPath()}.999.deadbeef0000.tmp`, "")
+
+    enableWithTop({})
+
+    expect(readSecret()).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  test("a valid secret is never replaced", () => {
+    const id = enableWithTop({})
+    const first = readSecret()
+    claudeSeals(id)
+    useKey(generateApiKey())
+    reconcileClaudeDesktopOnBoot(true, home)
+
+    expect(readSecret()).toBe(first)
+  })
+
+  test("corrupting it after Claude sealed costs one rewrite, never ownership", () => {
+    const id = enableWithTop({})
+    claudeSeals(id)
+    fs.writeFileSync(secretPath(), "")
+
+    expect(isConfigLibraryApplied(home)).toBe(false)
+    expect(configLibraryConflict(home)).toBeNull()
+    expect(applyConfigLibraryProfile(home)).toMatchObject({
+      wrote: true,
+      profileId: id,
+    })
+    expect(readSecret()).toMatch(/^[0-9a-f]{64}$/)
+    claudeSeals(id)
+    expect(isConfigLibraryApplied(home)).toBe(true)
+  })
+
+  test("a link in its place is never used or replaced", () => {
+    const target = path.join(home, "planted-secret")
+    fs.writeFileSync(target, `${"a".repeat(64)}\n`)
+    fs.rmSync(secretPath(), { force: true })
+    fs.mkdirSync(path.dirname(secretPath()), { recursive: true })
+    fs.symlinkSync(target, secretPath())
+
+    enableWithTop({})
+
+    expect(fs.lstatSync(secretPath()).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(target, "utf8")).toBe(`${"a".repeat(64)}\n`)
+    expect(readJson(statePath()).keyFingerprint).toBeUndefined()
   })
 })
