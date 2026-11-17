@@ -241,6 +241,51 @@ describe("FigJam plugin: setup", () => {
     await waitFor(statusIs(second, "ready"))
     expect(await readFile(codePath, "utf8")).toBe(current)
   })
+
+  test("rebuilds on start when generated content differs but version and ports match", async () => {
+    const first = await load()
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const dir = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR)
+    const expected: Record<string, string> = {}
+    for (const name of ["code.js", "ui.html", "manifest.json"]) {
+      expected[name] = await readFile(path.join(dir, name), "utf8")
+    }
+    // The same version and ports, but the sandbox, panel and manifest differ.
+    await writeFile(path.join(dir, "code.js"), `${expected["code.js"]}\n// old`)
+    await writeFile(path.join(dir, "ui.html"), "<!-- old panel -->")
+    await writeFile(
+      path.join(dir, "manifest.json"),
+      expected["manifest.json"].replace('"api": "1.0.0"', '"api": "0.9.0"'),
+    )
+
+    const second = await load()
+    await waitFor(statusIs(second, "ready"))
+    for (const [name, contents] of Object.entries(expected)) {
+      expect(await readFile(path.join(dir, name), "utf8")).toBe(contents)
+    }
+  })
+
+  test("rebuilds on start when a managed file is missing", async () => {
+    const first = await load()
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const uiPath = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html")
+    const panel = await readFile(uiPath, "utf8")
+    await rm(uiPath)
+
+    const second = await load()
+    await waitFor(statusIs(second, "ready"))
+    expect(await readFile(uiPath, "utf8")).toBe(panel)
+  })
 })
 
 describe("FigJam plugin: pairing", () => {

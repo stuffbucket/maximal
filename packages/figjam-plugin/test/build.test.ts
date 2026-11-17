@@ -1,9 +1,30 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test"
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { buildPlugin, readPackageVersion, stampVersion } from "../scripts/build"
+import {
+  buildPlugin,
+  inspectPlugin,
+  readPackageVersion,
+  renderPlugin,
+  stampVersion,
+} from "../scripts/build"
 
 let outDir: string
 
@@ -65,6 +86,73 @@ describe("build", () => {
       allowedDomains: ["https://api.figma.com"],
       devAllowedDomains: ["http://localhost:5141", "ws://localhost:5150"],
     })
+  })
+})
+
+describe("freshness", () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "figjam-plugin-fresh-"))
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test("is missing before a build, current after, and stale on any byte change", async () => {
+    expect(await inspectPlugin(dir, {})).toBe("missing")
+    await buildPlugin({ outDir: dir })
+    expect(await inspectPlugin(dir, {})).toBe("current")
+    for (const name of ["code.js", "ui.html", "manifest.json"]) {
+      const file = path.join(dir, name)
+      const original = await readFile(file, "utf8")
+      await writeFile(file, `${original} `)
+      expect(await inspectPlugin(dir, {}), name).toBe("stale")
+      await writeFile(file, original)
+      expect(await inspectPlugin(dir, {}), name).toBe("current")
+    }
+  })
+
+  test("a missing managed file is stale, and ports are part of the content", async () => {
+    await buildPlugin({ outDir: dir, maximalPort: 5141, bridgePort: 5150 })
+    expect(
+      await inspectPlugin(dir, { maximalPort: 5141, bridgePort: 5150 }),
+    ).toBe("current")
+    expect(
+      await inspectPlugin(dir, { maximalPort: 5141, bridgePort: 5151 }),
+    ).toBe("stale")
+    await rm(path.join(dir, "ui.html"))
+    expect(
+      await inspectPlugin(dir, { maximalPort: 5141, bridgePort: 5150 }),
+    ).toBe("stale")
+  })
+
+  test("files outside the managed set are ignored, and a build leaves no temp files", async () => {
+    await buildPlugin({ outDir: dir })
+    await writeFile(path.join(dir, "notes.txt"), "mine")
+    expect(await inspectPlugin(dir, {})).toBe("current")
+    expect((await readdir(dir)).sort()).toEqual([
+      "code.js",
+      "manifest.json",
+      "notes.txt",
+      "ui.html",
+    ])
+  })
+
+  test("a failed write leaves the folder as it was and removes temp files", async () => {
+    await buildPlugin({ outDir: dir })
+    const before = await renderPlugin({})
+    // A directory where a managed file belongs makes the final rename fail.
+    await rm(path.join(dir, "ui.html"))
+    await mkdir(path.join(dir, "ui.html"))
+    const failed = await buildPlugin({ outDir: dir }).then(
+      () => false,
+      () => true,
+    )
+    expect(failed).toBe(true)
+    expect((await readdir(dir)).filter((n) => n.endsWith(".tmp"))).toEqual([])
+    expect(await readFile(path.join(dir, "manifest.json"), "utf8")).toBe(
+      before["manifest.json"],
+    )
   })
 })
 

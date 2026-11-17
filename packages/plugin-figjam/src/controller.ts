@@ -12,9 +12,8 @@ import type {
 import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
 import {
   buildPlugin,
-  readPackageVersion,
+  inspectPlugin,
 } from "@stuffbucket/maximal-figjam-plugin/build"
-import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import type { FigjamConfig } from "./manifest"
@@ -70,37 +69,6 @@ function describeStartFailure(error: unknown, port: number): StartFailure {
     summary: "The FigJam bridge could not start",
     detail: message,
   }
-}
-
-/** Whether the files in `dir` exist and match this build and these ports. */
-async function inspectFolder(
-  dir: string,
-  ports: { bridge: number; maximal: number },
-): Promise<PluginFolder> {
-  const read = (name: string) => readFile(path.join(dir, name), "utf8")
-  let manifest: string
-  let code: string
-  try {
-    const [manifestText, codeText] = await Promise.all([
-      read("manifest.json"),
-      read("code.js"),
-      read("ui.html"),
-    ])
-    manifest = manifestText
-    code = codeText
-  } catch {
-    return "missing"
-  }
-  // The manifest names both ports in its dev domains, and code.js its version.
-  const expected = [
-    `ws://localhost:${ports.bridge}`,
-    `http://localhost:${ports.maximal}`,
-  ].map((domain) => JSON.stringify(domain))
-  const version = await readPackageVersion()
-  const current =
-    code.includes(`var PLUGIN_VERSION = ${JSON.stringify(version)}`)
-    && expected.every((domain) => manifest.includes(domain))
-  return current ? "current" : "stale"
 }
 
 /**
@@ -234,13 +202,15 @@ export class FigjamController {
     return run
   }
 
-  /** Learn what the plugin folder holds, and bring a stale one up to date. */
+  /**
+   * Learn what the plugin folder holds, and bring a stale one up to date. The
+   * managed files are compared byte for byte with what a build would write,
+   * so a source, manifest or security change rebuilds even when the version
+   * and ports are unchanged.
+   */
   async #checkFolder(): Promise<void> {
     try {
-      this.#folder = await inspectFolder(this.#pluginDir, {
-        bridge: this.#config.port,
-        maximal: this.#ctx.host.maximalPort(),
-      })
+      this.#folder = await inspectPlugin(this.#pluginDir, this.#buildOptions())
     } catch (error) {
       this.#ctx.host.logger.warn(
         `Could not check the Figma plugin: ${errorMessage(error)}`,
@@ -250,17 +220,21 @@ export class FigjamController {
     if (this.#folder === "stale") await this.#build()
   }
 
+  /** The ports the generated plugin must name, for building and for checking. */
+  #buildOptions(): { bridgePort: number; maximalPort: number } {
+    return {
+      bridgePort: this.#handle?.port ?? this.#config.port,
+      maximalPort: this.#ctx.host.maximalPort(),
+    }
+  }
+
   async #build(): Promise<void> {
     if (this.#building || this.#disposed) return
     this.#building = true
     this.#buildError = undefined
     this.#render()
     try {
-      await buildPlugin({
-        outDir: this.#pluginDir,
-        bridgePort: this.#handle?.port ?? this.#config.port,
-        maximalPort: this.#ctx.host.maximalPort(),
-      })
+      await buildPlugin({ outDir: this.#pluginDir, ...this.#buildOptions() })
       this.#folder = "current"
     } catch (error) {
       this.#buildError = errorMessage(error)

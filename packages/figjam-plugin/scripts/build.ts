@@ -12,7 +12,7 @@ import { watch } from "node:fs"
  *   bun scripts/build.ts --out <dir>     # write somewhere else
  *   bun scripts/build.ts --watch         # rebuild when src/ changes
  */
-import { mkdir, rename, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 // Embedded when bundled, so a compiled Maximal can write the plugin without
@@ -96,32 +96,92 @@ export function pluginManifest(
   }
 }
 
-// Write to a temp name and rename, so Figma never reads a half-written file.
-async function writeAtomic(file: string, contents: string): Promise<void> {
-  const temp = `${file}.${process.pid}.tmp`
-  await writeFile(temp, contents)
-  await rename(temp, file)
-}
+type PluginFiles = Record<"code.js" | "manifest.json" | "ui.html", string>
+type FolderState = "missing" | "stale" | "current"
 
-export async function buildPlugin(options: BuildOptions): Promise<BuildResult> {
-  const version = await readPackageVersion()
-  const resolved = {
+function resolveOptions(
+  options: Omit<BuildOptions, "outDir">,
+): Required<Omit<BuildOptions, "outDir">> {
+  return {
     release: options.release ?? false,
     maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
     bridgePort: options.bridgePort ?? DEFAULT_BRIDGE_PORT,
   }
-  await mkdir(options.outDir, { recursive: true })
-  const files = {
+}
+
+/**
+ * The exact files a build writes, by name. Pure: nothing touches the disk.
+ * These three are the plugin's managed outputs; a folder is current only when
+ * every one holds exactly these bytes.
+ */
+export async function renderPlugin(
+  options: Omit<BuildOptions, "outDir">,
+): Promise<PluginFiles> {
+  const version = await readPackageVersion()
+  const resolved = resolveOptions(options)
+  return {
     "code.js": stampVersion(embeddedText(codeSource, "code.js"), version),
     "ui.html": embeddedText(uiSource, "ui.html"),
     "manifest.json": `${JSON.stringify(pluginManifest(resolved), null, 2)}\n`,
   }
-  await Promise.all(
-    Object.entries(files).map(([name, contents]) =>
-      writeAtomic(path.join(options.outDir, name), contents),
-    ),
+}
+
+/**
+ * How a folder compares with what `options` would build, byte for byte:
+ * `missing` when none of the managed files exist, `current` when all three
+ * match, `stale` otherwise (a file differs, or only some exist). Files outside
+ * the managed set are not the build's, so they are ignored.
+ */
+export async function inspectPlugin(
+  outDir: string,
+  options: Omit<BuildOptions, "outDir">,
+): Promise<FolderState> {
+  const expected = await renderPlugin(options)
+  const found = await Promise.all(
+    Object.entries(expected).map(async ([name, contents]) => {
+      try {
+        const actual = await readFile(path.join(outDir, name))
+        return actual.equals(Buffer.from(contents)) ? "match" : "differs"
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent"
+        throw error
+      }
+    }),
   )
-  return { outDir: options.outDir, version, files: Object.keys(files) }
+  if (found.every((state) => state === "absent")) return "missing"
+  return found.every((state) => state === "match") ? "current" : "stale"
+}
+
+/**
+ * Write every file to a temp name first, then rename them into place, so
+ * Figma never reads a half-written file and a failed write leaves the managed
+ * files as they were (the temp files are removed).
+ */
+async function writeAll(outDir: string, files: PluginFiles): Promise<void> {
+  const staged = Object.entries(files).map(([name, contents]) => ({
+    final: path.join(outDir, name),
+    temp: path.join(outDir, `${name}.${process.pid}.tmp`),
+    contents,
+  }))
+  try {
+    await Promise.all(staged.map((f) => writeFile(f.temp, f.contents)))
+    for (const f of staged) await rename(f.temp, f.final)
+  } catch (error) {
+    await Promise.all(staged.map((f) => rm(f.temp, { force: true })))
+    throw error
+  }
+}
+
+export async function buildPlugin(options: BuildOptions): Promise<BuildResult> {
+  const { outDir, ...rest } = options
+  const files = await renderPlugin(rest)
+  await mkdir(outDir, { recursive: true })
+  await writeAll(outDir, files)
+  return {
+    outDir,
+    version: await readPackageVersion(),
+    files: Object.keys(files),
+  }
 }
 
 function parseArgs(argv: Array<string>): BuildOptions & { watch: boolean } {

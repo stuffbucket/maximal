@@ -24,8 +24,12 @@ build embeds them (text imports, so a compiled Maximal can write the plugin with
    default because it opens a local port (4150, changeable in its settings).
 2. Click **Set up the Figma plugin**. Maximal builds the development plugin
    into `<app dir>/plugins/figjam/figma-plugin/` and shows the path of its
-   `manifest.json`. The folder is rebuilt on start when its version or ports no
-   longer match, and **Rebuild the Figma plugin** does it on demand.
+   `manifest.json`. On start, Maximal compares `manifest.json`, `code.js` and `ui.html` byte
+   for byte with what a build would write (the ports it was given included), and
+   rebuilds when any differs or is missing, even if the version and ports are
+   unchanged. Other files in the folder are left alone. **Rebuild the Figma
+   plugin** does it on demand. A rebuild writes all three files to temp names,
+   then renames them into place.
 3. In the Figma desktop app: **Plugins → Development → Import plugin from
    manifest…**, then choose that `manifest.json`. Run **Maximal Agent (dev)**
    on a FigJam board and tick **Let Claude Code drive this board** in its
@@ -198,7 +202,7 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
   actions and the `attention` that carries them (with action ids that stay
   the same for the same panel name), that approving pairs the panel, that the
   host's Maximal port reaches the built manifest's `devAllowedDomains`, the
-  stale-folder rebuild, the port-in-use error and that stopping the plugin
+  stale-folder rebuild (changed content with the same version and ports, and a missing file), the port-in-use error and that stopping the plugin
   frees the port. It runs with
   `bun run plugins:test`.
 - `figjam-bridge` starts a bridge on a spare port with a temporary data
