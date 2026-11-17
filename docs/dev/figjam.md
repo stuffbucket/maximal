@@ -94,16 +94,19 @@ loopback port of its own, which is internal to the panel's path).
 
 | Route | Does |
 |---|---|
-| `GET /figjam/bridge.json` | JSON metadata: `{ service: "maximal-figjam-bridge", schema: 1, available, reason?, profile: { kind, id }, maximal: { version }, panel: { path } }`. `available: false` comes with a `503` and a `reason` (`disabled`, `starting`, `error`, `unavailable`). It carries no bridge port, no URL to the bridge, no token and no path on disk. |
-| `GET /figjam/plugin` | WebSocket upgrade (`ws://localhost:<maximal port>/figjam/plugin`). `src/lib/figjam/relay.ts` copies frames both ways to the bridge's own `/plugin` socket and passes the bridge's close codes through (pairing denied, expired, unpaired). It never reads a frame, so the pairing token and tool calls stay between the panel and the bridge. |
+| `GET /figjam/bridge.json` | JSON metadata: `{ service: "maximal-figjam-bridge", schema: 1, available, reason?, profile: { kind, id }, maximal: { version }, panel: { path } }`. `available: false` comes with a `503` and a `reason` (`disabled`, `starting`, `error`, `unavailable`). It carries no bridge port, no URL to the bridge, no token and no path on disk. The opaque-origin panel presents its per-process relay capability in `x-maximal-figjam-relay-key`. |
+| `GET /figjam/plugin` | WebSocket upgrade (`ws://localhost:<maximal port>/figjam/plugin`). The panel presents the same capability as a WebSocket subprotocol, which the server selects and echoes. `src/lib/figjam/relay.ts` copies frames both ways to the bridge's own `/plugin` socket and passes the bridge's close codes through (pairing denied, expired, unpaired). It never reads a frame, so the pairing token and tool calls stay between the panel and the bridge. Pre-open and socket backpressure are bounded at 64 MiB; overflow closes both peers instead of dropping frames. |
 
 The parent learns where the bridge listens from the plugin's own status (its
 **Port** fact), reading it on every request, so a generation handoff or a
 restart is followed without any cache. Both routes answer only callers on this
-computer (anyone else gets a plain 404) and only requests with no `Origin` or
-`Origin: null`, which is the Figma plugin frame: the same allowlist the
-bridge's own socket applies, so a web page can't use them. They need no API key
-(a WebSocket can't send one), like `/mcp`.
+computer (anyone else gets a plain 404). A request without `Origin`, as local
+CLI diagnostics send, may proceed; an opaque browser request (`Origin: null`)
+must also present the fresh per-process relay capability stamped into that
+profile's staged `ui.html`. `Origin: null` alone is not trusted because any
+sandboxed opaque-origin frame can send it. Other browser origins are refused.
+The capability is never put in the manifest, a URL, a response or a log. The
+routes need no normal API key (a WebSocket can't send one), like `/mcp`.
 
 The panel asks `bridge.json` first (so "FigJam is switched off", "this plugin
 was built for another profile" and "this Maximal is too old" are said instead
@@ -138,7 +141,9 @@ own bridge pairings, so profiles must not share a plugin id.
   that profile's own data directory (for `app:dev`, the persisted Tauri profile
   for the worktree), so one **Import plugin from manifest…** per profile
   stays valid across restarts, rebuilds and port changes. A changed profile id
-  or panel build rewrites the same folder.
+  or panel build rewrites the same folder. A partially populated folder (for
+  example, one imported build file was deleted) is stale and is repaired on
+  startup; only a wholly absent folder remains first-time setup.
 - The panel is stamped with the profile it was built for (`PANEL_BUILD` in
   `ui.html`, written by `scripts/build.ts`) and refuses a Maximal whose
   `bridge.json` names another profile, so a plugin imported from one profile
@@ -250,7 +255,7 @@ Files live under Maximal's data directory, `<data>/figjam/`:
 | File | Holds |
 |---|---|
 | `chats.sqlite` | Chats per board, searchable (FTS5) |
-| `clients.json` | Approved panels (token hashes only, mode 0600) |
+| `clients.json` | Approved panels (token hashes only, mode 0600). Embedded and standalone bridge processes coordinate updates with a short-lived cross-process lock and atomic rename, so approve, forget and `lastSeen` changes cannot overwrite one another. |
 | `pairing-token` | The admin token for HTTP callers (mode 0600) |
 | `exports/` | Images written by `export_png` |
 
@@ -274,10 +279,10 @@ const bridge = await startBridge({
 })
 bridge.port // the port actually bound
 bridge.preferredPort // the one asked for; differs when it was taken
-bridge.status() // { port, preferredPort, version, boards, pending, clients }
+bridge.status() // { port, preferredPort, version, boards, pending, clients, activity }
 await bridge.approve("grumpy-lynx") // name optional when one request is pending
 await bridge.deny("grumpy-lynx")
-bridge.forget(clientId)
+await bridge.forget(clientId)
 await bridge.stop() // closes sockets and the listener, frees the port
 ```
 
@@ -316,14 +321,16 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
   `bun run plugins:test`.
 - `figjam-bridge` starts a bridge on a spare port with a temporary data
   directory and drives pairing the way the panel and the CLI do, both as a
-  subprocess (the CLI path) and in-process through `startBridge`, and checks
-  the preferred-port choice and the walk upward when it is taken.
+  subprocess (the CLI path) and in-process through `startBridge`. It checks the
+  preferred-port choice and walk upward, overlapping-call expiry and labels,
+  and concurrent processes approving, forgetting and updating the same
+  `clients.json` (including stale-lock recovery).
 - `tests/figjam-route.test.ts` (the root suite, `bun test`) covers Maximal's
   `/figjam/*` routes: the availability read from the plugin's status, the
-  discovery JSON (and that it holds no port or path), loopback and origin
-  refusals, and the relay between a real HTTP server and both a stand-in and the
-  real bridge, including a panel pairing through it and close codes passing
-  through. `tests/build-sidecar-sources.test.ts` pins that the sidecar
+  discovery JSON (and that it holds no port or path), loopback/origin/relay-key
+  refusals, WebSocket subprotocol selection, bounded queue and backpressure,
+  and the relay between a real HTTP server and both a stand-in and the real
+  bridge, including a panel pairing through it and close codes passing through. `tests/build-sidecar-sources.test.ts` pins that the sidecar
   rebuilds when any `plugin-*`, `figjam-*` or `connector-kit` package changes.
 - `figjam-layout` runs the recommended pipeline on the capability-map fixture
   (about 10s): every hard check must pass, and its crossings, wire length and
