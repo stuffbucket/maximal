@@ -176,3 +176,75 @@ describe("Apps shell contract", () => {
     })
   })
 })
+
+describe("Claude Desktop restart dialog", () => {
+  const FULL_LOCALES = ["en", "es", "zh", "fr", "de", "ru", "ja", "it", "pt"]
+  const KEYS = [
+    "apps-desktop-restart-title",
+    "apps-desktop-relaunch",
+    "apps-desktop-signin-note",
+    "apps-desktop-restart-ok",
+  ]
+
+  test("opens after an applied change only, as an informational dialog", () => {
+    const row = source("shell/src/ui/features/apps/HarnessRow.tsx")
+    const hook = source("shell/src/ui/features/apps/useApps.ts")
+
+    // Gated on the app, on request success, and on the server having applied
+    // the requested state (a refused enable comes back ok with a conflict).
+    expect(row).toContain(
+      "desktopRestartChange(app.id, next, await onToggle(next))",
+    )
+    // Connecting over another Maximal profile's setting is an enable too.
+    expect(row).toContain(
+      "setRestartNotice(desktopRestartChange(app.id, true, result))",
+    )
+    expect(row).toContain("<DesktopRestartDialog")
+    // Not an inline banner, and not a confirm/cancel prompt.
+    expect(row).not.toContain("<Callout")
+    expect(row).not.toContain("relaunchNoticeShown")
+    const dialog = source("shell/src/ui/features/apps/DesktopRestartDialog.tsx")
+    expect(dialog).toContain("<NoticeDialog")
+    expect(dialog).not.toContain("ConfirmDialog")
+    expect(hook).toContain("applied: toggleApplied(result.data, enabled)")
+    // The failure branch returns before `applied` is ever set.
+    expect(hook).toContain("return { ok: false, error: message }")
+  })
+
+  test("leaves the Claude Code Windows restart dialog as it was", () => {
+    const row = source("shell/src/ui/features/apps/HarnessRow.tsx")
+
+    expect(row).toContain(
+      'const needsWindowsRestartWarning = app.id === "claude-code" && isWindows()',
+    )
+    expect(row).toContain("if (!next && needsWindowsRestartWarning)")
+    expect(row).toContain('title={t("apps-restart-title")}')
+    expect(row).toContain('t("apps-restart-windows-body")')
+    expect(row).toContain('t("apps-restart-after-disable"')
+    expect(row).toContain("await onToggle(false)")
+    // The confirm path calls onToggle directly, never the guidance wrapper.
+    expect(row).not.toContain("await applyToggle(false)")
+  })
+
+  test("its strings are in every full catalog", () => {
+    const base = JSON.parse(source("shell/src/i18n/en.json")) as Record<
+      string,
+      string
+    >
+    expect(base["apps-desktop-restart-title"]).toBe("Restart Claude Desktop")
+    expect(base["apps-desktop-relaunch"]).toBe(
+      "Quit and reopen Claude Desktop for this change to take effect.",
+    )
+    expect(base["apps-desktop-signin-note"]).toBe(
+      "If Claude Desktop asks you to sign in and sign-in doesn’t complete, leave the integration enabled, quit Claude Desktop completely, reopen it, and try again.",
+    )
+    expect(base["apps-desktop-restart-ok"]).toBe("Got it")
+    for (const locale of FULL_LOCALES) {
+      const catalog = JSON.parse(
+        source(`shell/src/i18n/${locale}.json`),
+      ) as Record<string, string>
+      for (const key of KEYS)
+        expect(catalog[key], `${locale} ${key}`).toBeTruthy()
+    }
+  })
+})

@@ -9,6 +9,11 @@ describe("renamed section ids", () => {
     expect(canonicalHash("budget")).toBe("#rules")
   })
 
+  test("#logs is folded into the one System section", () => {
+    expect(canonicalSection("logs")).toBe("diagnostics")
+    expect(canonicalHash("#logs")).toBe("#diagnostics")
+  })
+
   test("a sub-page after the section survives the rename", () => {
     expect(canonicalHash("#budget/limits")).toBe("#rules/limits")
   })

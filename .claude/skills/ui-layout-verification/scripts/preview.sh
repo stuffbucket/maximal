@@ -152,7 +152,7 @@ for _ in $(seq 1 40); do
   STATUS="$(curl -sS --fail --max-time 2 "http://127.0.0.1:${PORT}/status" 2>/dev/null || true)"
   if [[ "$STATUS" == *'"service":"maximal"'* ]]; then
     echo "preview ready: http://127.0.0.1:${PORT}/ui/settings/  (pid ${PID})"
-    echo "  sections:  #account #general #apps #endpoint #api-clients #models #logs #diagnostics"
+    echo "  sections:  #account #general #apps #endpoint #api-clients #models #diagnostics"
     echo "  stop with: $0 --stop ${PORT}"
     exit 0
   fi

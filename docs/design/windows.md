@@ -82,7 +82,12 @@ fluid up to `--content-max`, Dashboard's wide container is centered and fluid, a
 Sessions keeps its narrow-row reflow. The native-overlay top bar remains one row;
 its Settings tabs can scroll for longer localized labels rather than increasing the
 title-bar height, the active tab is kept in view, and the scrollport reserves a
-fixed gap before the pinned surface and language controls. Switching to Settings
+fixed gap before the pinned surface and language controls. The update icon that
+joins those controls while an update is offered never takes the tabs' width:
+where the full tab row would otherwise stop fitting (the narrow end of the range),
+the title bar closes up its own spacing instead (`.topbar--compact`: tighter
+utilities, no divider, a smaller end padding; the macOS traffic-light clearance is
+unchanged), so the English row still fits at the minimum. Switching to Settings
 may clamp an
 observability window that is wider than Settings' range; switching back removes
 that cap without forcing a resize.

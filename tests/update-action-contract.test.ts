@@ -1,10 +1,13 @@
 /**
- * Contract for the in-app update action: the topbar "Update to X.Y.Z" button
- * in the combined Settings/Dashboard window and the tray item. Both read the
- * sidecar's update-status. On Windows and macOS they install the update in
- * place (a native confirm, then the shell's signed-update flow); elsewhere they
- * send the user to the download page root. Neither checks github.com for
- * updates or points at the retired /maximal path.
+ * Contract for the in-app update action: the title bar's icon-only update
+ * button and System's "Update to X.Y.Z" button in the combined
+ * Settings/Dashboard window, and the tray item. All read the sidecar's
+ * update-status. Settings asks in its own dialog, then hands off once; the
+ * tray asks natively. On Windows and macOS the update installs in place (the
+ * shell's signed-update flow); elsewhere the user is sent to the download
+ * page root or, for apt, to the command. Nothing checks github.com for
+ * updates or points at the retired /maximal path. Behaviour is covered by
+ * tests/update-flow.test.ts and tests/e2e/settings-update.spec.ts.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -33,44 +36,104 @@ const TAURI_CONF = JSON.parse(read("shell/src-tauri/tauri.conf.json")) as {
   bundle?: { createUpdaterArtifacts?: unknown }
 }
 const EN = JSON.parse(read("shell/src/i18n/en.json")) as Record<string, string>
+const UPDATE_FLOW_TS = read("shell/src/ui/features/update/update-flow.ts")
+const UPDATE_COPY_TS = read("shell/src/ui/features/update/update-copy.ts")
 
 describe("topbar update button", () => {
+  const utilities = SETTINGS_HTML.slice(
+    SETTINGS_HTML.indexOf('<div class="topbar__utilities">'),
+    SETTINGS_HTML.indexOf("topbar__surface-switcher"),
+  )
+
   test("lives in the topbar utilities, hidden until an update is offered", () => {
-    const utilities = SETTINGS_HTML.slice(
-      SETTINGS_HTML.indexOf('<div class="topbar__utilities">'),
-      SETTINGS_HTML.indexOf("topbar__surface-switcher"),
-    )
     // The wrapper carries [hidden]: .btn's display rule would override the UA
     // [hidden] style on the button itself.
     expect(utilities).toContain("<span data-update-action hidden>")
-    expect(utilities).toContain('class="btn btn--primary btn--sm"')
     expect(utilities).toContain('data-action="open-update"')
   })
 
-  test("is labelled through the catalog, including while downloading", () => {
-    expect(EN["nav-update-to"]).toBe("Update to {version}")
-    expect(EN["nav-update-downloading"]).toBe("Downloading update…")
-    expect(SETTINGS_MAIN_TS).toContain('t("nav-update-to", { version })')
-    expect(SETTINGS_MAIN_TS).toContain('t("nav-update-downloading")')
+  test("is a compact icon-only button, not a text button that takes tab width", () => {
+    expect(utilities).toContain('class="btn btn--primary btn--icon"')
+    expect(utilities).not.toContain("btn--sm")
+    // The glyph is decorative; the name comes from aria-label and title.
+    expect(utilities).toMatch(/<svg[^>]*aria-hidden="true"/u)
   })
 
-  test("asks the shell to install, and opens the download page when it can't", () => {
-    expect(SETTINGS_MAIN_TS).toContain("await installUpdate(")
-    expect(SETTINGS_MAIN_TS).toContain(
-      'if (outcome === "unavailable") void openExternalUrl(status.url)',
+  test("is labelled through the catalog, including while downloading", () => {
+    expect(EN["nav-update-icon"]).toBe("Update Maximal to {version}")
+    expect(EN["nav-update-downloading"]).toBe("Downloading update…")
+    expect(EN["nav-update-to"]).toBe("Update to {version}")
+    expect(EN["system-update-downloading"]).toBe("Downloading…")
+    expect(UPDATE_COPY_TS).toContain(
+      't("nav-update-icon", { version: offer.version })',
     )
-    expect(SHELL_TS).toContain('invoke<unknown>("install_update", { onStep })')
+    expect(UPDATE_COPY_TS).toContain('t("nav-update-downloading")')
+    expect(SETTINGS_MAIN_TS).toContain(
+      'button.setAttribute("aria-label", labels.icon)',
+    )
+    expect(SETTINGS_MAIN_TS).toContain("button.title = labels.icon")
+  })
+
+  test("asks the shell to install the confirmed version, and opens the page when it can't", () => {
+    expect(SHELL_TS).toContain(
+      'invoke<unknown>("install_update", { onStep, version })',
+    )
     // Any IPC failure (a plain browser, an older shell) falls back to the page.
     expect(SHELL_TS).toContain('return "unavailable";')
+    expect(UPDATE_FLOW_TS).toContain(
+      'if (outcome === "unavailable") deps.openDownloadPage(offer.url)',
+    )
   })
 
-  test("shares one predicate with the Diagnostics Updates row", () => {
-    const uses = SETTINGS_MAIN_TS.match(/offeredUpdate\(/g) ?? []
-    // Definition + button render + click guard + Diagnostics row.
-    expect(uses.length).toBeGreaterThanOrEqual(4)
-    expect(SETTINGS_MAIN_TS).not.toContain(
-      "if (data.update_available && data.latest)",
+  test("the in-place install is reachable from exactly one place: after the dialog said yes", () => {
+    // One IPC call site, and one caller of it (the flow's installInPlace dep).
+    expect(SHELL_TS.match(/"install_update"/gu)).toHaveLength(1)
+    const sources = [SETTINGS_MAIN_TS, UPDATE_FLOW_TS, UPDATE_COPY_TS, SHELL_TS]
+    // The definition in shell.ts + the single call in main.ts.
+    expect(sources.join("\n").match(/\binstallUpdate\(/gu)).toHaveLength(2)
+    expect(SETTINGS_MAIN_TS).toMatch(
+      /installInPlace: \(version, onDownloading\) =>\s+installUpdate\(version, onDownloading\)/u,
     )
+    const flow = UPDATE_FLOW_TS.slice(UPDATE_FLOW_TS.indexOf("async start("))
+    expect(flow.indexOf("await deps.confirm(offer)")).toBeGreaterThan(-1)
+    expect(flow.indexOf("await deps.confirm(offer)")).toBeLessThan(
+      flow.indexOf("deps.installInPlace("),
+    )
+  })
+
+  test("the title bar and System share one offer predicate and one flow", () => {
+    expect(SETTINGS_MAIN_TS).not.toContain("function offeredUpdate(")
+    expect(SETTINGS_MAIN_TS.match(/createUpdateFlow\(/gu)).toHaveLength(1)
+    expect(SETTINGS_MAIN_TS).toMatch(
+      /'\[data-action="open-update"\]'[\s\S]*?startUpdate\(\)/u,
+    )
+    expect(SETTINGS_MAIN_TS).toMatch(
+      /'\[data-action="system-update"\]'[\s\S]*?startUpdate\(\)/u,
+    )
+  })
+})
+
+describe("System update button", () => {
+  const row = SETTINGS_HTML.slice(
+    SETTINGS_HTML.indexOf('<dt data-i18n="diagnostics-updates"></dt>'),
+    SETTINGS_HTML.indexOf('<dt data-i18n="diagnostics-update-check"></dt>'),
+  )
+
+  test("is a primary button in the Updates row, hidden until an update is offered", () => {
+    expect(row).toContain("<span data-system-update hidden>")
+    expect(row).toMatch(
+      /<button\s+type="button"\s+class="btn btn--primary btn--sm"\s+data-action="system-update"/u,
+    )
+    // It comes before Check now, which stays the quiet action.
+    expect(row.indexOf('data-action="system-update"')).toBeLessThan(
+      row.indexOf('data-action="check-update"'),
+    )
+  })
+
+  test("replaces the old text link to the download page", () => {
+    expect(SETTINGS_MAIN_TS).not.toContain('t("diagnostics-update-get-it")')
+    expect(EN["diagnostics-update-get-it"]).toBeUndefined()
+    expect(EN["diagnostics-update-newer"]).toBe("v{version} available")
   })
 })
 
@@ -85,10 +148,11 @@ describe("in-place update (shell)", () => {
     expect(SHELL_LIB_RS).toContain(
       "if !app.state::<AppProfile>().updates_enabled()",
     )
-    // Without in-place support the tray item and the button open the page,
-    // or, for an apt install, Settings with the apt command.
-    expect(SHELL_LIB_RS).toMatch(
-      /fn start_update\(app: &AppHandle\) \{[\s\S]*?if !IN_PLACE_UPDATE \{[\s\S]*?open_settings_window\(app, Some\(APT_UPDATE_SECTION\)\);\s+\} else \{\s+open_update_url\(app\);/u,
+    // Without in-place support the tray item asks natively and opens the
+    // page, or, for an apt install, asks Settings to confirm and show the
+    // apt command (tests/update-requests.test.ts).
+    expect(SHELL_LIB_RS).toContain(
+      "fn tray_update_handoff(in_place: bool, apt: bool) -> TrayUpdateHandoff",
     )
   })
 
@@ -131,11 +195,25 @@ describe("in-place update (shell)", () => {
   test("asks before installing, and says so plainly when it can't", () => {
     expect(SHELL_LIB_RS).toContain('"native-update-confirm-body"')
     expect(EN["native-update-confirm-body"]).toContain("{version}")
+    // Settings already asked about this exact signed version, or the shell
+    // asks natively now: there is no third way through.
     expect(SHELL_LIB_RS).toContain(
-      "if !confirm_update(app, &update.version).await",
+      "let confirmed = webview_confirmed_release(confirmed_version.as_deref(), &update.version)\n        || confirm_update(app, &update.version).await;",
     )
+    expect(SHELL_LIB_RS).toContain("if !confirmed {")
     expect(SHELL_LIB_RS).toContain("report_update_failure(app);")
     expect(EN["native-update-failed-body"]).toContain("mxml.sh")
+  })
+
+  test("the tray asks natively; Settings passes the version its dialog confirmed", () => {
+    expect(SHELL_LIB_RS).toMatch(
+      /fn start_update\(app: &AppHandle\) \{[\s\S]*?run_in_place_update\(&handle, None, \|_\| \{\}\)\.await;/u,
+    )
+    expect(SHELL_LIB_RS).toMatch(
+      /async fn install_update\(\s*app: AppHandle,\s*on_step: Channel<UpdateStep>,\s*version: String,\s*\) -> UpdateOutcome \{[\s\S]*?run_in_place_update\(&app, Some\(version\),/u,
+    )
+    // Exactly those two callers.
+    expect(SHELL_LIB_RS.match(/run_in_place_update\(&/gu)).toHaveLength(2)
   })
 
   test("the webview may call the update commands", () => {
@@ -170,10 +248,9 @@ describe("apt installs (Debian/Ubuntu packages)", () => {
     )
   })
 
-  test("the button and the tray item read 'Update with apt'", () => {
-    expect(EN["nav-update-apt"]).toBe("Update with apt")
+  test("the tray item reads 'Update with apt'; Settings asks before showing the command", () => {
+    expect(EN["nav-update-apt"]).toBeUndefined()
     expect(EN["native-tray-upgrade-apt"]).toBe("Update with apt…")
-    expect(SETTINGS_MAIN_TS).toContain('t("nav-update-apt")')
     expect(SHELL_LIB_RS).toContain(
       'native_i18n::tr(locale, "native-tray-upgrade-apt")',
     )
@@ -184,7 +261,7 @@ describe("apt installs (Debian/Ubuntu packages)", () => {
   test("clicking shows the command to copy and the Linux guide, without running it", () => {
     const block = SETTINGS_HTML.slice(
       SETTINGS_HTML.indexOf("<div data-update-apt hidden>"),
-      SETTINGS_HTML.indexOf("<div data-diagnostics-root"),
+      SETTINGS_HTML.indexOf("data-system-details"),
     )
     expect(block).toContain('class="app-card__cmd"')
     expect(block).toContain('data-action="copy-update-command"')
@@ -193,8 +270,12 @@ describe("apt installs (Debian/Ubuntu packages)", () => {
       'href="https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update"',
     )
     expect(EN["diagnostics-update-apt-hint"]).toContain("{version}")
+    expect(UPDATE_FLOW_TS).toMatch(
+      /case "apt":\s+setPhase\("idle"\);\s+deps\.revealAptCommand\(\);\s+return;/u,
+    )
+    // The tray's explicit request starts the same confirming flow.
     expect(SETTINGS_MAIN_TS).toMatch(
-      /if \(aptUpdateCommand\(status\)\) \{\s+showAptUpdate\(\);\s+return;/u,
+      /subscribeToUpdateRequests\(\(\) => \{[\s\S]*?startUpdate\(\)/u,
     )
     // Nothing in the shell runs apt or asks for root.
     expect(SHELL_LIB_RS).not.toMatch(

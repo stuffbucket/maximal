@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 
 import { cx } from "./cx";
+import { isTrailingClickOfOpening } from "./modal-click-guard";
 
 interface ModalDialogProps {
   open: boolean;
@@ -30,6 +31,9 @@ export function ModalDialog({
   onDismiss,
 }: ModalDialogProps): JSX.Element {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // When showModal() last ran, so the rest of a double click that opened the
+  // dialog can't dismiss it or press one of its buttons.
+  const openedAtRef = useRef(0);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -38,6 +42,7 @@ export function ModalDialog({
     if (open && !dialog.open) {
       try {
         dialog.showModal();
+        openedAtRef.current = performance.now();
         initialFocusRef?.current?.focus();
       } catch {
         // Strict mode can replay this effect after the dialog is already open.
@@ -58,6 +63,30 @@ export function ModalDialog({
         event.preventDefault();
         event.stopPropagation();
         onDismiss();
+      }}
+      onMouseDownCapture={(event) => {
+        // The trailing press of the opening double click would otherwise
+        // move focus off the safe first action onto the dialog itself.
+        if (
+          isTrailingClickOfOpening(
+            event.detail,
+            performance.now() - openedAtRef.current,
+          )
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onClickCapture={(event) => {
+        if (
+          isTrailingClickOfOpening(
+            event.detail,
+            performance.now() - openedAtRef.current,
+          )
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
       }}
       onClick={(event) => {
         if (event.target === dialogRef.current) onDismiss();

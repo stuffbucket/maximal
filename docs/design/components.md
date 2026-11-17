@@ -109,6 +109,34 @@ rules, in order:
 - Inline field validation (e.g. a name already taken) stays a caption
   next to the field.
 
+## Dialogs
+
+Native modal `<dialog>` (`ModalDialog`): the browser makes the window inert,
+traps focus and puts it back on the opener when the dialog closes. Escape and
+the backdrop dismiss. The rest of a double click that opened a dialog is
+ignored (`modal-click-guard.ts`), so it can neither dismiss the dialog, press
+one of its buttons, nor move focus off the safe first action. Two small shapes share the `.confirm-dialog` panel:
+
+- **`ConfirmDialog`** asks before something happens: a title that is the
+  question, a sentence on the consequence, Cancel (first focus, a ghost) and
+  the action (primary, or destructive for `tone="danger"`). Escape and the
+  backdrop are Cancel.
+- **`NoticeDialog`** tells the person what to do after something already
+  happened (e.g. "Restart Claude Desktop" once routing was switched): one
+  primary action ("Got it", first focus), no Cancel and nothing to undo.
+  Escape and the backdrop acknowledge it the same way.
+
+**Updates.** Every Settings way into an update — the title bar's icon
+(`btn--primary btn--icon`, named "Update Maximal to X.Y.Z" by `aria-label`
+and tooltip, shown only while one is offered), System → Version and updates'
+"Update to X.Y.Z" (`btn--primary`, beside the ghost Check now) and the tray's
+"Update with apt…" request — opens the same `ConfirmDialog`, worded for what happens next:
+install and restart, open mxml.sh, or show the apt command to run by hand.
+While it is open or the update downloads, another start is ignored; during the
+download both entry points are disabled and say so. The Updates row
+(`.system-update-row`) wraps whole items — status, Update, Check now — onto a
+new line when a translation is long; a label never breaks mid-phrase.
+
 ## Empty states
 
 Where a list will be, an `EmptyState` (`components/EmptyState.tsx`,
