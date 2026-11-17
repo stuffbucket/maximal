@@ -25,8 +25,10 @@ import type {
   UpstreamRejection,
 } from "./proxy/client";
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
+import { browserAuthRequired, isNativeShell } from "./proxy/browser-auth";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
+import { mountBrowserAuth } from "./ui/islands/browser-auth-island";
 import { canonicalHash, canonicalSection } from "./section-alias";
 import { mountBudget } from "./ui/islands/budget-island";
 import { mountModels } from "./ui/islands/models-island";
@@ -341,9 +343,10 @@ function syncFromHash(options: { persist?: boolean } = {}): void {
 
 /**
  * Fit the title bar. While an update is offered, the update icon joins the
- * pinned utilities; if the full Settings tab row would then no longer fit
- * (the narrow end of the window's range), `.topbar--compact` takes the
- * icon's width out of the title bar's own spacing instead of the tabs.
+ * pinned utilities (as does a plain browser's access icon); if the full
+ * Settings tab row would then no longer fit (the narrow end of the window's
+ * range), `.topbar--compact` takes the icons' width out of the title bar's
+ * own spacing instead of the tabs.
  * Measured without the class each time, so it never sticks once the window
  * is wide enough. Then the active tab is kept in view (longer translations
  * may still scroll the strip).
@@ -353,13 +356,11 @@ function fitTopbar(): void {
   const nav = document.querySelector<HTMLElement>("[data-settings-nav]");
   if (!topbar || !nav) return;
   const icon = document.querySelector<HTMLElement>("[data-update-action]");
+  const optionalIcon =
+    (icon !== null && !icon.hidden) ||
+    document.querySelector("[data-browser-access]") !== null;
   topbar.classList.remove("topbar--compact");
-  if (
-    icon &&
-    !icon.hidden &&
-    !nav.hidden &&
-    nav.scrollWidth > nav.clientWidth
-  ) {
+  if (optionalIcon && !nav.hidden && nav.scrollWidth > nav.clientWidth) {
     topbar.classList.add("topbar--compact");
   }
   nav
@@ -1901,6 +1902,12 @@ function showGhAccountsForAuthenticated(): void {
 }
 
 function renderAccount(status: AuthStatus): void {
+  // A plain browser without Maximal access knows nothing about the GitHub
+  // sign-in; the access dialog speaks instead of a false "sign-in failed".
+  if (browserAuthRequired() && !isNativeShell()) {
+    stopAuthPolling();
+    return;
+  }
   notifyDashboardOfAuthChange(status);
   currentAuthStatus = status;
   const active = accountKeyFor(status.state);
@@ -2728,6 +2735,8 @@ async function checkInitialAccountHealth(): Promise<void> {
     method: "GET",
     path: "/settings/api/auth/github/status",
   });
+  // Missing browser access is not an account problem: stay where we are.
+  if (!result.ok && result.authRequired && !isNativeShell()) return;
   if (!result.ok || hasAccountProblem(result.data)) {
     if (!userExplicitlySelectedTab) {
       showSection("account", { persist: false });
@@ -2763,6 +2772,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireEndpoint();
   wireUninstall();
   wireAppearance();
+  mountBrowserAuth();
   mountApiClients();
   mountApps();
   mountConnectors();
