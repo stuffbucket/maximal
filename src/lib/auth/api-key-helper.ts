@@ -22,8 +22,22 @@ export type ApiKeyHelperResult =
   | { ok: true; key: string; source: "app" | "default" }
   | { ok: false; error: string }
 
+const GENERATED_KEY_PREFIX = "mxl_"
+const GENERATED_KEY_BYTES = 24
+/** `mxl_` + base64url of 24 random bytes: 32 characters, no padding. */
+const GENERATED_KEY_BODY_LENGTH = Math.ceil((GENERATED_KEY_BYTES * 4) / 3)
+const GENERATED_KEY = new RegExp(
+  String.raw`^${GENERATED_KEY_PREFIX}[\w-]{${GENERATED_KEY_BODY_LENGTH}}$`,
+)
+
 export function generateApiKey(): string {
-  return `mxl_${randomBytes(24).toString("base64url")}`
+  return `${GENERATED_KEY_PREFIX}${randomBytes(GENERATED_KEY_BYTES).toString("base64url")}`
+}
+
+/** Is this exactly the form `generateApiKey` produces? A key a person or
+ *  another gateway chose never is, so it can tell Maximal's keys from theirs. */
+export function isGeneratedApiKey(key: unknown): key is string {
+  return typeof key === "string" && GENERATED_KEY.test(key)
 }
 
 export interface ApiKeyHelperInvocation {

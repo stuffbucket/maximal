@@ -10,7 +10,7 @@ import path from "node:path"
 import { z } from "zod"
 
 import { currentProfileId } from "~/apps/profile-identity"
-import { resolveApiKey } from "~/lib/auth/api-key-helper"
+import { isGeneratedApiKey, resolveApiKey } from "~/lib/auth/api-key-helper"
 import {
   AtomicWriteConflictError,
   atomicWriteJson as atomicWriteJsonShared,
@@ -489,29 +489,6 @@ class Library {
     return this.routingStateOwnership() ?? this.stateEntryOwnership(values)
   }
 
-  /**
-   * The applied entry is the marker's own `maximal` entry with exactly the
-   * fields Maximal writes, but its gateway URL or key no longer traces to a
-   * Maximal write (the sibling it was copied from is gone, or a key
-   * rotated). An explicit Take over repairs it in place under the marker's
-   * snapshot rather than keeping a dead duplicate to switch back to. Any
-   * other edit keeps it the user's.
-   */
-  appliedMarkerArtifact(values: GatewayProfileValues): MetaEntry | null {
-    const entry = this.meta.entries.find(
-      (item) => item.id === this.meta.appliedId,
-    )
-    if (
-      !entry
-      || entry.name !== OWNED_ENTRY_NAME
-      || this.state?.profileId !== entry.id
-      || !SAFE_PROFILE_ID.test(entry.id)
-    ) {
-      return null
-    }
-    return isMaximalArtifactShape(this.profile(entry.id), values) ? entry : null
-  }
-
   /** Someone else's selection we mustn't switch away from on our own: a
    *  readable gateway profile (`foreign`, which an explicit take over may
    *  switch from), or a profile we can't read or safely address
@@ -551,11 +528,13 @@ class Library {
   /**
    * The marker's profile no longer says what the marker recorded, yet it is
    * still exactly a Maximal artifact: our entry name, exactly the fields
-   * Maximal writes, and a gateway URL and key that a Maximal write produced,
-   * either this copy's own or another `maximal` entry's in the library. That
-   * is what Claude Desktop leaves when it writes a stale copy of an earlier
-   * Maximal profile back over ours. A user's edit (another gateway or key,
-   * folder, flag, extra field, or a renamed entry) never matches.
+   * Maximal writes, and a key in the exact form Maximal generates or a
+   * gateway URL and key that a Maximal write produced (this copy's own or
+   * another `maximal` entry's). That is what Claude Desktop leaves when it
+   * writes a stale copy of an earlier Maximal profile back over ours, or what
+   * a rotated key leaves. A person's edit (their own gateway or key, even on
+   * a loopback port; a folder, flag or extra field; a renamed entry) never
+   * matches.
    */
   isStaleMaximalArtifact(
     entry: MetaEntry,
@@ -566,6 +545,7 @@ class Library {
     }
     const profile = this.profile(entry.id)
     if (!isMaximalArtifactShape(profile, values)) return false
+    if (isGeneratedApiKey(profile.inferenceGatewayApiKey)) return true
     const pair = routingPair(profile)
     if (pair === routingPair(values)) return true
     return this.meta.entries.some((other) => {
@@ -660,12 +640,10 @@ export function applyConfigLibraryProfile(
     }
   }
 
-  const repair =
-    options.overrideForeignGateway === true ?
-      lib.appliedMarkerArtifact(values)
-    : null
-  const ourEntry =
-    repair ?? lib.reusableEntry(values, options.overrideOtherMaximal === true)
+  const ourEntry = lib.reusableEntry(
+    values,
+    options.overrideOtherMaximal === true,
+  )
   const profileId = ourEntry?.id ?? randomUUID()
   const ensuredWorkspaceFolders = ensureWorkspaceFolders(
     values.allowedWorkspaceFolders,
@@ -676,9 +654,10 @@ export function applyConfigLibraryProfile(
     return { ...unchanged, wrote: false, conflict: null }
   }
 
-  // Re-applying over a Maximal profile (or repairing the marker's own entry)
-  // keeps the marker's snapshot; see `priorFor` for a switch from elsewhere.
-  const prior = priorFor(lib, Boolean(appliedOwnership || repair), top)
+  // Re-applying over a Maximal profile (including the marker's own stale
+  // entry, repaired in place) keeps the marker's snapshot; see `priorFor`
+  // for a switch from elsewhere.
+  const prior = priorFor(lib, appliedOwnership !== null, top)
 
   const profilePath = lib.profilePath(profileId)
   atomicWriteJson(profilePath, values, readJsonText(profilePath))

@@ -30,12 +30,14 @@ import {
   currentProfileId,
   profileIdForDirectory,
 } from "~/apps/profile-identity"
+import { generateApiKey, isGeneratedApiKey } from "~/lib/auth/api-key-helper"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { setListeningPort } from "~/lib/start/proxy-port"
 
 let home: string
 
 const TAKE_OVER = { overrideForeignGateway: true }
+const TRANSFER = { overrideOtherMaximal: true }
 const CORP_GATEWAY = {
   inferenceProvider: "gateway",
   inferenceGatewayBaseUrl: "https://llm.corp.example",
@@ -247,7 +249,7 @@ describe("Take over from another gateway", () => {
     })
   }
 
-  test("repairs the marker's own entry in place when only its key changed", () => {
+  test("a rotated Maximal key on this profile's own entry is repaired in place, no Take over needed", () => {
     fs.mkdirSync(getClaude3pDir(home), { recursive: true })
     fs.writeFileSync(topPath(), JSON.stringify({ unrelated: 1 }))
     const { profileId } = applyConfigLibraryProfile(home)
@@ -257,14 +259,14 @@ describe("Take over from another gateway", () => {
     fs.writeFileSync(
       ownPath,
       JSON.stringify(
-        { ...readJson(ownPath), inferenceGatewayApiKey: "mxl_rotated_away" },
+        { ...readJson(ownPath), inferenceGatewayApiKey: generateApiKey() },
         null,
         2,
       ),
     )
-    expect(configLibraryConflict(home)).toBe("foreign-gateway-profile")
+    expect(configLibraryConflict(home)).toBeNull()
 
-    const result = enableClaudeDesktopRouting(home, TAKE_OVER)
+    const result = enableClaudeDesktopRouting(home)
 
     expect(result).toMatchObject({ wrote: true, conflict: null, profileId })
     expect(readJson(metaPath()).entries).toEqual([
@@ -365,7 +367,7 @@ function seedOrphanedMarkerEntry(): void {
     JSON.stringify(
       {
         ...gatewayProfile(home, "http://127.0.0.1:6001"),
-        inferenceGatewayApiKey: "mxl_vanished_copy",
+        inferenceGatewayApiKey: generateApiKey(),
       },
       null,
       2,
@@ -373,12 +375,13 @@ function seedOrphanedMarkerEntry(): void {
   )
 }
 
-describe("Take over of the marker's own stale entry", () => {
-  test("repairs it in place, never snapshotting it as a duplicate to restore", () => {
+describe("The marker's own stale entry with a Maximal key", () => {
+  test("is offered as a transfer and repaired in place, never kept as a duplicate to restore", () => {
     seedOrphanedMarkerEntry()
-    expect(configLibraryConflict(home)).toBe("foreign-gateway-profile")
+    expect(configLibraryConflict(home)).toBe("other-maximal-config")
+    expect(enableClaudeDesktopRouting(home, TAKE_OVER).wrote).toBe(false)
 
-    const result = enableClaudeDesktopRouting(home, TAKE_OVER)
+    const result = enableClaudeDesktopRouting(home, TRANSFER)
 
     expect(result).toMatchObject({
       wrote: true,
@@ -392,7 +395,7 @@ describe("Take over of the marker's own stale entry", () => {
       appliedId: "",
       hadPreferences: false,
     })
-    expect(enableClaudeDesktopRouting(home, TAKE_OVER)).toMatchObject({
+    expect(enableClaudeDesktopRouting(home, TRANSFER)).toMatchObject({
       wrote: false,
       conflict: null,
       profileId: "stale",
@@ -632,3 +635,86 @@ function seedOtherMarkerWithCorpAppliedForBoot(): void {
   state.ownerProfileId = profileIdForDirectory(path.join(home, "other"))
   fs.writeFileSync(statePath(), JSON.stringify(state))
 }
+
+describe("isGeneratedApiKey matches exactly what generateApiKey produces", () => {
+  test("every generated key", () => {
+    for (let index = 0; index < 200; index++) {
+      expect(isGeneratedApiKey(generateApiKey())).toBe(true)
+    }
+  })
+})
+
+/** Keys a person or another gateway might use, including ones that only
+ *  look like Maximal's. None may be mistaken for a Maximal key. */
+const NOT_MAXIMAL_KEYS: Array<[string, unknown]> = [
+  ["an arbitrary key", "sk-litellm-local-1234"],
+  ["a short mxl_ key", "mxl_short"],
+  ["a 31-character mxl_ body", `mxl_${"a".repeat(31)}`],
+  ["a 33-character mxl_ body", `mxl_${"a".repeat(33)}`],
+  ["standard base64 characters", `mxl_${"a".repeat(31)}+`],
+  ["padding", `mxl_${"a".repeat(31)}=`],
+  ["an upper-case prefix", `MXL_${"a".repeat(32)}`],
+  ["leading whitespace", ` mxl_${"a".repeat(32)}`],
+  ["a trailing newline", `mxl_${"a".repeat(32)}\n`],
+]
+
+describe("a person's own gateway on the marker's maximal entry stays theirs", () => {
+  test.each(NOT_MAXIMAL_KEYS)("%s is not a Maximal key", (_name, key) => {
+    expect(isGeneratedApiKey(key)).toBe(false)
+  })
+
+  test.each(NOT_MAXIMAL_KEYS)(
+    "%s: Take over keeps it and disable switches back exactly",
+    (_name, key) => {
+      fs.mkdirSync(getClaude3pDir(home), { recursive: true })
+      fs.writeFileSync(topPath(), JSON.stringify({ unrelated: 1 }))
+      const { profileId: theirs } = applyConfigLibraryProfile(home)
+      const theirsPath = path.join(libDir(), `${theirs}.json`)
+      fs.writeFileSync(
+        theirsPath,
+        JSON.stringify(
+          {
+            ...readJson(theirsPath),
+            inferenceGatewayBaseUrl: "http://127.0.0.1:4000",
+            inferenceGatewayApiKey: key,
+          },
+          null,
+          2,
+        ),
+      )
+      const theirBytes = fs.readFileSync(theirsPath, "utf8")
+      expect(configLibraryConflict(home)).toBe("foreign-gateway-profile")
+      expect(enableClaudeDesktopRouting(home, TRANSFER).wrote).toBe(false)
+
+      const result = enableClaudeDesktopRouting(home, TAKE_OVER)
+
+      expect(result).toMatchObject({ wrote: true, conflict: null })
+      expect(result.profileId).not.toBe(theirs)
+      expect(fs.readFileSync(theirsPath, "utf8")).toBe(theirBytes)
+      expect(readJson(statePath()).prior).toEqual({
+        appliedId: theirs,
+        hadPreferences: false,
+      })
+
+      disableClaudeDesktopRouting(home)
+
+      expect(readJson(metaPath())).toEqual({
+        appliedId: theirs,
+        entries: [{ id: theirs, name: "maximal" }],
+      })
+      expect(fs.readFileSync(theirsPath, "utf8")).toBe(theirBytes)
+      expect(readJson(topPath())).toEqual({ unrelated: 1 })
+    },
+  )
+
+  test("the dialog's promise is what disable does", () => {
+    const catalog = readJson(
+      path.join(import.meta.dir, "..", "shell", "src", "i18n", "en.json"),
+    )
+    // Asserted against the restore above: the other gateway is kept and
+    // turning routing off switches back to it.
+    expect(catalog["apps-takeover-body"]).toBe(
+      "Maximal found another gateway in {appName} and didn’t change it. Take over switches {appName} to Maximal and keeps the other gateway, so turning routing off switches back to it.",
+    )
+  })
+})
