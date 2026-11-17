@@ -15,7 +15,27 @@ const maximalPort = Number(maximalArg)
 const bridgePort = Number(bridgeArg)
 const html = fs.readFileSync(path.join(dir, "ui.html"), "utf8")
 const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"))
-const script = html.match(/<script>([\s\S]*)<\/script>/)[1]
+
+// The panel's one inline script, cut out of the ui.html this repo's build
+// just wrote (a trusted fixture, not input to sanitize). No pattern matching:
+// the panel must contain exactly one script element, opened as a bare
+// `<script>` and closed by the last `</script>`, compared case-insensitively
+// so an upper-case or second script tag fails this test instead of being
+// skipped.
+function panelScript(source) {
+  const lower = source.toLowerCase()
+  const opens = lower.split("<script").length - 1
+  const closes = lower.split("</script").length - 1
+  assert.equal(opens, 1, `ui.html must have exactly one script element, found ${opens}`)
+  assert.equal(closes, 1, `ui.html must close its one script element, found ${closes}`)
+  const open = lower.indexOf("<script>")
+  assert.notEqual(open, -1, "the panel's script element must be a bare <script>")
+  const start = open + "<script>".length
+  const end = lower.indexOf("</script>", start)
+  assert.ok(end > start, "the panel's script element must close with </script>")
+  return source.slice(start, end)
+}
+const script = panelScript(html)
 const stamped = JSON.parse(html.match(/^const PANEL_BUILD = (.*);$/m)[1])
 assert.equal(stamped.maximalPort, maximalPort)
 assert.equal(stamped.bridgePort, bridgePort)

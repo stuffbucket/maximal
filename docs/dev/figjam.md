@@ -263,7 +263,10 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
 
 - `figjam-plugin` builds into a temp folder, checks the manifest, the
   version stamp and the panel's build line (the relay key only in `ui.html`,
-  files owner-only, never in a release build), then runs the stub tests in `test/sandbox/*.mjs` under Node.
+  files owner-only, never in a release build) and the header's Maximal mark
+  (one labelled, self-contained SVG whose "m" is byte-for-byte the outlined
+  "m" of `shell/maximal-wordmark.svg`, colored by the panel's brand tokens),
+  then runs the stub tests in `test/sandbox/*.mjs` under Node.
   Each stub loads the built `code.js` in a `vm` context with a fake `figma`
   global. `panel-ports.mjs` does the same for the built `ui.html` with fake
   browser globals and checks, for default and non-default ports, that Maximal

@@ -97,6 +97,69 @@ describe("build", () => {
   })
 })
 
+// The panel header carries Maximal's mark: the app icon's crimson rounded
+// square with the "m" outlined from the repo's wordmark, so it needs no font,
+// image or network inside Figma's iframe. Plain string search, not HTML
+// pattern matching: the fixture is the ui.html this build just wrote.
+
+/** The text between the first `open` in `text` and the next `close`. */
+function between(text: string, open: string, close: string): string {
+  const start = text.indexOf(open)
+  if (start === -1) throw new Error(`missing ${open}`)
+  const end = text.indexOf(close, start + open.length)
+  if (end === -1) throw new Error(`unclosed ${open}`)
+  return text.slice(start + open.length, end)
+}
+describe("brand mark", () => {
+  const REPO = path.resolve(import.meta.dir, "../../..")
+
+  test("the panel shows one labelled mark, self-contained", async () => {
+    const ui = await readFile(path.join(outDir, "ui.html"), "utf8")
+    expect(ui.split('class="brand-mark"').length - 1).toBe(1)
+    const svg = between(ui, '<svg class="brand-mark"', "</svg>")
+    expect(svg).toContain('role="img" aria-label="Maximal"')
+    expect(svg.split("<rect ").length - 1).toBe(1)
+    expect(svg.split("<path ").length - 1).toBe(1)
+    for (const outside of ["href", "src=", "url(", "<text", "<image", "font"]) {
+      expect(svg).not.toContain(outside)
+    }
+  })
+
+  test("its m is the wordmark's outlined Fraunces m, byte for byte", async () => {
+    const ui = await readFile(path.join(outDir, "ui.html"), "utf8")
+    const markPath = between(
+      between(ui, '<svg class="brand-mark"', "</svg>"),
+      ' d="',
+      '"',
+    )
+    const wordmark = await readFile(
+      path.join(REPO, "shell", "maximal-wordmark.svg"),
+      "utf8",
+    )
+    const wordmarkPath = between(wordmark, '<path d="', '"')
+    expect(markPath.length).toBeGreaterThan(1000)
+    expect(wordmarkPath.startsWith(markPath)).toBe(true)
+    // The m ends where the wordmark's next letter begins.
+    expect(wordmarkPath.slice(markPath.length).startsWith(" M")).toBe(true)
+  })
+
+  test("its colors are the brand tokens, and --brand is the app's brand color", async () => {
+    const ui = await readFile(path.join(outDir, "ui.html"), "utf8")
+    expect(ui).toContain(".brand-mark rect { fill: var(--brand); }")
+    expect(ui).toContain(".brand-mark path { fill: var(--on-brand); }")
+    const theme = await readFile(
+      path.join(REPO, "shell", "src", "ui", "styles", "theme.ts"),
+      "utf8",
+    )
+    const brandColor = between(
+      between(theme, "export const brand = {", "}"),
+      'color: "',
+      '"',
+    )
+    expect(ui).toContain(`--brand: ${brandColor};`)
+  })
+})
+
 describe("freshness", () => {
   let dir: string
   beforeEach(async () => {
@@ -421,6 +484,17 @@ describe("panel ports", () => {
   test("an unkeyed build still calls Maximal but opens no bridge socket", () => {
     const result = run(outDir, { maximalPort: 4141, bridgePort: 4150 })
     expect(result.code, result.output).toBe(0)
+  })
+
+  test("refuses a panel with a second script element, whatever its case", async () => {
+    const extraDir = path.join(outDir, "extra-script")
+    await buildPlugin({ outDir: extraDir, relayKey: KEY })
+    const uiPath = path.join(extraDir, "ui.html")
+    const ui = await readFile(uiPath, "utf8")
+    await writeFile(uiPath, `${ui}\n<SCRIPT>void 0</SCRIPT>\n`)
+    const result = run(extraDir, { maximalPort: 4141, bridgePort: 4150 })
+    expect(result.code).not.toBe(0)
+    expect(result.output).toContain("exactly one script element, found 2")
   })
 
   test("non-default ports reach the panel's connections and status text", async () => {
