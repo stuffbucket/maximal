@@ -481,6 +481,25 @@ function checkStatusAttention(pluginId: string, attention: unknown): void {
     invalidStatus(pluginId, "attention needs a string summary and actions.")
   }
   checkStatusActions(pluginId, attention.actions)
+  if (attention.requests === undefined) return
+  if (!Array.isArray(attention.requests)) {
+    invalidStatus(pluginId, "attention requests must be an array.")
+  }
+  for (const request of attention.requests as Array<unknown>) {
+    if (
+      !isRecord(request)
+      || typeof request.title !== "string"
+      || typeof request.detail !== "string"
+      || !isValidStatusAction(request.approve)
+      || !isValidStatusAction(request.decline)
+    ) {
+      invalidStatus(
+        pluginId,
+        "each attention request needs a title, detail, approve action and decline action.",
+      )
+    }
+    if (request.facts !== undefined) checkStatusFacts(pluginId, request.facts)
+  }
 }
 
 function isCount(value: unknown): value is number {
