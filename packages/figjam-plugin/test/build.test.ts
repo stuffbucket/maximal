@@ -8,10 +8,10 @@ import {
   test,
 } from "bun:test"
 import {
-  mkdir,
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   writeFile,
 } from "node:fs/promises"
@@ -22,7 +22,6 @@ import {
   buildPlugin,
   inspectPlugin,
   readPackageVersion,
-  renderPlugin,
   stampVersion,
 } from "../scripts/build"
 
@@ -137,22 +136,113 @@ describe("freshness", () => {
       "ui.html",
     ])
   })
+})
 
-  test("a failed write leaves the folder as it was and removes temp files", async () => {
-    await buildPlugin({ outDir: dir })
-    const before = await renderPlugin({})
-    // A directory where a managed file belongs makes the final rename fail.
-    await rm(path.join(dir, "ui.html"))
-    await mkdir(path.join(dir, "ui.html"))
-    const failed = await buildPlugin({ outDir: dir }).then(
-      () => false,
-      () => true,
+const MANAGED = ["code.js", "ui.html", "manifest.json"]
+const LEFTOVER = /\.(?:tmp|undo)$/
+
+async function snapshot(dir: string): Promise<Record<string, string>> {
+  return Object.fromEntries(
+    await Promise.all(
+      MANAGED.map(
+        async (name) =>
+          [name, await readFile(path.join(dir, name), "utf8")] as const,
+      ),
+    ),
+  )
+}
+
+async function leftovers(dir: string): Promise<Array<string>> {
+  return (await readdir(dir)).filter((name) => LEFTOVER.test(name))
+}
+
+/**
+ * File operations whose `failAt`th rename (1-based) throws. With `persist`
+ * every later rename fails too (so a rollback fails as well), and `removal`
+ * makes every removal throw.
+ */
+function failingOps(
+  failAt: number,
+  options: { persist?: boolean; removal?: Error } = {},
+) {
+  let calls = 0
+  return {
+    rename: async (from: string, to: string) => {
+      calls++
+      if (calls === failAt || (options.persist && calls > failAt)) {
+        throw new Error("rename failed")
+      }
+      await rename(from, to)
+    },
+    rm: async (file: string) => {
+      if (options.removal) throw options.removal
+      await rm(file, { force: true })
+    },
+  }
+}
+
+async function caught(run: Promise<unknown>): Promise<unknown> {
+  return run.then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+}
+
+describe("rollback", () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "figjam-plugin-undo-"))
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test("a failure after one rename restores every previous file", async () => {
+    await buildPlugin({ outDir: dir, maximalPort: 4141, bridgePort: 4150 })
+    // Previous generation: differs from the new build in all three files.
+    const code = await readFile(path.join(dir, "code.js"), "utf8")
+    await writeFile(path.join(dir, "code.js"), `${code}\n// previous`)
+    await writeFile(path.join(dir, "ui.html"), "<!-- previous -->")
+    const before = await snapshot(dir)
+
+    // The first rename (code.js) succeeds; the second (ui.html) throws.
+    const error = await caught(
+      buildPlugin(
+        { outDir: dir, maximalPort: 5141, bridgePort: 5150 },
+        failingOps(2),
+      ),
     )
-    expect(failed).toBe(true)
-    expect((await readdir(dir)).filter((n) => n.endsWith(".tmp"))).toEqual([])
-    expect(await readFile(path.join(dir, "manifest.json"), "utf8")).toBe(
-      before["manifest.json"],
+    expect((error as Error).message).toBe("rename failed")
+    expect(await snapshot(dir)).toEqual(before)
+    expect(await leftovers(dir)).toEqual([])
+  })
+
+  test("a failure removes files that did not exist before", async () => {
+    const error = await caught(buildPlugin({ outDir: dir }, failingOps(3)))
+    expect((error as Error).message).toBe("rename failed")
+    expect(await readdir(dir)).toEqual([])
+  })
+
+  test("a failing rollback or cleanup does not replace the original error", async () => {
+    await buildPlugin({ outDir: dir, maximalPort: 4141 })
+    const eperm = Object.assign(new Error("EPERM: busy"), { code: "EPERM" })
+    // Every rename after the first fails (so the restore does too) and every
+    // removal throws.
+    const error = await caught(
+      buildPlugin(
+        { outDir: dir, maximalPort: 5141 },
+        failingOps(2, { persist: true, removal: eperm }),
+      ),
     )
+    expect((error as Error).message).toBe("rename failed")
+  })
+
+  test("a rebuild after a rolled-back one lands the new content", async () => {
+    await buildPlugin({ outDir: dir, maximalPort: 4141 })
+    await caught(buildPlugin({ outDir: dir, maximalPort: 5141 }, failingOps(2)))
+    await buildPlugin({ outDir: dir, maximalPort: 5141 })
+    expect(await inspectPlugin(dir, { maximalPort: 5141 })).toBe("current")
+    expect(await leftovers(dir)).toEqual([])
   })
 })
 

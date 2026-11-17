@@ -29,7 +29,12 @@ build embeds them (text imports, so a compiled Maximal can write the plugin with
    rebuilds when any differs or is missing, even if the version and ports are
    unchanged. Other files in the folder are left alone. **Rebuild the Figma
    plugin** does it on demand. A rebuild writes all three files to temp names,
-   then renames them into place.
+   then renames them into place. Each rename is atomic, but the three together
+   are not: if a rename throws, the files already renamed are restored from
+   their previous contents (or removed if they did not exist), so the folder
+   is left as it was. A crash or power loss between renames can still leave a
+   mix of old and new files; the next start finds the folder stale and
+   rebuilds it.
 3. In the Figma desktop app: **Plugins → Development → Import plugin from
    manifest…**, then choose that `manifest.json`. Run **Maximal Agent (dev)**
    on a FigJam board and tick **Let Claude Code drive this board** in its

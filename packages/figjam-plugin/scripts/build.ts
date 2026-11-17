@@ -152,31 +152,101 @@ export async function inspectPlugin(
   return found.every((state) => state === "match") ? "current" : "stale"
 }
 
-/**
- * Write every file to a temp name first, then rename them into place, so
- * Figma never reads a half-written file and a failed write leaves the managed
- * files as they were (the temp files are removed).
- */
-async function writeAll(outDir: string, files: PluginFiles): Promise<void> {
-  const staged = Object.entries(files).map(([name, contents]) => ({
-    final: path.join(outDir, name),
-    temp: path.join(outDir, `${name}.${process.pid}.tmp`),
-    contents,
-  }))
+/** The file operations a build uses; tests replace them to inject failures. */
+interface FileOps {
+  rename: (from: string, to: string) => Promise<void>
+  rm: (file: string) => Promise<void>
+}
+
+const realFileOps: FileOps = {
+  rename,
+  rm: (file) => rm(file, { force: true }),
+}
+
+/** The file's bytes, or `null` when it doesn't exist. Other errors propagate. */
+async function readPrior(file: string): Promise<Buffer | null> {
   try {
-    await Promise.all(staged.map((f) => writeFile(f.temp, f.contents)))
-    for (const f of staged) await rename(f.temp, f.final)
+    return await readFile(file)
   } catch (error) {
-    await Promise.all(staged.map((f) => rm(f.temp, { force: true })))
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
     throw error
   }
 }
 
-export async function buildPlugin(options: BuildOptions): Promise<BuildResult> {
+async function bestEffortRm(ops: FileOps, file: string): Promise<void> {
+  try {
+    await ops.rm(file)
+  } catch {
+    // A leftover temp file is harmless; the original error matters more.
+  }
+}
+
+/**
+ * Put the managed files in place. Each file is written to a temp name first,
+ * so Figma never reads a half-written file, and then renamed over its final
+ * name. Each rename is atomic, but the three together are not: a process
+ * crash or power loss between renames can leave a mix of old and new files,
+ * which the next start sees as stale and rebuilds. What an ordinary failure
+ * (a rename that throws) gets is rollback: the previous contents are read up
+ * front, and every file already renamed is restored (or removed, if it did
+ * not exist before), so the folder is left as it was. Rollback and cleanup
+ * are best-effort: an error in them (EPERM or EBUSY from antivirus, say)
+ * never replaces the error that caused the rollback.
+ */
+async function writeAll(
+  outDir: string,
+  files: PluginFiles,
+  ops: FileOps,
+): Promise<void> {
+  const staged = await Promise.all(
+    Object.entries(files).map(async ([name, contents]) => {
+      const final = path.join(outDir, name)
+      return {
+        final,
+        temp: path.join(outDir, `${name}.${process.pid}.tmp`),
+        undo: path.join(outDir, `${name}.${process.pid}.undo`),
+        contents,
+        prior: await readPrior(final),
+      }
+    }),
+  )
+  const renamed: Array<(typeof staged)[number]> = []
+  try {
+    await Promise.all(staged.map((f) => writeFile(f.temp, f.contents)))
+    for (const f of staged) {
+      await ops.rename(f.temp, f.final)
+      renamed.push(f)
+    }
+  } catch (error) {
+    for (const f of renamed.reverse()) {
+      try {
+        if (f.prior === null) {
+          await ops.rm(f.final)
+        } else {
+          await writeFile(f.undo, f.prior)
+          await ops.rename(f.undo, f.final)
+        }
+      } catch {
+        // Best-effort: the next start finds the folder stale and rebuilds.
+      }
+    }
+    await Promise.all(
+      staged
+        .flatMap((f) => [f.temp, f.undo])
+        .map((file) => bestEffortRm(ops, file)),
+    )
+    throw error
+  }
+}
+
+export async function buildPlugin(
+  options: BuildOptions,
+  ops: FileOps = realFileOps,
+): Promise<BuildResult> {
   const { outDir, ...rest } = options
   const files = await renderPlugin(rest)
   await mkdir(outDir, { recursive: true })
-  await writeAll(outDir, files)
+  await writeAll(outDir, files, ops)
   return {
     outDir,
     version: await readPackageVersion(),
