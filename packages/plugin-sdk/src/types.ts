@@ -304,6 +304,27 @@ export interface PluginAttention {
   summary: string
   /** What the person can do about it; the labels are shown as they are. */
   actions: Array<PluginStatusAction>
+  /**
+   * Questions the person answers in a dialog in Settings (a panel asking to
+   * pair, say). Each is shown on its own; `approve` and `decline` must be
+   * actions the plugin has registered, and are not listed in `status.actions`.
+   * The tray still uses `actions` above.
+   */
+  requests?: Array<PluginAttentionRequest>
+}
+
+/** One yes-or-no question a plugin asks in Settings; see `PluginAttention.requests`. */
+export interface PluginAttentionRequest {
+  /** English dialog title, e.g. `Let "grumpy-lynx" drive this board?`. */
+  title: string
+  /** English sentences saying what approving allows. */
+  detail: string
+  /** What the request names (panel, board, profile), one row each. */
+  facts?: Array<{ label: string; value: string }>
+  /** Allows it. Labelled as a verb, e.g. `Approve`. */
+  approve: PluginStatusAction
+  /** Refuses it for good (unexpected, stale, wrong profile), e.g. `Deny`. */
+  decline: PluginStatusAction
 }
 
 /** Handler for a surface action; errors should be reported via status. */

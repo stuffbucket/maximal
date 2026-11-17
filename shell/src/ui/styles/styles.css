@@ -2185,6 +2185,30 @@ html[data-os="macos"] .topbar {
   margin-bottom: 0;
 }
 
+/* A plugin's question (connectors AttentionRequestDialog): the connector's own
+   words keep their line breaks, the names it asks about sit in a key/value
+   list, and a quiet line says what Not now does. */
+.attention-dialog__detail {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.attention-dialog__facts {
+  margin-block: var(--space-3);
+}
+
+.attention-dialog__facts .kv__row dd {
+  overflow-wrap: anywhere;
+}
+
+.confirm-dialog__body .attention-dialog__hint {
+  color: var(--text-muted);
+}
+
+.attention-dialog .confirm-dialog__actions {
+  flex-wrap: wrap;
+}
+
 .confirm-dialog__actions {
   display: flex;
   justify-content: flex-end;

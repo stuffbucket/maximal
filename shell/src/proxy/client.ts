@@ -80,6 +80,8 @@ export type {
 /** One action button a plugin's status offers. */
 export type PluginStatusAction = NonNullable<PluginStatus["actions"]>[number];
 export type PluginStatusState = PluginStatus["state"];
+/** A yes-or-no question a plugin asks in Settings (`status.attention.requests`). */
+export type PluginAttentionRequest = NonNullable<NonNullable<PluginStatus["attention"]>["requests"]>[number];
 
 const TIMEOUT_MS = 5000;
 

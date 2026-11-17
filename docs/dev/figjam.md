@@ -31,15 +31,24 @@ build embeds them (text imports, so a compiled Maximal can write the plugin with
    on a FigJam board and tick **Let Claude Code drive this board** in its
    Settings.
 4. Maximal raises a notification, "A FigJam panel ("grumpy-lynx") wants to
-   connect.", and FigJam's page in Integrations lists the request with
-   **Approve** and **Deny**. The status also shows the port, the connected
-   boards and who's waiting. The notice code is `figjam-pair-requested`
-   (param `name`); it has no localized wording yet, so the English message is
-   shown.
+   connect.", and FigJam's page in Integrations shows a notice with **Review
+   request**. That opens one dialog, "Let the FigJam panel "grumpy-lynx"
+   connect?", that names the panel, the board it is open on and the Figma
+   profile, and says approving lets that panel read and change the board.
+   **Approve** pairs it; **Deny** refuses it for good (use it for a request you
+   didn't expect or from the wrong profile); **Not now**, Escape or a click on
+   the backdrop leave it waiting (it expires after five minutes). Focus starts
+   on Not now. With several waiting, the next opens after each answer. The
+   status also shows the port, the connected boards and who's waiting. The
+   notice code is `figjam-pair-requested` (param `name`); it has no localized
+   wording yet, so the English message is shown. The dialog is the generic
+   `status.attention.requests` (see Architecture → Attention), so its wording
+   comes from `packages/plugin-figjam/src/status.ts`.
 
    The same request can be answered from the tray, without opening Settings.
    While a panel waits, the status carries `attention` (summary: `A FigJam panel
-   ("name") wants to connect`, actions: Approve and Deny), so the tray icon
+   ("name") wants to connect`, `actions`: Approve and Deny for the tray,
+   `requests`: the dialog's question), so the tray icon
    turns to its attention state and the menu (macOS menu bar, Windows
    notification-area right-click) starts with `FigJam: Approve "name"` and
    `FigJam: Deny "name"`. They disappear once the request is answered or
@@ -194,9 +203,10 @@ bun run figjam:typecheck   # CI runs this in quality; check:fast includes it
   context's top-level `var` bindings in sync with the context object.
 - `plugin-figjam` runs the plugin conformance suite, then the real bridge on a
   spare port with a temporary data directory: a fake panel asks to pair, and
-  the test checks the `figjam-pair-requested` notice, the Approve/Deny status
-  actions and the `attention` that carries them (with action ids that stay
-  the same for the same panel name), that approving pairs the panel, that the
+  the test checks the `figjam-pair-requested` notice, the `attention` that
+  carries the tray's Approve/Deny actions and the dialog's request (naming the
+  panel and board, with action ids that stay the same for the same panel name,
+  and no Approve/Deny among the status's own actions), that approving pairs the panel, that the
   host's Maximal port reaches the built manifest's `devAllowedDomains`, the
   stale-folder rebuild, the port-in-use error and that stopping the plugin
   frees the port. It runs with

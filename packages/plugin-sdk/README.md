@@ -175,9 +175,12 @@ never destructured.
   knows it, else `message`): for changes worth interrupting for, not for
   status. Best effort; nothing shows it outside the desktop app. `code` is
   `a-z0-9-`, `message` non-empty English text. A status may also carry
-  `attention: { summary, actions }` while the plugin needs the person now:
-  the menu-bar tray lists each action (so they can be taken without opening
-  Settings). Use stable action ids, and clear it when nothing is waiting.
+  `attention: { summary, actions, requests? }` while the plugin needs the person
+  now: the menu-bar tray lists each action (so they can be taken without opening
+  Settings). `requests` are yes-or-no questions (`{ title, detail, facts?,
+  approve, decline }`) that Settings asks in a dialog, one at a time; their
+  `approve` and `decline` are registered actions and aren't repeated in
+  `status.actions`. Use stable action ids, and clear it when nothing is waiting.
 - **`ctx.storage`** — private `<app dir>/plugins/<id>/` (0700): `readText`,
   `writeText` (atomic, 0600), `delete`, `dir`. Names are single path
   segments (`/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/`); `settings.json` is

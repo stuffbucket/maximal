@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { t } from "../../../i18n";
-import type { PluginStatus, PluginStatusAction } from "../../../proxy/client";
+import type { PluginAttentionRequest, PluginStatus, PluginStatusAction } from "../../../proxy/client";
 import { Button } from "../../components/Button";
+import { Callout } from "../../components/Callout";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ProblemCallout } from "../../components/ProblemCallout";
 import type { Problem } from "../../problems";
 
+import { AttentionRequestDialog } from "./AttentionRequestDialog";
 import type { ConnectorLine } from "./connector-state";
 import { ConnectorText } from "./ConnectorText";
 import type { ConnectorMutationResult } from "./useConnectors";
@@ -46,13 +48,55 @@ export function ConnectorStatusBlock({ line, status, onAction }: ConnectorStatus
   const [running, setRunning] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ problem: Problem; actionId: string } | null>(null);
 
-  const run = async (actionId: string): Promise<void> => {
+  // The plugin's own questions (a panel asking to pair), each asked in a dialog.
+  // An answered one is hidden at once; the status catches up a moment later.
+  const [reviewing, setReviewing] = useState(false);
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
+  const lineRef = useRef<HTMLParagraphElement>(null);
+  const refocusLine = useRef(false);
+  const attention = status?.attention;
+  const requests = (attention?.requests ?? []).filter((request) => !answered.has(request.approve.id));
+  const current = requests[0];
+  const waitingIds = (attention?.requests ?? []).map((request) => request.approve.id).join("\n");
+
+  useEffect(() => {
+    // Forget answers the status has moved past.
+    const live = new Set(waitingIds.split("\n"));
+    setAnswered((previous) => {
+      const kept = [...previous].filter((id) => live.has(id));
+      return kept.length === previous.size ? previous : new Set(kept);
+    });
+  }, [waitingIds]);
+
+  useEffect(() => {
+    // The Review button went with the last question; keep focus in the page.
+    if (current !== undefined) return;
+    setReviewing(false);
+    if (refocusLine.current) {
+      refocusLine.current = false;
+      lineRef.current?.focus();
+    }
+  }, [current]);
+
+  const run = async (actionId: string): Promise<boolean> => {
     setRunning(actionId);
     setFailed(null);
     const result = await onAction(actionId);
     setRunning(null);
     setConfirming(null);
     if (!result.ok && result.problem) setFailed({ problem: result.problem, actionId });
+    return result.ok;
+  };
+
+  const answer = async (request: PluginAttentionRequest, verdict: "approve" | "decline"): Promise<void> => {
+    const ok = await run(request[verdict].id);
+    if (ok) {
+      refocusLine.current = true;
+      setAnswered((previous) => new Set(previous).add(request.approve.id));
+    } else {
+      // The problem shows on the page, not under the dialog.
+      setReviewing(false);
+    }
   };
 
   const click = (action: PluginStatusAction): void => {
@@ -67,11 +111,25 @@ export function ConnectorStatusBlock({ line, status, onAction }: ConnectorStatus
 
   return (
     <div className="connector-status">
-      <p className="connector-status__line" role="status">
+      <p className="connector-status__line" role="status" ref={lineRef} tabIndex={-1}>
         <span className={`connector-dot connector-dot--${line.tone}`} aria-hidden="true" />
         <span className="sr-only">{line.toneLabel}: </span>
         {line.text}
       </p>
+
+      {current && attention && (
+        <Callout
+          tone="notice"
+          title={attention.summary}
+          action={
+            <Button size="sm" variant="primary" onClick={() => setReviewing(true)}>
+              {t("connectors-request-review")}
+            </Button>
+          }
+        >
+          {requests.length > 1 && <p>{t("connectors-request-more", { count: requests.length - 1 })}</p>}
+        </Callout>
+      )}
 
       {status?.detail && (
         <p className="connector-status__detail">
@@ -113,6 +171,19 @@ export function ConnectorStatusBlock({ line, status, onAction }: ConnectorStatus
         />
       )}
 
+      <AttentionRequestDialog
+        open={reviewing && current !== undefined}
+        request={current}
+        busy={
+          current && running === current.approve.id ? "approve"
+          : current && running === current.decline.id ? "decline"
+          : null
+        }
+        onApprove={() => current && void answer(current, "approve")}
+        onDecline={() => current && void answer(current, "decline")}
+        onDismiss={() => setReviewing(false)}
+      />
+
       <ConfirmDialog
         open={confirming !== null}
         title={t("connectors-confirm-title", { action: confirming?.label ?? "" })}
@@ -125,7 +196,9 @@ export function ConnectorStatusBlock({ line, status, onAction }: ConnectorStatus
         cancelLabel={t("common-cancel")}
         tone={confirming?.kind === "destructive" ? "danger" : "default"}
         busy={running !== null}
-        onConfirm={() => (confirming ? run(confirming.id) : undefined)}
+        onConfirm={async () => {
+          if (confirming) await run(confirming.id);
+        }}
         onCancel={() => setConfirming(null)}
       />
     </div>

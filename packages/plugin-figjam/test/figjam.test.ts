@@ -119,6 +119,8 @@ const fact = (loaded: Loaded, label: string) =>
   status(loaded)?.facts?.find((item) => item.label === label)?.value
 const actionIds = (loaded: Loaded) =>
   (status(loaded)?.actions ?? []).map((action) => action.id)
+const attentionIds = (loaded: Loaded) =>
+  (status(loaded)?.attention?.actions ?? []).map((action) => action.id)
 const statusIs = (loaded: Loaded, code: string) => () =>
   status(loaded)?.code === code
 
@@ -253,7 +255,7 @@ describe("FigJam plugin: pairing", () => {
     const panel = openPanel("test-lynx")
     await panel.next("pair-pending")
     await waitFor(() =>
-      actionIds(loaded).some((id) => id.startsWith("approve")),
+      attentionIds(loaded).some((id) => id.startsWith("approve")),
     )
 
     const notices = loaded.testbed.events.filter(
@@ -267,23 +269,37 @@ describe("FigJam plugin: pairing", () => {
       },
     ])
     expect(fact(loaded, "Waiting for approval")).toBe("test-lynx")
-    expect(status(loaded)?.actions?.map((action) => action.label)).toContain(
-      'Approve "test-lynx"',
-    )
-    expect(status(loaded)?.actions?.map((action) => action.label)).toContain(
-      'Deny "test-lynx"',
-    )
+    // Approve and Deny are not inline buttons: the dialog and the tray carry them.
+    expect(actionIds(loaded)).toEqual(["setup"])
 
     // The ids follow the panel's name, not a counter, and the status asks
     // for attention while the request waits.
     const { approveId: approve, denyId } = pairActionIds("test-lynx")
     expect(approve).toMatch(/^approve-test-lynx-[0-9a-f]{8}$/)
-    expect(status(loaded)?.attention).toEqual({
+    const attention = status(loaded)?.attention
+    expect(attention).toMatchObject({
       summary: 'A FigJam panel ("test-lynx") wants to connect',
       actions: [
         { id: approve, label: 'Approve "test-lynx"', kind: "primary" },
         { id: denyId, label: 'Deny "test-lynx"', kind: "secondary" },
       ],
+    })
+    // The dialog's request names the panel and board and carries the same ids.
+    expect(attention?.requests).toHaveLength(1)
+    const [request] = attention?.requests ?? []
+    expect(request.title).toBe('Let the FigJam panel "test-lynx" connect?')
+    expect(request.detail).toContain("read and change the board")
+    expect(request.facts).toContainEqual({ label: "Panel", value: "test-lynx" })
+    expect(request.facts?.map((item) => item.label)).toContain("Board")
+    expect(request.approve).toEqual({
+      id: approve,
+      label: "Approve",
+      kind: "primary",
+    })
+    expect(request.decline).toEqual({
+      id: denyId,
+      label: "Deny",
+      kind: "secondary",
     })
 
     await loaded.runAction(approve)
@@ -303,8 +319,10 @@ describe("FigJam plugin: pairing", () => {
 
     const panel = openPanel("test-koala")
     await panel.next("pair-pending")
-    await waitFor(() => actionIds(loaded).some((id) => id.startsWith("deny")))
-    const deny = actionIds(loaded).find((id) => id.startsWith("deny"))
+    await waitFor(() =>
+      attentionIds(loaded).some((id) => id.startsWith("deny")),
+    )
+    const deny = attentionIds(loaded).find((id) => id.startsWith("deny"))
     if (deny === undefined) throw new Error("no deny action")
     await loaded.runAction(deny)
     await waitFor(() => fact(loaded, "Waiting for approval") === "None")

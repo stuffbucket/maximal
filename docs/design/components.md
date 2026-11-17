@@ -176,6 +176,24 @@ sections, and sections appear only when they apply to that plugin kind:
   secondary, or destructive as a ghost that reads red); an action with
   `confirm` asks in a `ConfirmDialog` first. One that failed to start
   shows an error `Callout` instead. Off shows no status line.
+- A question the connector asks (`status.attention.requests`, for example a
+  FigJam panel asking to pair): never inline buttons. A notice `Callout` under
+  the status line carries the summary, how many more are waiting, and one
+  **Review request** button. It opens `AttentionRequestDialog`, a native
+  `ModalDialog` in `.confirm-dialog`'s shell stacked above the detail: the
+  connector's title, its sentence on what approving allows, the names it asks
+  about as `.kv` rows (for FigJam: panel, board, Figma profile), and three
+  buttons. **Approve** (primary) lets it through; **Deny** (secondary) refuses
+  it for good, for an unexpected, stale or wrong-profile request; **Not now**
+  (ghost) leaves it waiting. Initial focus is Not now, never Approve. Escape and
+  the backdrop are Not now, never an answer, and are ignored while an answer is
+  being sent. There is no form, so nothing is dirty. Answering the first of
+  several opens the next in the same dialog; answering the last closes it and
+  puts focus on the status line (the Review button is gone). A failed answer
+  closes the dialog and shows a `ProblemCallout` on the page. The dialog's
+  words come from the connector in English; only the chrome (Review request,
+  Not now, the count) is in the catalogs. The tray still lists the connector's
+  `attention.actions`.
 - App Permissions: one visible row for every fixed app (Claude Code, Claude
   Desktop, Codex, Copilot CLI) and every named API connection; nothing hides
   behind a menu. A row is the name (a connection shows the label the person

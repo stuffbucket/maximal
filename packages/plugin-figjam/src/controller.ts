@@ -6,7 +6,6 @@ import type {
   Context,
   PluginDisposer,
   PluginLifecycleContext,
-  PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
 
 import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
@@ -39,9 +38,6 @@ export interface FigjamPluginOptions {
 }
 
 interface PairRequest {
-  label: string
-  approveId: string
-  denyId: string
   dispose: PluginDisposer
 }
 
@@ -330,9 +326,6 @@ export class FigjamController {
       surface.registerAction(denyId, () => this.#decide("deny", name)),
     ]
     this.#requests.set(name, {
-      label: displayName(name),
-      approveId,
-      denyId,
       dispose: () => {
         for (const dispose of disposers) dispose()
       },
@@ -352,21 +345,6 @@ export class FigjamController {
     }
   }
 
-  #pairActions(): Array<PluginStatusAction> {
-    return [...this.#requests.values()].flatMap((request) => [
-      {
-        id: request.approveId,
-        label: `Approve "${request.label}"`,
-        kind: "primary" as const,
-      },
-      {
-        id: request.denyId,
-        label: `Deny "${request.label}"`,
-        kind: "secondary" as const,
-      },
-    ])
-  }
-
   #render(): void {
     if (this.#disposed) return
     const view = this.#handle?.status()
@@ -383,14 +361,18 @@ export class FigjamController {
                     title
                   : board.id
               }),
-              pending: view.pending.map((request) => request.name),
+              pending: view.pending.map((request) => ({
+                name: request.name,
+                board: request.board,
+                user: request.user,
+              })),
             }
           : undefined,
         building: this.#building,
         folder: this.#folder,
         buildError: this.#buildError,
         manifestPath: path.join(this.#pluginDir, "manifest.json"),
-        pairActions: this.#pairActions(),
+        registered: new Set(this.#requests.keys()),
       }),
     )
   }
