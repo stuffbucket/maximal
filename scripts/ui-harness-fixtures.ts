@@ -398,12 +398,13 @@ const appsAllInstalled: AppsListResponse = {
     {
       id: "pi",
       name: "Pi",
-      kind: "coming-soon",
+      kind: "config",
       enabled: false,
-      status: "coming-soon",
-      installs: [],
+      status: "ready",
+      installs: [{ kind: "cli", path: "/Users/you/.local/bin/pi", version: "1.5.2", source: "unknown" }],
       install: null,
       conflict: null,
+      config_directory: "/Users/you/.pi/agent",
     },
     {
       id: "copilot-cli",

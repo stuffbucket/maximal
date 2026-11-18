@@ -232,12 +232,12 @@ describe("GET /apps", () => {
       "copilot-cli",
       "pi",
     ])
-    expect(body.apps.filter((app) => app.kind === "config")).toHaveLength(3)
+    expect(body.apps.filter((app) => app.kind === "config")).toHaveLength(4)
     expect(
       body.apps
         .filter((app) => app.kind === "coming-soon")
         .map((app) => app.id),
-    ).toEqual(["chatgpt", "copilot-cli", "pi"])
+    ).toEqual(["chatgpt", "copilot-cli"])
     expect(
       body.apps
         .filter((app) => app.kind === "coming-soon")

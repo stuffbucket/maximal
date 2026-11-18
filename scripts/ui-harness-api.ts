@@ -18,6 +18,7 @@ import type { AuthStatus, PluginDetailView } from "../src/lib/config/settings-ty
 
 import { type BudgetMock, createBudgetMock } from "./ui-harness-budget"
 import {
+  AppToggleRequest,
   ClaudeAutoModelsUpdateRequest,
   PluginToolPermissionsRequest,
   PluginUpdateRequest,
@@ -282,33 +283,22 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     }
 
     // --- apps toggles (same conflict and install gates as the real routes) ---
-    const appToggle =
-      /^\/settings\/api\/apps\/(claude-code|claude-desktop|codex)\/toggle$/.exec(
-        path,
-      )
+    const appToggle = /^\/settings\/api\/apps\/([^/]+)\/toggle$/.exec(path)
     if (appToggle && method === "POST") {
       const app = state.apps.apps.find((a) => a.id === appToggle[1])
       if (!app) return json({ error: { message: "no such app" } }, 404)
-      const payload = await body()
-      if (
-        typeof payload.enabled !== "boolean"
-        || (payload.overrideOtherMaximal !== undefined
-          && typeof payload.overrideOtherMaximal !== "boolean")
-      ) {
-        return json({ error: { message: "Expected { enabled: boolean, overrideOtherMaximal?: boolean }" } }, 400)
-      }
-      if (payload.enabled && app.status === "not-installed") {
-        return json({ error: { message: `No ${app.name} install detected. Install it first, then enable routing.` } }, 409)
-      }
+      if (app.kind !== "config") return json({ error: { message: "Integration not available yet" } }, 409)
+      const parsed = AppToggleRequest.safeParse(await body())
+      if (!parsed.success) return json({ error: { message: "Expected valid integration options" } }, 400)
+      const payload = parsed.data
+      if (payload.enabled && app.status === "not-installed") return json({ error: { message: `No ${app.name} install detected. Install it first, then enable routing.` } }, 409)
       if (payload.enabled && app.conflict) {
-        if (
-          app.conflict !== "other-maximal-config"
-          || payload.overrideOtherMaximal !== true
-        ) {
-          return json(app)
-        }
+        const transfer = app.conflict === "other-maximal-config" && payload.overrideOtherMaximal === true
+        const adopt = app.conflict === "existing-provider" && payload.adoptExisting === true
+        if (!transfer && !adopt) return json(app)
         app.conflict = null
       }
+      if (payload.configDirectory !== undefined) app.config_directory = payload.configDirectory
       app.enabled = payload.enabled
       return json(app)
     }

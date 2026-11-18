@@ -15,7 +15,11 @@ import {
 import { resolveBudgetDisplay } from "~/lib/budget/units"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { PATHS } from "~/lib/platform/paths"
-import { state, subscribeModelCatalogChanged } from "~/lib/runtime-state/state"
+import {
+  setModels,
+  state,
+  subscribeModelCatalogChanged,
+} from "~/lib/runtime-state/state"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
 import { fetchPiCatalog } from "./catalog"
@@ -149,9 +153,13 @@ class PiIntegration {
     this.unsubscribe = null
   }
 
-  details(conflict: AppEntry["conflict"] = null): AppEntry {
+  details(
+    conflict: AppEntry["conflict"] = null,
+    options?: ClientAppEnableOptions,
+  ): AppEntry {
     const installations = this.installations()
-    const inspected = inspectPiProvider(this.target())
+    const destination = this.target(options?.configDirectory)
+    const inspected = inspectPiProvider(destination)
     return {
       id: "pi",
       name: "Pi",
@@ -175,7 +183,7 @@ class PiIntegration {
             command: "npm install -g @earendil-works/pi-coding-agent",
             automatic: null,
           },
-      config_directory: path.dirname(this.target().filePath),
+      config_directory: path.dirname(destination.filePath),
     }
   }
 
@@ -195,9 +203,7 @@ class PiIntegration {
     const catalog =
       this.options.loadCatalog ?
         await this.options.loadCatalog()
-      : (state.models?.data
-        ?? (await fetchPiCatalog(options.accountType ?? state.accountType))
-          .data)
+      : (state.models?.data ?? [])
     const provider = projection(catalog)
     applyPiProvider(
       destination,
@@ -306,9 +312,27 @@ export function createPiApp(
     name: "Pi",
     kind: "config",
     apiKeyLabel: "pi",
-    cli,
+    cli: {
+      ...cli,
+      async handle(op, args) {
+        if (op === "enable" && !state.models?.data.length) {
+          const enableOptions = (await cli.enableOptions?.(args)) ?? {}
+          const inspected = inspectPiProvider(
+            integration.target(enableOptions.configDirectory),
+          )
+          if (allowed(inspected.conflict, enableOptions))
+            setModels(
+              await fetchPiCatalog(
+                enableOptions.accountType ?? state.accountType,
+              ),
+            )
+        }
+        return false
+      },
+    },
     detect: () => Promise.resolve(integration.installations().length > 0),
-    getDetails: (conflict) => Promise.resolve(integration.details(conflict)),
+    getDetails: (conflict, enableOptions) =>
+      Promise.resolve(integration.details(conflict, enableOptions)),
     enable: (enableOptions) => integration.enable(enableOptions),
     disable: () => integration.disable(),
     isEnabled: () => inspectPiProvider(integration.target()).enabled,

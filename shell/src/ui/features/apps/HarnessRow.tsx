@@ -4,6 +4,7 @@ import { t } from "../../../i18n";
 import type { AppEntry, AppId } from "../../../proxy/client";
 import { openUrl, revealPath } from "../../../tauri/shell";
 import { Button } from "../../components/Button";
+import { Callout } from "../../components/Callout";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Switch } from "../../components/Switch";
 import { isWindows } from "../../platform";
@@ -18,6 +19,7 @@ const OFFICIAL_APP_URLS: Partial<Record<AppId, string>> = {
   "claude-code": "https://code.claude.com/docs/en/setup",
   "claude-desktop": "https://claude.ai/download",
   codex: "https://learn.chatgpt.com/docs/codex/cli",
+  pi: "https://pi.dev/",
 };
 
 const HARNESS_TYPES: Record<AppId, "terminal" | "window"> = {
@@ -49,7 +51,7 @@ function conflictDetail(app: AppEntry): string {
   const appName = harnessName(app);
   switch (app.conflict) {
     case "existing-provider":
-      return t("apps-connect-title", { appName });
+      return t("apps-pi-adopt-body");
     case "other-maximal-config":
       return t("apps-override-body", { appName });
     case "foreign-base-url":
@@ -90,6 +92,8 @@ function HarnessTypeIcon({ appId }: { appId: AppId }): JSX.Element {
 export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   const [connectOpen, setConnectOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [configDirectory, setConfigDirectory] = useState(app.config_directory ?? "");
+  const [connectError, setConnectError] = useState<string | null>(null);
   const [restartWarnOpen, setRestartWarnOpen] = useState(false);
   const [disabling, setDisabling] = useState(false);
   // Claude Desktop reads its gateway profile at launch, so a change in
@@ -105,8 +109,11 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   const comingSoon = app.kind === "coming-soon";
   const notInstalled = app.status === "not-installed";
   const hasConflict = !notInstalled && app.conflict !== null;
-  const needsConnection = notInstalled || hasConflict;
+  const needsSetup = Boolean(app.config_directory) && !app.enabled;
+  const needsConnection = notInstalled || hasConflict || needsSetup;
+  const canAdopt = app.conflict === "existing-provider";
   const canTransfer = app.conflict === "other-maximal-config";
+  const canConfigure = canTransfer || canAdopt || (needsSetup && !hasConflict);
   const needsWindowsRestartWarning = app.id === "claude-code" && isWindows();
   const preferredInstall =
     app.installs.find((install) => install.kind === "desktop") ??
@@ -117,21 +124,24 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
   // switch instead of leaving focus on the page — or on the just-closed
   // dialog itself, where a backdrop press leaves it.
   useEffect(() => {
-    if (restartNotice !== null) {
+    if (connectOpen || restartNotice !== null) {
       restartDialogWasOpen.current = true;
       return;
     }
     if (!restartDialogWasOpen.current) return;
     restartDialogWasOpen.current = false;
-    const active = document.activeElement;
-    if (
-      active === null ||
-      active === document.body ||
-      (active instanceof HTMLDialogElement && !active.open)
-    ) {
-      rowRef.current?.querySelector<HTMLInputElement>(".switch input")?.focus();
-    }
-  }, [restartNotice]);
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (
+        active === null || active === document.documentElement ||
+        active === document.body ||
+        (active instanceof HTMLDialogElement && !active.open)
+      ) {
+        rowRef.current?.querySelector<HTMLInputElement>(".switch input")?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [connectOpen, restartNotice]);
 
   const handleToggle = (next: boolean): void => {
     if (!next && needsWindowsRestartWarning) {
@@ -151,11 +161,18 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
       await openOfficialInstructions(app);
       return;
     }
-    if (canTransfer) {
+    if (canConfigure) {
       setConnecting(true);
-      const result = await onToggle(true, { overrideOtherMaximal: true });
+      setConnectError(null);
+      const sameDirectory = !app.config_directory || configDirectory.trim() === app.config_directory;
+      const result = await onToggle(true, {
+        ...(canTransfer && sameDirectory ? { overrideOtherMaximal: true } : {}),
+        ...(canAdopt && sameDirectory ? { adoptExisting: true } : {}),
+        ...(app.config_directory ? { configDirectory: configDirectory.trim() } : {}),
+      });
       setConnecting(false);
-      if (result.ok) setConnectOpen(false);
+      if (result.applied || (result.ok && !app.config_directory)) setConnectOpen(false);
+      if (!result.ok) setConnectError(result.error ?? t("apps-connect-failed", { appName: displayName }));
       setRestartNotice(desktopRestartChange(app.id, true, result));
       return;
     }
@@ -178,10 +195,10 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
     ? t("apps-download-body", { appName: displayName })
     : canTransfer
       ? t("apps-override-body", { appName: displayName })
-      : conflictDetail(app);
+      : hasConflict ? conflictDetail(app) : t("apps-pi-setup-body");
   const connectConfirmLabel = notInstalled
     ? t("apps-download-confirm")
-    : canTransfer
+    : canConfigure
       ? t("apps-connect")
       : t("common-close");
 
@@ -218,7 +235,11 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setConnectOpen(true)}
+            onClick={() => {
+              setConfigDirectory(app.config_directory ?? "");
+              setConnectError(null);
+              setConnectOpen(true);
+            }}
           >
             {t("apps-connect")}
           </Button>
@@ -235,9 +256,20 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
           <ConfirmDialog
             open={connectOpen}
             title={connectTitle}
-            body={<p>{connectBody}</p>}
+            body={<>
+              <p>{connectBody}</p>
+              {connectError && <Callout tone="error" title={t("apps-connect-failed", { appName: displayName })}>{connectError}</Callout>}
+              {canConfigure && app.config_directory && <details>
+                <summary>{t("connectors-config-advanced")}</summary>
+                <div className="form">
+                  <div className="form__label"><label htmlFor={`${app.id}-config-directory`}>{t("apps-config-directory")}</label></div>
+                  <input id={`${app.id}-config-directory`} className="input" value={configDirectory} onChange={(event) => setConfigDirectory(event.target.value)} disabled={connecting} spellCheck={false} autoComplete="off" aria-describedby={`${app.id}-config-directory-hint`} />
+                  <p id={`${app.id}-config-directory-hint`} className="form__hint">{t("apps-config-directory-hint")}</p>
+                </div>
+              </details>}
+            </>}
             confirmLabel={connectConfirmLabel}
-            cancelLabel={hasConflict && !canTransfer ? null : t("apps-cancel")}
+            cancelLabel={hasConflict && !canConfigure ? null : t("apps-cancel")}
             busy={connecting}
             onConfirm={confirmConnect}
             onCancel={() => setConnectOpen(false)}

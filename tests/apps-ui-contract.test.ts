@@ -32,8 +32,11 @@ describe("Apps shell contract", () => {
     expect(hook).toContain("options?: ToggleAppOptions")
     expect(hook).toContain("overrideOtherMaximal?: boolean")
     expect(hook).toContain("overrideOtherMaximal: true")
-    expect(hook).toContain('path: "/settings/api/apps/codex/toggle"')
-    expect(hook).toContain('"claude-code" | "claude-desktop" | "codex"')
+    expect(hook).toContain('kind: "app-toggle"')
+    expect(hook).toContain("path: `/settings/api/apps/${appId}/toggle`")
+    expect(hook).toContain('?.kind !== "config"')
+    expect(hook).toContain("adoptExisting?: boolean")
+    expect(hook).toContain("configDirectory?: string")
     expect(hook).not.toContain('path: "/settings/api/apps/chatgpt/toggle"')
     expect(hook).not.toContain('path: "/settings/api/apps/pi/toggle"')
     expect(hook).not.toContain('path: "/settings/api/apps/copilot-cli/toggle"')
@@ -93,7 +96,10 @@ describe("Apps shell contract", () => {
     expect(row).toContain('app.conflict === "other-maximal-config"')
     expect(row).toContain("overrideOtherMaximal: true")
     expect(row).toContain('t("apps-override-body"')
-    expect(row).toContain("hasConflict && !canTransfer ? null")
+    expect(row).toContain("hasConflict && !canConfigure ? null")
+    expect(row).toContain('app.conflict === "existing-provider"')
+    expect(row).toContain("adoptExisting: true")
+    expect(row).toContain("sameDirectory")
   })
 
   test("provides inspectable Codex harness states and toggle behavior", async () => {
@@ -201,7 +207,9 @@ describe("Claude Desktop restart dialog", () => {
     )
     expect(row).toContain("<DesktopRestartDialog")
     // Not an inline banner, and not a confirm/cancel prompt.
-    expect(row).not.toContain("<Callout")
+    expect(
+      source("shell/src/ui/features/apps/DesktopRestartDialog.tsx"),
+    ).not.toContain("<Callout")
     expect(row).not.toContain("relaunchNoticeShown")
     const dialog = source("shell/src/ui/features/apps/DesktopRestartDialog.tsx")
     expect(dialog).toContain("<NoticeDialog")

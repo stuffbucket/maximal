@@ -472,9 +472,17 @@ export const AppsListResponse = z.object({
 })
 export type AppsListResponse = z.infer<typeof AppsListResponse>
 
-export const CodexToggleRequest = z.object({
-  enabled: z.boolean(),
-  overrideOtherMaximal: z.boolean().optional(),
+export const AppToggleRequest = z
+  .object({
+    enabled: z.boolean(),
+    overrideOtherMaximal: z.boolean().optional(),
+    adoptExisting: z.boolean().optional(),
+    configDirectory: z.string().trim().min(1).max(4096).optional(),
+  })
+  .strict()
+export const CodexToggleRequest = AppToggleRequest.pick({
+  enabled: true,
+  overrideOtherMaximal: true,
 })
 export type CodexToggleRequest = z.infer<typeof CodexToggleRequest>
 

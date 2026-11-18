@@ -13,7 +13,9 @@ export type AppCliOp = "status" | "enable" | "disable"
  *  bespoke handling (e.g. Claude Desktop's `--force` / `--managed`). */
 export interface AppCli {
   /** Map app-specific CLI flags into the same enable operation Settings uses. */
-  enableOptions?(args: Record<string, unknown>): ClientAppEnableOptions
+  enableOptions?(
+    args: Record<string, unknown>,
+  ): ClientAppEnableOptions | Promise<ClientAppEnableOptions>
   /** Extra citty args merged into this app's command beyond the shared
    *  `--enable` / `--disable`. */
   extraArgs?: ArgsDef
@@ -66,7 +68,10 @@ export interface ClientApp {
   detect(): Promise<boolean>
 
   /** Build the complete metadata payload returned to the Settings UI */
-  getDetails(conflict?: AppEntry["conflict"]): Promise<AppEntry>
+  getDetails(
+    conflict?: AppEntry["conflict"],
+    options?: ClientAppEnableOptions,
+  ): Promise<AppEntry>
 
   /** Enable the proxy routing for this app (e.g. write settings / profile) */
   enable(

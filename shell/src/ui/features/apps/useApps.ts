@@ -29,6 +29,8 @@ export interface MutationResult {
 
 export interface ToggleAppOptions {
   overrideOtherMaximal?: boolean;
+  adoptExisting?: boolean;
+  configDirectory?: string;
 }
 
 interface UseApps {
@@ -43,32 +45,6 @@ interface UseApps {
     enabled: boolean,
     options?: ToggleAppOptions,
   ) => Promise<MutationResult>;
-}
-
-type ToggleableAppId = Extract<
-  AppId,
-  "claude-code" | "claude-desktop" | "codex"
->;
-
-const TOGGLE_ENDPOINTS = {
-  "claude-code": {
-    kind: "claude-code-toggle",
-    path: "/settings/api/apps/claude-code/toggle",
-  },
-  "claude-desktop": {
-    kind: "claude-desktop-toggle",
-    path: "/settings/api/apps/claude-desktop/toggle",
-  },
-  codex: {
-    kind: "codex-toggle",
-    path: "/settings/api/apps/codex/toggle",
-  },
-} as const satisfies Record<ToggleableAppId, { kind: string; path: string }>;
-
-function isToggleableAppId(appId: AppId): appId is ToggleableAppId {
-  return (
-    appId === "claude-code" || appId === "claude-desktop" || appId === "codex"
-  );
 }
 
 function sortHarnesses(apps: Array<AppEntry>): Array<AppEntry> {
@@ -140,20 +116,22 @@ export function useApps(): UseApps {
 
   const toggleApp = useCallback<UseApps["toggleApp"]>(
     async (appId, enabled, options) => {
-      if (!isToggleableAppId(appId)) {
+      if (apps.find((app) => app.id === appId)?.kind !== "config") {
         return { ok: false, error: t("apps-coming-soon") };
       }
-      const endpoint = TOGGLE_ENDPOINTS[appId];
 
       // A list request started before this mutation must not overwrite its
       // fresher response. Invalidate once before the write and again after it
       // so a re-scan started while the write was in flight is stale too.
       refreshGeneration.current += 1;
       const result = await apiCall({
-        ...endpoint,
+        kind: "app-toggle",
+        path: `/settings/api/apps/${appId}/toggle`,
         method: "POST",
         body: {
           enabled,
+          ...(options?.adoptExisting ? { adoptExisting: true } : {}),
+          ...(options?.configDirectory !== undefined ? { configDirectory: options.configDirectory } : {}),
           ...(options?.overrideOtherMaximal
             ? { overrideOtherMaximal: true }
             : {}),
@@ -174,7 +152,7 @@ export function useApps(): UseApps {
         applied: toggleApplied(result.data, enabled),
       };
     },
-    [splice],
+    [apps, splice],
   );
 
   return {

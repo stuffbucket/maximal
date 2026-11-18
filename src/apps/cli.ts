@@ -79,7 +79,7 @@ async function enableApp(
   app: ClientApp,
   args: Record<string, unknown>,
 ): Promise<void> {
-  const result = await app.enable(app.cli?.enableOptions?.(args))
+  const result = await app.enable(await app.cli?.enableOptions?.(args))
   if (result.conflict) {
     consola.warn(
       `Left ${app.name} untouched: a ${result.conflict} is already set.`

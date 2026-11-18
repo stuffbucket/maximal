@@ -1,13 +1,8 @@
-/**
- * /settings/api/apps — wire downstream tools to talk to the proxy.
- *
- * Auth-gated by the parent `/settings/api` middleware. Persistence is
- * `config.apps`, round-tripped through `writeConfig()`.
- */
-
+/** Registry-driven Settings mutations. Each app owns its persistence and conflict rules. */
 import type { Context } from "hono"
 
 import { Hono } from "hono"
+import path from "node:path"
 
 import {
   CLAUDE_CODE_INSTALL_REFUSAL_MESSAGE,
@@ -17,11 +12,9 @@ import { getAllApps, getApp } from "~/apps/registry"
 import {
   AppEntry,
   AppsListResponse,
+  AppToggleRequest,
   ClaudeCodeInstallRequest,
   ClaudeCodeInstallStatus,
-  ClaudeCodeToggleRequest,
-  CodexToggleRequest,
-  ClaudeDesktopToggleRequest,
   type AppEntry as AppEntryT,
 } from "~/lib/config/settings-types"
 import { forwardError, HTTPError } from "~/lib/errors/error"
@@ -29,70 +22,66 @@ import { armWorkingNotice, resetWorkingNotice } from "~/lib/working-notice"
 
 import { respondValidated } from "./respond-validated"
 
-/** Build an HTTPError whose body is a plain message, so `forwardError`
- *  surfaces a clean `{ error: { message } }` at the given status. */
 function httpError(message: string, status: number): HTTPError {
   return new HTTPError(message, new Response(message, { status }))
 }
-
-/** Validate a single app object against the contract before returning
- *  it, so drift fails loudly in tests rather than silently in the UI. */
 function jsonApp(c: Context, app: AppEntryT) {
   return respondValidated(c, { schema: AppEntry, label: "App" }, app)
 }
-
 export const appsRoutes = new Hono()
-
 appsRoutes.get("/", async (c) => {
   try {
-    const appsPayloads = await Promise.all(
-      getAllApps().map((app) => app.getDetails()),
-    )
-    const payload = {
-      apps: appsPayloads,
-    }
+    const apps = await Promise.all(getAllApps().map((app) => app.getDetails()))
     return respondValidated(
       c,
       { schema: AppsListResponse, label: "Apps" },
-      payload,
+      { apps },
     )
   } catch (error) {
     return forwardError(c, error)
   }
 })
 
-appsRoutes.post("/claude-code/toggle", async (c) => {
+function parseToggle(appId: string, body: unknown) {
+  const parsed = AppToggleRequest.safeParse(body)
+  if (!parsed.success)
+    throw httpError(
+      "Expected { enabled: boolean } and valid integration options",
+      400,
+    )
+  const { configDirectory, adoptExisting } = parsed.data
+  if (configDirectory && !path.isAbsolute(configDirectory))
+    throw httpError("Choose an absolute Pi agent directory", 400)
+  if (appId !== "pi" && (configDirectory || adoptExisting))
+    throw httpError("These options apply only to Pi", 400)
+  return parsed.data
+}
+
+appsRoutes.post("/:id/toggle", async (c) => {
   try {
-    const body: unknown = await c.req.json().catch(() => null)
-    const parsed = ClaudeCodeToggleRequest.safeParse(body)
-    if (!parsed.success) {
-      throw httpError("Expected { enabled: boolean }", 400)
-    }
-
-    const app = getApp("claude-code")
+    const app = getApp(c.req.param("id"))
     if (!app) throw httpError("App not found", 404)
-
-    if (parsed.data.enabled) {
-      const isInstalled = await app.detect()
-      if (!isInstalled) {
-        throw httpError(
-          "No Claude Code install detected. Install it first, then enable routing.",
-          409,
-        )
-      }
-      const result = await app.enable({
-        overrideOtherMaximal: parsed.data.overrideOtherMaximal,
-      })
-      const conflict = result.conflict || null
-      if (result.success) armWorkingNotice(app.id, app.name)
-      // `app.enable()` is the single owner of the claude-code routing intent
-      // (persists config.apps.claudeCode.enabled itself) — no separate persist.
-      return jsonApp(c, await app.getDetails(conflict))
+    if (app.kind !== "config")
+      throw httpError("This integration is not available yet", 409)
+    const body: unknown = await c.req.json().catch(() => null)
+    const { enabled, ...options } = parseToggle(app.id, body)
+    if (enabled && !(await app.detect()))
+      throw httpError(
+        `No ${app.name} install detected. Install it first, then enable routing.`,
+        409,
+      )
+    const result = enabled ? await app.enable(options) : await app.disable()
+    if (app.id === "claude-code" || app.id === "claude-desktop") {
+      if (enabled && result.success) armWorkingNotice(app.id, app.name)
+      if (!enabled) resetWorkingNotice(app.id)
     }
-
-    await app.disable()
-    resetWorkingNotice(app.id)
-    return jsonApp(c, await app.getDetails())
+    return jsonApp(
+      c,
+      await app.getDetails(
+        result.conflict ?? null,
+        enabled ? options : undefined,
+      ),
+    )
   } catch (error) {
     return forwardError(c, error)
   }
@@ -128,72 +117,3 @@ appsRoutes.get("/claude-code/install", (c) =>
     claudeCodeInstaller.status(),
   ),
 )
-
-appsRoutes.post("/codex/toggle", async (c) => {
-  try {
-    const body: unknown = await c.req.json().catch(() => null)
-    const parsed = CodexToggleRequest.safeParse(body)
-    if (!parsed.success) {
-      throw httpError("Expected { enabled: boolean }", 400)
-    }
-
-    const app = getApp("codex")
-    if (!app) throw httpError("App not found", 404)
-
-    if (parsed.data.enabled) {
-      if (!(await app.detect())) {
-        throw httpError(
-          "No Codex install detected. Install it first, then enable routing.",
-          409,
-        )
-      }
-      const result = await app.enable({
-        overrideOtherMaximal: parsed.data.overrideOtherMaximal,
-      })
-      return jsonApp(c, await app.getDetails(result.conflict ?? null))
-    }
-
-    const result = await app.disable()
-    return jsonApp(c, await app.getDetails(result.conflict ?? null))
-  } catch (error) {
-    return forwardError(c, error)
-  }
-})
-
-appsRoutes.post("/claude-desktop/toggle", async (c) => {
-  try {
-    const body: unknown = await c.req.json().catch(() => null)
-    const parsed = ClaudeDesktopToggleRequest.safeParse(body)
-    if (!parsed.success) {
-      throw httpError("Expected { enabled: boolean }", 400)
-    }
-
-    const app = getApp("claude-desktop")
-    if (!app) throw httpError("App not found", 404)
-
-    // `app.enable()` / `disable()` own the persisted routing intent; a
-    // refused enable (someone else's gateway is applied) doesn't record it.
-    if (parsed.data.enabled) {
-      if (!(await app.detect())) {
-        throw httpError(
-          "No Claude Desktop install detected. Install it first, then enable routing.",
-          409,
-        )
-      }
-      const result = await app.enable({
-        overrideOtherMaximal: parsed.data.overrideOtherMaximal,
-      })
-      if (!result.success) {
-        return jsonApp(c, await app.getDetails(result.conflict ?? null))
-      }
-      armWorkingNotice(app.id, app.name)
-      return jsonApp(c, await app.getDetails())
-    }
-
-    await app.disable()
-    resetWorkingNotice(app.id)
-    return jsonApp(c, await app.getDetails())
-  } catch (error) {
-    return forwardError(c, error)
-  }
-})

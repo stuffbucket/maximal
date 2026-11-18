@@ -328,6 +328,12 @@ type Endpoint =
       body: ClaudeAutoModelsUpdateRequest;
     }
   | {
+      kind: "app-toggle";
+      method: "POST";
+      path: `/settings/api/apps/${AppId}/toggle`;
+      body: { enabled: boolean; overrideOtherMaximal?: boolean; adoptExisting?: boolean; configDirectory?: string };
+    }
+  | {
       kind: "claude-code-toggle";
       method: "POST";
       path: "/settings/api/apps/claude-code/toggle";
@@ -455,6 +461,7 @@ interface ResponseFor {
   "api-keys-enforce": ApiKeysListResponse;
   "active-clients": ActiveApiClientsResponse;
   "apps-list": AppsListResponse;
+  "app-toggle": AppEntry;
   "claude-code-toggle": AppEntry;
   "claude-desktop-toggle": AppEntry;
   "codex-toggle": AppEntry;
