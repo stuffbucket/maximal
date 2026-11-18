@@ -267,9 +267,11 @@ export function applyPiProvider(
     )
   }
   const metadata = metadataFor(target.profileId, text, existing ?? null)
+  const payload = { ...current.provider, ...provider }
+  delete payload._maximal
   const managed = {
-    ...provider,
-    _maximal: { ...metadata, fingerprint: fingerprint(provider, metadata) },
+    ...payload,
+    _maximal: { ...metadata, fingerprint: fingerprint(payload, metadata) },
   }
   const next = edit(text, managed)
   if (next === original) return false

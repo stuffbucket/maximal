@@ -448,6 +448,8 @@ export const AppEntry = z.object({
   status: z.enum(["ready", "not-installed", "coming-soon"]),
   installs: z.array(AppInstall),
   install: AppInstallHint.nullable(),
+  /** Pi agent directory currently selected by this profile. */
+  config_directory: z.string().optional(),
   /** Non-null when enabling was refused because the app's config already
    *  has a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL or
    *  apiKeyHelper). The UI surfaces this so the user knows why the toggle
@@ -455,6 +457,7 @@ export const AppEntry = z.object({
   conflict: z
     .enum([
       "foreign-base-url",
+      "existing-provider",
       "foreign-api-key-helper",
       "foreign-gateway-profile",
       "other-maximal-config",

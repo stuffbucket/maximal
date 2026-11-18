@@ -75,8 +75,11 @@ async function showStatus(app: ClientApp): Promise<void> {
   }
 }
 
-async function enableApp(app: ClientApp): Promise<void> {
-  const result = await app.enable()
+async function enableApp(
+  app: ClientApp,
+  args: Record<string, unknown>,
+): Promise<void> {
+  const result = await app.enable(app.cli?.enableOptions?.(args))
   if (result.conflict) {
     consola.warn(
       `Left ${app.name} untouched: a ${result.conflict} is already set.`
@@ -116,7 +119,7 @@ async function runAppOp(
     const handled = await app.cli.handle(op, args)
     if (handled) return
   }
-  if (op === "enable") return enableApp(app)
+  if (op === "enable") return enableApp(app, args)
   if (op === "disable") return disableApp(app)
   return showStatus(app)
 }

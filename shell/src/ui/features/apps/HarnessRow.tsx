@@ -48,6 +48,8 @@ function harnessName(app: AppEntry): string {
 function conflictDetail(app: AppEntry): string {
   const appName = harnessName(app);
   switch (app.conflict) {
+    case "existing-provider":
+      return t("apps-connect-title", { appName });
     case "other-maximal-config":
       return t("apps-override-body", { appName });
     case "foreign-base-url":

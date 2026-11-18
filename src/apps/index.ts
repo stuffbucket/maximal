@@ -12,6 +12,8 @@ export type AppCliOp = "status" | "enable" | "disable"
  *  `ClientApp` contract; this only exists for apps that need EXTRA flags or
  *  bespoke handling (e.g. Claude Desktop's `--force` / `--managed`). */
 export interface AppCli {
+  /** Map app-specific CLI flags into the same enable operation Settings uses. */
+  enableOptions?(args: Record<string, unknown>): ClientAppEnableOptions
   /** Extra citty args merged into this app's command beyond the shared
    *  `--enable` / `--disable`. */
   extraArgs?: ArgsDef
@@ -39,6 +41,12 @@ export interface ClientAppEnableOptions {
   /** Replace routing owned by another valid Maximal profile. Settings only:
    *  callers must require an explicit confirmation before setting this. */
   overrideOtherMaximal?: boolean
+  /** Explicitly adopt an unmanaged Pi provider, preserving it for reversal. */
+  adoptExisting?: boolean
+  /** Optional absolute Pi agent directory, persisted only after enabling. */
+  configDirectory?: string
+  /** CLI-only Copilot account selection when the catalog must be fetched. */
+  accountType?: string
 }
 
 export interface ClientApp {

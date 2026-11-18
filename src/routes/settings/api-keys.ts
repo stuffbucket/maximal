@@ -27,6 +27,7 @@ import { randomUUID } from "node:crypto"
 import { refreshClaudeCodeApiKeyHelper } from "~/apps/claude-code/reconcile"
 import { refreshClaudeDesktopApiKey } from "~/apps/claude-desktop/reconcile"
 import { refreshCodexApiKeyHelper } from "~/apps/codex/reconcile"
+import { refreshPiApiKeyHelper } from "~/apps/pi"
 import { generateApiKey } from "~/lib/auth/api-key-helper"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { API_KEY_VALUE_PATTERN } from "~/lib/config/config-schema"
@@ -104,6 +105,7 @@ apiKeysRoutes.post("/", async (c) => {
   refreshClaudeCodeApiKeyHelper()
   refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
+  refreshPiApiKeyHelper()
   // Connector entries in Claude Code carry the Claude Code key too.
   syncPluginClients()
 
@@ -199,6 +201,7 @@ apiKeysRoutes.patch("/:id", async (c) => {
   refreshClaudeCodeApiKeyHelper()
   refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
+  refreshPiApiKeyHelper()
   // Connector entries in Claude Code carry the Claude Code key too.
   syncPluginClients()
 
@@ -226,6 +229,7 @@ apiKeysRoutes.delete("/:id", (c) => {
   refreshClaudeCodeApiKeyHelper()
   refreshCodexApiKeyHelper()
   refreshClaudeDesktopApiKey()
+  refreshPiApiKeyHelper()
   // Connector entries in Claude Code carry the Claude Code key too.
   syncPluginClients()
   return c.body(null, 204)

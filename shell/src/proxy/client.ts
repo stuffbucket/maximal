@@ -163,6 +163,7 @@ export type AppStatus = "ready" | "not-installed" | "coming-soon";
 /** Why enabling was refused. The app's config already carries a routing
  *  setting we don't own, so we backed off rather than clobber it. */
 export type AppConflict =
+  | "existing-provider"
   | "foreign-base-url"
   | "foreign-api-key-helper"
   | "foreign-gateway-profile"
@@ -190,6 +191,7 @@ export interface AppEntry {
   enabled: boolean;
   status: AppStatus;
   installs: Array<AppInstall>;
+  config_directory?: string;
   /** Non-null only when claude-code has no installs (offer to install). */
   install: AppInstallHint | null;
   /** Non-null when the last enable attempt was refused. The card surfaces this

@@ -214,6 +214,12 @@ export const AppConfigSchema = z
     editorVersion: z.string().optional(),
     apps: z
       .object({
+        pi: z
+          .object({
+            enabled: z.boolean().optional(),
+            configDirectory: z.string().trim().min(1).optional(),
+          })
+          .optional(),
         codex: z
           .object({
             enabled: z.boolean().optional(),

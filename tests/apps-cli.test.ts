@@ -181,8 +181,19 @@ describe("apiKeyLabel — single source for api <client>", () => {
     expect(getApp("claude-desktop")?.apiKeyLabel).toBe("claude-desktop")
   })
 
+  test("Pi declares its key surface and explicit provisioning options", () => {
+    const app = getApp("pi")
+    expect(app?.apiKeyLabel).toBe("pi")
+    expect(
+      app?.cli?.enableOptions?.({
+        "adopt-existing": true,
+        "config-dir": "/tmp/pi",
+      }),
+    ).toMatchObject({ adoptExisting: true, configDirectory: "/tmp/pi" })
+  })
+
   test("coming-soon harnesses have no key surface", () => {
-    for (const appId of ["chatgpt", "pi", "copilot-cli"]) {
+    for (const appId of ["chatgpt", "copilot-cli"]) {
       expect(getApp(appId)?.apiKeyLabel).toBeUndefined()
     }
   })

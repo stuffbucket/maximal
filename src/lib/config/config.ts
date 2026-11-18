@@ -69,6 +69,10 @@ export interface AppConfig {
 }
 
 export interface AppsConfig {
+  pi?: {
+    enabled?: boolean
+    configDirectory?: string
+  }
   codex?: {
     enabled?: boolean
   }
