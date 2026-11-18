@@ -14,7 +14,13 @@ import path from "node:path"
 import type { Model, TokenPrices } from "~/services/copilot/get-models"
 
 import { projectPiModels } from "~/apps/pi/models"
+import {
+  applyPiProvider,
+  inspectPiProvider,
+  revertPiProvider,
+} from "~/apps/pi/ownership"
 import { syncPiModels } from "~/apps/pi/sync"
+import { currentProfileId } from "~/apps/profile-identity"
 
 const baseUrl = "http://127.0.0.1:4141/v1"
 
@@ -331,7 +337,7 @@ describe("Pi catalog file sync", () => {
     expect(await readdir(directory)).toEqual(["models.json"])
   })
 
-  test("refuses commented JSON and an absent Maximal provider without rewriting anything", async () => {
+  test("refuses an absent Maximal provider without rewriting anything", async () => {
     for (const text of [
       '{ /* keep me */ "providers": {} }',
       '{"providers":{}}',
@@ -346,6 +352,65 @@ describe("Pi catalog file sync", () => {
       expect(await readFile(filePath, "utf8")).toBe(text)
       expect(await readdir(directory)).toEqual(["models.json"])
     }
+  })
+
+  test("preserves JSONC comments while refreshing a manually configured provider", async () => {
+    const text =
+      '{\n // Keep this comment\n "providers":{"maximal":{"baseUrl":"http://127.0.0.1:4141/v1","apiKey":"old","models":[],}},\n "custom":true,\n}\n'
+    await writeFile(filePath, text)
+    const result = await syncPiModels({
+      filePath,
+      catalog: [example()],
+      write: true,
+    })
+    expect(result.written).toBe(true)
+    expect(await readFile(filePath, "utf8")).toContain("// Keep this comment")
+    expect(await readFile(filePath, "utf8")).toContain('"custom":true')
+  })
+
+  test("refreshes the ownership fingerprint and journal of an enabled integration", async () => {
+    const target = {
+      filePath,
+      journalPath: path.join(directory, "journal.json"),
+      profileId: currentProfileId(),
+    }
+    applyPiProvider(
+      target,
+      { baseUrl, apiKey: "!helper", models: [] },
+      { claim: true, adoptExisting: true },
+    )
+    const result = await syncPiModels({
+      filePath,
+      catalog: [example()],
+      write: true,
+      journalPath: target.journalPath,
+    })
+    expect(result.written).toBe(true)
+    expect(inspectPiProvider(target).enabled).toBe(true)
+    revertPiProvider(target)
+    expect(await readFile(filePath, "utf8")).toBe(original)
+  })
+
+  test("does not change another profile's managed provider", async () => {
+    const target = {
+      filePath,
+      journalPath: path.join(directory, "journal.json"),
+      profileId: "f".repeat(64),
+    }
+    applyPiProvider(
+      target,
+      { baseUrl, models: [] },
+      { claim: true, adoptExisting: true },
+    )
+    const text = await readFile(filePath, "utf8")
+    const failure = await syncPiModels({
+      filePath,
+      catalog: [example()],
+      write: true,
+      journalPath: target.journalPath,
+    }).catch((error: unknown) => error)
+    expect(String(failure)).toContain("another Maximal profile")
+    expect(await readFile(filePath, "utf8")).toBe(text)
   })
 
   test("does not replace a symlink managed by another configuration tool", async () => {

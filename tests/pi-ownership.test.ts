@@ -25,25 +25,25 @@ function parsed(target: PiTarget): unknown {
   return parse(contents(target))
 }
 
-describe("Pi provider ownership", () => {
-  let directory: string
-  let target: PiTarget
-  beforeEach(() => {
-    directory = fs.mkdtempSync(path.join(os.tmpdir(), "pi-ownership-"))
-    target = {
-      filePath: path.join(directory, "pi", "models.json"),
-      journalPath: path.join(directory, "maximal", "pi-routing.json"),
-      profileId: "a".repeat(64),
-    }
-  })
-  afterEach(() => {
-    fs.rmSync(directory, { recursive: true, force: true })
-  })
-  function write(text: string) {
-    fs.mkdirSync(path.dirname(target.filePath), { recursive: true })
-    fs.writeFileSync(target.filePath, text)
+let directory: string
+let target: PiTarget
+beforeEach(() => {
+  directory = fs.mkdtempSync(path.join(os.tmpdir(), "pi-ownership-"))
+  target = {
+    filePath: path.join(directory, "pi", "models.json"),
+    journalPath: path.join(directory, "maximal", "pi-routing.json"),
+    profileId: "a".repeat(64),
   }
+})
+afterEach(() => {
+  fs.rmSync(directory, { recursive: true, force: true })
+})
+function write(text: string) {
+  fs.mkdirSync(path.dirname(target.filePath), { recursive: true })
+  fs.writeFileSync(target.filePath, text)
+}
 
+describe("Pi provider ownership", () => {
   test("inspection is read-only and a fresh installation is reversible", () => {
     expect(inspectPiProvider(target)).toEqual({
       enabled: false,
@@ -90,6 +90,8 @@ describe("Pi provider ownership", () => {
     applyPiProvider(target, provider, { claim: true })
     write(contents(target).replace('"before"', '"after"'))
     expect(inspectPiProvider(target).enabled).toBe(true)
+    // A later catalog refresh must not make disable restore an older, pre-edit snapshot.
+    applyPiProvider(target, { ...provider, models: [{ id: "updated-model" }] })
     revertPiProvider(target)
     expect(contents(target)).toContain("// untouched")
     expect(parsed(target)).toEqual({
@@ -195,6 +197,39 @@ describe("Pi provider ownership", () => {
       custom: true,
       providers: { maximal: { apiKey: "original" } },
     })
+  })
+
+  test("an edited but syntactically valid journal cannot replace the original configuration", () => {
+    applyPiProvider(target, provider, { claim: true })
+    const original = contents(target)
+    const journal = fs
+      .readFileSync(target.journalPath, "utf8")
+      .replace('"before": null', '"before": "{}"')
+    fs.writeFileSync(target.journalPath, journal)
+    expect(inspectPiProvider(target).conflict).toBe("cleanup-required")
+    expect(() => revertPiProvider(target)).toThrow(PiOwnershipError)
+    expect(contents(target)).toBe(original)
+  })
+
+  test("cleanup cannot delete the journal belonging to a different target", () => {
+    applyPiProvider(target, provider, { claim: true })
+    expect(() =>
+      revertPiProvider({
+        ...target,
+        filePath: path.join(directory, "different.json"),
+      }),
+    ).toThrow(PiOwnershipError)
+    expect(fs.existsSync(target.journalPath)).toBe(true)
+    expect(inspectPiProvider(target).enabled).toBe(true)
+  })
+
+  test("explicit disable forgets the journal but preserves a provider the user has replaced", () => {
+    applyPiProvider(target, provider, { claim: true })
+    const manual = '{"providers":{"maximal":{"apiKey":"user-owned"}}}'
+    write(manual)
+    expect(revertPiProvider(target)).toBe(false)
+    expect(contents(target)).toBe(manual)
+    expect(fs.existsSync(target.journalPath)).toBe(false)
   })
 
   test("a damaged journal prevents changes and a symlink is never replaced", () => {

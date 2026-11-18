@@ -85,7 +85,15 @@ docker run --rm -v "$PWD:/src:ro" -v "<out-dir>:/debs:ro" \
 `build-maximal-deb.sh` needs `dpkg-deb`, so run it on Debian/Ubuntu (or in an
 `ubuntu:24.04` container).
 
-## Refresh an existing Pi model catalog
+## Connect Pi and refresh its model catalog
+
+Use Settings → Integrations → Pi → Connect, or `maximal app pi --enable`,
+for a new installation. An existing Maximal provider needs explicit adoption
+(`--adopt-existing` in the CLI). Use `--config-dir /absolute/path/to/agent`
+for a custom Pi agent directory. Enabled integrations follow successful model
+catalog refreshes automatically. `maximal app pi --disable` restores the prior
+provider without changing unrelated Pi settings. See [Pi integration](dev/pi-integration.md)
+for ownership, discovery, and lifecycle details.
 
 From a source checkout, `bun run pi:sync --account-type enterprise` previews
 the signed-in Copilot catalog; add `--write` to replace only
@@ -95,9 +103,11 @@ one-shot refresh, not an installed background integration or a sign-in flow.
 
 It preserves the existing API-key helper, provider overrides, and unrelated
 providers/settings, and saves a private byte-for-byte backup before an atomic
-replacement. It honors `PI_CODING_AGENT_DIR`; `--file /path/to/models.json`
-selects a different file. Missing providers, empty catalogs, JSONC comments,
-and symlink files are refused rather than rewritten.
+replacement. JSONC comments are preserved. It honors `PI_CODING_AGENT_DIR`;
+`--file /path/to/models.json` selects a different file. Missing providers,
+empty catalogs, symlink files, and edited or other-profile managed providers
+are refused rather than rewritten. Managed refreshes update the ownership
+fingerprint and restoration journal too.
 
 The projection uses native supported transports, context/output limits, image
 and reasoning capabilities, and Copilot token prices. Prices are converted

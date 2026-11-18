@@ -63,6 +63,14 @@ Maximal maps direct Haiku and Sonnet aliases to concrete live-catalog IDs. When 
 
 Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyHelper` in `~/.claude/settings.json` (`src/apps/claude-code/`), reverted on shutdown and on the process `exit` event (`src/lib/start/shutdown.ts`). Enabling the integration projects the route-scoped Haiku/Sonnet selections and Auto permission classifier into that file with the same snapshot-and-marker ownership: pre-existing values and direct user edits (including deleting a setting) win until the person deliberately selects that setting in Maximal; that selection snapshots the latest external state and takes ownership. Maximal-owned values follow successful catalog refreshes. Shutdown restores the latest external values and suspends model ownership in a dormant journal so Automatic stickiness, explicit choices, and external divergence survive restart; explicit disable restores the same values and clears the journal. The toggle owns this base URL, helper, environment projection, and plugin MCP lifecycle; it does not enable or disable root Messages alias resolution. Don't reintroduce a PATH shim for `claude`. Turning the integration on or off also adds or removes the plugin MCP endpoints chosen for Claude Code (see *Plugins*).
 
+Pi uses a profile-owned `providers.maximal` entry in its standard `models.json`,
+with reversible adoption, private restoration state, and in-process catalog-change
+subscriptions (`src/apps/pi/`). Settings and CLI use the same adapter. Unlike
+Claude Code/Codex shutdown reversion, Pi retains its cached provider across proxy
+restarts; explicit disable/uninstall removes it. Details: [Pi integration](dev/pi-integration.md).
+App toggles share the registry-driven `POST /settings/api/apps/:id/toggle` route;
+coming-soon and unknown clients cannot be mutated.
+
 ## Config and state
 
 - `src/lib/config/config.ts` — `AppConfig` shape, disk read/write of `config.json` in the app directory: `~/.local/share/maximal/` (Linux/macOS) or `%APPDATA%\maximal\` (Windows), resolved by `src/lib/platform/paths.ts`. `COPILOT_API_HOME` overrides it. A leading UTF-8 byte order mark (Notepad, PowerShell 5's `Set-Content -Encoding utf8`) is ignored, here and in the Claude Code and Claude Desktop files Maximal reads (`src/lib/platform/json-text.ts`). A `config.json` that isn't valid JSON leaves Maximal on the defaults, and `writeConfig` then refuses with `ConfigUnreadableError` rather than write over the file, until a read succeeds.

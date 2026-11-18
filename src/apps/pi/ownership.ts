@@ -17,6 +17,8 @@ import {
   readFileNoFollow,
 } from "~/lib/platform/atomic-json"
 
+import type { PiModel } from "./models"
+
 export type PiConflict =
   | "existing-provider"
   | "other-maximal-config"
@@ -51,6 +53,7 @@ const Journal = z
     filePath: z.string(),
     before: z.string().nullable(),
     after: z.string(),
+    checksum: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict()
 type PiMarker = z.infer<typeof Marker>
@@ -60,6 +63,11 @@ function conflict(message: string): never {
 }
 
 function read(filePath: string): string | null {
+  const stat = fs.lstatSync(filePath, { throwIfNoEntry: false })
+  if (stat && !stat.isFile())
+    conflict(
+      "Pi configuration must be a regular file; select a symlink's target explicitly",
+    )
   return readFileNoFollow(
     filePath,
     () =>
@@ -127,6 +135,22 @@ function markerFor(provider: Record<string, unknown>): PiMarker | null {
   return parsed.data
 }
 
+function journalChecksum(
+  journal: Omit<z.infer<typeof Journal>, "checksum">,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        journal.version,
+        journal.profileId,
+        journal.filePath,
+        journal.before,
+        journal.after,
+      ]),
+    )
+    .digest("hex")
+}
+
 function journalFor(target: PiTarget) {
   const text = read(target.journalPath)
   if (text === null) return null
@@ -146,6 +170,8 @@ function journalFor(target: PiTarget) {
       "Pi's ownership journal belongs to another configuration; disable that integration first",
     )
   }
+  if (journalChecksum(parsed.data) !== parsed.data.checksum)
+    conflict("Pi's ownership journal was edited; preserving the configuration")
   return parsed.data
 }
 
@@ -182,6 +208,40 @@ function restore(text: string, marker: PiMarker): string {
   return marker.createdProviders && remaining?.children?.length === 0 ?
       edit(next, undefined, ["providers"])
     : next
+}
+
+/** Read an existing provider without following symlinks or losing JSONC/duplicate-key validation. */
+export function readPiProviderFile(filePath: string): {
+  text: string
+  provider: Record<string, unknown>
+} {
+  const text = read(filePath)
+  const provider = text === null ? undefined : document(text).provider
+  if (text === null || !provider)
+    conflict(
+      "Configure a Maximal provider before using the one-shot sync command",
+    )
+  return { text, provider }
+}
+
+/** A one-shot model refresh uses the same ownership and atomic-write rules as background reconciliation. */
+export function updatePiModels(
+  target: PiTarget,
+  models: ReadonlyArray<PiModel>,
+  expected: string,
+): boolean {
+  const { text, provider } = readPiProviderFile(target.filePath)
+  if (text !== expected)
+    conflict(
+      "Pi's models.json changed during refresh; preserving the newer edit",
+    )
+  if (Object.hasOwn(provider, "_maximal"))
+    return applyPiProvider(target, { models })
+  return atomicWriteText(
+    target.filePath,
+    edit(text, models, ["providers", "maximal", "models"]),
+    { expectedContent: text, label: "Pi models.json" },
+  )
 }
 
 /** Inspect ownership without creating files, keys, or enabling routing. */
@@ -231,6 +291,17 @@ function metadataFor(
   }
 }
 
+function restorationSnapshot(
+  text: string,
+  marker: PiMarker,
+  journal: z.infer<typeof Journal> | null,
+): string | null {
+  // Rebase restoration on unrelated edits before publishing a new catalog.
+  // Otherwise the next disable could restore a snapshot from before those edits.
+  if (journal?.after === text) return journal.before
+  return restore(text, marker)
+}
+
 /** Claim or refresh one provider. Automatic refreshes never adopt unowned data or recreate external deletions. */
 export function applyPiProvider(
   target: PiTarget,
@@ -276,13 +347,17 @@ export function applyPiProvider(
   const next = edit(text, managed)
   if (next === original) return false
   let before = original
-  if (existing) before = journal ? journal.before : restore(text, existing)
-  atomicWriteJson(target.journalPath, {
+  if (existing) before = restorationSnapshot(text, existing, journal)
+  const journalData: Omit<z.infer<typeof Journal>, "checksum"> = {
     version: 1,
     profileId: target.profileId,
     filePath: target.filePath,
     before,
     after: next,
+  }
+  atomicWriteJson(target.journalPath, {
+    ...journalData,
+    checksum: journalChecksum(journalData),
   })
   return atomicWriteText(target.filePath, next, {
     expectedContent: original,
@@ -293,19 +368,22 @@ export function applyPiProvider(
 /** Restore the adopted provider, or remove our new provider; never undo another person's edits. */
 export function revertPiProvider(target: PiTarget): boolean {
   const original = read(target.filePath)
+  const journal = journalFor(target)
   const provider = original === null ? undefined : document(original).provider
   if (!provider || original === null) {
     fs.rmSync(target.journalPath, { force: true })
     return false
   }
   const marker = markerFor(provider)
-  if (!marker) return false
+  if (!marker) {
+    fs.rmSync(target.journalPath, { force: true })
+    return false
+  }
   if (marker.profileId !== target.profileId)
     throw new PiOwnershipError(
       "other-maximal-config",
       "Another Maximal profile owns Pi routing",
     )
-  const journal = journalFor(target)
   const next =
     journal?.after === original ? journal.before : restore(original, marker)
   if (next === null) fs.unlinkSync(target.filePath)

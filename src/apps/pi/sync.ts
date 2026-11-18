@@ -1,16 +1,21 @@
 import { randomUUID } from "node:crypto"
-import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { writeFile } from "node:fs/promises"
+import path from "node:path"
 import { z } from "zod"
 
 import type { Model } from "~/services/copilot/get-models"
 
-import { parseJsonText } from "~/lib/platform/json-text"
+import { currentProfileId } from "~/apps/profile-identity"
+import { PATHS } from "~/lib/platform/paths"
 
 import { projectPiModels } from "./models"
+import {
+  inspectPiProvider,
+  PiOwnershipError,
+  readPiProviderFile,
+  updatePiModels,
+} from "./ownership"
 
-const PiFile = z
-  .object({ providers: z.record(z.string(), z.unknown()) })
-  .loose()
 const PiProvider = z
   .object({
     baseUrl: z.string(),
@@ -23,19 +28,27 @@ export interface SyncPiOptions {
   catalog: ReadonlyArray<Model>
   write?: boolean
   creditUsd?: number
+  journalPath?: string
 }
 
-/** Replace only an existing Maximal provider's models, preserving its auth and every unrelated setting. */
+/** Refresh an existing provider, preserving JSONC, unrelated data, and managed ownership. */
 export async function syncPiModels(options: SyncPiOptions) {
-  if (!(await lstat(options.filePath)).isFile()) {
-    throw new Error(
-      "Pi's models.json must be a regular file; pass --file with the target instead of replacing a symlink",
-    )
+  const target = {
+    filePath: path.resolve(options.filePath),
+    journalPath:
+      options.journalPath ?? path.join(PATHS.APP_DIR, "pi-routing.json"),
+    profileId: currentProfileId(),
   }
-  const originalText = await readFile(options.filePath, "utf8")
-  // Refuse JSONC rather than destroy comments with a parse/stringify rewrite.
-  const config = PiFile.parse(parseJsonText(originalText))
-  const provider = PiProvider.parse(config.providers.maximal)
+  const original = readPiProviderFile(target.filePath)
+  const provider = PiProvider.parse(original.provider)
+  if (Object.hasOwn(provider, "_maximal")) {
+    const inspection = inspectPiProvider(target)
+    if (!inspection.enabled)
+      throw new PiOwnershipError(
+        inspection.conflict ?? "cleanup-required",
+        "Cannot refresh an edited provider or a provider owned by another Maximal profile",
+      )
+  }
   const models = projectPiModels(
     options.catalog,
     provider.baseUrl,
@@ -61,27 +74,8 @@ export async function syncPiModels(options: SyncPiOptions) {
     backup: null as string | null,
   }
   if (!options.write || !result.changed) return result
-  const next = {
-    ...config,
-    providers: { ...config.providers, maximal: { ...provider, models } },
-  }
-  const suffix = `${Date.now()}-${randomUUID()}`
-  const backup = `${options.filePath}.maximal-${suffix}.bak`
-  const temporary = `${options.filePath}.maximal-${suffix}.tmp`
-  try {
-    await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, {
-      flag: "wx",
-      mode: 0o600,
-    })
-    if ((await readFile(options.filePath, "utf8")) !== originalText) {
-      throw new Error(
-        "Pi's models.json changed during refresh; refusing to overwrite the newer edit",
-      )
-    }
-    await writeFile(backup, originalText, { flag: "wx", mode: 0o600 })
-    await rename(temporary, options.filePath)
-    return { ...result, written: true, backup }
-  } finally {
-    await rm(temporary, { force: true })
-  }
+  const backup = `${target.filePath}.maximal-${Date.now()}-${randomUUID()}.bak`
+  await writeFile(backup, original.text, { flag: "wx", mode: 0o600 })
+  const written = updatePiModels(target, models, original.text)
+  return { ...result, written, backup }
 }

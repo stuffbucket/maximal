@@ -25,6 +25,8 @@ export interface MutationResult {
   /** The server applied the requested state. A refused enable still comes
    *  back `ok` (the fresh entry carries the conflict) but is not applied. */
   applied?: boolean;
+  /** Canonical directory inspected by the server, including on an adoption refusal. */
+  configDirectory?: string;
 }
 
 export interface ToggleAppOptions {
@@ -150,6 +152,7 @@ export function useApps(): UseApps {
       return {
         ok: true,
         applied: toggleApplied(result.data, enabled),
+        configDirectory: result.data.config_directory,
       };
     },
     [apps, splice],

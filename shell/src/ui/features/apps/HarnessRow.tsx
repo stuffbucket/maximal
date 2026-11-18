@@ -171,6 +171,7 @@ export function HarnessRow({ app, onToggle }: HarnessRowProps): JSX.Element {
         ...(app.config_directory ? { configDirectory: configDirectory.trim() } : {}),
       });
       setConnecting(false);
+      if (result.ok && !result.applied && result.configDirectory) setConfigDirectory(result.configDirectory);
       if (result.applied || (result.ok && !app.config_directory)) setConnectOpen(false);
       if (!result.ok) setConnectError(result.error ?? t("apps-connect-failed", { appName: displayName }));
       setRestartNotice(desktopRestartChange(app.id, true, result));

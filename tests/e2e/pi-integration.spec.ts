@@ -115,11 +115,14 @@ test("changing the agent directory invalidates adoption consent until the new ta
   })
   const { dialog, row } = await open(page, "existing-provider")
   await dialog.getByText("Advanced", { exact: true }).click()
-  await dialog.getByLabel("Agent directory").fill("/tmp/another-pi")
+  await dialog.getByLabel("Agent directory").fill("/tmp/another-pi/")
   await page.screenshot({ path: "/tmp/maximal-pi-directory.png" })
   await dialog.getByRole("button", { name: "Connect", exact: true }).click()
   await expect.poll(() => bodies.length).toBe(1)
   expect(bodies[0].adoptExisting).toBeUndefined()
+  await expect(dialog.getByLabel("Agent directory")).toHaveValue(
+    "/tmp/another-pi",
+  )
   await expect(dialog).toBeVisible()
   await dialog.getByRole("button", { name: "Connect", exact: true }).click()
   await expect(row.getByRole("checkbox")).toBeChecked()
