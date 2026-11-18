@@ -98,6 +98,12 @@ export function gatewayProfile(
   }
 }
 
+/** Claude's local 3P data directory per Anthropic's "Configuration
+ *  implementation" page: `~/Library/Application Support/Claude-3p` (macOS),
+ *  `%LOCALAPPDATA%\Claude-3p` (Windows), `~/.config/Claude-3p` (Linux). A
+ *  Windows install packaged as MSIX may keep its data under its package
+ *  folder instead; Anthropic doesn't document that location, so it is not
+ *  guessed and not detected here. */
 export function getClaude3pDir(
   home: string = os.homedir(),
   platform: NodeJS.Platform = process.platform,
@@ -106,6 +112,18 @@ export function getClaude3pDir(
     const localAppData =
       process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local")
     return path.join(localAppData, `Claude${USERDATA_3P_SUFFIX}`)
+  }
+  if (platform === "linux") {
+    // Anthropic: `~/.config/Claude-3p/configLibrary/`. Electron's userData
+    // follows XDG_CONFIG_HOME, but only for the current user: an explicit
+    // other `home` (a fixture, another account) gets its own `.config`. A
+    // relative XDG_CONFIG_HOME is ignored, as the XDG spec says.
+    const xdg = process.env.XDG_CONFIG_HOME
+    const base =
+      xdg && path.isAbsolute(xdg) && home === os.homedir() ?
+        xdg
+      : path.join(home, ".config")
+    return path.join(base, `Claude${USERDATA_3P_SUFFIX}`)
   }
   return path.join(
     home,

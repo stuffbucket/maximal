@@ -2,7 +2,8 @@
  * `maximal app claude-desktop --profiles | --current-profile |
  * --select-profile <id>`: the config-library profile surface (see
  * `profile-library.ts`). Kept apart from enable/disable on purpose: these
- * never touch Maximal's routing ownership, its marker, or any profile file.
+ * never touch Maximal's routing ownership, its marker, any profile file, or
+ * `deploymentMode`.
  */
 
 import type { ArgsDef } from "citty"
@@ -11,6 +12,7 @@ import consola from "consola"
 
 import {
   applyProfileSelection,
+  type DeploymentModeState,
   planProfileSelection,
   ProfileLibraryError,
   type ProfileLibraryView,
@@ -39,10 +41,25 @@ export const PROFILE_ARGS = {
 } as const satisfies ArgsDef
 
 const RESTART_NOTE =
-  "Claude Desktop reads its profile at launch: quit and relaunch it to load this one. A running Claude keeps its current profile until then."
+  "Claude Desktop reads its profile at launch: quit and relaunch it. A running Claude keeps its current profile until then."
 
 const PRECEDENCE_NOTE =
-  "A managed (MDM) configuration, or an admin-console connection, takes precedence over the selected profile."
+  "A managed (MDM) configuration, or an admin-console connection, takes precedence over the applied profile; Maximal can't see an MDM one."
+
+/** Longest id or name shown, in characters. */
+const MAX_SHOWN = 64
+
+/** Text from a file Claude (or a person) wrote, made safe to print: control,
+ *  format (bidi overrides, zero-width) and line-separator characters are
+ *  dropped, so it can't forge output lines or hide text, and it is cut to
+ *  `MAX_SHOWN` characters. */
+function shown(value: string): string {
+  const clean = value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "")
+  const chars = Array.from(clean)
+  return chars.length > MAX_SHOWN ?
+      `${chars.slice(0, MAX_SHOWN - 1).join("")}…`
+    : clean
+}
 
 /** Does this invocation ask for a profile operation? */
 export function profileCliRequested(args: Record<string, unknown>): boolean {
@@ -59,7 +76,7 @@ function describe(profile: ProfileSummary): string {
     profile.validId ? null : "invalid id",
     profile.file === "ok" ? null : `file ${profile.file}`,
   ].filter((flag) => flag !== null)
-  return `${profile.applied ? "*" : " "} ${profile.id}\t${profile.name}${flags.length > 0 ? `\t(${flags.join(", ")})` : ""}`
+  return `${profile.applied ? "*" : " "} ${shown(profile.id)}\t${shown(profile.name)}${flags.length > 0 ? `\t(${flags.join(", ")})` : ""}`
 }
 
 function showHybridPointer(view: ProfileLibraryView): void {
@@ -68,6 +85,27 @@ function showHybridPointer(view: ProfileLibraryView): void {
       "Claude Desktop is connected through an admin console (hybridPointer); it takes precedence over the applied profile.",
     )
   }
+}
+
+const MODE_PROBLEMS: Record<Exclude<DeploymentModeState, "3p">, string> = {
+  unset:
+    "claude_desktop_config.json doesn't set deploymentMode to 3p (it is not set), so the applied profile will not be active on relaunch.",
+  other:
+    "claude_desktop_config.json doesn't set deploymentMode to 3p, so the applied profile will not be active on relaunch.",
+  unreadable:
+    "claude_desktop_config.json can't be read as JSON, so deploymentMode can't be confirmed as 3p; the applied profile may not be active on relaunch.",
+}
+
+/** Why the applied profile won't load at launch, or null when
+ *  `deploymentMode` is "3p". */
+function deploymentModeProblem(mode: DeploymentModeState): string | null {
+  return mode === "3p" ? null : MODE_PROBLEMS[mode]
+}
+
+function showDeploymentMode(mode: DeploymentModeState): void {
+  const problem = deploymentModeProblem(mode)
+  if (problem) consola.warn(problem)
+  else consola.info("  deploymentMode: 3p")
 }
 
 function listProfiles(dir: string): void {
@@ -85,6 +123,7 @@ function listProfiles(dir: string): void {
     )
   }
   showHybridPointer(view)
+  showDeploymentMode(view.deploymentMode)
 }
 
 function showCurrent(dir: string): void {
@@ -96,13 +135,32 @@ function showCurrent(dir: string): void {
     consola.info(
       view.appliedId === "" ?
         "No profile is applied."
-      : `The applied id (${view.appliedId}) doesn't match any profile listed.`,
+      : `The applied id (${shown(view.appliedId)}) doesn't match any profile listed.`,
     )
   }
   showHybridPointer(view)
+  showDeploymentMode(view.deploymentMode)
   consola.info(
-    "  This is what Claude Desktop loads at its next launch; a running Claude may still be on another profile.",
+    "  Claude Desktop loads the applied profile at its next launch; a running Claude may still be on another profile.",
   )
+}
+
+/** What the selection means for Maximal's own routing. Maximal doesn't decide
+ *  here whether a profile belongs to this copy, another copy or a person, so
+ *  these say what can happen, not what will. */
+function showRoutingNotes(name: string, routingIntended: boolean): void {
+  if (routingIntended) {
+    consola.warn(
+      "Maximal's Claude Desktop routing is on for this copy. It re-applies its own profile when Maximal starts, after an API-key change, and when routing is enabled again in Settings; that switches back from a profile that isn't a gateway profile. Run `maximal app claude-desktop --disable` first to keep your selection.",
+    )
+    consola.warn(
+      "Selecting a profile that another Maximal copy owns can turn this copy's routing intent off the next time it re-applies.",
+    )
+  } else if (name === "maximal") {
+    consola.warn(
+      "This is a Maximal entry and this copy's routing is off: its port or key may be stale, or Maximal may not be running, so Claude's requests can fail.",
+    )
+  }
 }
 
 function selectProfile(
@@ -111,22 +169,27 @@ function selectProfile(
   routingIntended: boolean,
 ): void {
   const plan = planProfileSelection(dir, id)
+  const label = `${shown(plan.id)} (${shown(plan.name) || "no name"})`
   if (plan.unchanged) {
     consola.success(
-      `Profile ${plan.id} (${plan.name}) is already selected; nothing written.`,
+      `Profile ${label} is already the applied profile in the index; nothing written.`,
     )
-    consola.info(`  ${RESTART_NOTE}`)
-    return
+  } else {
+    applyProfileSelection(plan)
+    consola.success(
+      `Set appliedId to ${label} in the config library index. Nothing else was changed.`,
+    )
   }
-  applyProfileSelection(plan)
-  consola.success(`Selected profile ${plan.id} (${plan.name}).`)
-  consola.info(`  Only _meta.json's appliedId changed. ${RESTART_NOTE}`)
+  const problem = deploymentModeProblem(plan.deploymentMode)
+  if (problem) {
+    // Selecting never writes deploymentMode: that is `--enable`'s job, or the
+    // person's choice inside Claude.
+    consola.warn(problem)
+  } else {
+    consola.info(`  deploymentMode is 3p. ${RESTART_NOTE}`)
+  }
   consola.info(`  ${PRECEDENCE_NOTE}`)
-  if (routingIntended) {
-    consola.warn(
-      "Maximal's Claude Desktop routing is on: when Maximal next starts it leaves another gateway profile selected, but re-applies its own profile over one that isn't a gateway. Run `maximal app claude-desktop --disable` first to keep that selection.",
-    )
-  }
+  showRoutingNotes(plan.name, routingIntended)
 }
 
 /** Run the requested profile operation against Claude's `Claude-3p`

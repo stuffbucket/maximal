@@ -62,6 +62,17 @@ function metaJson(): Record<string, unknown> {
     .parse(parseJsonText(fs.readFileSync(metaPath(), "utf8")))
 }
 
+function topPath(): string {
+  return path.join(dir, "claude_desktop_config.json")
+}
+
+function writeTop(value: unknown): void {
+  fs.writeFileSync(
+    topPath(),
+    typeof value === "string" ? value : JSON.stringify(value),
+  )
+}
+
 function writeMeta(value: unknown): string {
   const text = typeof value === "string" ? value : JSON.stringify(value)
   fs.writeFileSync(metaPath(), text)
@@ -219,6 +230,24 @@ describe("readProfileLibrary (list / current)", () => {
     seed()
     writeMeta({ ...standardMeta(), hybridPointer: { bootstrapUrl: "x" } })
     expect(readProfileLibrary(dir).hybridPointer).toBe(true)
+  })
+
+  test("classifies deploymentMode from claude_desktop_config.json without reporting its value", () => {
+    seed()
+    expect(readProfileLibrary(dir).deploymentMode).toBe("unset")
+    writeTop({ deploymentMode: "3p" })
+    expect(readProfileLibrary(dir).deploymentMode).toBe("3p")
+    expect(planProfileSelection(dir, ID_B).deploymentMode).toBe("3p")
+    writeTop({ deploymentMode: "1p" })
+    expect(readProfileLibrary(dir).deploymentMode).toBe("other")
+    writeTop({ preferences: {} })
+    expect(readProfileLibrary(dir).deploymentMode).toBe("unset")
+    writeTop("{" + FAKE_KEY)
+    expect(readProfileLibrary(dir).deploymentMode).toBe("unreadable")
+    // An absent library still reports the top-level mode.
+    fs.rmSync(lib, { recursive: true })
+    writeTop({ deploymentMode: "3p" })
+    expect(readProfileLibrary(dir).deploymentMode).toBe("3p")
   })
 
   test("never modifies anything", () => {
@@ -531,29 +560,39 @@ function quietLog(method: "info" | "warn" | "error" | "success") {
 
 type LogSpy = ReturnType<typeof quietLog>
 
+function installLogSpies() {
+  return {
+    info: quietLog("info"),
+    warn: quietLog("warn"),
+    error: quietLog("error"),
+    success: quietLog("success"),
+  }
+}
+
+function restoreLogSpies(spies: ReturnType<typeof installLogSpies>): void {
+  for (const spy of Object.values(spies)) spy.mockRestore()
+}
+
+/** Everything a spied `consola` method was called with, one line per call. */
+function said(spy: LogSpy): string {
+  return spy.mock.calls.map((call) => String(call[0])).join("\n")
+}
+
 describe("maximal app claude-desktop profile flags", () => {
+  let spies: ReturnType<typeof installLogSpies>
   let info: LogSpy
   let warn: LogSpy
-  let error: LogSpy
   let success: LogSpy
 
   beforeEach(() => {
-    info = quietLog("info")
-    warn = quietLog("warn")
-    error = quietLog("error")
-    success = quietLog("success")
+    writeTop({ deploymentMode: "3p", unrelated: FAKE_KEY })
+    spies = installLogSpies()
+    ;({ info, warn, success } = spies)
   })
 
   afterEach(() => {
-    info.mockRestore()
-    warn.mockRestore()
-    error.mockRestore()
-    success.mockRestore()
+    restoreLogSpies(spies)
   })
-
-  function said(spy: LogSpy): string {
-    return spy.mock.calls.map((call) => String(call[0])).join("\n")
-  }
 
   test("parses the documented syntax", () => {
     const parsed = parseArgs(["--select-profile", ID_B], PROFILE_ARGS)
@@ -629,11 +668,14 @@ describe("maximal app claude-desktop profile flags", () => {
     seed(ID_A)
     expect(runProfileCli({ "select-profile": ID_B }, dir)).toBe(0)
     expect(readProfileLibrary(dir).appliedId).toBe(ID_B)
-    expect(said(success)).toContain(`Selected profile ${ID_B} (beta)`)
+    expect(said(success)).toContain(
+      `Set appliedId to ${ID_B} (beta) in the config library index`,
+    )
     const out = said(info)
+    expect(out).toContain("deploymentMode is 3p")
     expect(out).toContain("quit and relaunch")
-    expect(out).toContain("appliedId")
     expect(out).toContain("MDM")
+    expect(warn).not.toHaveBeenCalled()
   })
 
   test("--select-profile warns when Maximal's routing is on, and only then", () => {
@@ -641,17 +683,164 @@ describe("maximal app claude-desktop profile flags", () => {
     expect(runProfileCli({ "select-profile": ID_B }, dir)).toBe(0)
     expect(warn).not.toHaveBeenCalled()
     expect(runProfileCli({ "select-profile": ID_A }, dir, true)).toBe(0)
-    expect(said(warn)).toContain("routing is on")
-    expect(said(warn)).toContain("--disable")
+    const out = said(warn)
+    expect(out).toContain("routing is on for this copy")
+    expect(out).toContain("when Maximal starts")
+    expect(out).toContain("API-key change")
+    expect(out).toContain("enabled again in Settings")
+    expect(out).toContain("--disable")
+    expect(out).toContain("another Maximal copy owns")
+    expect(out).toContain("intent off")
+  })
+
+  test("a Maximal entry selected while routing is off warns about a stale port", () => {
+    writeProfile(ID_A)
+    writeProfile(ID_B)
+    writeMeta({
+      appliedId: ID_A,
+      entries: [
+        { id: ID_A, name: "alpha" },
+        { id: ID_B, name: "maximal" },
+      ],
+    })
+    expect(runProfileCli({ "select-profile": ID_B }, dir, false)).toBe(0)
+    expect(said(warn)).toContain("port or key may be stale")
+    expect(said(warn)).toContain("routing is off")
+    // A person's own profile doesn't get the stale warning.
+    warn.mockClear()
+    expect(runProfileCli({ "select-profile": ID_A }, dir, false)).toBe(0)
+    expect(warn).not.toHaveBeenCalled()
   })
 
   test("--select-profile of the applied profile is a stated no-op", () => {
     seed(ID_A)
     const before = fs.readFileSync(metaPath(), "utf8")
     expect(runProfileCli({ "select-profile": ID_A }, dir)).toBe(0)
-    expect(said(success)).toContain("already selected; nothing written")
+    expect(said(success)).toContain(
+      "already the applied profile in the index; nothing written",
+    )
     expect(said(info)).toContain("relaunch")
     expect(fs.readFileSync(metaPath(), "utf8")).toBe(before)
+  })
+})
+
+describe("maximal app claude-desktop profile flags: deploymentMode, display and refusals", () => {
+  let spies: ReturnType<typeof installLogSpies>
+  let info: LogSpy
+  let warn: LogSpy
+  let error: LogSpy
+  let success: LogSpy
+
+  beforeEach(() => {
+    writeTop({ deploymentMode: "3p", unrelated: FAKE_KEY })
+    spies = installLogSpies()
+    ;({ info, warn, error, success } = spies)
+  })
+
+  afterEach(() => {
+    restoreLogSpies(spies)
+  })
+
+  test("--profiles and --current-profile report deploymentMode 3p", () => {
+    seed(ID_A)
+    expect(runProfileCli({ profiles: true }, dir)).toBe(0)
+    expect(runProfileCli({ "current-profile": true }, dir)).toBe(0)
+    expect(said(info).match(/deploymentMode: 3p/g)).toHaveLength(2)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  const notThreeP: Array<[string, () => void, string]> = [
+    ["absent", () => fs.rmSync(topPath()), "it is not set"],
+    ["a different mode", () => writeTop({ deploymentMode: "1p" }), "doesn't"],
+    ["a non-string mode", () => writeTop({ deploymentMode: 3 }), "doesn't"],
+    ["no such key", () => writeTop({ preferences: {} }), "it is not set"],
+    ["invalid JSON", () => writeTop("{nope"), "can't be read as JSON"],
+    ["a JSON array", () => writeTop("[]"), "can't be read as JSON"],
+  ]
+  for (const [label, arrange, phrase] of notThreeP) {
+    test(`deploymentMode not 3p (${label}): list, current and select say it won't be active`, () => {
+      seed(ID_A)
+      arrange()
+      const topBefore =
+        fs.existsSync(topPath()) ? fs.readFileSync(topPath(), "utf8") : null
+
+      expect(runProfileCli({ profiles: true }, dir)).toBe(0)
+      expect(runProfileCli({ "current-profile": true }, dir)).toBe(0)
+      expect(runProfileCli({ "select-profile": ID_B }, dir)).toBe(0)
+
+      const warned = said(warn)
+      expect(warned.match(/active on relaunch/g)).toHaveLength(3)
+      expect(warned).toContain(phrase)
+      expect(said(info)).not.toContain("deploymentMode: 3p")
+      expect(said(info)).not.toContain("deploymentMode is 3p")
+      // The selection itself happened, and is worded as only that.
+      expect(readProfileLibrary(dir).appliedId).toBe(ID_B)
+      expect(said(success)).toContain("Set appliedId to")
+      expect(said(success)).not.toMatch(/Selected profile|will load/)
+      // Select never writes deploymentMode, or anything else at the top.
+      expect(
+        fs.existsSync(topPath()) ? fs.readFileSync(topPath(), "utf8") : null,
+      ).toBe(topBefore)
+    })
+  }
+
+  test("a symlinked claude_desktop_config.json is reported unreadable, not followed", () => {
+    seed(ID_A)
+    const target = path.join(dir, "real-top.json")
+    fs.writeFileSync(target, '{"deploymentMode":"3p"}')
+    fs.rmSync(topPath())
+    fs.symlinkSync(target, topPath())
+    expect(readProfileLibrary(dir).deploymentMode).toBe("unreadable")
+    expect(runProfileCli({ "select-profile": ID_B }, dir)).toBe(0)
+    expect(fs.lstatSync(topPath()).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(target, "utf8")).toBe('{"deploymentMode":"3p"}')
+  })
+
+  test("names and ids are stripped of control characters and bounded", () => {
+    const ESC = String.fromCodePoint(27)
+    const RLO = String.fromCodePoint(0x202e)
+    const ZWSP = String.fromCodePoint(0x200b)
+    const LS = String.fromCodePoint(0x2028)
+    const evil = `${ESC}[31mred${ESC}[0m\nFORGED line\r\t${RLO}rtl${ZWSP}${LS}${"x".repeat(500)}`
+    const badId = `bad\nid${ESC}${"y".repeat(200)}`
+    writeProfile(ID_A)
+    writeMeta({
+      appliedId: ID_A,
+      entries: [
+        { id: ID_A, name: evil },
+        { id: badId, name: "other" },
+      ],
+    })
+    expect(runProfileCli({ profiles: true }, dir)).toBe(0)
+    expect(runProfileCli({ "current-profile": true }, dir)).toBe(0)
+    expect(runProfileCli({ "select-profile": ID_A }, dir)).toBe(0)
+
+    const lines = [info, warn, success].flatMap((spy) =>
+      spy.mock.calls.map((call) => String(call[0])),
+    )
+    for (const line of lines) {
+      // Only the tab column separator may remain of the control characters.
+      expect(line.replaceAll("\t", "")).not.toMatch(
+        /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u,
+      )
+    }
+    const listed = lines.filter(
+      (line) => line.includes(ID_A) && line.includes("\t"),
+    )
+    expect(listed.length).toBeGreaterThan(0)
+    for (const line of listed) {
+      const [, name = ""] = line.split("\t")
+      expect(name).toContain("red")
+      expect(Array.from(name).length).toBeLessThanOrEqual(64)
+    }
+    const badIdLine = lines.find((line) => line.includes("\tother"))
+    expect(badIdLine).toBeDefined()
+    expect(
+      Array.from((badIdLine ?? "").split("\t")[0] ?? "").length,
+    ).toBeLessThanOrEqual(66)
+    expect(lines.join("\n")).toContain("…")
+    // The select line is one line too.
+    expect(said(success)).not.toContain("\n")
   })
 
   test("a refusal prints why and exits 1", () => {

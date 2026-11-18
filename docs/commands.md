@@ -109,10 +109,34 @@ profile flags can't be combined with `--enable`, `--disable`, `--managed` or
 `--force`, and none of them touches Maximal's routing marker.
 
 Claude reads its library at launch, so the output says it: **quit and relaunch
-Claude Desktop** to load the selected profile. A running Claude keeps its
-current profile until then, and a managed (MDM) configuration or admin-console
-connection still outranks the library. Maximal can't create or remove
-profiles: Claude owns their content, including the keys it seals.
+Claude Desktop**. A running Claude keeps its current profile until then, and a
+managed (MDM) configuration or admin-console connection still outranks the
+library. Maximal can't create or remove profiles: Claude owns their content,
+including the keys it seals.
+
+All three also read (never write) the top-level `claude_desktop_config.json`
+and report whether `deploymentMode` is `3p`. When it isn't (absent, another
+value, or the file isn't readable JSON), the output warns that the applied
+profile will not be active on relaunch (or may not be, when the file is
+unreadable). `--select-profile` still sets `appliedId` and words its result as
+exactly that; it never writes `deploymentMode`, which `--enable` or Claude's own
+mode switch owns. Ids and names come from files Claude or a person wrote, so
+they are printed with control, format (bidi, zero-width) and line-separator
+characters removed and cut to 64 characters.
+
+When Maximal's own routing is on, selecting warns that Maximal re-applies its
+profile at start, after an API-key change and when routing is enabled again in
+Settings, that selecting another Maximal copy's profile can turn this copy's
+routing intent off, and to run `--disable` first to keep the selection. When it
+is off and the selected entry is named `maximal`, it warns that the port or key
+may be stale or Maximal not running.
+
+The data directory is `~/Library/Application Support/Claude-3p` on macOS,
+`%LOCALAPPDATA%\Claude-3p` on Windows and `$XDG_CONFIG_HOME/Claude-3p` (default
+`~/.config/Claude-3p`) on Linux, for the current user; a relative
+`XDG_CONFIG_HOME` is ignored. A Windows install packaged as MSIX may keep its
+data under its package folder instead; Anthropic doesn't document that
+location, so it is neither guessed nor detected.
 
 `--managed` writes `maximal-claude-3p.mobileconfig`. `profiles install` no
 longer exists on current macOS, so open the file and approve it in System

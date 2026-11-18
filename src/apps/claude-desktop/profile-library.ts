@@ -80,8 +80,14 @@ export interface ProfileSummary {
   file: ProfileFileState
 }
 
+/** What the top-level `claude_desktop_config.json` says about
+ *  `deploymentMode`. Claude opens in third-party mode, and so loads the
+ *  applied profile, only for "3p"; the value itself is never reported. */
+export type DeploymentModeState = "3p" | "unset" | "other" | "unreadable"
+
 export interface ProfileLibraryView {
   dir: string
+  deploymentMode: DeploymentModeState
   /** `_meta.json` exists. A fresh Desktop has no library yet. */
   indexPresent: boolean
   appliedId: string
@@ -221,6 +227,34 @@ function profileFileState(dir: string, id: string): ProfileFileState {
   }
 }
 
+/** Read-only look at `<dir>/claude_desktop_config.json`. Anything that can't
+ *  be read as a JSON object (including a symlink) is "unreadable": we can't
+ *  confirm the mode, and nothing is written either way. */
+function readDeploymentMode(dir: string): DeploymentModeState {
+  let text: string | null
+  try {
+    text = readText(
+      path.join(dir, "claude_desktop_config.json"),
+      "claude_desktop_config.json",
+    )
+  } catch {
+    return "unreadable"
+  }
+  if (text === null) return "unset"
+  let json: unknown
+  try {
+    json = parseJsonText(text)
+  } catch {
+    return "unreadable"
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json)) {
+    return "unreadable"
+  }
+  const mode = (json as Record<string, unknown>).deploymentMode
+  if (mode === undefined) return "unset"
+  return mode === "3p" ? "3p" : "other"
+}
+
 function hasHybridPointer(index: ParsedIndex): boolean {
   return Object.hasOwn(index.value, "hybridPointer")
 }
@@ -232,6 +266,7 @@ export function readProfileLibrary(dir: string): ProfileLibraryView {
   if (!index) {
     return {
       dir,
+      deploymentMode: readDeploymentMode(dir),
       indexPresent: false,
       appliedId: "",
       appliedKnown: false,
@@ -241,6 +276,7 @@ export function readProfileLibrary(dir: string): ProfileLibraryView {
   }
   return {
     dir,
+    deploymentMode: readDeploymentMode(dir),
     indexPresent: true,
     appliedId: index.appliedId,
     appliedKnown: index.entries.some((entry) => entry.id === index.appliedId),
@@ -265,6 +301,8 @@ export interface ProfileSelectionPlan {
   /** Already selected: applying writes nothing. */
   unchanged: boolean
   previousAppliedId: string
+  /** Read when planning; selecting never writes it. */
+  deploymentMode: DeploymentModeState
   /** The exact `_meta.json` bytes this plan was made from; the write is
    *  refused if the file no longer holds them. */
   expectedContent: string
@@ -327,6 +365,7 @@ export function planProfileSelection(
     name: entry.name,
     unchanged: index.appliedId === id,
     previousAppliedId: index.appliedId,
+    deploymentMode: readDeploymentMode(dir),
     expectedContent: index.raw,
     // Spreading keeps every other field and the key order; only `appliedId`
     // changes.

@@ -39,13 +39,17 @@ fields Maximal doesn't know survive. It refuses (touching nothing) an
 unreadable, malformed or symlinked index or library directory, a profile file
 that is missing, unreadable or a symlink, an id that isn't `[a-f0-9-]{36}`, and
 an index with `hybridPointer`, which Claude honours instead of `appliedId`. A
-selection takes effect when Claude is next launched. While Maximal's routing
-intent is on, its next boot treats the selection like any other: a readable
-gateway profile Maximal doesn't own is left untouched
-(`foreign-gateway-profile`), but a profile that sets no `inferenceProvider` is
-not a gateway, so boot re-applies Maximal's own entry over it. Select with
-routing off (`--disable`) to keep such a profile; the command warns when the
-intent is on.
+selection takes effect when Claude is next launched, and only while
+`claude_desktop_config.json` has `deploymentMode` `3p`, which the command reads
+(never writes) and reports; otherwise it says the profile will not be active on
+relaunch. While Maximal's routing intent is on, the command warns that Maximal's
+next boot, an API-key change, or enabling routing again in Settings reapplies
+this copy's profile: a readable gateway profile Maximal doesn't own is left
+untouched (`foreign-gateway-profile`), but a profile that sets no
+`inferenceProvider` is not a gateway, so it is switched back; and selecting a
+profile another Maximal copy owns can turn this copy's intent off at the next
+reapply. With routing off, selecting a `maximal` entry warns that its port or
+key may be stale. Select with routing off (`--disable`) to keep a selection.
 
 Claude publishes no schema for `_meta.json` or the profile files. The layout is
 taken from Anthropic's documentation (`claude.com/docs/third-party/claude-desktop/`,
