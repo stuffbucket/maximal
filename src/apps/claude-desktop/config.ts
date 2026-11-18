@@ -19,6 +19,7 @@ import {
 import { parseJsonText } from "~/lib/platform/json-text"
 import { proxyBaseUrl } from "~/lib/start/proxy-port"
 
+import { withMaximalDesktopManagedMcpServers } from "./managed-mcp"
 import {
   fileFingerprint,
   fingerprintMatches,
@@ -171,7 +172,7 @@ const RoutingStateSchema = z.object({
     hadPreferences: z.boolean(),
   }),
 })
-type RoutingState = z.infer<typeof RoutingStateSchema>
+export type RoutingState = z.infer<typeof RoutingStateSchema>
 
 /** Older builds kept no snapshot, so what Desktop had selected before is
  *  unknown: reverting deselects our profile and drops the keys we added. */
@@ -237,7 +238,7 @@ export function atomicWriteJson(
 }
 
 /** Desktop's config library, read once, with ownership resolved. */
-class Library {
+export class Library {
   readonly dir: string
   readonly libDir: string
   readonly metaPath: string
@@ -630,7 +631,12 @@ export function applyConfigLibraryProfile(
   const prior = priorFor(lib, appliedOwnership !== null, top)
 
   const profilePath = lib.profilePath(profileId)
-  atomicWriteJson(profilePath, values, readJsonText(profilePath))
+  const existingProfile = ourEntry ? lib.profile(profileId) : null
+  const profileValues = withMaximalDesktopManagedMcpServers(
+    values,
+    existingProfile?.managedMcpServers,
+  )
+  atomicWriteJson(profilePath, profileValues, readJsonText(profilePath))
 
   const ours = { id: profileId, name: OWNED_ENTRY_NAME }
   const entries =
@@ -657,7 +663,7 @@ export function applyConfigLibraryProfile(
 }
 
 /** The evidence a marker records for `values` (see marker-evidence). */
-function markerEvidence(
+export function markerEvidence(
   values: GatewayProfileValues,
 ): Pick<RoutingState, "managedFingerprint" | "keyFingerprint"> {
   const keyFingerprint = keyFingerprintFor(values.inferenceGatewayApiKey)
