@@ -79,6 +79,33 @@ allowlist-only — keys outside this set are preserved verbatim, and
 `maximal app claude-desktop --disable` (or `maximal uninstall --force`)
 removes exactly these keys.
 
+When at least one Maximal connector is allowed for Claude Desktop, client
+sync adds this Desktop-specific array to the same owned config-library
+profile:
+
+```json
+{
+  "managedMcpServers": [
+    {
+      "name": "maximal",
+      "transport": "http",
+      "url": "http://127.0.0.1:4141/mcp",
+      "headers": {
+        "Authorization": "Bearer <claude-desktop app identity key>"
+      }
+    }
+  ]
+}
+```
+
+This is not Claude Code's setting shape. Claude Code uses an object keyed by
+server name, reads it only from administrator-managed sources and requires
+HTTPS; Maximal therefore keeps Claude Code's local connector entries in its
+ordinary user MCP configuration. Desktop's array and the routing marker are
+updated together. Blocking the final Desktop connector removes the array,
+and the first managed-array pass removes Maximal's previous aggregate stdio
+entry from top-level `mcpServers`.
+
 `preferences` is the one **nested** block we touch: we set only the
 `coworkWebSearchEnabled` sub-key and preserve every other preference
 the app stores there, so revert strips just that sub-key (dropping the
@@ -121,7 +148,7 @@ list.
 | `coworkEgressAllowedHosts` | JSON array | unset (= deny most) | **The egress allowlist that gates Cowork's bundled tool-call traffic.** Accepts exact hostnames (`api.github.com`), single-level wildcards (`*.corp.com`), and the bare sentinel `*` for allow-all. Wildcards don't cover the apex — `*.corp.com` matches `docs.corp.com` but not `corp.com` itself. Scope is **tool calls only** — inference and MCP traffic have their own allowlists. IP literals and `localhost` always resolve regardless of this list. Surfaced in the desktop UI under **Configure third-party inference → Sandbox & workspace → Allowed egress hosts** (with an `* Allow all` button). |
 | `coworkWebSearchEnabled` | bool | `true` | (UI-tier preference, not MDM.) Enables Cowork's bundled WebSearch connector. |
 | `isLocalDevMcpEnabled` | bool | `true` | Allow user-added local stdio MCP servers via Developer settings. |
-| `managedMcpServers` | JSON array | unset | Org-pushed remote MCP servers (HTTP/SSE) — e.g. GitHub MCP, Atlassian MCP. |
+| `managedMcpServers` | JSON array of `{ name, transport, url, headers? }` | unset | Managed remote MCP servers. Maximal writes one aggregate loopback HTTP entry into its owned config-library profile; this is a different schema and scope from Claude Code's same-named object setting. |
 | `isDesktopExtensionEnabled` | bool | `true` | Allow installation of `.mcpb` desktop extensions. |
 | `allowedWorkspaceFolders` | JSON array | unset | Which absolute paths Cowork can attach as workspace folders. |
 

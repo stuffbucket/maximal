@@ -66,8 +66,8 @@ export const claudeDesktopApp: ClientApp = {
   },
 
   uninstall(): Promise<AppUninstallResult> {
-    // Removes only our gateway profile and signed MCP entry. A profile or
-    // entry the user edited after setup is left on disk.
+    // Removes only our gateway profile and managed MCP array. A profile or
+    // MCP field the user edited after setup is left on disk.
     const reverted: Array<string> = []
     const mcp = removePluginClientEntries(claudeDesktopPluginClient)
     if (mcp.removed.length > 0) {

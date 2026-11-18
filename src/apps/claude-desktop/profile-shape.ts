@@ -5,6 +5,8 @@
 
 import type { GatewayProfileValues } from "./config"
 
+import { isMaximalDesktopManagedMcpServers } from "./managed-mcp"
+
 export function profileMatches(
   existing: Record<string, unknown> | null,
   values: GatewayProfileValues,
@@ -34,15 +36,22 @@ const ROUTING_FIELDS: ReadonlySet<string> = new Set([
   "inferenceGatewayApiKey",
 ])
 
-/** The profile has exactly the fields Maximal writes, no more, no fewer. */
+const MANAGED_MCP_FIELD = "managedMcpServers"
+
+/** The profile has exactly the routing fields Maximal writes, plus at most the
+ * managed MCP array maintained by the connector configurator. */
 export function hasExactFields(
   profile: Record<string, unknown>,
   values: GatewayProfileValues,
 ): boolean {
   const keys = Object.keys(values)
+  if (!keys.every((key) => Object.hasOwn(profile, key))) return false
+  const extras = Object.keys(profile).filter((key) => !keys.includes(key))
   return (
-    Object.keys(profile).length === keys.length
-    && keys.every((key) => Object.hasOwn(profile, key))
+    extras.length === 0
+    || (extras.length === 1
+      && extras[0] === MANAGED_MCP_FIELD
+      && isMaximalDesktopManagedMcpServers(profile[MANAGED_MCP_FIELD]))
   )
 }
 
