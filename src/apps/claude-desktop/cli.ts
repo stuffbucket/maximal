@@ -4,17 +4,24 @@ import path from "node:path"
 
 import type { AppCli, AppCliOp } from "../index"
 
+import { getClaude3pDir } from "./config"
 import { claudeAppInstalled, claudeAppCandidates } from "./detect"
 import { generateManagedProfile } from "./managed-profile"
-import { enableClaudeDesktopRouting } from "./reconcile"
+import { PROFILE_ARGS, profileCliRequested, runProfileCli } from "./profile-cli"
+import {
+  claudeDesktopRoutingIntended,
+  enableClaudeDesktopRouting,
+} from "./reconcile"
 
 const MANAGED_PROFILE_OUT = "maximal-claude-3p.mobileconfig"
 
-/** Claude Desktop needs two flags beyond the shared status/enable/disable:
- *  `--force` (write even when the app isn't installed) and `--managed` (emit an
- *  MDM .mobileconfig instead of touching the config library). Enable and
- *  disable otherwise fall through to the generic framework (`ClientApp.enable`
- *  / `disable`), so this hook only intercepts the two extra behaviours. */
+/** Claude Desktop needs flags beyond the shared status/enable/disable:
+ *  `--force` (write even when the app isn't installed), `--managed` (emit an
+ *  MDM .mobileconfig instead of touching the config library), and the
+ *  read-only/selecting profile flags (`--profiles`, `--current-profile`,
+ *  `--select-profile`). Enable and disable otherwise fall through to the
+ *  generic framework (`ClientApp.enable` / `disable`), so this hook only
+ *  intercepts the extra behaviours. */
 export const claudeDesktopCli: AppCli = {
   extraArgs: {
     force: {
@@ -28,9 +35,21 @@ export const claudeDesktopCli: AppCli = {
       default: false,
       description: `Emit a managed-preferences .mobileconfig (${MANAGED_PROFILE_OUT}) for MDM fleets instead of writing the config library.`,
     },
+    ...PROFILE_ARGS,
   },
 
   handle(op: AppCliOp, args: Record<string, unknown>): boolean {
+    // Profile operations read or select in Desktop's config library and never
+    // go through the configurator's ownership checks.
+    if (profileCliRequested(args)) {
+      const code = runProfileCli(
+        args,
+        getClaude3pDir(),
+        claudeDesktopRoutingIntended(),
+      )
+      if (code !== 0) process.exitCode = code
+      return true
+    }
     if (op !== "enable") return false
 
     if (args.managed === true) {
@@ -93,7 +112,7 @@ function writeManagedProfile(): void {
     consola.success(`Wrote managed-preferences profile to ${abs}`)
     consola.info(
       "  Install it (no Anthropic sign-in needed) via either:\n"
-        + `    sudo profiles install -path ${abs}\n`
+        + `    open ${abs}   # then approve it in System Settings → Privacy & Security → Profiles\n`
         + "  …or push it through your MDM (Intune/Jamf). It is read\n"
         + "  regardless of Claude Desktop's data dir and outranks file config.",
     )

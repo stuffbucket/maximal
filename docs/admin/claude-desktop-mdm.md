@@ -161,8 +161,10 @@ Three options, by descending durability:
 defaults write com.anthropic.claudefordesktop <key> <value>
 defaults read  com.anthropic.claudefordesktop                  # inspect
 
-# 2. Managed plist (MDM-style, requires writing a configuration profile)
-sudo profiles install -path /path/to/com.anthropic.claudefordesktop.mobileconfig
+# 2. Managed plist (MDM-style, a configuration profile). `profiles install`
+#    no longer exists on current macOS: open the file and approve it in
+#    System Settings → Privacy & Security → Profiles, or push it via MDM.
+open /path/to/com.anthropic.claudefordesktop.mobileconfig
 
 # 3. Per-deployment file (relevant for fleet management)
 # /Library/Managed Preferences/com.anthropic.claudefordesktop.plist
