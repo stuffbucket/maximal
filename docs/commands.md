@@ -85,6 +85,29 @@ docker run --rm -v "$PWD:/src:ro" -v "<out-dir>:/debs:ro" \
 `build-maximal-deb.sh` needs `dpkg-deb`, so run it on Debian/Ubuntu (or in an
 `ubuntu:24.04` container).
 
+## Refresh an existing Pi model catalog
+
+From a source checkout, `bun run pi:sync --account-type enterprise` previews
+the signed-in Copilot catalog; add `--write` to replace only
+`providers.maximal.models` in Pi's existing `models.json`. Use `individual`
+(the default), `business`, or `enterprise` for the account type. This is a
+one-shot refresh, not an installed background integration or a sign-in flow.
+
+It preserves the existing API-key helper, provider overrides, and unrelated
+providers/settings, and saves a private byte-for-byte backup before an atomic
+replacement. It honors `PI_CODING_AGENT_DIR`; `--file /path/to/models.json`
+selects a different file. Missing providers, empty catalogs, JSONC comments,
+and symlink files are refused rather than rewritten.
+
+The projection uses native supported transports, context/output limits, image
+and reasoning capabilities, and Copilot token prices. Prices are converted
+from AI credits per `batch_size` to USD per million tokens using Maximal's
+`budget.display.creditUsd` (default $0.01 per credit); different long-context
+rates become Pi pricing tiers. Missing/incomplete pricing is left unknown;
+explicitly published zero rates are marked `cost.known: true` so an updated Pi
+selector can distinguish them from placeholder zeroes. Reopen `/model` after
+syncing (restart older Pi versions if needed).
+
 ## pnpm lockfiles and the package feed
 
 `packages/storybook` has its own pnpm

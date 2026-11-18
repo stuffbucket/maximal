@@ -74,6 +74,7 @@
     "lint:fast": "oxlint",
     "mutate": "stryker run",
     "prepack": "bun run build",
+    "pi:sync": "bun scripts/sync-pi-models.ts",
     "plugins:test": "bun run --filter './packages/plugin-*' --filter './packages/connector-kit' test",
     "plugins:typecheck": "bun run --filter './packages/plugin-*' --filter './packages/connector-kit' typecheck",
     "prepare": "bun run ensure:ui-embed && simple-git-hooks && cd shell && bun install",
