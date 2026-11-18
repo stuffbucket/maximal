@@ -25,6 +25,40 @@ Ownership then follows the marker: this profile's marker is reapplied normally, 
 
 Take over never bypasses the marker: another profile's marker, or an ownerless marker whose own entry traces to another copy, needs the explicit transfer (`overrideOtherMaximal`) whatever Claude has applied, and when both are needed the dialog sends both only after each was confirmed. A profile Maximal can't read or safely address is `unreadable-profile`, whose dialog offers only Close; an unreadable `_meta.json` or a malformed marker keeps its own refusal. A refused or failed request keeps the dialog open with a callout ("Nothing was changed." or the error) above what still needs attention. At boot, a profile whose own marker is intact keeps its routing intent even when another copy's stale `maximal` entry is applied; only another copy's marker turns this profile's stale intent off.
 
+### Choosing a profile from the CLI
+
+`maximal app claude-desktop --profiles`, `--current-profile` and
+`--select-profile <id>` (see [Commands](commands.md)) work on the config
+library directly through `src/apps/claude-desktop/profile-library.ts`, not
+through the ownership checks above: they never write a profile, never touch
+`maximal-routing.json`, and never turn Maximal's routing on or off. Selecting
+sets `_meta.json`'s `appliedId` only, through the shared no-follow atomic writer
+with the index's exact bytes as the expected content, so a change by Claude or a
+person between the read and the write is refused rather than overwritten, and
+fields Maximal doesn't know survive. It refuses (touching nothing) an
+unreadable, malformed or symlinked index or library directory, a profile file
+that is missing, unreadable or a symlink, an id that isn't `[a-f0-9-]{36}`, and
+an index with `hybridPointer`, which Claude honours instead of `appliedId`. A
+selection takes effect when Claude is next launched, and only while
+`claude_desktop_config.json` has `deploymentMode` `3p`, which the command reads
+(never writes) and reports; otherwise it says the profile will not be active on
+relaunch. While Maximal's routing intent is on, the command warns that Maximal's
+next boot, an API-key change, or enabling routing again in Settings reapplies
+this copy's profile: a readable gateway profile Maximal doesn't own is left
+untouched (`foreign-gateway-profile`), but a profile that sets no
+`inferenceProvider` is not a gateway, so it is switched back; and selecting a
+profile another Maximal copy owns can turn this copy's intent off at the next
+reapply. With routing off, selecting a `maximal` entry warns that its port or
+key may be stale. Select with routing off (`--disable`) to keep a selection.
+
+Claude publishes no schema for `_meta.json` or the profile files. The layout is
+taken from Anthropic's documentation (`claude.com/docs/third-party/claude-desktop/`,
+"Configuration implementation" and "Deploy with MDM") and from the shape checks in
+Claude Desktop 5.11492.5's bundled main-process code
+(`Contents/Resources/app.asar`, `.vite/build/index.chunk-*.js`; minified and not
+a schema). So the index schema here is deliberately loose: `appliedId` and
+`entries[{ id, name }]` are required, everything else is preserved untouched.
+
 ## Claude Code integration
 
 `maximal app claude-code --enable` writes `env.ANTHROPIC_BASE_URL`, `env.CLAUDE_CODE_AUTO_MODE_SERVER=0`, an `apiKeyHelper` command, the current catalog-resolved Haiku/Sonnet selections, and a client-side Auto permission classifier into `~/.claude/settings.json` (`src/apps/claude-code/`). `CLAUDE_CODE_AUTO_MODE_SERVER=0` disables Claude Code's server-side permission review, which Copilot doesn't support, so `CLAUDE_CODE_AUTO_MODE_MODEL` controls the local classifier instead. The helper prints the Claude Code API-client key from Settings → API clients, falling back to the default endpoint key. (The same key is available on demand via `maximal api claude-code`.) The toggle owns only this client setup and its plugin MCP projections; root Anthropic Messages resolves the saved Haiku/Sonnet aliases for every caller even when the integration is off.
