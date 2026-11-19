@@ -3,7 +3,9 @@
 Maximal configures Pi through its standard `models.json` custom-provider interface.
 No Pi extension, modified Pi installation, or additional GitHub sign-in is needed.
 The readable-name and price-column selector changes are separate Pi UI changes;
-connectivity does not depend on them.
+connectivity does not depend on them. The optional [picker display extension](../../examples/pi-model-picker/README.md)
+applies those changes to the existing Pi picker in both Herdr CLI and desktop
+terminals, without changing their launchers or restarting running sessions.
 
 ## Connect
 

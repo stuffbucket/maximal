@@ -157,6 +157,9 @@ export default [
       "packages/figjam-plugin/test/sandbox/**",
       // Parked code (kept in git, not part of the build): see parked/mcp/README.md.
       "parked/**",
+      // Pi extension entry point: it imports Pi's host-provided packages, which
+      // are not dependencies here. Its renderer and tests are linted normally.
+      "examples/pi-model-picker/index.ts",
       "site/**",
       ".dependency-cruiser.cjs",
       ".pnpmfile.cjs",
