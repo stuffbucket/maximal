@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import path from "node:path"
 
 import { HTTPError } from "~/lib/errors/error"
+import { requestContext } from "~/lib/http/request-context"
 import {
   sendProviderRequest,
   sendRequest,
   sendRequestJson,
 } from "~/lib/http/send-request"
+import { PATHS } from "~/lib/platform/paths"
 import { state } from "~/lib/runtime-state/state"
 
 const realFetch = globalThis.fetch
@@ -131,6 +134,95 @@ describe("sendRequest — credential inferred from the destination host", () => 
     })
     expect(cap.calls[0].init.signal).toBe(controller.signal)
   })
+})
+
+const getFailure = (request: Promise<Response>) =>
+  request.catch((error: unknown) => error)
+
+test("persists only safe metadata for pre-header Copilot socket failures", async () => {
+  const reset = Object.assign(new TypeError("private error details"), {
+    code: "ECONNRESET",
+  })
+  const legacyClose = new Error(
+    "The socket connection was closed unexpectedly. private error details",
+  )
+  const aborted = AbortSignal.abort(reset)
+  const traceId = "copilot-transport-test"
+  const log = Bun.file(
+    path.join(
+      PATHS.APP_DIR,
+      "logs",
+      `copilot-transport-${new Date().toLocaleDateString("sv-SE")}.log`,
+    ),
+  )
+
+  await requestContext.run(
+    {
+      traceId,
+      startTime: Date.now(),
+      userAgent: "",
+      sessionAffinity: undefined,
+      parentSessionId: undefined,
+      usage: {},
+    },
+    async () => {
+      let attempts = 0
+      const rejectFetch = (error: Error) => {
+        globalThis.fetch = Object.assign(
+          () => {
+            attempts++
+            return Promise.reject(error)
+          },
+          { preconnect: realFetch.preconnect },
+        )
+      }
+
+      rejectFetch(reset)
+      expect(
+        await getFailure(
+          sendRequest(`${COPILOT_HOST}/responses?private-query`, {
+            method: "POST",
+            body: "private prompt",
+          }),
+        ),
+      ).toBe(reset)
+      expect(
+        await getFailure(
+          sendRequest(`${COPILOT_HOST}/responses`, { signal: aborted }),
+        ),
+      ).toBe(reset)
+      expect(
+        await getFailure(sendRequest(`${GITHUB_API_HOST}/responses`)),
+      ).toBe(reset)
+      expect(
+        await getFailure(sendRequest(`${COPILOT_HOST}/private-path`)),
+      ).toBe(reset)
+      rejectFetch(legacyClose)
+      expect(await getFailure(sendRequest(`${COPILOT_HOST}/v1/messages`))).toBe(
+        legacyClose,
+      )
+      const otherError = new Error("unrelated failure")
+      rejectFetch(otherError)
+      expect(await getFailure(sendRequest(`${COPILOT_HOST}/responses`))).toBe(
+        otherError,
+      )
+      expect(attempts).toBe(6)
+    },
+  )
+
+  // The shared logger flushes file writes asynchronously.
+  await Bun.sleep(1300)
+  const lines = (await log.text())
+    .split("\n")
+    .filter((line) => line.includes(`[${traceId}]`))
+  expect(lines).toHaveLength(2)
+  expect(lines[0]).toMatch(
+    /endpoint=\/responses code=ECONNRESET elapsed_ms=\d+/,
+  )
+  expect(lines[1]).toMatch(
+    /endpoint=\/v1\/messages code=unknown elapsed_ms=\d+/,
+  )
+  expect(lines.join("\n")).not.toMatch(/private|copilot-tok/)
 })
 
 describe("sendProviderRequest — credential from the config object", () => {
