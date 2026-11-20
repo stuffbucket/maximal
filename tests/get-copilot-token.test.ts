@@ -141,8 +141,8 @@ describe("getCopilotToken", () => {
       const e = err as CopilotAuthFatalError
       expect(e.status).toBe(401)
       expect(e.message).not.toContain("AuthenticateToken")
-      expect(e.message).toContain("expired or revoked")
-      expect(e.message).toContain("gh auth login")
+      expect(e.message).toContain("revoked or has expired")
+      expect(e.message).toContain("maximal auth")
     }
   })
 
