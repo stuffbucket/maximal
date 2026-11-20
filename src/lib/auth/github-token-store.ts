@@ -395,12 +395,10 @@ export const writeDefaultRegistry = (reg: AccountRegistry): Promise<void> =>
 // Concurrency: these read-modify-write helpers take no lock. That's safe on a
 // single sidecar — Bun's event loop serializes Hono handlers, so no two writes
 // interleave (the `await`s yield, but the next handler doesn't start mid-write).
-// The only race is the pathological case of running the `maximal auth` CLI (a
-// separate process) WHILE the sidecar is live; a lost write there drops an
-// account entry (not the GitHub credential — re-add via gh-reuse or re-auth),
-// and the atomic temp+rename write rules out a corrupt/torn file regardless.
-// Not a documented workflow; revisit with an OS file-lock if the CLI ever
-// becomes a first-class concurrent auth path.
+// The one cross-process writer is the `maximal auth` CLI, which a live sidecar
+// picks up (registry-adoption.ts). If the CLI and the sidecar write at the same
+// instant, the later write can drop the other's account entry (not a corrupt
+// file: writes are atomic temp+rename). Add an OS file lock if that shows up.
 
 /** Read-modify-write: add (or replace by `login@host`) an account, make it the
  *  active one, persist. The shared path for every sign-in producer

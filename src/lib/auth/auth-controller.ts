@@ -177,6 +177,12 @@ type AuthState =
 
 let authState: AuthState = { kind: "signed-out" }
 
+export type AuthStateKind = AuthState["kind"]
+
+export function getAuthStateKind(): AuthStateKind {
+  return authState.kind
+}
+
 /**
  * The single writer for `authState`. Assigns the new union value, then
  * publishes the projected wire status on the settings event bus so the
