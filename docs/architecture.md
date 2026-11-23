@@ -77,6 +77,7 @@ Claude Code is routed by an ownership-guarded `ANTHROPIC_BASE_URL` plus `apiKeyH
 - **`maximal debug`** (and `--json`) — effective config (including `plugins_enabled`), executor selection (which `Executor` `selectExecutor()` would pick), secret sources (env/file/config/unset, never values), paths.
 - **`GET /_debug/state`** — live equivalent on a running proxy, plus each plugin's lifecycle, status code and tool count. 404 by default; gated on `state.verbose`. Useful when restart isn't an option.
 - **Daily log** at `~/.local/share/maximal/logs/messages-handler-<date>.log` — request payloads, translated SSE events, web-tools agent traces. 7-day retention.
+- **Copilot transport log** at `~/.local/share/maximal/logs/copilot-transport-<date>.log` — socket closures before response headers on Copilot inference calls, even without verbose mode. Includes the upstream endpoint, known runtime error code (or `unknown`), elapsed time, and Maximal trace ID when available. It contains no prompts, credentials, query strings, or raw exception text. The log does not change client responses or retries.
 
 ## Token-usage sessions
 

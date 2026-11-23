@@ -31,9 +31,11 @@ import {
 } from "~/lib/config/api-config"
 import { getAnthropicApiKey } from "~/lib/config/config"
 import { HTTPError } from "~/lib/errors/http-errors"
+import { createHandlerLogger } from "~/lib/platform/logger"
 import { state } from "~/lib/runtime-state/state"
 
 const ANTHROPIC_API_BASE_URL = "https://api.anthropic.com"
+let copilotTransportLog: ReturnType<typeof createHandlerLogger> | undefined
 
 export interface SendRequestInit extends Omit<RequestInit, "headers"> {
   /** Request-specific NON-secret headers only. The mechanism attaches auth. */
@@ -147,6 +149,39 @@ function dispatch(
   })
 }
 
+/** Log only known socket failures, without raw errors, URLs, or request data. */
+function logCopilotSocketFailure(
+  url: string,
+  error: unknown,
+  elapsedMs: number,
+): void {
+  if (!(error instanceof Error)) return
+  const code = "code" in error ? error.code : undefined
+  const knownCode = code === "ECONNRESET" || code === "ConnectionClosed"
+  if (
+    !knownCode
+    && !error.message.startsWith(
+      "The socket connection was closed unexpectedly.",
+    )
+  )
+    return
+  if (!isSameOrigin(url, copilotBaseUrl(state))) return
+
+  const endpoint = URL.parse(url)?.pathname
+  if (
+    endpoint !== "/responses"
+    && endpoint !== "/v1/messages"
+    && endpoint !== "/chat/completions"
+  )
+    return
+
+  // The logger includes the incoming request's trace ID when available.
+  copilotTransportLog ??= createHandlerLogger("copilot-transport")
+  copilotTransportLog.warn(
+    `Socket closed before response headers: endpoint=${endpoint} code=${knownCode ? code : "unknown"} elapsed_ms=${elapsedMs}`,
+  )
+}
+
 /**
  * Send a request to a first-party host. The credential is selected from the
  * destination host — the caller passes only a URL (plus, for the sign-in flow,
@@ -159,7 +194,23 @@ export async function sendRequest(
 ): Promise<Response> {
   const merged = new Headers(init.headers)
   attachHostAuth(url, merged, init.githubToken)
-  return dispatch(url, merged, init)
+  const startedAt = performance.now()
+  try {
+    return await dispatch(url, merged, init)
+  } catch (error) {
+    if (!init.signal?.aborted) {
+      try {
+        logCopilotSocketFailure(
+          url,
+          error,
+          Math.round(performance.now() - startedAt),
+        )
+      } catch {
+        // A logging failure must never replace the original transport error.
+      }
+    }
+    throw error
+  }
 }
 
 /**
