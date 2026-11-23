@@ -30,13 +30,13 @@ export const getCopilotToken = async () => {
       // The raw upstream body (a gRPC string like "unauthorized:
       // AuthenticateToken authentication failed") is already logged above
       // and is unreadable in the UI. Map to a friendly, actionable message
-      // by status — mirroring the wording in preflightCopilotError. The raw
-      // remediationUrl still flows through to power the UI's remediation link.
+      // by status. The raw remediationUrl still flows through to power the
+      // UI's remediation link.
       const parsed = parseCopilotErrorBody(errorText)
       const who = state.userName ?? "your account"
       const friendlyMessage =
         response.status === 401 ?
-          `GitHub rejected ${who}'s token — it may be expired or revoked. Run \`gh auth login\` and try again, or sign in with a code.`
+          `GitHub rejected ${who}'s token. It was revoked or has expired. Sign in again with a code in Maximal, or run \`maximal auth\`. Maximal keeps its own sign-in, so \`gh auth login\` won't fix this.`
         : `${who} doesn't have access to GitHub Copilot. Pick another account with an active Copilot subscription, or sign in with a code.`
       throw new CopilotAuthFatalError(
         friendlyMessage,
