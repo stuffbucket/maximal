@@ -80,7 +80,9 @@ appsRoutes.post("/claude-code/toggle", async (c) => {
           409,
         )
       }
-      const result = await app.enable()
+      const result = await app.enable({
+        overrideOtherMaximal: parsed.data.overrideOtherMaximal,
+      })
       const conflict = result.conflict || null
       if (result.success) armWorkingNotice(app.id, app.name)
       // `app.enable()` is the single owner of the claude-code routing intent
@@ -145,7 +147,9 @@ appsRoutes.post("/codex/toggle", async (c) => {
           409,
         )
       }
-      const result = await app.enable()
+      const result = await app.enable({
+        overrideOtherMaximal: parsed.data.overrideOtherMaximal,
+      })
       return jsonApp(c, await app.getDetails(result.conflict ?? null))
     }
 
@@ -170,7 +174,16 @@ appsRoutes.post("/claude-desktop/toggle", async (c) => {
     // `app.enable()` / `disable()` own the persisted routing intent; a
     // refused enable (someone else's gateway is applied) doesn't record it.
     if (parsed.data.enabled) {
-      const result = await app.enable()
+      if (!(await app.detect())) {
+        throw httpError(
+          "No Claude Desktop install detected. Install it first, then enable routing.",
+          409,
+        )
+      }
+      const result = await app.enable({
+        overrideOtherMaximal: parsed.data.overrideOtherMaximal,
+        overrideForeignGateway: parsed.data.overrideForeignGateway,
+      })
       if (!result.success) {
         return jsonApp(c, await app.getDetails(result.conflict ?? null))
       }

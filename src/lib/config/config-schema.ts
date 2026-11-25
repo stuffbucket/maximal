@@ -40,7 +40,7 @@ const ProviderConfigSchema = z.object({
   adjustInputTokens: z.boolean().optional(),
 })
 
-const ReasoningEffortSchema = z.enum([
+export const ReasoningEffortSchema = z.enum([
   "none",
   "minimal",
   "low",
@@ -112,8 +112,18 @@ const ClaudeCodeConfigSchema = z
   })
   .loose()
 
-/** Clients Maximal can register a plugin's MCP endpoint with. */
-const PluginClientIdSchema = z.enum(["claude-code"])
+/** Apps shown as possible destinations for a plugin's MCP endpoint. */
+const PluginClientIdSchema = z.enum([
+  "claude-code",
+  "claude-desktop",
+  "codex",
+  "copilot-cli",
+])
+
+const PluginAccessIdSchema = z
+  .string()
+  .regex(/^(?:app|connection):[\w.-]{1,128}$/u)
+const PluginAccessPermissionSchema = z.enum(["allow", "ask", "block"])
 
 /** One `plugins.<id>` entry. Absent (or `enabled` not true) means off. */
 const PluginSettingsEntrySchema = z
@@ -123,6 +133,9 @@ const PluginSettingsEntrySchema = z
      *  it starts, so a bad value fails that plugin, not Maximal. */
     config: z.unknown().optional(),
     clients: z.array(PluginClientIdSchema).max(8).optional(),
+    access: z
+      .record(PluginAccessIdSchema, PluginAccessPermissionSchema)
+      .optional(),
   })
   .loose()
 
@@ -175,7 +188,7 @@ export const AppConfigSchema = z
       .optional(),
     providers: z.record(z.string(), ProviderConfigSchema).optional(),
     extraPrompts: z.record(z.string(), z.string()).optional(),
-    smallModel: z.string().optional(),
+    smallModel: z.string().trim().min(1).optional(),
     responsesApiContextManagementModels: z.array(z.string()).optional(),
     /**
      * Copilot/OpenAI-Responses-specific: extend server-side prefix-cache
@@ -218,6 +231,11 @@ export const AppConfigSchema = z
     /** Built-in plugins, keyed by plugin id (`src/lib/plugins/`). */
     plugins: z
       .record(z.string().min(1).max(64), PluginSettingsEntrySchema)
+      .optional(),
+    /** Data-only built-in inventory, rooted in Maximal's app directory. */
+    pluginInventory: z
+      .object({ entry: z.string().trim().min(1).max(512) })
+      .strict()
       .optional(),
     // The parked MCP broker's config (`parked/mcp`), accepted silently so
     // existing config.json files don't warn. Not interpreted here; the plugin

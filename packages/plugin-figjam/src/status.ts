@@ -37,6 +37,36 @@ const nameList = (names: ReadonlyArray<string>): string =>
     "None"
   : names.map((name) => displayName(name)).join(", ")
 
+/**
+ * A panel waiting for approval and where it says it comes from: the board,
+ * its file key and the Figma user, as the panel reported them. Only a panel
+ * holding the bridge's relay key (the plugin Maximal wrote) gets this far,
+ * but the values are still what the panel says, so they identify a request
+ * rather than prove anything.
+ */
+export interface PendingPanel {
+  name: string
+  board?: string | null
+  fileKey?: string | null
+  user?: string | null
+}
+
+/** `grumpy-lynx (board "Roadmap", file abc123, Figma user Ann)`. */
+export function describePending(panel: PendingPanel): string {
+  const where = [
+    panel.board ? `board "${displayName(panel.board)}"` : undefined,
+    panel.fileKey ? `file ${displayName(panel.fileKey)}` : undefined,
+    panel.user ? `Figma user ${displayName(panel.user)}` : undefined,
+  ].filter((part) => part !== undefined)
+  const name = displayName(panel.name)
+  return where.length === 0 ? name : `${name} (${where.join(", ")})`
+}
+
+const pendingList = (panels: ReadonlyArray<PendingPanel>): string =>
+  panels.length === 0 ?
+    "None"
+  : panels.map((panel) => describePending(panel)).join("; ")
+
 /** Everything the status shows, as the controller knows it. */
 export interface StatusInput {
   startFailure: StartFailure | undefined
@@ -45,7 +75,7 @@ export interface StatusInput {
     | {
         port: number
         boards: ReadonlyArray<string>
-        pending: ReadonlyArray<string>
+        pending: ReadonlyArray<PendingPanel>
       }
     | undefined
   building: boolean
@@ -88,10 +118,11 @@ function pairAttention(input: StatusInput): PluginAttention | undefined {
   const pending = input.bridge?.pending ?? []
   if (pending.length === 0 || input.pairActions.length === 0) return undefined
   const [first] = pending
+  const board = first.board ? ` on board "${displayName(first.board)}"` : ""
   return {
     summary:
       pending.length === 1 ?
-        `A FigJam panel ("${displayName(first)}") wants to connect`
+        `A FigJam panel ("${displayName(first.name)}")${board} wants to connect`
       : `${pending.length} FigJam panels want to connect`,
     actions: input.pairActions,
   }
@@ -125,7 +156,7 @@ function composeBase(input: StatusInput): PluginStatus {
   const facts = [
     { label: "Port", value: String(bridge.port) },
     { label: "Connected boards", value: nameList(bridge.boards) },
-    { label: "Waiting for approval", value: nameList(bridge.pending) },
+    { label: "Waiting for approval", value: pendingList(bridge.pending) },
   ]
   if (input.building) {
     return {

@@ -109,6 +109,44 @@ rules, in order:
 - Inline field validation (e.g. a name already taken) stays a caption
   next to the field.
 
+## Dialogs
+
+Native modal `<dialog>` (`ModalDialog`): the browser makes the window inert,
+traps focus and puts it back on the opener when the dialog closes. Escape and
+the backdrop dismiss. The rest of a double click that opened a dialog is
+ignored (`modal-click-guard.ts`), so it can neither dismiss the dialog, press
+one of its buttons, nor move focus off the safe first action. Two small shapes share the `.confirm-dialog` panel:
+
+- **`ConfirmDialog`** asks before something happens: a title that is the
+  question, a sentence on the consequence, Cancel (first focus, a ghost) and
+  the action (primary, or destructive for `tone="danger"`). Escape and the
+  backdrop are Cancel.
+- **`NoticeDialog`** tells the person what to do after something already
+  happened (e.g. "Restart Claude" once routing was switched): one
+  primary action ("Got it", first focus), no Cancel and nothing to undo.
+  Escape and the backdrop acknowledge it the same way. It may carry one
+  explicit **secondary action** when there is a deliberate way past what
+  happened (e.g. "Take over" when Maximal left another gateway alone): a
+  ghost button before the primary (ghost destructive when it changes
+  something the person set up), never first focus, never triggered by
+  Escape, the backdrop or Enter on the focused primary. While it runs, both
+  buttons and dismissal wait.
+
+A dialog whose action the server refuses or that fails stays open: a
+`Callout` (notice for a refusal, error for a failure) goes at the top of its
+body, above whatever the dialog now explains, and nothing is retried.
+
+**Updates.** Every Settings way into an update — the title bar's icon
+(`btn--primary btn--icon`, named "Update Maximal to X.Y.Z" by `aria-label`
+and tooltip, shown only while one is offered), System → Version and updates'
+"Update to X.Y.Z" (`btn--primary`, beside the ghost Check now) and the tray's
+"Update with apt…" request — opens the same `ConfirmDialog`, worded for what happens next:
+install and restart, open mxml.sh, or show the apt command to run by hand.
+While it is open or the update downloads, another start is ignored; during the
+download both entry points are disabled and say so. The Updates row
+(`.system-update-row`) wraps whole items — status, Update, Check now — onto a
+new line when a translation is long; a label never breaks mid-phrase.
+
 ## Empty states
 
 Where a list will be, an `EmptyState` (`components/EmptyState.tsx`,
@@ -120,7 +158,7 @@ error wins.
 
 ## Checkbox groups with "All"
 
-For one entity offered to several targets (a plugin to each app):
+For one entity offered to several targets (a plugin to each of several places):
 an "All …" checkbox heads the group, the targets indent under it by
 `--space-5`, rows split by a hairline. "All" shows the mixed
 (indeterminate) state when some are checked. Each target row is a
@@ -160,11 +198,15 @@ connector is ready, else a `.connector-dot` in a status token plus a
 short word (Off, Needs setup, Signing in, Starting, Error, Failed), and a
 quiet chevron.
 
-**Page.** Opening a row replaces the list in place (`#connectors/<id>`,
-mirrored with `replaceState`); "← Your connectors" goes back and returns
-focus to the row. Opening from the list moves focus to the page's heading.
-No cards: the page is the entity, laid out as hairline-divided
-typographic sections:
+**Plugin detail dialog.** Opening a row keeps the list mounted and presents
+the plugin in a large native modal (`#connectors/<id>`, mirrored with
+`replaceState`). The browser makes the list inert and traps focus; Escape,
+the backdrop, and the pinned close button dismiss the dialog, clear the hash,
+and return focus to the row. Focus starts on the plugin heading. One body
+scrolls below the pinned identity/switch/close header. Native modal stacking
+allows an action's `ConfirmDialog` to open safely above the detail. No nested
+cards: the plugin is the surface, laid out as hairline-divided typographic
+sections, and sections appear only when they apply to that plugin kind:
 
 - Head: tile, name, on/off switch; then the description and the
   connector's own report — status line, detail, facts (`.kv`), action
@@ -172,8 +214,18 @@ typographic sections:
   secondary, or destructive as a ghost that reads red); an action with
   `confirm` asks in a `ConfirmDialog` first. One that failed to start
   shows an error `Callout` instead. Off shows no status line.
-- Connect to apps: a `LinkCheckbox` per client and the endpoint address
-  with a Copy button.
+- App Permissions: one visible row for every fixed app (Claude Code, Claude
+  Desktop, Codex, Copilot CLI) and every named API connection; nothing hides
+  behind a menu. A row is the name (a connection shows the label the person
+  gave it) and an editable Allow / Ask / Block `PermissionControl`
+  (`kind="access"`, the `.perm-seg` radio group: glyph-only, each option named
+  and with a tooltip). A row that can't be used right now (the app can't
+  receive connectors yet, the connection is turned off) stays in the list with
+  its control editable, so the choice is kept, and carries an info glyph;
+  hover or keyboard focus on it opens a card giving the reason. Changes save as
+  made and show at once; a failed save puts the control back and says why in a
+  `ProblemCallout`. The endpoint address and its Copy button sit below the rows.
+  A fixed app starts at Block until chosen; a named connection starts at Allow.
 - Tool permissions: the tools in three groups (Read-only, Write/delete,
   Other), each a twirl with a `.count-badge` and a menu button (Always
   allow / Ask every time / Blocked set the whole group; Custom marks a mixed
@@ -186,15 +238,186 @@ typographic sections:
   Changes save as made and show at once; a failed save puts the control
   back and says why in a `ProblemCallout`. Tools from the cached catalog
   carry a quiet `.panel-status` line saying when they were last seen.
+  These compose with App Permissions, the caller's gate, which is checked
+  first: Block there refuses the whole connector for that app or connection
+  whatever its tools say (no tools are listed to it and an app gets no
+  connector entry); Ask there needs approval on each call, even to a tool that
+  is Allowed; Allow there defers to the per-tool permissions, which then
+  decide on their own.
 - Configuration: a `.form` generated from the connector's config schema;
   advanced fields fold under a twirl (open when the connector failed to
   start). Save / Revert; the connector's validation lands as a caption
   under the field it names.
 - About: where it connects, how it signs in, its terms and website.
 
+Extensions use the same detail dialog, status/actions, switch, configuration,
+and About sections, but omit connector-only App Permissions, MCP endpoint, and tool
+permission sections. This keeps FigJam and Work IQ in one plugin-detail pattern
+without presenting controls that do not apply.
+
 Text a connector supplies is shown as written; only http(s) addresses in
 it become links, opened in the system browser. Glyphs are Maximal's own
 (`glyphs.tsx`).
+
+## Rules
+
+The fourth surface of the unified window, called Rules in the product (it was
+Budget; the code, `budget-*` catalog keys and `/settings/api/budget` keep that
+name). It lives in `shell/src/ui/features/budget/`, a React island in the
+Settings bundle, and is reached at `#rules` (`#budget` and `/ui/budget/` still
+redirect there). A rule is what the code calls a budget limit. One scrolling column: a one-line summary,
+then three typographic sections, no cards: **Rules**, **Activity**,
+**Settings**. Rules and Activity are what people open the window for, so they
+come first. The first heading (Rules, `.section__title`) is the window's one
+Fraunces moment; the others step down to Commissioner
+(`.budget-block__title`). The window's own name is in the native title bar, so
+no heading repeats it.
+
+- **Summary.** One line (`.budget-status`) above the Rules heading: whether
+  rules are enforced, how many exist, and how far the rule a request would hit
+  first (else the widest) has got, e.g. "Enforcing · 2 rules · $12.40 of $100
+  today". It is muted while enforcement is off. A spent blocking rule, a missing
+  usage database and a status that failed to load each show under it as a notice
+  `Callout` or `ProblemCallout`.
+- **Rules.** A hairline-divided list (`.limits`), one row per rule that exists,
+  in the server's order (widest scope first, so a row never jumps as spend
+  changes). A row is the name (with a `.chip` for its scope when it has a name of
+  its own, and a "Warn only" chip), edit and delete as ghost icon buttons, a
+  meter, then the figures: confirmed spend ("$12.40 of $100"), the state (icon
+  and word, for nearly spent and spent), what is left, what is held by calls in
+  progress, any conservative amount awaiting reconciliation, and when it resets.
+  Every figure uses the rule's unit, so token rules show token counts rather than
+  currency. The meter and amount left include unreconciled spend, so they remain conservative
+  even though the primary figure separates it. The meter (`.budget-meter`) is the Dashboard's quota meter: the
+  fill is `--accent` while fine, `--status-warning` from the rule's own warn
+  threshold, `--status-error` once spent; the track is a pale step of the same
+  color. No rule exists until someone adds it, so the empty state is an
+  `EmptyState` with "Add a rule"; there are never per-model rows.
+- **Rules from sessions.** Beside "Add a rule" (a quiet ghost button,
+  `.budget-block__actions`) sits "Create rules from sessions", which opens a native
+  `<dialog>` in the editor's shell (`.budget-sessions`) with two steps. *Pick*: a
+  `RangePicker` and the sessions in it (`GET .../sessions`, biggest spender first,
+  twelve shown, "Show all" for the rest), each row a checkbox label: the client or key,
+  when it started (UTC), its requests and minutes, its model mix as text ("claude-sonnet
+  62%, claude-opus 30%, and 2 more") and its cost. Picks survive a change of range
+  (a line says how many sit outside the one shown); none picked means all usage in the
+  range, which the button says. A select chooses the shape of the rules (Let Maximal
+  choose, Trying things out, Daily driver, Heavy agent use, Team; their amounts always
+  come from what was picked). *Review*: the suggestion (`POST .../suggest`) as a
+  hairline-divided list (`.draft`): the rule's name, scope chip and amount with its
+  reset, what it would have done to the usage it was sized from ("Over 36 periods it
+  would have been reached in 4 and refused 573 requests ($2.49)"), how the amount was
+  reached, and two actions: **Open in editor** (the editor opens over the dialog,
+  filled in, with its What if; a draft whose reset the editor cannot set yet, such as a
+  rolling one, can only be added) and **Add rule** (the row then says Added and stays).
+  "Add all N" adds the rest and stops at the first that fails, whose row says why.
+  `short_history` and `no_spend` notes are notices. Nothing picked or suggested is lost
+  to a stray click: once something is picked the backdrop and Escape do nothing and
+  Cancel or Done is the way out, as in the editor.
+- **Rules for one model.** The Models list marks a model with a shield-check (the glyph
+  of the Rules surface in the top bar, `.model-row__rules`, a link) when a rule names
+  it: a filter of models with a member (exact id or glob) that matches, or the model's
+  provider. A rule that covers everything is not marked on every row, since it would
+  say nothing about any one of them: the list says once, above the models, how many
+  cover everything, with a link to Rules. The shield opens `#rules/model/<id>` (the id
+  escaped), and Rules, which follows its address, lists every rule that applies to that
+  model, including those that cover everything, under a chip ("Showing rules for
+  gpt-6.1-sol", with how many of the rules it is) whose × (or `#rules`) clears it. A
+  model no rule applies to says so under the chip.
+- **How a rule is performing.** Each row carries a sparkline (`.spark`, the last
+  seven days' spend, one line in `--series-1`, no axes) in a quiet button
+  (`.limit__perf`, `aria-expanded`, a chevron beside it) that opens the rule's
+  history inline under its row, as a disclosure rather than a panel or a second
+  page: depth on demand, the list keeps its place. Any number of rows may be
+  open. The detail (`.rule-detail`) is a range picker (default 30 days, the same
+  `RangePicker` Activity uses), four totals in the Dashboard's totals style (spent,
+  requests, periods crossed, requests refused with what they would have cost), the
+  timeline, a three-item legend with counts, and a table of the periods (newest
+  first, five rows, "Show all"; an estimated period wears an "est." chip). The
+  timeline (`.timeline`) places everything on one time axis: spend counted in each
+  period climbing toward the limit (`--series-1` line and pale area, starting over
+  where a period resets, which is also a dotted `--border-strong` line), the limit
+  as a solid `--status-error` line and the warning as a dashed `--status-warning`
+  line, each labelled at the right edge ("Limit $40.50", "Warns at $32.40"), and
+  under it the spend per bucket as columns on their own scale. Markers sit on the
+  line they belong to and differ by shape as well as hue: a triangle warned, a dot
+  reached the limit, a cross is a refused request (one per bucket, its count and
+  cost in the tooltip). The plot is an image to a screen reader with the figures in
+  its label; the legend and the periods table carry them in text. It follows the
+  same states as Activity: the previous figures stay while the next range loads, a
+  failed load drops them and shows a retry, a range with nothing counted is a
+  compact `EmptyState`.
+- **Add or edit a rule.** A native `<dialog>` in `.confirm-dialog`'s shell
+  (`.budget-editor`): name, what it applies to (everything, one client key, one
+  plugin, one provider, listing only what exists), amount in the display unit,
+  warn-at percent, when it resets (with each window the provider reported, else
+  daily, weekly or never) and whether reaching it refuses requests or only warns.
+  The amount field (`.input-adorn`) shows its unit inside it (`$` on the side the
+  locale writes it, or "credits" after) so nobody has to type it. Typing is
+  forgiving: a currency sign or code ("$100", "100 USD"), a credit word ("100
+  credits", "AIU", "cr"), spaces and the locale's thousands separators all read,
+  and a unit other than the display unit is converted at the status's
+  `credit_usd` (`parseAmountDetailed` in `format.ts`). A validation problem is a
+  caption under its field that says what is wrong ("Enter an amount like 100 or
+  $100"; zero has its own wording), focuses the field and keeps the dialog and
+  every value as they were; a refused save is an error `Callout` inside the
+  dialog. **Edits are never discarded by accident:** while the form differs from
+  what it opened with, a click on the backdrop (or in the dialog's padding) and
+  Escape do nothing, and Cancel is the explicit way out. An untouched form closes
+  on either. Under the fields sits a **What if** panel (`.whatif`, a hairline above it, in the
+  dialog's scroll area): a range picker (7 days, 30 days, 90 days, All time; 30 days
+  to start) and the rule as typed, replayed over recorded usage once typing has
+  paused (`POST .../simulate`, nothing is applied). It lists when the rule would
+  have warned and reached its limit, the requests it would have refused and what
+  they cost (a rule that only warns says so), the most spent in one period (one
+  window, for a rolling rule), the requests it covers and the periods that hit the
+  limit, then "Suggested: $X" (the amount that would have kept about nine in ten
+  periods under the limit, rounded up to what it reads as) with a "Use $X" button
+  that puts it in the amount field and nothing else. It never changes what was
+  typed, the name is not part of the question (typing it asks for nothing), a form
+  that isn't a rule yet shows what it needs, a replay that fails shows an error
+  with a retry and leaves Save as it was, and the previous answer stays up
+  (labelled "Updating…") while the next one loads. Deleting asks in a `ConfirmDialog`.
+- **Activity.** What was used, over any range, laid out like the Dashboard. A
+  range picker (`.range-seg`, a segmented row: 24 hours, 7 days, 30 days, 90 days,
+  All time, Custom; the chosen option steps forward onto the card surface, as in
+  the permission control) and a group select (model, plugin, client key, provider,
+  day, hour). Custom opens two day fields (UTC, the second day included); a range
+  that runs backwards says so under them and fetches nothing. The shared
+  `RangePicker` and `range.ts` also serve a rule's timeline and the what-if
+  preview. Then a totals strip (`.budget-totals`, hairlines above and below, not a
+  card) in the Dashboard's measures and its catalog labels: total tokens as the
+  headline, then input, output, cache read, cache write, requests and cost. Then a chart and a
+  table of the same rows with the same measures per row (token counts compact, the
+  exact figure in the cell's tooltip), and a "Download activity statement (CSV)"
+  button (the shell's save dialog; a plain download in a browser) whose tooltip and
+  file name (`maximal-activity-<range>-by-<group>.csv`, the range being `7d` or
+  `2026-11-01_to_2026-11-08`) name the range and grouping. A group that used nothing
+  is still listed (`include_free`), so the rows add up to the totals, as on the
+  Dashboard. By model, plugin, client key or provider the chart is a thin segmented
+  bar (`.budget-share`): five parts in `--series-1` to `--series-5`, the tail folded
+  into a neutral "Other", and a swatch on each table row standing in for a legend. By
+  day or hour it is columns (`.budget-columns`, at most `--size-lg` wide,
+  `--radius-chip` rounded tops, one baseline) on an even time axis, quiet buckets
+  drawn empty; a long span packs its columns closer (`--dense`, `--packed`), and the
+  first and last bucket and the busiest are named under them. The chart never
+  carries a number the table doesn't. A table longer than ten rows folds under "Show
+  all" (newest first for a span of time, the biggest spender first otherwise, at most
+  500 rows; the statement has the rest). The table is seven columns in a 640px window
+  with tight cells and headings that wrap (a long German compound breaks inside its
+  column) rather than an inner scroller. While another range loads the previous
+  figures stay (`aria-busy`); a failed load drops them, so a range's figures never
+  sit under another's heading, and shows an error `ProblemCallout` with a retry; a
+  range with nothing recorded is an `EmptyState` that suggests a longer one.
+
+- **Settings.** Two `.form` rows (an on/off `Switch` for enforcement, a `.select`
+  for the display unit), then what each provider reports: its allowances grouped
+  under the provider's name, each a label, the percent used, a meter and
+  "Resets <date> (<relative>)". These are the provider's figures and can lag, so
+  the section says so; rules count what Maximal records.
+
+All text is in the catalog (`budget-*` keys); amounts and dates go through `Intl`
+in the active locale, with the unit passed as an ICU argument.
 
 ## Focus rings
 

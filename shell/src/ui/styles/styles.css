@@ -187,6 +187,35 @@ html[data-os="macos"] .topbar {
   background: var(--border-subtle);
 }
 
+/* The browser-access mount adds no box (so no extra utilities gap) until it
+   holds the access icon; its dialog lives in the top layer. */
+.topbar__browser-access {
+  display: contents;
+}
+
+.topbar__browser-access[hidden] {
+  display: none;
+}
+
+/* Update offered and the full tab row would otherwise not fit (the narrow
+   end of Settings' width range): the update icon's width comes out of the
+   title bar's own spacing, not the tabs. The utilities close up, the
+   divider goes (the icon and the switcher already separate the picker),
+   and the end padding steps down. main.ts sets this class only when it is
+   needed (fitTopbar); wider windows keep the regular spacing, and the
+   macOS traffic-light clearance on the other side is untouched. */
+.topbar--compact {
+  padding-inline-end: var(--space-2);
+}
+
+.topbar--compact .topbar__utilities {
+  gap: var(--space-1);
+}
+
+.topbar--compact .topbar__divider {
+  display: none;
+}
+
 .lang-picker {
   position: relative;
   display: inline-flex;
@@ -929,10 +958,10 @@ html[data-os="macos"] .topbar {
   margin: 0;
 }
 
-/* ---- Uninstall card ----
- * The card itself is the only surface (no nested card). Its body is a
- * vertical stack matching the card's own rhythm; the option checkboxes,
- * inline error, and action button each get their own row. */
+/* ---- Uninstall region ----
+ * A typographic region under a hairline (.system-uninstall), not a card. Its
+ * body is a vertical stack; the option checkboxes, inline error, and action
+ * button each get their own row. */
 [data-uninstall-body] {
   display: flex;
   flex-direction: column;
@@ -1770,6 +1799,29 @@ html[data-os="macos"] .topbar {
   gap: var(--space-1);
 }
 
+/* A model a rule names: a shield-check (the Rules surface's own glyph) that opens those rules. */
+.model-row__rules {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  color: var(--text-muted);
+  border-radius: var(--radius-chip);
+}
+
+.model-row__rules:hover {
+  color: var(--text-strong);
+}
+
+.model-row__rules:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.model-row__rules svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
 .model-row__name {
   display: flex;
   align-items: baseline;
@@ -2095,23 +2147,83 @@ html[data-os="macos"] .topbar {
   max-width: 60ch;
 }
 
-/* ---- Confirm dialog ----
-   Uses native <dialog>. The element itself sits at the top layer
-   (free, no z-index gymnastics); ::backdrop styles the scrim. */
-.confirm-dialog {
+/* The summary is the disclosure's only control, so keyboard focus has to show
+   on it. */
+.advanced-section__summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-chip);
+}
+
+/* ---- System tab ----
+   One section, one display heading. Everyday version/update state and the
+   troubleshooting actions come first; runtime values and log locations sit in
+   the .advanced-section disclosure; Uninstall is a hairline-separated region
+   after everything else. */
+.system-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.system-details__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The Updates row: the status, Update to X and Check now. A long translation
+   wraps whole items onto the next line, never a label mid-phrase. */
+.system-update-row {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+
+.system-update-row > *,
+.system-update-row .btn {
+  white-space: nowrap;
+}
+
+/* Paths and revisions have no break opportunities; let them wrap inside the
+   narrower disclosure body instead of widening the pane. */
+.system-details__body .kv__row dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.system-uninstall {
+  padding-block-start: var(--space-5);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+/* ---- Modal dialogs ----
+   Native <dialog> owns the top layer, inert background, focus containment,
+   and nested modal stacking. Content decides whether the surface is compact
+   (confirmation) or a large, internally scrolling detail view. */
+.modal-dialog {
   padding: 0;
   border: var(--border-width-hairline) solid var(--border-subtle);
   border-radius: var(--radius-card);
   background: var(--surface-card);
   color: var(--text-base-color);
-  max-width: 420px;
-  width: calc(100% - var(--space-6));
   box-shadow: var(--elevation-modal);
   font-family: var(--font-body);
 }
 
-.confirm-dialog::backdrop {
+.modal-dialog::backdrop {
   background: rgb(0 0 0 / 0.5);
+}
+
+.confirm-dialog {
+  width: calc(100% - var(--space-6));
+  max-width: 420px;
+}
+
+.plugin-details-dialog {
+  width: calc(100% - var(--space-6));
+  max-width: var(--content-max);
+  max-height: calc(100dvh - var(--space-6));
+  overflow: hidden;
 }
 
 .confirm-dialog__panel {
@@ -2151,25 +2263,51 @@ html[data-os="macos"] .topbar {
   margin-bottom: 0;
 }
 
+/* A callout in a dialog (e.g. a refused Connect) sits above the text it
+   qualifies, with the same step as between paragraphs. */
+.confirm-dialog__body > .callout {
+  margin-bottom: var(--space-2);
+}
+
 .confirm-dialog__actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
 }
 
+/* Browser access (a plain browser against a headless Maximal): the key
+   field, with a refused key as a caption under it. */
+.browser-auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.browser-auth__field label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.browser-auth__error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--status-error);
+}
+
 /* Default: a subtle fade-in. Respect reduced-motion as a hard contract. */
 @media (prefers-reduced-motion: no-preference) {
-  .confirm-dialog[open] {
-    animation: confirm-dialog-in 120ms ease-out;
+  .modal-dialog[open] {
+    animation: modal-dialog-in 120ms ease-out;
   }
-  .confirm-dialog[open]::backdrop {
-    animation: confirm-backdrop-in 120ms ease-out;
+  .modal-dialog[open]::backdrop {
+    animation: modal-backdrop-in 120ms ease-out;
   }
-  @keyframes confirm-dialog-in {
+  @keyframes modal-dialog-in {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  @keyframes confirm-backdrop-in {
+  @keyframes modal-backdrop-in {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
@@ -2294,121 +2432,150 @@ html[data-os="macos"] .topbar {
   cursor: not-allowed;
 }
 
-/* ---- Apps: per-integration cards ----
-   One card per app (Claude Code, Claude Desktop, Codex, Copilot CLI) — each
-   is a discrete actionable entity, so a card earns its chrome here.
-   The name leads; the On/Off switch (or install action) anchors the
-   right edge; detected surfaces live below as flat rows. */
+/* ---- Apps: harness table ---- */
+.apps-panel,
+.harnesses,
+.harnesses__header {
+  display: flex;
+  flex-direction: column;
+}
+
 .apps-panel {
-  display: flex;
-  flex-direction: column;
   gap: var(--space-4);
 }
 
+.harnesses,
+.harnesses__header {
+  gap: var(--space-2);
+}
 
-.app-card {
-  background: var(--surface-card);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  box-shadow: var(--elevation-card);
-  padding: var(--space-4) var(--space-5);
+.harnesses__table-wrap {
+  overflow-x: auto;
+}
+
+.harnesses__table {
+  table-layout: fixed;
+}
+
+.harnesses__table th:first-child {
+  width: 58%;
+}
+
+.harnesses__table th:nth-child(2) {
+  width: 16%;
+}
+
+.harnesses__table th:last-child,
+.harness-row__action {
+  text-align: end;
+}
+
+.harness-row__identity {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-3);
-}
-
-/* Coming-soon apps read as present-but-inert: dashed border, muted name,
-   no interaction. No opacity — it compounds with --text-muted and drops
-   the name below AA (contrast-audit.ts caught it). */
-.app-card--soon {
-  border-style: dashed;
-}
-
-.app-card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.app-card__name {
-  margin: 0;
   min-width: 0;
-  flex: 1 1 auto;
-  font-size: var(--text-md);
-  font-weight: var(--weight-lg);
-  line-height: var(--leading-lg);
-  color: var(--text-strong);
 }
 
-.app-card--soon .app-card__name {
-  color: var(--text-muted);
-  font-weight: var(--weight-md);
-}
-
-.app-card__control {
-  flex: 0 0 auto;
-  display: flex;
+.harness-row__icon {
+  display: inline-flex;
+  flex: 0 0 var(--size-xl);
   align-items: center;
+  justify-content: center;
+  width: var(--size-xl);
+  height: var(--size-xl);
+  overflow: hidden;
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
 }
 
-.app-card__pill {
+.harness-icon {
+  display: block;
+  width: var(--size-lg);
+  height: var(--size-lg);
+  object-fit: contain;
+}
+
+.harness-icon--monochrome {
+  filter: invert(1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .harness-icon--monochrome {
+    filter: none;
+  }
+}
+
+[data-theme="light"] .harness-icon--monochrome {
+  filter: none;
+}
+
+.harness-row__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.harness-row__name--link {
+  appearance: none;
+  min-height: var(--size-xl);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-input);
+  color: var(--link);
+  text-align: start;
+  cursor: pointer;
+}
+
+.harness-row__name--link:hover {
+  color: var(--link-hover);
+}
+
+.harness-row__name--link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.harness-row__type,
+.harness-row__coming-soon {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.harness-row__type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-lg);
+  height: var(--size-lg);
+}
+
+.harness-row__type-icon svg {
+  width: var(--size-md);
+  height: var(--size-md);
+}
+
+.harness-row__action .switch {
+  display: inline-flex;
+}
+
+/* Legacy install/update affordance shared by the vanilla Linux apt UI. */
 .app-card__hint {
   margin: 0;
   font-size: var(--text-sm);
   line-height: var(--leading-lg);
   color: var(--text-muted);
-  /* A hint can be a path, such as an MCP server's on Windows. */
   overflow-wrap: anywhere;
 }
 
-.app-card__installs {
-  display: flex;
-  flex-direction: column;
-  border-block: var(--border-width-hairline) solid var(--border-subtle);
-}
-
-.app-card__install-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  padding-block: var(--space-2);
-}
-
-.app-card__install-row + .app-card__install-row {
-  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
-}
-
-.app-card__install-kind {
-  flex: 0 0 auto;
-  min-width: var(--space-12);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-md);
-  color: var(--text-muted);
-}
-
-.app-card__install-path {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: var(--text-sm);
-  color: var(--text-base-color);
-}
-
-.app-card__guidance {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding-inline-start: var(--space-5);
-  font-size: var(--text-sm);
-  line-height: var(--leading-lg);
-  color: var(--text-muted);
-}
-
-/* ---- Install affordance (Claude Code, no install found) ---- */
 .app-card__install {
   display: flex;
   flex-direction: column;
@@ -2441,77 +2608,13 @@ html[data-os="macos"] .topbar {
   gap: var(--space-2);
 }
 
-/* ---- WinGet install progress and output (Claude Code, Windows) ----
-   Live progress is the last line WinGet printed; a failed install shows the
-   whole recent output in a box that scrolls rather than growing the card. */
-.app-card__progress {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.app-card__output {
-  margin: 0;
-  max-height: 12em;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-/* ---- Conflict surface (enable refused) ----
-   Shown when toggling on was refused because the app's config already
-   carries a setting we don't own (e.g. a user-set ANTHROPIC_BASE_URL).
-   Honest, not alarming: an error-colored icon (the toggle snapped back)
-   with a plain-language remedy so the user is never left guessing why the
-   switch didn't take. Same shape as .callout. */
-.app-card__conflict {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-control);
-  border: var(--border-width-hairline) solid var(--border-subtle);
-  border-radius: var(--radius-card);
-}
-
-.app-card__conflict-icon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-block-start: 2px;
-  color: var(--status-error);
-}
-
-.app-card__conflict-text {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.app-card__conflict-title {
-  font-size: var(--text-base);
-  font-weight: var(--weight-md);
-  line-height: var(--leading-lg);
-  color: var(--text-strong);
-}
-
-.app-card__conflict-detail {
-  font-size: var(--text-sm);
-  line-height: var(--leading-lg);
-  color: var(--text-muted);
-}
-
 /* ---- Callout (banner across a section or card) ----
    One shape for every "something happened here" state that would otherwise
    be a bare line of colored text: icon + title + detail + at most one
    remedy, in a hairline-bordered box. No colored edge stripe — the icon's
    color carries the tone. error: something failed (--status-error icon).
    notice: worth knowing, nothing wrong (muted icon). Rendered by
-   components/Callout.tsx; the vanilla Diagnostics error uses the same
+   components/Callout.tsx; the vanilla System error uses the same
    classes. */
 .callout {
   display: flex;
@@ -2781,28 +2884,32 @@ html[data-os="macos"] .topbar {
   background: var(--status-error);
 }
 
-/* Page */
+/* Plugin detail dialog: identity stays pinned while one body scrolls. */
 .connector-detail {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
   min-width: 0;
-}
-
-.connector-detail__back {
-  gap: var(--space-2);
-  margin-inline-start: calc(-1 * var(--space-3));
-}
-
-.connector-detail__back svg {
-  width: var(--size-sm);
-  height: var(--size-sm);
+  max-height: inherit;
 }
 
 .connector-detail__head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.connector-detail__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .connector-detail__name {
@@ -2815,9 +2922,12 @@ html[data-os="macos"] .topbar {
   color: var(--text-strong);
   overflow-wrap: anywhere;
   border-radius: var(--radius-chip);
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-/* Focus lands here when the page opens (it isn't in the tab order); the
+/* Focus lands here when the dialog opens (it isn't in the tab order); the
    ring shows only when that came from the keyboard. */
 .connector-detail__name:focus-visible {
   outline: var(--focus-ring);
@@ -2831,9 +2941,27 @@ html[data-os="macos"] .topbar {
   gap: var(--space-3);
 }
 
+.connector-detail__close {
+  flex: 0 0 auto;
+}
+
+.connector-detail__close svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
 .connector-detail__saving {
   font-size: var(--text-sm);
   color: var(--text-muted);
+}
+
+/* The live region stays mounted; idle, it takes no space (an absolutely
+   positioned flex item adds no gap) but is still announced when it fills. */
+.connector-detail__saving:not([data-active]) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
 }
 
 .connector-detail__desc {
@@ -2921,22 +3049,118 @@ html[data-os="macos"] .topbar {
   overflow-wrap: anywhere;
 }
 
-.connector-clients {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
+.app-permissions,
+.access-group {
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.connector-clients__row {
+.access-group + .access-group {
+  margin-block-start: var(--space-2);
+}
+
+.access-group__title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+}
+
+.access-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.access-row {
+  position: relative;
+  display: flex;
   align-items: center;
-  column-gap: var(--space-3);
-  row-gap: var(--space-1);
-  padding-block: var(--space-1);
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-block: var(--space-2);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.access-row:last-child {
+  border-block-end: 0;
+}
+
+.access-row__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.access-row__name {
+  min-width: 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.access-row--unavailable .access-row__name {
+  color: var(--text-muted);
+}
+
+.access-info {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+.access-info__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-lg);
+  height: var(--size-lg);
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: help;
+}
+
+.access-info__trigger:hover {
+  color: var(--text-strong);
+}
+
+.access-info__trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.access-info__trigger svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+/* Anchored to the row, not the icon, and only in the DOM while open, so it
+   can't run past the dialog body or leave scroll overflow behind. */
+.access-info__card {
+  position: absolute;
+  inset-block-start: calc(100% - var(--space-1));
+  inset-inline-start: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: min(34ch, 100%);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  color: var(--text-base-color);
+  background: var(--surface-card);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  box-shadow: var(--elevation-tooltip);
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 
 .connector-endpoint {
@@ -3296,8 +3520,8 @@ html[data-os="macos"] .topbar {
   display: none;
 }
 
-/* Two-state permission control (Allowed / Blocked): a segmented pair on a
-   control surface; the chosen option steps forward onto the card surface. */
+/* Three-state permission control (Allow / Ask / Block): a segmented group on
+   a control surface; the chosen option steps forward onto the card surface. */
 .perm-seg {
   flex: 0 0 auto;
   display: inline-flex;
@@ -3357,6 +3581,10 @@ html[data-os="macos"] .topbar {
 
 .perm-seg__option:disabled {
   cursor: not-allowed;
+}
+
+.perm-seg[aria-busy="true"] .perm-seg__option {
+  cursor: progress;
 }
 
 /* Configuration form: the shared .form rows. */
@@ -3521,4 +3749,1120 @@ html[data-os="macos"] .topbar {
 .link-check__warn--dismissed:focus-visible .tooltip {
   opacity: 0;
   visibility: hidden;
+}
+
+/* ---- Budget (features/budget) ----
+   The Rules surface: a one-line summary, then Rules, Activity and Settings
+   as typographic sections in one column (no card grid). The first heading
+   (Limits) is the one Fraunces moment
+   (.section__title); the others step down to Commissioner like the stacked
+   Settings sections. Limits are hairline-divided rows, not cards. The meter
+   is the Dashboard's quota meter: the fill is the state, the track a pale
+   step of the same color, and the row beside it carries the words and icon. */
+.budget {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+/* The one-line state at the top (Enforcing · 2 limits · $12.40 of $100 today),
+   with whatever needs attention under it. */
+.budget-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.budget-status {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.budget-status--paused {
+  color: var(--text-muted);
+}
+
+.budget-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.budget-block__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.budget-block__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-xl);
+  line-height: var(--leading-xl);
+  letter-spacing: var(--tracking-xl);
+  color: var(--text-strong);
+}
+
+.budget-block__head .btn svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.empty__action .btn svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.budget-meter {
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background-color: color-mix(
+    in srgb,
+    var(--meter-color) 18%,
+    var(--surface-base)
+  );
+}
+
+.budget-meter__fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background-color: var(--meter-color);
+}
+
+.budget-meter--ok {
+  --meter-color: var(--accent);
+}
+
+.budget-meter--warning {
+  --meter-color: var(--status-warning);
+}
+
+.budget-meter--exhausted {
+  --meter-color: var(--status-error);
+}
+
+/* Provider allowances, grouped under the provider's name. */
+.budget-provider {
+  display: flex;
+  flex-direction: column;
+}
+
+.budget-provider__name {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-muted);
+}
+
+.budget-windows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.budget-window {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-3);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.budget-window:last-child {
+  border-block-end: 0;
+}
+
+.budget-window__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.budget-window__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.budget-window__used {
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.budget-window__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.budget-window__over {
+  color: var(--status-warning);
+}
+
+/* Limits */
+.limits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.limit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.limit:first-child {
+  padding-block-start: 0;
+}
+
+.limit:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.limit__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.limit__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.limit__name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.limit__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+}
+
+.limit__figures {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.limit__amounts {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.limit__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: var(--weight-md);
+}
+
+.limit__state svg {
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.limit__state--warning {
+  color: var(--status-warning);
+}
+
+.limit__state--exhausted {
+  color: var(--status-error);
+}
+
+/* A rule's performance: a sparkline that opens the history under its row. */
+.limit__perf {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-xl);
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-muted);
+  background: transparent;
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+}
+
+.limit__perf:hover {
+  color: var(--text-strong);
+  background: var(--surface-control);
+}
+
+.limit__perf:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.limit__perf > svg:not(.spark) {
+  width: var(--size-sm);
+  height: var(--size-sm);
+  transition: transform 150ms ease-out;
+}
+
+.limit__perf[aria-expanded="true"] > svg:not(.spark) {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .limit__perf > svg:not(.spark) {
+    transition: none;
+  }
+}
+
+.spark {
+  width: calc(var(--size-2xl) * 2);
+  height: var(--size-md);
+  overflow: visible;
+}
+
+.spark__base {
+  stroke: var(--border-subtle);
+  stroke-width: var(--border-width-hairline);
+  vector-effect: non-scaling-stroke;
+}
+
+.spark__line {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: var(--border-width-thick);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The history under a rule's row: range, totals, the timeline, the periods. */
+.rule-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-block: var(--space-3) var(--space-2);
+}
+
+.rule-detail__worth {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-base);
+  color: var(--text-muted);
+}
+
+.rule-detail__estimated {
+  margin-inline-start: var(--space-2);
+}
+
+.rule-detail__periods {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Spend in each period climbing toward the limit, placed by time, with the
+   spend per bucket under it on its own scale. The lines differ by dash as well
+   as hue: the limit is solid, the warning dashed, a period's reset dotted. */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.timeline__plot {
+  position: relative;
+  height: calc(var(--size-2xl) * 4);
+  margin-block-start: var(--space-5);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.timeline__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.timeline__line {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: var(--border-width-thick);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.timeline__area {
+  fill: color-mix(in srgb, var(--series-1) 16%, transparent);
+  stroke: none;
+}
+
+.timeline__limit,
+.timeline__warn,
+.timeline__boundary {
+  fill: none;
+  stroke-width: var(--border-width-hairline);
+  vector-effect: non-scaling-stroke;
+}
+
+.timeline__limit {
+  stroke: var(--status-error);
+}
+
+.timeline__warn {
+  stroke: var(--status-warning);
+  stroke-dasharray: var(--space-2) var(--space-1);
+}
+
+.timeline__boundary {
+  stroke: var(--border-strong);
+  stroke-dasharray: var(--border-width-thick) var(--space-1);
+}
+
+.timeline__tag {
+  position: absolute;
+  inset-inline-end: 0;
+  padding-inline: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-base-color);
+  background: color-mix(in srgb, var(--surface-base) 85%, transparent);
+  border-radius: var(--radius-chip);
+}
+
+.timeline__tag--limit {
+  transform: translateY(-100%);
+}
+
+.timeline__tag--warn {
+  transform: translateY(var(--border-width-thick));
+}
+
+.timeline__marker {
+  position: absolute;
+  display: flex;
+  width: var(--size-sm);
+  height: var(--size-sm);
+  transform: translate(-50%, -50%);
+}
+
+.marker {
+  flex: none;
+  width: var(--size-sm);
+  height: var(--size-sm);
+}
+
+.marker--warned {
+  fill: var(--status-warning);
+}
+
+.marker--crossed {
+  fill: var(--status-error);
+}
+
+.marker--refused {
+  fill: none;
+  stroke: var(--status-error);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.timeline__columns {
+  position: relative;
+  height: calc(var(--size-xl) * 1.5);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.timeline__column {
+  position: absolute;
+  inset-block: 0;
+  display: flex;
+  align-items: flex-end;
+  padding-inline: calc(var(--border-width-hairline) / 2);
+}
+
+.timeline__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.timeline__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.timeline__legend strong {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "What if": the rule being typed, replayed over past usage, inside the editor. */
+.whatif {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.whatif__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.whatif__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+}
+
+.whatif__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.whatif__none {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+}
+
+.whatif__facts {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.whatif__facts > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.whatif__facts dt {
+  color: var(--text-muted);
+}
+
+.whatif__facts dd {
+  margin: 0;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.whatif__when {
+  color: var(--text-muted);
+}
+
+.whatif__suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.whatif__suggested {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-strong);
+}
+
+/* Rules for one model (from the Models list): a chip that says so, and clears. */
+.budget-block__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.rules-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.rules-filter__chip {
+  gap: var(--space-2);
+  padding-inline-end: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.rules-filter__clear {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-md);
+  height: var(--size-md);
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.rules-filter__clear:hover {
+  color: var(--text-strong);
+  background: var(--surface-card);
+}
+
+.rules-filter__clear:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.rules-filter__clear svg {
+  width: var(--size-xs);
+  height: var(--size-xs);
+}
+
+/* Create rules from sessions: pick sessions, then review the rules drafted from them. */
+.session-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.session-picker__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+  cursor: pointer;
+}
+
+.session-list li:last-child .session-row {
+  border-block-end: 0;
+}
+
+.session-row__box {
+  margin-block-start: var(--space-1);
+}
+
+.session-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.session-row__name {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.session-row__meta {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.session-row__cost {
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.session-footer__sum {
+  margin-inline-end: auto;
+}
+
+.draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.draft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.draft:first-child {
+  padding-block-start: 0;
+}
+
+.draft:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.draft__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.draft__amount {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.draft__amount strong {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-lg);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.draft__line {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-base-color);
+}
+
+.draft__line--muted {
+  color: var(--text-muted);
+}
+
+.draft__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Add / edit a limit: the confirm dialog's shell with a form inside. In a short
+   window the fields scroll and the title and buttons stay in reach. */
+.budget-editor {
+  max-width: var(--content-max);
+}
+
+.budget-editor .confirm-dialog__panel {
+  max-height: calc(100vh - var(--space-6));
+}
+
+.budget-editor__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for the focus ring, which the scroll box would otherwise clip. */
+  padding: var(--space-1);
+  margin: calc(var(--space-1) * -1);
+}
+
+/* Two short fields side by side (what it applies to, how much) so the whole
+   form fits a short window without scrolling much. */
+.budget-editor__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.budget-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.budget-field label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.budget-field .form__hint {
+  max-width: 65ch;
+}
+
+.budget-field__error {
+  color: var(--status-error);
+}
+
+.budget-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.budget-field--inline .select {
+  width: auto;
+}
+
+.input[aria-invalid="true"],
+.select[aria-invalid="true"] {
+  border-color: var(--status-error);
+}
+
+/* A field with its unit inside it ($ before the number, "credits" after): the
+   wrapper wears the input's box, the bare input fills it, so the unit never
+   needs typing and never overlaps the text. */
+.input-adorn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  padding: 0 var(--space-3);
+  min-height: var(--size-xl);
+}
+
+.input-adorn:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.input-adorn[data-invalid="true"] {
+  border-color: var(--status-error);
+}
+
+.input-adorn__text {
+  flex: none;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.input-adorn__field {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  color: var(--text-strong);
+  border: 0;
+  outline: 0;
+  padding: var(--space-2) 0;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-lg);
+}
+
+/* Activity */
+.budget-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
+}
+
+/* How far back to look: a segmented row of ranges, the chosen one stepping
+   forward onto the card surface (the permission control's pattern), and under
+   Custom two day fields. */
+.range-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+.range-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface-control);
+  border: var(--border-width-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-input);
+}
+
+.range-seg__option {
+  appearance: none;
+  padding: var(--space-1) var(--space-3);
+  min-height: var(--size-lg);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  line-height: var(--leading-lg);
+  color: var(--text-muted);
+  background: transparent;
+  border: var(--border-width-hairline) solid transparent;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+.range-seg__option:hover {
+  color: var(--text-strong);
+}
+
+.range-seg__option[aria-pressed="true"] {
+  color: var(--text-strong);
+  background: var(--surface-card);
+  border-color: var(--border-strong);
+  box-shadow: var(--elevation-card);
+}
+
+.range-seg__option:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.range-picker__custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.range-picker__date {
+  width: auto;
+}
+
+.range-picker__custom .budget-field__error {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .range-seg__option {
+    transition: none;
+  }
+}
+
+.budget-activity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* What the range recorded, in the Dashboard's measures: the total tokens as
+   the headline, the parts in a quiet row between hairlines. Every number is
+   text ink; hierarchy comes from size, not hue. Not a card. */
+.budget-totals {
+  display: grid;
+  gap: var(--space-4);
+  padding-block: var(--space-4);
+  border-block: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.budget-totals__hero {
+  margin: 0;
+  display: flex;
+  flex-direction: column-reverse;
+}
+
+.budget-totals__hero-value {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-lg);
+  line-height: var(--leading-2xl);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-totals__label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.budget-totals__parts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--size-2xl) * 3)), 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.budget-totals__parts div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-1);
+}
+
+.budget-totals__parts dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One whole split into parts: a thin segmented bar with a surface gap
+   between parts. The table beside it names each part by its swatch. */
+.budget-share {
+  display: flex;
+  gap: var(--border-width-thick);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.budget-share__part {
+  flex-basis: 0;
+  flex-shrink: 0;
+}
+
+/* Spend per day or hour: columns on one baseline, each at most one size-lg
+   wide, with the span named under them. A long span packs its columns closer. */
+.budget-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.budget-columns {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  height: calc(var(--size-2xl) * 4);
+}
+
+.budget-columns--dense {
+  gap: var(--border-width-hairline);
+}
+
+.budget-columns--packed {
+  gap: 0;
+}
+
+.budget-column {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: var(--size-lg);
+  display: flex;
+}
+
+.budget-column__track {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  border-block-end: var(--border-width-hairline) solid var(--border-subtle);
+}
+
+.budget-column__bar {
+  display: block;
+  width: 100%;
+  min-height: var(--border-width-thick);
+  background-color: var(--series-1);
+  border-start-start-radius: var(--radius-chip);
+  border-start-end-radius: var(--radius-chip);
+}
+
+.budget-column__bar--empty {
+  min-height: 0;
+}
+
+/* The first and last bucket, with the busiest named between them. */
+.budget-columns__axis {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Seven measures in a 640px window: tighter cells, headings that wrap. */
+.table.budget-table th,
+.table.budget-table td {
+  padding-inline: var(--space-2);
+}
+
+.table.budget-table thead th {
+  vertical-align: bottom;
+  white-space: normal;
+}
+
+/* German compounds (Cache-Schreibvorgänge) are wider than their column. */
+.table.budget-table thead .budget-table__long {
+  overflow-wrap: anywhere;
+}
+
+.table .budget-table__number {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The row header reads as a name, not as the table's muted column caption. */
+.table .budget-table__row {
+  font-weight: var(--weight-base);
+  color: var(--text-strong);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.budget-table__name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-wrap: break-word;
+}
+
+.budget-swatch {
+  flex-shrink: 0;
+  width: var(--size-xs);
+  height: var(--size-xs);
+  border-radius: var(--radius-chip);
 }

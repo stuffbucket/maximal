@@ -2,7 +2,13 @@ import consola from "consola"
 import path from "node:path"
 import { z } from "zod"
 
-import { BUDGET_HOLDS_MIGRATION } from "~/lib/budget/migrations"
+import {
+  BUDGET_HOLDS_MIGRATION,
+  BUDGET_HOLDS_MODEL_MIGRATION,
+  BUDGET_HOLDS_TOKENS_MIGRATION,
+  BUDGET_OVERRIDES_MIGRATION,
+} from "~/lib/budget/migrations"
+import { BUDGET_EVENTS_MIGRATION } from "~/lib/budget/reports/migrations"
 import { PATHS } from "~/lib/platform/paths"
 import { registerProcessCleanup } from "~/lib/platform/process-cleanup"
 import {
@@ -13,6 +19,12 @@ import {
   type SqliteDatabase,
 } from "~/lib/platform/sqlite"
 
+import {
+  emptyTotals,
+  numberFromRow,
+  totalsFromRow,
+  USAGE_TOTALS_SELECT,
+} from "./aggregate"
 import {
   addToRecentMinutes,
   emptyRecentMinutes,
@@ -294,6 +306,28 @@ const TOKEN_USAGE_MIGRATIONS: Array<Migration> = [
     },
   },
   BUDGET_HOLDS_MIGRATION,
+  BUDGET_EVENTS_MIGRATION,
+  BUDGET_HOLDS_MODEL_MIGRATION,
+  BUDGET_OVERRIDES_MIGRATION,
+  BUDGET_HOLDS_TOKENS_MIGRATION,
+  {
+    // Older builds used the same user_version slots for a different schema.
+    // Repair the two current objects known to be absent in that lineage without
+    // changing or reordering the shipped positional migrations above.
+    name: "reconcile plugin attribution and provider windows",
+    up: (db) => {
+      ensureColumn(db, "plugin_id", "TEXT")
+      db.exec(
+        "UPDATE token_usage_events SET plugin_id = endpoint WHERE plugin_id IS NULL AND endpoint IN ('images', 'decisions', 'systemone')",
+      )
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_token_usage_events_created_plugin ON token_usage_events(created_at_ms, plugin_id)",
+      )
+      db.exec(
+        "CREATE TABLE IF NOT EXISTS provider_quota_windows (provider TEXT NOT NULL, window_id TEXT NOT NULL, window_json TEXT NOT NULL, previous_resets_at TEXT, updated_at_ms INTEGER NOT NULL, PRIMARY KEY (provider, window_id))",
+      )
+    },
+  },
 ]
 
 /** Migration step 2's columns: which client sent a request, how long its
@@ -381,10 +415,10 @@ export function resolveTotalTokens(input: UsageTokens): number {
   )
 }
 
-async function writeTokenUsageEvent(
+export function insertTokenUsageEvent(
+  db: SqliteDatabase,
   event: PersistedTokenUsageEvent,
-): Promise<void> {
-  const db = await getDb()
+): void {
   db.prepare(
     `
       INSERT INTO token_usage_events (
@@ -449,15 +483,26 @@ async function writeTokenUsageEvent(
 }
 
 export function enqueueTokenUsageWrite(event: PersistedTokenUsageEvent): void {
-  if (!isTokenUsageStorageEnabled()) {
-    return
-  }
-
-  writeQueue = writeQueue
-    .then(() => writeTokenUsageEvent(event))
-    .catch((error: unknown) => {
+  void queueUsageDbWrite((db) => insertTokenUsageEvent(db, event)).catch(
+    (error: unknown) => {
       consola.warn("Failed to record token usage", error)
-    })
+    },
+  )
+}
+
+/** Queue a database write and report its own failure to the caller. The shared
+ * queue always recovers, so one failed write cannot poison later accounting. */
+export function queueUsageDbWrite<T>(
+  write: (db: SqliteDatabase) => T,
+): Promise<T | undefined> {
+  if (!isTokenUsageStorageEnabled()) return Promise.resolve(undefined)
+
+  const result = writeQueue.then(async () => write(await getDb()))
+  writeQueue = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
 }
 
 async function flushTokenUsageEvents(): Promise<void> {
@@ -520,18 +565,6 @@ function getPeriodRange(period: TokenUsagePeriod, now = new Date()) {
   }
 }
 
-function createEmptyTotals(): TokenUsageTotals {
-  return {
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    request_count: 0,
-    total_tokens: 0,
-    total_nano_aiu: 0,
-  }
-}
-
 function createEmptySummary(period: TokenUsagePeriod): TokenUsageSummary {
   const range = getPeriodRange(period)
 
@@ -544,7 +577,7 @@ function createEmptySummary(period: TokenUsagePeriod): TokenUsageSummary {
       start_ms: range.startMs,
       start_utc: new Date(range.startMs).toISOString(),
     },
-    totals: createEmptyTotals(),
+    totals: emptyTotals(),
     recent_minutes: emptyRecentMinutes(Date.now()),
   }
 }
@@ -571,31 +604,6 @@ function createEmptyEventsPage(input: {
     },
     total: 0,
     total_pages: 1,
-  }
-}
-
-function numberFromRow(
-  row: Record<string, unknown> | undefined,
-  key: string,
-): number {
-  const value = row?.[key]
-  return typeof value === "number" && Number.isFinite(value) ? value : 0
-}
-
-function totalsFromRow(
-  row: Record<string, unknown> | undefined,
-): TokenUsageTotals {
-  return {
-    cache_creation_input_tokens: numberFromRow(
-      row,
-      "cache_creation_input_tokens",
-    ),
-    cache_read_input_tokens: numberFromRow(row, "cache_read_input_tokens"),
-    input_tokens: numberFromRow(row, "input_tokens"),
-    output_tokens: numberFromRow(row, "output_tokens"),
-    request_count: numberFromRow(row, "request_count"),
-    total_tokens: numberFromRow(row, "total_tokens"),
-    total_nano_aiu: numberFromRow(row, "total_nano_aiu"),
   }
 }
 
@@ -664,13 +672,7 @@ export async function getTokenUsageSummary(
     .prepare(
       `
     SELECT
-      COUNT(*) AS request_count,
-      COALESCE(SUM(input_tokens), 0) AS input_tokens,
-      COALESCE(SUM(output_tokens), 0) AS output_tokens,
-      COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_input_tokens,
-      COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
-      COALESCE(SUM(total_tokens), 0) AS total_tokens,
-      COALESCE(SUM(total_nano_aiu), 0) AS total_nano_aiu
+      ${USAGE_TOTALS_SELECT}
     FROM token_usage_events
     WHERE created_at_ms >= ? AND created_at_ms < ?
   `,
@@ -682,13 +684,7 @@ export async function getTokenUsageSummary(
       `
     SELECT
       model,
-      COUNT(*) AS request_count,
-      COALESCE(SUM(input_tokens), 0) AS input_tokens,
-      COALESCE(SUM(output_tokens), 0) AS output_tokens,
-      COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_input_tokens,
-      COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
-      COALESCE(SUM(total_tokens), 0) AS total_tokens,
-      COALESCE(SUM(total_nano_aiu), 0) AS total_nano_aiu,
+      ${USAGE_TOTALS_SELECT},
       MAX(is_premium) AS is_premium
     FROM token_usage_events
     WHERE created_at_ms >= ? AND created_at_ms < ?
@@ -761,12 +757,9 @@ export function enqueueUsageDbWrite(
   write: (db: SqliteDatabase) => void,
   failureMessage: string,
 ): void {
-  if (!isTokenUsageStorageEnabled()) return
-  writeQueue = writeQueue
-    .then(async () => write(await getDb()))
-    .catch((error: unknown) => {
-      consola.warn(failureMessage, error)
-    })
+  void queueUsageDbWrite(write).catch((error: unknown) => {
+    consola.warn(failureMessage, error)
+  })
 }
 
 const SessionRowSchema = z.object({
@@ -879,7 +872,9 @@ export async function getTokenUsageEventsPage(input: {
       output_tokens,
       cache_read_input_tokens,
       cache_creation_input_tokens,
-      total_tokens
+      total_tokens,
+      total_nano_aiu,
+      is_premium
     FROM token_usage_events
     WHERE created_at_ms >= ? AND created_at_ms < ?
     ORDER BY created_at_ms DESC, id DESC

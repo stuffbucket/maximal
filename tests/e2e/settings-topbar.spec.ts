@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test"
 const BASE = process.env.UI_HARNESS_URL ?? "http://127.0.0.1:4747"
 const SETTINGS = `${BASE}/ui/settings/#account`
 
-test.use({ viewport: { width: 736, height: 720 }, deviceScaleFactor: 1 })
+test.use({ viewport: { width: 772, height: 720 }, deviceScaleFactor: 1 })
 
 test.beforeEach(async ({ request }) => {
   const response = await request.post(`${BASE}/__harness/scenario`, {

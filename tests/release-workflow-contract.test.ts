@@ -7,6 +7,38 @@ const readRepoFile = (path: string): Promise<string> =>
 const readWorkflow = (name: string): Promise<string> =>
   readRepoFile(`.github/workflows/${name}`)
 
+interface TauriBundleConfig {
+  bundle?: { externalBin?: Array<unknown>; resources?: Array<unknown> }
+}
+
+interface TauriBuildOverride extends TauriBundleConfig {
+  build?: { beforeBuildCommand?: string }
+}
+
+/**
+ * The JSON a workflow passes to `tauri build --config`. Single-quoted shell
+ * arguments are literal; double-quoted ones (as release.yml writes them, with
+ * a ${VERSION} placeholder) escape their quotes.
+ */
+const tauriBuildOverride = (
+  workflow: string,
+  invocation: string,
+): TauriBuildOverride => {
+  const start = workflow.indexOf(invocation)
+  expect(start, invocation).toBeGreaterThan(-1)
+  const nextStep = workflow.indexOf("\n      - ", start)
+  const step = workflow.slice(start, nextStep === -1 ? undefined : nextStep)
+  const literal = /--config '([^']*)'/u.exec(step)?.[1]
+  const escaped = /--config "((?:[^"\\]|\\.)*)"/u.exec(step)?.[1]
+  if (literal === undefined && escaped === undefined) {
+    throw new Error(`no --config after "${invocation}"`)
+  }
+  const json = literal ?? (escaped ?? "").replaceAll(/\\(.)/gu, "$1")
+  return JSON.parse(
+    json.replaceAll("${VERSION}", "0.0.0"),
+  ) as TauriBuildOverride
+}
+
 const workflowJob = (workflow: string, name: string): string => {
   const start = workflow.indexOf(`\n  ${name}:`)
   expect(start).toBeGreaterThan(-1)
@@ -142,6 +174,38 @@ describe("release DAG", () => {
     expect(rawAssets).toContain("pattern: release-binary-*")
     expect(rawAssets).toContain("uses: ./.github/actions/upload-release-asset")
     expect(rawAssets).toContain("files: dist-release/*")
+  })
+
+  test("seals target-specific built-ins before packaging every raw binary", async () => {
+    const binaries = workflowJob(await readWorkflow("release.yml"), "binaries")
+
+    for (const mapping of [
+      "bun-darwin-arm64) PLATFORM=darwin; ARCHITECTURE=arm64",
+      "bun-windows-x64) PLATFORM=win32; ARCHITECTURE=x64",
+      "bun-linux-x64) PLATFORM=linux; ARCHITECTURE=x64",
+      "bun-linux-arm64) PLATFORM=linux; ARCHITECTURE=arm64",
+    ]) {
+      expect(binaries).toContain(mapping)
+    }
+    expect(binaries).toContain("bun run scripts/build-plugin-builtins.ts")
+    expect(binaries).toContain("--output=dist-bin/plugin-builtins")
+    expect(binaries).toContain('--runtime="bun:$(bun --version)"')
+    expect(binaries).toContain('--platform="$PLATFORM"')
+    expect(binaries).toContain('--architecture="$ARCHITECTURE"')
+    expect(binaries.indexOf("build-plugin-builtins.ts")).toBeLessThan(
+      binaries.indexOf("- name: Package"),
+    )
+  })
+
+  test("stages and verifies sealed built-ins for Windows desktop and MSI packages", async () => {
+    const workflow = await readWorkflow("release.yml")
+    const msi = workflowJob(workflow, "windows-msi")
+    const shell = workflowJob(workflow, "windows-shell")
+
+    expect(msi).toContain(String.raw`plugin-builtins\committed.json`)
+    expect(msi).toContain("-bindpath staging")
+    expect(shell).toContain("plugin-builtins/committed.json")
+    expect(shell).toContain(String.raw`shell\src-tauri\plugin-builtins`)
   })
 
   test("aggregates checksums only after every checksum-producing lane", async () => {
@@ -350,12 +414,14 @@ describe("release action supply chain", () => {
 })
 
 describe("parked MCP broker distribution", () => {
-  test("raw release archives carry only the maximal executable", async () => {
+  test("raw release archives carry maximal and its sealed plugin generation", async () => {
     const workflow = await readWorkflow("release.yml")
 
-    expect(workflow).toContain('7z a "../dist-release/${BASE}.zip" maximal.exe')
     expect(workflow).toContain(
-      'tar -czf "../dist-release/${BASE}.tar.gz" maximal',
+      '7z a "../dist-release/${BASE}.zip" maximal.exe plugin-builtins',
+    )
+    expect(workflow).toContain(
+      'tar -czf "../dist-release/${BASE}.tar.gz" maximal plugin-builtins',
     )
     expect(workflow).not.toContain("mcp-broker")
     expect(workflow).not.toContain("pnpm install --frozen-lockfile")
@@ -395,6 +461,7 @@ describe("parked MCP broker distribution", () => {
 
     // Not packaged.
     expect(wix).not.toContain('Source="maximal-mcp-broker.exe"')
+    expect(wix).toContain(String.raw`<Files Include="plugin-builtins\**" />`)
     expect(shellWorkflow).not.toContain("mcp-broker")
     expect(installerWorkflow).not.toContain("packages/mcp-broker")
     // Upgrade/uninstall still stops and removes a broker an older version left.
@@ -445,12 +512,38 @@ describe("Linux Rust cache", () => {
     expect(saveStep).toContain("github.event_name == 'workflow_dispatch'")
   })
 
-  test("warms the release profile without fake external sidecars", async () => {
-    const workflow = await readWorkflow("linux-rust-cache.yml")
+  test("warms the release profile with the desktop package's Linux overrides, no fake sidecars", async () => {
+    const [cacheWorkflow, release, baseConf] = await Promise.all([
+      readWorkflow("linux-rust-cache.yml"),
+      readWorkflow("release.yml"),
+      readRepoFile("shell/src-tauri/tauri.conf.json"),
+    ])
 
-    expect(workflow).toContain("tauri build --no-bundle")
-    expect(workflow).toContain('"bundle":{"externalBin":[]}')
-    expect(workflow).not.toContain(": > src-tauri/binaries/")
+    expect(cacheWorkflow).toContain("tauri build --no-bundle")
+    expect(cacheWorkflow).not.toContain(": > src-tauri/binaries/")
+
+    // Compare parsed overrides, not text: the two lanes quote the JSON
+    // differently, and a drift in either list must fail here.
+    const cache = tauriBuildOverride(
+      cacheWorkflow,
+      "bun run tauri build --no-bundle",
+    )
+    const desktop = tauriBuildOverride(
+      release,
+      "bun run tauri build --bundles deb",
+    )
+    expect(cache.build).toEqual(desktop.build)
+    expect(cache.bundle).toEqual(desktop.bundle)
+    expect(cache.bundle).toEqual({ externalBin: [], resources: [] })
+
+    // Every list the base config populates must be cleared by the Linux
+    // override. A populated resource the override forgets is exactly the
+    // "resource path ... doesn't exist" failure on the cache lane.
+    const base = JSON.parse(baseConf) as TauriBundleConfig
+    for (const key of ["externalBin", "resources"] as const) {
+      expect(base.bundle?.[key], `base ${key}`).not.toEqual([])
+      expect(cache.bundle?.[key], `cache override ${key}`).toEqual([])
+    }
   })
 })
 

@@ -145,18 +145,20 @@ gone through and to check before trying again, so nothing is sent twice.
 
 ## Use it from Claude Code
 
-On Work IQ’s page in Settings → Integrations → Connectors, tick **Claude Code**. Maximal then
-registers Work IQ with Claude Code (user scope, in `~/.claude.json`) as an
+On Work IQ’s page in Settings → Integrations → Connectors, open the app
+picker and check **Claude Code**. The picker shows every Maximal app; targets
+that Maximal cannot configure yet remain visible and explain why they are
+unavailable. Maximal then registers Work IQ with Claude Code (user scope, in `~/.claude.json`) as an
 HTTP MCP server named `maximal-workiq` at `http://127.0.0.1:<port>/mcp/workiq`,
 using your Claude Code key. Its tools appear in Claude Code as
 `mcp__maximal-workiq__<tool>`. Start a new Claude Code session after turning
 Work IQ on.
 
-- The Claude Code integration (Settings → Apps) must be on; otherwise the box
-  is unavailable and says why.
+- The Claude Code integration (Settings → Apps) must be on; otherwise its menu
+  item is unavailable and says why.
 - The entry stays while Maximal is stopped. Claude Code then shows
   `maximal-workiq` as failing to connect, and it works again once Maximal is
-  running. Turning Work IQ off, unticking Claude Code, turning off the Claude
+  running. Turning Work IQ off, unchecking Claude Code, turning off the Claude
   Code integration or `maximal uninstall` removes it.
 - If Claude Code already has its own Work IQ (a server named `workiq`, or
   Microsoft’s `workiq@work-iq` plugin), Maximal adds nothing and Settings

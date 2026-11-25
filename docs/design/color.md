@@ -108,4 +108,17 @@ label beside it says what:
   `--accent` below 75%, `--status-warning` from 75%, `--status-error`
   from 90%, each with the warning icon. The compaction point's tick is
   `--border-strong`.
+- **Rules** (`shell/src/ui/features/budget/`): the rule meter and the provider-allowance
+  meter are the quota meter again (`--accent` while fine, `--status-warning`,
+  `--status-error`). A rule row adds an icon and a word when it is nearly spent or
+  spent, and an allowance prints its percent used, so state never rests on color
+  alone. Activity's share bar
+  gives the first five parts `--series-1` to `--series-5` and folds the rest into
+  a neutral `--border-strong` "Other"; every part is named by the swatch on its
+  table row, so identity never rests on color. Day and hour columns are one series
+  (`--series-1`). The totals strip is text ink at three sizes, no hue. A rule's timeline draws spend in
+  `--series-1`, the limit as a solid `--status-error` line, the warning as a dashed
+  `--status-warning` line and a period's reset as a dotted `--border-strong` line;
+  its markers are a triangle (warned), a dot (limit reached) and a cross (request
+  refused), so the three never rest on color alone. Text stays text ink.
 - **Status colors are for state only**, never to tell categories apart.

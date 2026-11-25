@@ -41,7 +41,10 @@ export default meta;
 type Story = StoryObj<Args>;
 
 /** Live model-to-session traffic with streaming, warm, and cooling sessions. */
-export const LiveTraffic: Story = { args: { scenario: "live-sessions" } };
+export const LiveTraffic: Story = {
+  args: { scenario: "live-sessions" },
+  tags: ["asset", "journey", "funnel-first-value"],
+};
 /** Quotas (one metered, two unlimited) + a day of mixed-model traffic, 3 pages of events. */
 export const BusyDay: Story = {};
 /** Authentication is required before the Usage Quotas card can show metrics. */

@@ -8,18 +8,26 @@ import type {
   OperationHandler,
   OperationRequest,
   PluginModule,
+  PluginResourceLifecycle,
 } from "@stuffbucket/maximal-plugin-sdk"
 
 import { isOperationUnavailableError } from "@stuffbucket/maximal-plugin-sdk"
 import {
   createFileStorage,
+  createStorageSettingsAuthority,
   operationsService,
 } from "@stuffbucket/maximal-plugin-sdk/runtime"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { createPluginHost, PluginContractError } from "../src/index"
 import { runPluginConformance } from "../src/testing"
-import { Empty, fakeHost, runCleanups, tempDir } from "./helpers"
+import {
+  Empty,
+  fakeHost,
+  runCleanups,
+  tempDir,
+  testSettingsAuthority,
+} from "./helpers"
 
 interface Served {
   operation?: ModelOperation
@@ -65,6 +73,9 @@ function serving(
             return Promise.resolve({
               json: { by: id, upstream: request.binding.upstreamModel },
               usage: { input_tokens: 1 },
+              invocationId: request.invocationId,
+              providerCallId: request.providerCallId,
+              sequence: request.sequence,
             })
           },
         }
@@ -76,11 +87,13 @@ function serving(
 }
 
 function hostOf(plugins: Array<PluginModule>) {
+  const storageRoot = tempDir()
   const gateway = createPluginHost({
     plugins,
     services: {
       host: fakeHost(),
-      storageRoot: tempDir(),
+      storageRoot,
+      settingsAuthority: testSettingsAuthority(storageRoot),
       extra: [operationsService],
     },
   })
@@ -96,6 +109,9 @@ const request = (
   body: { prompt: "x" },
   signal: new AbortController().signal,
   origin: { kind: "http", client: "test" },
+  invocationId: "test-invocation",
+  providerCallId: "test-provider-call",
+  sequence: 1,
 })
 
 const on = { enabled: true }
@@ -111,6 +127,7 @@ function start(plugins: Array<PluginModule>) {
   return gateway
 }
 
+// eslint-disable-next-line max-lines-per-function -- operation lifecycle scenarios share the serving fixture
 describe("operations: registration and lifetime", () => {
   test("a registered handler is served while its plugin is enabled and withdrawn when it is disabled", async () => {
     const gateway = start([serving("alpha", [{ model: "m1" }])])
@@ -138,6 +155,63 @@ describe("operations: registration and lifetime", () => {
     unsubscribe()
     await gateway.reconcile({ alpha: on })
     expect(notified).toBe(2)
+  })
+
+  test("a quarantined replacement cannot expose its operation registration", async () => {
+    let failRevoke = true
+    const old = serving("alpha", [{ model: "old-model" }])
+    const candidateBase = serving("alpha", [{ model: "candidate-model" }])
+    const resources: PluginResourceLifecycle = {
+      declaration: {
+        mode: "exclusive",
+        resources: ["fixture:operation-replacement"],
+      },
+      prepare: () => Promise.resolve(),
+      commit: () => Promise.reject(new Error("candidate commit failed")),
+      revoke: () => {
+        if (failRevoke) throw new Error("candidate revoke failed")
+        return Promise.resolve()
+      },
+      resume: () => Promise.resolve(),
+    }
+    const candidate: PluginModule = {
+      ...candidateBase,
+      apply: (ctx, config) => {
+        void candidateBase.apply(ctx, config)
+        return resources
+      },
+    }
+    const gateway = start([old])
+    const operations = gateway.operations()
+    await gateway.reconcile({ alpha: on })
+    expect(operations.resolve("decisions", "old-model")).toBeDefined()
+
+    const replacementError = await gateway
+      .replacePlugin("alpha", candidate, {
+        type: "external",
+        specifier: "fixture:operation-candidate",
+      })
+      .catch((error: unknown) => error)
+    expect(replacementError).toMatchObject({ code: "replacement-not-ready" })
+    expect(gateway.get("alpha")).toMatchObject({
+      lifecycle: "failed",
+      source: { type: "built-in" },
+    })
+    expect(operations.servedModels()).toEqual([])
+    expect(operations.resolve("decisions", "candidate-model")).toBeUndefined()
+    expect(operations.resolve("decisions", "old-model")).toBeUndefined()
+    expect(
+      isOperationUnavailableError(
+        await operations
+          .dispatch(request("decisions", "candidate-model"))
+          .catch((error: unknown) => error),
+      ),
+    ).toBe(true)
+
+    failRevoke = false
+    await gateway.reconcile({ alpha: on })
+    expect(operations.resolve("decisions", "old-model")?.pluginId).toBe("alpha")
+    expect(operations.resolve("decisions", "candidate-model")).toBeUndefined()
   })
 
   test("a config reload withdraws the old fiber's registrations and re-registers", async () => {
@@ -180,7 +254,20 @@ describe("operations: registration and lifetime", () => {
   })
 
   test("record order wins a duplicate even when the first plugin's settings load last", async () => {
-    const files = createFileStorage(tempDir())
+    const storageRoot = tempDir()
+    const files = createFileStorage(storageRoot)
+    const skewed = {
+      ...files,
+      dir: (id: string) => files.dir(id),
+      readText: async (id: string, name: string) => {
+        if (id === "alpha")
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        return await files.readText(id, name)
+      },
+      writeText: (id: string, name: string, text: string) =>
+        files.writeText(id, name, text),
+      delete: (id: string, name: string) => files.delete(id, name),
+    }
     const gateway = createPluginHost({
       plugins: [
         serving("alpha", [{ model: "m1" }]),
@@ -188,19 +275,10 @@ describe("operations: registration and lifetime", () => {
       ],
       services: {
         host: fakeHost(),
-        storageRoot: tempDir(),
+        storageRoot,
         extra: [operationsService],
-        // Skew load timing: alpha's settings resolve after beta's.
-        storage: {
-          ...files,
-          dir: (id) => files.dir(id),
-          readText: async (id, name) => {
-            if (id === "alpha") await new Promise((r) => setTimeout(r, 50))
-            return files.readText(id, name)
-          },
-          writeText: (id, name, text) => files.writeText(id, name, text),
-          delete: (id, name) => files.delete(id, name),
-        },
+        storage: skewed,
+        settingsAuthority: createStorageSettingsAuthority(skewed),
       },
     })
     gateways.push(gateway)
@@ -235,7 +313,14 @@ describe("operations: registration and lifetime", () => {
           ctx.operations.register({
             operation: "decisions",
             bindings: [binding, binding],
-            handle: () => Promise.resolve({ json: {}, usage: {} }),
+            handle: (request) =>
+              Promise.resolve({
+                json: {},
+                usage: {},
+                invocationId: request.invocationId,
+                providerCallId: request.providerCallId,
+                sequence: request.sequence,
+              }),
           })
         } catch (caught) {
           error = caught
@@ -372,9 +457,14 @@ describe("operations: resolve and dispatch", () => {
   })
 
   test("a host without the operations service answers unavailable", async () => {
+    const storageRoot = tempDir()
     const gateway = createPluginHost({
       plugins: [],
-      services: { host: fakeHost(), storageRoot: tempDir() },
+      services: {
+        host: fakeHost(),
+        storageRoot,
+        settingsAuthority: testSettingsAuthority(storageRoot),
+      },
     })
     gateways.push(gateway)
     const ops = gateway.operations()

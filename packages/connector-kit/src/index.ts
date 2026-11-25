@@ -66,6 +66,7 @@ export type {
   NoAuthManifest,
   RemoteMcpConnectorManifest,
 } from "./manifest"
+export { releaseUpstreamSession } from "./session-registry"
 export {
   ACTION_IDS,
   CONNECTED_NOTICE,

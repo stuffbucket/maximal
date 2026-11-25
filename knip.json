@@ -25,6 +25,16 @@
         ]
       }
     },
+    "packages/plugin-figjam": {
+      "entry": [
+        "test/**/*.test.ts",
+        "test/fixtures/**/*.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+      ]
+    },
     "packages/plugin-*": {
       "entry": [
         "test/**/*.test.ts"

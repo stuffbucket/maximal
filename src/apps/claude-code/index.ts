@@ -12,6 +12,7 @@ import {
   revertProxyBaseUrl,
   getClaudeCodeSettingsPath,
   HELPER_LABEL,
+  inspectClaudeCodeRoutingFile,
 } from "./config"
 import { detectClaudeInstalls } from "./detect"
 import { claudeCodeInstallHint } from "./install"
@@ -46,16 +47,18 @@ export const claudeCodeApp: ClientApp = {
         source: i.source,
       })),
       install: installs.length === 0 ? await claudeCodeInstallHint() : null,
-      conflict,
+      conflict: conflict ?? inspectClaudeCodeRoutingFile().conflict,
     }
   },
 
-  enable() {
-    const result = applyProxyBaseUrl()
+  enable(options) {
+    const result = applyProxyBaseUrl(undefined, undefined, options)
     const conflict =
       (
         result.skippedReason === "foreign-base-url"
         || result.skippedReason === "foreign-api-key-helper"
+        || result.skippedReason === "other-maximal-config"
+        || result.skippedReason === "cleanup-required"
       ) ?
         result.skippedReason
       : null

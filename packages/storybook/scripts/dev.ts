@@ -10,7 +10,9 @@
 import { watch } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { firstAvailablePort, portIsAvailable, storybookPortOption } from "./port";
 import { REPO, buildUi, stageUi } from "./prepare-ui";
+import { ignoreStorybookRestagePath } from "./watch-policy";
 
 const PKG = resolve(import.meta.dir, "..");
 const WATCHED = [
@@ -27,6 +29,25 @@ async function rebuild(): Promise<void> {
   await stageUi();
   console.error(`[storybook] restaged window UI (${Date.now() - t}ms)`);
 }
+
+const extra = process.argv.slice(2);
+const requested = storybookPortOption(extra);
+let selectedPort = requested.port;
+if (selectedPort !== null && !(await portIsAvailable(selectedPort))) {
+  const alternative = await firstAvailablePort(selectedPort + 1, Math.min(65_535, selectedPort + 20));
+  if (!requested.explicit && alternative !== null) {
+    console.error(`[storybook] Port ${selectedPort} is already in use; starting this checkout on ${alternative} instead.`);
+    selectedPort = alternative;
+  } else {
+    const suggestion = alternative === null ? "" : ` Re-run with --port ${alternative} to use a free port.`;
+    console.error(
+      `[storybook] Port ${selectedPort} is already in use.${suggestion}\n` +
+        `  If the existing server is the Storybook you want, open http://127.0.0.1:${selectedPort}/.`,
+    );
+    process.exit(1);
+  }
+}
+const port = requested.explicit || selectedPort === null ? [] : ["--port", String(selectedPort)];
 
 await rebuild();
 
@@ -54,16 +75,14 @@ function schedule(): void {
 }
 for (const path of WATCHED) {
   watch(path, { recursive: true }, (_event, file) => {
-    // build-ui copies shell/ui/*/vendor/ into dist, and that copy raises
-    // change events on the sources here — restaging on them would loop.
-    // Vendor bundles only change on deliberate upgrades; restart for those.
-    if (file && /(^|[\\/])vendor([\\/]|$)/.test(String(file))) return;
+    // build-ui copies static sources into dist, and those copies raise change
+    // events on the sources here — restaging on them would loop. These assets
+    // change only deliberately; restart Storybook after upgrading or adding one.
+    if (file && ignoreStorybookRestagePath(String(file))) return;
     schedule();
   });
 }
 
-const extra = process.argv.slice(2);
-const port = extra.includes("--port") || extra.includes("-p") ? [] : ["--port", "6006"];
 const storybook = Bun.spawn(["storybook", "dev", ...port, ...extra], {
   cwd: PKG,
   stdio: ["inherit", "inherit", "inherit"],

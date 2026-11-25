@@ -35,6 +35,7 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client"
+import { pluginClientsService } from "@stuffbucket/maximal-plugin-host"
 import {
   createLifecycleHarness,
   findSecrets,
@@ -63,6 +64,7 @@ import { getConfig, writeConfig } from "~/lib/config/config"
 import { PATHS } from "~/lib/platform/paths"
 import { entryName } from "~/lib/plugins/clients/claude-code"
 import { startPlugins, stopPlugins } from "~/lib/plugins/runtime"
+import { state } from "~/lib/runtime-state/state"
 import { setListeningPort } from "~/lib/start/proxy-port"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 import { pluginMcpRoutes } from "~/routes/plugins/mcp"
@@ -92,6 +94,7 @@ const hex = () => randomBytes(8).toString("hex")
 const ACCESS_TOKEN = `e2e-access-${hex()}`
 const REFRESH_TOKEN = `e2e-refresh-${hex()}`
 const API_KEY = `e2e-key-${hex()}`
+const SHELL_API_KEY = `e2e-shell-key-${hex()}`
 const SECRETS = [ACCESS_TOKEN, REFRESH_TOKEN]
 const TOKEN_CACHE = "fake-token-cache.json"
 const BROWSER_URL = "https://login.example.test/e2e/authorize"
@@ -202,6 +205,7 @@ async function startRun(fake: FakeRemoteMcp): Promise<Run> {
     aliases: {
       [fake.origin]: "<upstream>",
       [API_KEY]: "<api-key>",
+      [SHELL_API_KEY]: "<shell-api-key>",
       [BUILD_VERSION]: "<version>",
       [claude.cli.binDir]: "<claude-bin>",
     },
@@ -221,6 +225,20 @@ async function startRun(fake: FakeRemoteMcp): Promise<Run> {
         random: () => 0.5,
         limits: { progressIntervalMs: RETRY_MS },
       }),
+    ],
+    extraServices: [
+      pluginClientsService([
+        { clientId: "claude-code", driverId: "claude-code" },
+        { clientId: "claude-desktop", driverId: "claude-desktop" },
+        {
+          clientId: "codex",
+          unavailableReason: "Maximal doesn't add connectors to Codex yet.",
+        },
+        {
+          clientId: "copilot-cli",
+          unavailableReason: "Copilot CLI integration is coming soon.",
+        },
+      ]),
     ],
     storageRoot,
     normalizer,
@@ -244,6 +262,11 @@ async function startRun(fake: FakeRemoteMcp): Promise<Run> {
     apps: { claudeCode: { mcpServers: [ID] } },
   })
   cleanups.push(() => void writeConfig({}))
+  const previousShellApiKey = state.shellApiKey
+  state.shellApiKey = SHELL_API_KEY
+  cleanups.push(() => {
+    state.shellApiKey = previousShellApiKey
+  })
   const app = await serveApp(server.fetch)
   setListeningPort(Number(new URL(app.origin).port))
   normalizer.alias(app.origin, "<maximal>")
@@ -258,17 +281,17 @@ async function startRun(fake: FakeRemoteMcp): Promise<Run> {
   }
   cleanups.push(close)
   const apiLog: Array<ApiExchange> = []
-  const sse = await openSse(`${app.origin}/settings/api/events`, API_KEY)
+  const sse = await openSse(`${app.origin}/settings/api/events`, SHELL_API_KEY)
   cleanups.push(() => sse.close())
   return {
     id: ID,
-    apiKey: API_KEY,
+    apiKey: SHELL_API_KEY,
     bearer: ACCESS_TOKEN,
     harness,
     fake,
     normalizer,
     origin: app.origin,
-    api: settingsApi(app.origin, API_KEY, apiLog),
+    api: settingsApi(app.origin, SHELL_API_KEY, apiLog),
     apiLog,
     mcpLog: [],
     sse,
@@ -313,6 +336,15 @@ function startClaudeCode(): Run["claude"] {
     }),
   )
   return { cli, configFile }
+}
+
+/** The app-identifying key Maximal provisions for Claude Code's MCP entries. */
+function claudeCodeApiKey(): string {
+  const entry = getConfig().auth?.apiKeyEntries?.find(
+    (candidate) => candidate.label === "claude-code" && candidate.enabled,
+  )
+  if (!entry) throw new Error("no Claude Code API key")
+  return entry.key
 }
 
 /** Claude Code as Settings shows it on Work IQ. */
@@ -439,13 +471,14 @@ async function sendToClaudeCode(run: Run) {
   const ours = () => ({
     type: "http",
     url: `${run.origin}/mcp/${ID}`,
-    headers: { Authorization: `Bearer ${API_KEY}` },
+    headers: { Authorization: `Bearer ${claudeCodeApiKey()}` },
   })
   await step(run, "send Work IQ to Claude Code", async () => {
     const patched = await run.api("PATCH", `/plugins/${ID}`, {
       clients: ["claude-code"],
     })
     expect(patched.status).toBe(200)
+    run.normalizer.alias(claudeCodeApiKey(), "<claude-code-api-key>")
     expect(claudeMcpServers(run)).toEqual({
       github: USER_SERVER,
       [ENTRY]: ours(),

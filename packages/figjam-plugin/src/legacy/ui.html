@@ -48,7 +48,12 @@
        Disabled text uses text-disabled (#b3b3b3, exempt); the disabled
        composer's placeholder keeps fg-2 because it carries the error.
      Exempt: hairline dividers (--border, decorative), disabled controls.
-     Reconnect button: fg on bg-2 16.0 / 11.7; dots accent-fg on bg-2 4.84 / 6.20. */
+     Reconnect button: fg on bg-2 16.0 / 11.7; dots accent-fg on bg-2 4.84 / 6.20.
+     BRAND MARK (header; identity only, both themes): Maximal's mark, the
+       crimson rounded square with the Fraunces "m" (build/macos/app-icon.svg),
+       the "m" outlined from shell/maximal-wordmark.svg so no font is needed.
+       on-brand #f4ead4 on brand #c8334a 4.36. The square vs bg is light 5.21,
+       dark 2.68: a logo, exempt from the 3:1 non-text guideline. */
   :root {
     color-scheme: light;
     --bg: var(--figma-color-bg, #ffffff);
@@ -74,6 +79,11 @@
     --syn-str: #0f7a3f;
     --syn-num: #7a3ce0;
     --syn-lit: #9a5200;
+    /* Maximal's brand: identity only (the header mark), never text or a
+       control, and the same in both themes. */
+    --brand: #c8334a;
+    --on-brand: #f4ead4;
+    --brand-mark: 20px;
 
     /* type: system UI (SF Pro Text/Display picked optically on macOS).
        rem so text zoom scales it: 11/16, 12/16, 14/20, 16/24 px at 100%. */
@@ -196,6 +206,11 @@
 
   /* ---------- header */
   header { min-height: var(--header-h); flex: none; display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); border-bottom: 1px solid var(--border); }
+  /* Maximal's mark, once per window beside the title. Self-contained SVG
+     (no font, image or network); fills come from the brand tokens. */
+  .brand-mark { flex: none; display: block; width: var(--brand-mark); height: var(--brand-mark); margin: 0 var(--space-1); }
+  .brand-mark rect { fill: var(--brand); }
+  .brand-mark path { fill: var(--on-brand); }
   #chatTitle { flex: 1; min-width: 0; display: block; min-height: var(--control-h); padding: 0 var(--space-2); font: var(--text-base) var(--font-family); font-weight: 500; color: var(--fg); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
   #chatTitle:hover { background: var(--bg-hover); }
   #titleInput { flex: 1; min-width: 0; min-height: var(--control-h); font-weight: 500; }
@@ -372,6 +387,7 @@
 <div id="app">
   <header>
     <button class="icon" id="menuBtn" title="Menu" aria-label="Menu" aria-haspopup="menu" aria-expanded="false" aria-controls="mainMenu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg></button>
+    <svg class="brand-mark" viewBox="0 0 1024 1024" role="img" aria-label="Maximal" focusable="false"><rect width="1024" height="1024" rx="230"/><path transform="translate(132.34 695.55) scale(0.37031 -0.37031)" d="M569.87109375 904.0V204.5439453125Q569.87109375 165.539306640625 575.907958984375 149.7236328125Q581.94482421875 133.907958984375 596.834228515625 126.09228515625L617.497802734375 115.202880859375Q649.64990234375 96.82958984375 649.64990234375 61.935546875Q649.64990234375 0.0 575.046142578125 0.0H130.4609375Q91.71435546875 0.0 74.267333984375 15.5023193359375Q56.8203125 31.004638671875 56.8203125 58.0830078125Q56.8203125 77.456298828125 66.59912109375 92.013916015625Q76.3779296875 106.571533203125 98.751220703125 116.23974609375L121.267333984375 126.166015625Q136.23046875 133.0185546875 142.193603515625 149.2236328125Q148.15673828125 165.4287109375 148.15673828125 204.396484375V683.3916015625Q148.15673828125 714.543701171875 139.841064453125 727.748779296875Q131.525390625 740.953857421875 114.8203125 745.76953125L92.00927734375 752.511474609375Q71.635986328125 759.25341796875 62.3756103515625 771.8663330078125Q53.115234375 784.479248046875 53.115234375 803.8525390625Q53.115234375 827.078369140625 65.74658203125 840.6728515625Q78.3779296875 854.267333984375 113.27197265625 867.7880859375L341.0966796875 954.525390625Q390.54833984375 973.898681640625 421.08984375 982.5853271484375Q451.63134765625 991.27197265625 480.74658203125 991.27197265625Q524.382568359375 991.27197265625 547.1268310546875 966.5277099609375Q569.87109375 941.783447265625 569.87109375 904.0ZM534.166015625 660.66357421875 475.86181640625 722.74658203125 506.15673828125 751.04150390625Q645.940185546875 884.824951171875 747.218994140625 937.9747314453125Q848.497802734375 991.12451171875 934.981689453125 991.12451171875Q1067.433349609375 991.12451171875 1146.1038818359375 903.8226318359375Q1224.7744140625 816.520751953125 1224.7744140625 674.1474609375V204.1015625Q1224.7744140625 165.1337890625 1230.7191162109375 149.50244140625Q1236.663818359375 133.87109375 1251.442626953125 126.09228515625L1271.590087890625 115.276611328125Q1303.81591796875 96.82958984375 1303.81591796875 61.935546875Q1303.81591796875 0.0 1229.064697265625 0.0H798.253662109375Q723.79736328125 0.0 723.79736328125 61.935546875Q723.79736328125 96.82958984375 755.949462890625 115.202880859375L776.170654296875 126.0185546875Q791.28125 133.907958984375 797.28125 149.79736328125Q803.28125 165.686767578125 803.28125 204.91259765625V614.884765625Q803.28125 678.479248046875 776.28125 710.5345458984375Q749.28125 742.58984375 696.686767578125 742.58984375Q663.576171875 742.58984375 630.3157958984375 729.6451416015625Q597.055419921875 716.700439453125 569.202880859375 691.774169921875ZM1189.14306640625 660.66357421875 1130.8388671875 722.74658203125 1160.91259765625 751.2626953125Q1297.295166015625 879.7880859375 1394.131591796875 935.456298828125Q1490.968017578125 991.12451171875 1573.07861328125 991.12451171875Q1701.60400390625 991.12451171875 1774.772216796875 903.341064453125Q1847.9404296875 815.5576171875 1860.9404296875 674.07373046875L1906.788330078125 204.2490234375Q1910.714599609375 165.170654296875 1914.7698974609375 149.0208740234375Q1918.8251953125 132.87109375 1933.60400390625 126.0185546875L1955.60400390625 116.166015625Q1977.9404296875 106.497802734375 1987.6639404296875 91.97705078125Q1997.387451171875 77.456298828125 1997.387451171875 58.0830078125Q1997.387451171875 30.9677734375 1979.9588623046875 15.48388671875Q1962.5302734375 0.0 1923.820556640625 0.0H1474.788330078125Q1400.33203125 0.0 1400.33203125 61.935546875Q1400.33203125 96.82958984375 1432.484130859375 115.202880859375L1452.705322265625 126.0185546875Q1467.81591796875 133.907958984375 1475.779052734375 149.834228515625Q1483.7421875 165.760498046875 1479.81591796875 205.06005859375L1441.37353515625 614.884765625Q1435.447265625 678.479248046875 1410.8919677734375 710.5345458984375Q1386.336669921875 742.58984375 1335.5947265625 742.58984375Q1307.7421875 742.58984375 1278.6292724609375 728.700439453125Q1249.516357421875 714.81103515625 1223.958740234375 691.995361328125Z"/></svg>
     <button id="chatTitle" title="Rename chat">New chat</button>
     <button class="icon" id="collapse" title="Collapse to a bar" aria-label="Collapse to a bar"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 2.5L7 7M7 3v4H3M13.5 13.5L9 9M9 13V9h4"/></svg></button>
   </header>
@@ -410,7 +426,7 @@
     <h2 id="settingsTitle">Settings</h2>
     <label class="field"><span>Maximal</span><input id="baseUrl" spellcheck="false" /></label>
     <label class="field"><span>API key</span><input id="apiKey" type="password" placeholder="Only if required" spellcheck="false" /></label>
-    <label class="check-row"><input type="checkbox" id="remote" /><span>Let Claude Code drive this board<small id="bridgeStatus">Connects to the bridge on localhost:4150</small></span></label>
+    <label class="check-row"><input type="checkbox" id="remote" /><span>Let Claude Code drive this board<small id="bridgeStatus">Connects to the bridge on this computer</small></span></label>
     <div class="bridge-row"><button type="button" class="btn" id="bridgeAct" hidden></button></div>
     <label class="check-row"><input type="checkbox" id="allowRunCode" /><span>Allow run_code<small>Agents may run arbitrary Plugin API code on this board</small></span></label>
     <div class="field" role="group" aria-labelledby="figmaTokenLabel">
@@ -444,10 +460,19 @@
 <script>
 "use strict";
 
-const DEFAULT_BASE = "http://localhost:4141";
+// The build (scripts/build.ts) rewrites this line with the ports the manifest's
+// devAllowedDomains allow, so the panel only dials what the manifest permits,
+// and with the relay key of the bridge whose host wrote this plugin ("" =
+// none). The bridge refuses a socket without its key, so a page that isn't
+// this plugin can't even ask to pair. Never log or send the key anywhere but
+// the bridge socket. These are the defaults an unstamped source runs with.
+const PANEL_BUILD = {"maximalPort":4141,"bridgePort":4150,"relayKey":""};
+const LEGACY_BASE = "http://localhost:4141"; // the address older panels saved
+const DEFAULT_BASE = `http://localhost:${PANEL_BUILD.maximalPort}`;
 const PREFERRED_MODELS = ["claude-sonnet", "claude-opus", "claude-fable", "gpt-6", "gpt-5"];
 const MAX_STEPS = 30;
-const BRIDGE_URL = "ws://localhost:4150/plugin";
+const BRIDGE_HOST = `localhost:${PANEL_BUILD.bridgePort}`;
+const BRIDGE_URL = `ws://${BRIDGE_HOST}/plugin`;
 // Maximal runs on this computer, so the panel only calls a loopback host.
 const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
@@ -665,6 +690,9 @@ window.onmessage = (event) => {
   if (!msg) return;
   if (msg.type === "init") {
     settings = Object.assign({}, settings, msg.settings);
+    // Only the stamped address is in the manifest's allowlist, so a default
+    // saved by an older panel on another port could never connect.
+    if (settings.baseUrl === LEGACY_BASE) settings.baseUrl = DEFAULT_BASE;
     fileInfo = msg.file || {};
     boardId = msg.boardId || fileInfo.boardId || "";
     selection = msg.selection || [];
@@ -1316,7 +1344,7 @@ let netSince = 0; // when the current bridge trouble started; 0 = healthy
 let netTimer = null;
 let netShown = null; // the bridge issue the input is showing, if any
 let netSaid = ""; // key of the last state announced
-const BRIDGE_IDLE = "Connects to the bridge on localhost:4150";
+const BRIDGE_IDLE = `Connects to the bridge on ${BRIDGE_HOST}`;
 
 function setNet(part, s, extra) {
   net[part] = Object.assign({}, extra, { s });
@@ -1353,6 +1381,8 @@ function bridgeIssue() {
       return { text: "Approval timed out · see Settings", say: "Bridge approval timed out. Ask again in Settings.", key: "b:expired" };
     case "unpaired":
       return { text: "Panel unpaired · see Settings", say: "This panel was unpaired from the bridge.", key: "b:unpaired" };
+    case "unkeyed":
+      return { text: "Bridge: plugin not set up · see Settings", say: "This copy of the plugin can't connect to the bridge. See Settings.", key: "b:unkeyed" };
     case "retrying":
       if (b.why === "pair-name-in-use") return { text: "Bridge: name in use · retrying", say: "Another panel is using this name. Retrying.", key: "b:name" };
       if (b.why === "pair-busy") return { text: "Bridge busy · retrying", say: "The bridge has too many requests. Retrying.", key: "b:busy" };
@@ -1373,7 +1403,8 @@ function bridgeStatus() {
   if (!settings.remote) return settings.bridgeToken ? paired : { text: BRIDGE_IDLE, act: "" };
   switch (b.s) {
     case "connected": return { text: `Paired with this computer ✓ · ${SESSION}`, act: "forget" };
-    case "connecting": return { text: `${b.attempt ? "Reconnecting" : "Connecting"} to the bridge on localhost:4150…`, act: "" };
+    case "connecting": return { text: `${b.attempt ? "Reconnecting" : "Connecting"} to the bridge on ${BRIDGE_HOST}…`, act: "" };
+    case "unkeyed": return { text: "This copy of the plugin can't connect to the bridge. Import the one Maximal set up (Settings → Integrations → FigJam), or the one bun run figjam:bridge writes.", act: "" };
     case "pending": return { text: `Waiting for approval${b.expiresAt ? ` (${mmss(b.expiresAt)})` : ""}. ${APPROVE_HINT(b.name || SESSION)}`, act: "ask" };
     case "denied": return { text: "Pairing was denied.", act: "ask" };
     case "expired": return { text: "The approval request timed out.", act: "ask" };
@@ -1382,7 +1413,7 @@ function bridgeStatus() {
     case "retrying": {
       const why = b.why === "pair-name-in-use" ? `Another request already uses the name ${SESSION}`
         : b.why === "pair-busy" ? "The bridge has too many pending requests"
-        : "Bridge isn't running on localhost:4150";
+        : `Can't reach the bridge on ${BRIDGE_HOST} (if Maximal or the bridge restarted, run the plugin again)`;
       return { text: `${why} · ${countdown(b)} (attempt ${b.attempt})`, act: "retry" };
     }
     case "blocked": return { text: `Bridge blocked: ${b.error}`, act: "retry" };
@@ -2624,9 +2655,11 @@ function openBridge() {
   clearTimeout(bridgeRetry);
   if (!settings.remote) return setNet("bridge", "off");
   if (bridge || pairStop) return;
+  // A build without its bridge's relay key would only be refused.
+  if (!PANEL_BUILD.relayKey) return setNet("bridge", "unkeyed");
   let ws;
   try {
-    ws = new WebSocket(BRIDGE_URL);
+    ws = new WebSocket(BRIDGE_URL, [PANEL_BUILD.relayKey]);
   } catch (error) {
     setNet("bridge", "blocked", { error: error.message });
     return;

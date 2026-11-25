@@ -5,23 +5,26 @@ import type {
 import type {
   Context,
   PluginDisposer,
+  PluginLifecycleContext,
   PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
 
 import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
 import {
   buildPlugin,
-  readPackageVersion,
+  inspectPlugin,
+  type PluginBuildOptions,
 } from "@stuffbucket/maximal-figjam-plugin/build"
-import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import type { FigjamConfig } from "./manifest"
 
+import { generationRelayKey } from "./relay-key"
 import {
   composeStatus,
   displayName,
   pairActionIds,
+  type PendingPanel,
   type PluginFolder,
   RETRY_ACTION,
   SETUP_ACTION,
@@ -48,8 +51,22 @@ interface PairRequest {
 // reload starts the new bridge only after the old one has let go of its port.
 let previousStop: Promise<void> = Promise.resolve()
 
+// One relay key per owning Maximal process, in memory only (see relay-key.ts).
+// Every bridge this generation starts uses it, so a Retry, a config reload or
+// a resumed handoff keeps the panels already written working, and the next
+// generation (a plugin inventory or settings reload) inherits the same key
+// from the parent. Only a new owning process (Maximal restarted) makes a new
+// key and rewrites the plugin. The copy stamped into the plugin folder opens
+// nothing once that process ends.
+let processRelayKey: string | undefined
+const relayKey = (): string => (processRelayKey ??= generationRelayKey())
+
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
+
+function lifecycleAborted(context?: PluginLifecycleContext): boolean {
+  return context?.signal.aborted === true
+}
 
 function describeStartFailure(error: unknown, port: number): StartFailure {
   const message = errorMessage(error)
@@ -67,37 +84,6 @@ function describeStartFailure(error: unknown, port: number): StartFailure {
   }
 }
 
-/** Whether the files in `dir` exist and match this build and these ports. */
-async function inspectFolder(
-  dir: string,
-  ports: { bridge: number; maximal: number },
-): Promise<PluginFolder> {
-  const read = (name: string) => readFile(path.join(dir, name), "utf8")
-  let manifest: string
-  let code: string
-  try {
-    const [manifestText, codeText] = await Promise.all([
-      read("manifest.json"),
-      read("code.js"),
-      read("ui.html"),
-    ])
-    manifest = manifestText
-    code = codeText
-  } catch {
-    return "missing"
-  }
-  // The manifest names both ports in its dev domains, and code.js its version.
-  const expected = [
-    `ws://localhost:${ports.bridge}`,
-    `http://localhost:${ports.maximal}`,
-  ].map((domain) => JSON.stringify(domain))
-  const version = await readPackageVersion()
-  const current =
-    code.includes(`var PLUGIN_VERSION = ${JSON.stringify(version)}`)
-    && expected.every((domain) => manifest.includes(domain))
-  return current ? "current" : "stale"
-}
-
 /**
  * One running FigJam plugin: the bridge, the Figma plugin files, the pending
  * pairing requests (each with its own Approve and Deny actions) and the
@@ -108,15 +94,14 @@ export class FigjamController {
   readonly #config: FigjamConfig
   readonly #options: FigjamPluginOptions
   readonly #pluginDir: string
-  readonly #waitFor = previousStop
   readonly #requests = new Map<string, PairRequest>()
-  #starting: Promise<BridgeHandle | undefined> = Promise.resolve(undefined)
+  #tail: Promise<void> = Promise.resolve()
   #handle: BridgeHandle | undefined
   #startFailure: StartFailure | undefined
   #folder: PluginFolder = "missing"
   #building = false
   #buildError: string | undefined
-  #stopped = false
+  #disposed = false
 
   constructor(
     ctx: Context,
@@ -129,75 +114,118 @@ export class FigjamController {
     this.#pluginDir = path.join(ctx.storage.dir, FIGMA_PLUGIN_DIR)
   }
 
-  // A method, not a field read: `stop()` can run while a start is awaited.
-  #isStopped(): boolean {
-    return this.#stopped
-  }
-
-  /** Register the plugin's actions and start the bridge in the background. */
+  /** Register actions and status without acquiring the exclusive bridge port. */
   start(): void {
-    this.#ctx.effect(() => this.stop, "figjam bridge")
+    this.#ctx.effect(
+      // eslint-disable-next-line unicorn/consistent-function-scoping -- cleanup captures this controller
+      () => () => {
+        void this.dispose()
+      },
+      "figjam bridge",
+    )
     this.#ctx.surface.registerAction(SETUP_ACTION, () => this.#build())
     this.#ctx.surface.registerAction(RETRY_ACTION, async () => {
-      if (this.#handle || this.#stopped) return
-      this.#starting = this.#launch()
-      await this.#starting
+      if (this.#handle || this.#disposed) return
+      await this.bind()
     })
-    this.#starting = this.#launch()
+    this.#render()
   }
 
-  /** Drop the actions and stop the bridge once any start in flight has finished. */
-  readonly stop = (): void => {
-    this.#stopped = true
-    for (const request of this.#requests.values()) request.dispose()
-    this.#requests.clear()
-    this.#handle = undefined
-    const starting = this.#starting
-    previousStop = previousStop.then(async () => {
+  /** Bind the bridge after the parent has granted this generation its lease. */
+  bind(context?: PluginLifecycleContext): Promise<void> {
+    return this.#enqueue(async () => {
+      if (this.#handle || this.#disposed) return
       try {
-        await (await starting)?.stop()
+        await this.#launch(context)
       } catch (error) {
-        this.#ctx.host.logger.warn(
-          `The FigJam bridge did not stop cleanly: ${errorMessage(error)}`,
-        )
+        // Initial activation remains operable so the person can free the port
+        // and use Try again. Handoff and recovery must prove readiness.
+        if (context?.purpose !== "activation") throw error
       }
     })
   }
 
-  async #launch(): Promise<BridgeHandle | undefined> {
+  /** Stop the physical bridge and resolve only after the port is released. */
+  unbind(context?: PluginLifecycleContext): Promise<void> {
+    return this.#enqueue(async () => {
+      context?.signal.throwIfAborted()
+      const handle = this.#handle
+      if (!handle) return
+      const stopping = previousStop.then(() => handle.stop())
+      previousStop = stopping.catch(() => undefined)
+      try {
+        await stopping
+      } catch (error) {
+        this.#ctx.host.logger.warn(
+          `The FigJam bridge did not stop cleanly: ${errorMessage(error)}`,
+        )
+        throw error
+      }
+      if (this.#handle === handle) this.#handle = undefined
+      for (const request of this.#requests.values()) request.dispose()
+      this.#requests.clear()
+      this.#render()
+    })
+  }
+
+  /** Permanently dispose this controller after the lifecycle has been revoked. */
+  async dispose(): Promise<void> {
+    this.#disposed = true
+    await this.unbind()
+  }
+
+  async #launch(context?: PluginLifecycleContext): Promise<void> {
     this.#startFailure = undefined
     this.#render()
     try {
-      await this.#waitFor
-      if (this.#isStopped()) return undefined
+      await previousStop
+      context?.signal.throwIfAborted()
+      if (this.#disposed) return
       const { dataDir } = this.#options
       const started = await startBridge({
         port: this.#config.port,
+        relayKey: relayKey(),
         ...(dataDir === undefined ? {} : { dataDir }),
         onEvent: (event) => this.#onEvent(event),
       })
+      if (this.#shouldStop(context)) {
+        await started.stop()
+        context?.signal.throwIfAborted()
+        return
+      }
       this.#handle = started
-      if (this.#isStopped()) return started
     } catch (error) {
       this.#startFailure = describeStartFailure(error, this.#config.port)
       this.#ctx.host.logger.warn(
         `The FigJam bridge did not start: ${this.#startFailure.detail}`,
       )
       this.#render()
-      return undefined
+      throw error
     }
     await this.#checkFolder()
     this.#sync()
-    return this.#handle
   }
 
-  /** Learn what the plugin folder holds, and bring a stale one up to date. */
+  #shouldStop(context?: PluginLifecycleContext): boolean {
+    return this.#disposed || lifecycleAborted(context)
+  }
+
+  #enqueue(task: () => Promise<void>): Promise<void> {
+    const run = this.#tail.then(task, task)
+    this.#tail = run.catch(() => undefined)
+    return run
+  }
+
+  /**
+   * Learn what the plugin folder holds, and bring a stale one up to date. The
+   * managed files are compared byte for byte with what a build would write,
+   * so a source, manifest or security change rebuilds even when the version
+   * and ports are unchanged, and so does a folder holding another process's
+   * relay key.
+   */
   async #checkFolder(): Promise<void> {
     try {
-      this.#folder = await inspectFolder(this.#pluginDir, {
-        bridge: this.#config.port,
-        maximal: this.#ctx.host.maximalPort(),
-      })
+      this.#folder = await inspectPlugin(this.#pluginDir, this.#buildOptions())
     } catch (error) {
       this.#ctx.host.logger.warn(
         `Could not check the Figma plugin: ${errorMessage(error)}`,
@@ -207,17 +235,26 @@ export class FigjamController {
     if (this.#folder === "stale") await this.#build()
   }
 
+  /**
+   * The options the generated plugin is built with. The start-time check and
+   * every build (start or manual) both read this, so a folder is judged
+   * against exactly what a rebuild would write.
+   */
+  #buildOptions(): PluginBuildOptions {
+    return {
+      bridgePort: this.#handle?.port ?? this.#config.port,
+      maximalPort: this.#ctx.host.maximalPort(),
+      relayKey: relayKey(),
+    }
+  }
+
   async #build(): Promise<void> {
-    if (this.#building || this.#stopped) return
+    if (this.#building || this.#disposed) return
     this.#building = true
     this.#buildError = undefined
     this.#render()
     try {
-      await buildPlugin({
-        outDir: this.#pluginDir,
-        bridgePort: this.#handle?.port ?? this.#config.port,
-        maximalPort: this.#ctx.host.maximalPort(),
-      })
+      await buildPlugin({ outDir: this.#pluginDir, ...this.#buildOptions() })
       this.#folder = "current"
     } catch (error) {
       this.#buildError = errorMessage(error)
@@ -231,9 +268,9 @@ export class FigjamController {
   }
 
   #onEvent(event: BridgeEvent): void {
-    if (this.#stopped) return
+    if (this.#disposed) return
     if (event.type === "pair-requested" && !this.#requests.has(event.name)) {
-      this.#notify(event.name)
+      this.#notify(event)
     }
     try {
       this.#sync()
@@ -244,13 +281,15 @@ export class FigjamController {
     }
   }
 
-  #notify(name: string): void {
-    const shown = displayName(name)
+  #notify(event: { name: string; board?: string }): void {
+    const shown = displayName(event.name)
+    const board =
+      event.board === undefined ? undefined : displayName(event.board)
     try {
       this.#ctx.surface.notify({
         code: "figjam-pair-requested",
-        message: `A FigJam panel ("${shown}") wants to connect.`,
-        params: { name: shown },
+        message: `A FigJam panel ("${shown}")${board === undefined ? "" : ` on board "${board}"`} wants to connect.`,
+        params: { name: shown, ...(board === undefined ? {} : { board }) },
       })
     } catch (error) {
       this.#ctx.host.logger.warn(
@@ -261,7 +300,7 @@ export class FigjamController {
 
   /** Make the actions match the bridge's pending requests, then show the status. */
   #sync(): void {
-    if (this.#stopped) return
+    if (this.#disposed) return
     if (this.#handle) {
       const pending = new Set(
         this.#handle.status().pending.map((request) => request.name),
@@ -325,7 +364,7 @@ export class FigjamController {
   }
 
   #render(): void {
-    if (this.#stopped) return
+    if (this.#disposed) return
     const view = this.#handle?.status()
     this.#ctx.surface.setStatus(
       composeStatus({
@@ -340,7 +379,14 @@ export class FigjamController {
                     title
                   : board.id
               }),
-              pending: view.pending.map((request) => request.name),
+              pending: view.pending.map(
+                (request): PendingPanel => ({
+                  name: request.name,
+                  board: request.board,
+                  fileKey: request.fileKey,
+                  user: request.user,
+                }),
+              ),
             }
           : undefined,
         building: this.#building,

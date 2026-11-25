@@ -55,6 +55,7 @@ describe("refusalMessage", () => {
   const NOW = Date.UTC(2026, 10, 11, 20, 48, 0)
   const base: RefusalWords = {
     name: "Images per day",
+    unit: "nano_aiu",
     limit: 3 * AIU,
     used: 3 * AIU,
     held: 0,
@@ -67,19 +68,19 @@ describe("refusalMessage", () => {
 
   test("a spent limit says so, with what this call needs and when it resets", () => {
     expect(refusalMessage(base)).toBe(
-      'Maximal budget "Images per day" is used up: $0.03 of $0.03 used; this request needs about $0.006. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Budget.',
+      'Maximal rule "Images per day" blocked this request: it is used up ($0.03 of $0.03 used); the request needs about $0.006. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Rules.',
     )
   })
 
   test("a call that doesn't fit says there's no room for it", () => {
     expect(refusalMessage({ ...base, used: 2.98 * AIU })).toBe(
-      'Maximal budget "Images per day" doesn\'t have room for this request: $0.03 of $0.03 used; this request needs about $0.006. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Budget.',
+      'Maximal rule "Images per day" blocked this request: $0.03 of $0.03 used, and the request needs about $0.006. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Rules.',
     )
   })
 
   test("a call with no estimate leaves that clause out", () => {
     expect(refusalMessage({ ...base, requested: 0 })).toBe(
-      'Maximal budget "Images per day" is used up: $0.03 of $0.03 used. Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Budget.',
+      'Maximal rule "Images per day" blocked this request: it is used up ($0.03 of $0.03 used). Resets 2026-11-12T00:00:00.000Z (in 3 h 12 min). Raise or remove it in Maximal → Rules.',
     )
   })
 
@@ -97,14 +98,14 @@ describe("refusalMessage", () => {
       inFlight: true,
     })
     expect(message).toBe(
-      'Maximal budget "Images per day" has $0.02 left, and requests in progress already hold $0.02 of it; this request needs about $0.006. Try again in a moment. Raise or remove it in Maximal → Budget.',
+      'Maximal rule "Images per day" blocked this request: it has $0.02 left, and requests in progress already hold $0.02 of it; the request needs about $0.006. Try again in a moment. Raise or remove it in Maximal → Rules.',
     )
     expect(message).not.toContain("Resets")
   })
 
   test("amounts follow the display unit", () => {
     expect(refusalMessage({ ...base, display: credits })).toContain(
-      "3.00 AI credits of 3.00 AI credits used; this request needs about 0.60 AI credits",
+      "it is used up (3.00 AI credits of 3.00 AI credits used); the request needs about 0.60 AI credits",
     )
   })
 })

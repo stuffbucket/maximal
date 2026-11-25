@@ -62,6 +62,8 @@ use tauri_plugin_window_state::{StateFlags, WindowExt};
 /// Native-string i18n (tray, notifications, window titles, quit dialog),
 /// backed by the same shell/src/i18n/*.json catalogs the webview renders with.
 mod native_i18n;
+/// Screen lock and idle time, reported to the sidecar (local only).
+mod presence;
 mod sidecar_runtime;
 #[cfg(target_os = "windows")]
 mod windows_jump_list;
@@ -101,8 +103,11 @@ const UPDATE_RETRY_INTERVAL: Duration = Duration::from_secs(10 * 60);
 const UPDATE_FORCE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Event the shell sends the Settings window after it ran an update check, so
-/// the topbar button and Diagnostics rows re-read the status right away.
+/// the topbar button and System update rows re-read the status right away.
 const UPDATE_STATUS_EVENT: &str = "update:status";
+/// Event the shell sends the Settings window when the tray asks it to run the
+/// update flow (an apt install); see `PendingUpdateRequest`.
+const UPDATE_REQUESTED_EVENT: &str = "app://update-requested";
 #[cfg(target_os = "windows")]
 const QUIT_REQUESTED_EVENT: &str = "app://quit-requested";
 #[cfg(target_os = "windows")]
@@ -138,6 +143,8 @@ mod main_surface {
     pub const SETTINGS: &str = "settings";
     pub const DASHBOARD: &str = "dashboard";
     pub const SESSIONS: &str = "sessions";
+    // The Rules surface (named Budget before; the identifier keeps that name).
+    pub const BUDGET: &str = "rules";
 }
 
 const MAIN_WINDOW_FALLBACK_WIDTH: f64 = 1100.0;
@@ -146,7 +153,7 @@ const MAIN_WINDOW_MIN_WIDTH: f64 = 640.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
 /// Keeps all five Settings tabs ahead of the pinned utilities with the topbar's
 /// reserved end gap. Observability surfaces use the smaller shared minimum.
-const SETTINGS_SURFACE_MIN_WIDTH: f64 = 736.0;
+const SETTINGS_SURFACE_MIN_WIDTH: f64 = 772.0;
 /// Settings has a bounded readable layout. Observability surfaces explicitly
 /// remove this width constraint because their tables and graphs use extra room.
 const SETTINGS_SURFACE_MAX_WIDTH: f64 = 1100.0;
@@ -392,6 +399,7 @@ mod menu_id {
     pub const SETTINGS: &str = "settings";
     pub const DASHBOARD: &str = "dashboard";
     pub const SESSIONS: &str = "sessions";
+    pub const BUDGET: &str = "budget";
     pub const QUIT: &str = "quit";
     pub const SIGN_IN: &str = "sign_in";
     pub const ACCOUNT_INFO: &str = "account_info";
@@ -413,6 +421,7 @@ enum ShellAction {
     Settings,
     Dashboard,
     Sessions,
+    Budget,
     CheckUpdates,
     ShowLogs,
     OpenConfig,
@@ -425,6 +434,7 @@ impl ShellAction {
             "settings" => Some(Self::Settings),
             "dashboard" => Some(Self::Dashboard),
             "sessions" => Some(Self::Sessions),
+            "budget" => Some(Self::Budget),
             "check-updates" => Some(Self::CheckUpdates),
             "show-logs" => Some(Self::ShowLogs),
             "open-config" => Some(Self::OpenConfig),
@@ -440,6 +450,7 @@ impl ShellAction {
             Self::Settings => Some("--maximal-action=settings"),
             Self::Dashboard => Some("--maximal-action=dashboard"),
             Self::Sessions => Some("--maximal-action=sessions"),
+            Self::Budget => Some("--maximal-action=budget"),
             Self::CheckUpdates => Some("--maximal-action=check-updates"),
             Self::ShowLogs => Some("--maximal-action=show-logs"),
             Self::OpenConfig => Some("--maximal-action=open-config"),
@@ -783,6 +794,8 @@ pub fn run() {
         .manage(runtime_events)
         .manage(PendingShellAction::new())
         .manage(PendingQuitPrompt::new())
+        .manage(PendingUpdateRequest::new())
+        .manage(DownloadPagePrompt::new())
         .manage(SetupPromptShown::new())
         .manage(StartupAnnounced::new())
         .manage(SplashDismissed::new())
@@ -803,6 +816,7 @@ pub fn run() {
             open_settings_at,
             open_dashboard,
             set_main_surface,
+            save_text_file,
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
@@ -817,6 +831,7 @@ pub fn run() {
             set_dock_visibility,
             update_installs_in_place,
             install_update,
+            take_update_request,
             refresh_update_status,
         ])
     } else {
@@ -824,6 +839,7 @@ pub fn run() {
             open_settings_at,
             open_dashboard,
             set_main_surface,
+            save_text_file,
             reveal_config_dir,
             reveal_logs_dir,
             restart_sidecar,
@@ -1022,6 +1038,25 @@ async fn poll_sidecar_status(app: AppHandle, endpoint: SidecarEndpoint) {
     let working_notice_url = endpoint.http_url("/settings/api/notices/working");
     let plugin_notices_url = endpoint.http_url("/settings/api/notices/plugins");
     let plugin_attention_url = endpoint.http_url("/settings/api/plugins/attention");
+    // Presence (screen lock, idle time) goes to the sidecar from its own task:
+    // it reads every second and posts on the 5 s cadence and at once on a
+    // lock change. It ends with this generation, like the loop below.
+    {
+        let key = app.state::<ShellApiKey>().value().to_owned();
+        let presence_app = app.clone();
+        tauri::async_runtime::spawn(presence::report_loop(
+            client.clone(),
+            endpoint.http_url("/settings/api/presence"),
+            key,
+            move || {
+                presence_app.state::<ManagedEndpoint>().current() == Some(endpoint)
+                    && !matches!(
+                        presence_app.state::<AppStatus>().get(),
+                        SidecarState::Failed | SidecarState::Stopped
+                    )
+            },
+        ));
+    }
     // Periodic update check: a menu-bar app can stay open for days, well past a
     // new release, so we re-check on an interval rather than once per launch.
     // `next_update_check` is when the next check is due (None = now, so the
@@ -1414,7 +1449,7 @@ fn apply_update(app: &AppHandle, next: Option<UpdateSnapshot>) {
 /// One-shot banner notification when a newer release is available. Same
 /// best-effort caveats as `fire_rejection_notification` (dev `cargo run` may
 /// silently no-op without a signed bundle). The body names the download page;
-/// Settings → Diagnostics carries the clickable link.
+/// Settings → System → Version and updates carries the clickable link.
 fn fire_update_notification(app: &AppHandle, latest: &str, url: &str) {
     use tauri_plugin_notification::NotificationExt;
     let locale = app.state::<LocaleState>().get();
@@ -1807,6 +1842,10 @@ fn install_windows_jump_list(app: &AppHandle) {
             native_i18n::tr(&locale, "native-tray-sessions"),
         ),
         task(
+            ShellAction::Budget,
+            native_i18n::tr(&locale, "native-tray-budget"),
+        ),
+        task(
             ShellAction::Settings,
             native_i18n::tr(&locale, "native-tray-settings"),
         ),
@@ -1910,6 +1949,12 @@ fn build_muda_dock_menu(
         true,
         None,
     );
+    let budget_item = MenuItem::with_id(
+        menu_id::BUDGET,
+        native_i18n::tr(locale, "native-tray-budget"),
+        true,
+        None,
+    );
     let sep1 = PredefinedMenuItem::separator();
 
     let update = app.state::<LatestUpdate>().get();
@@ -1945,7 +1990,13 @@ fn build_muda_dock_menu(
                 menu.append(&sep_upgrade)?;
                 menu.append(up)?;
             }
-            menu.append_items(&[&sep1, &dashboard_item, &sessions_item, &settings_item])?;
+            menu.append_items(&[
+                &sep1,
+                &dashboard_item,
+                &sessions_item,
+                &budget_item,
+                &settings_item,
+            ])?;
         }
         SidecarState::RunningAuthenticated => {
             let info = MenuItem::with_id(
@@ -1959,7 +2010,13 @@ fn build_muda_dock_menu(
                 menu.append(&sep_upgrade)?;
                 menu.append(up)?;
             }
-            menu.append_items(&[&sep1, &dashboard_item, &sessions_item, &settings_item])?;
+            menu.append_items(&[
+                &sep1,
+                &dashboard_item,
+                &sessions_item,
+                &budget_item,
+                &settings_item,
+            ])?;
         }
         SidecarState::Failed | SidecarState::Stopped => {
             let failed = MenuItem::with_id(
@@ -2252,6 +2309,13 @@ fn build_menu(
         true,
         None::<&str>,
     )?;
+    let budget_item = MenuItem::with_id(
+        app,
+        menu_id::BUDGET,
+        native_i18n::tr(locale, "native-tray-budget"),
+        true,
+        None::<&str>,
+    )?;
     let quit_item = MenuItem::with_id(
         app,
         menu_id::QUIT,
@@ -2350,6 +2414,7 @@ fn build_menu(
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&sessions_item);
+            items.push(&budget_item);
             items.push(&settings_item);
             items.push(&sep2);
             items.push(&quit_item);
@@ -2391,6 +2456,7 @@ fn build_menu(
             items.push(&sep1);
             items.push(&dashboard_item);
             items.push(&sessions_item);
+            items.push(&budget_item);
             items.push(&settings_item);
             items.push(&sep2);
             items.push(&quit_item);
@@ -2448,6 +2514,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         menu_id::SETTINGS => open_settings_window(app, None),
         menu_id::DASHBOARD => open_dashboard_window(app),
         menu_id::SESSIONS => open_sessions_window(app),
+        menu_id::BUDGET => open_budget_window(app),
         menu_id::SIGN_IN => open_settings_window(app, Some("account")),
         menu_id::SHOW_LOGS => do_reveal_logs_dir(app),
         menu_id::OPEN_CONFIG => do_reveal_config_dir(app),
@@ -2475,30 +2542,160 @@ fn open_update_url(app: &AppHandle) {
     }
 }
 
+/// How the tray's "Update to X.Y.Z…" item hands an update off. Every one
+/// starts with a confirmation: the native install confirm, Settings' own
+/// dialog before it shows the apt command, or a native confirm before the
+/// browser opens the download page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrayUpdateHandoff {
+    InPlace,
+    AptInSettings,
+    DownloadPage,
+}
+
+fn tray_update_handoff(in_place: bool, apt: bool) -> TrayUpdateHandoff {
+    if in_place {
+        TrayUpdateHandoff::InPlace
+    } else if apt {
+        TrayUpdateHandoff::AptInSettings
+    } else {
+        TrayUpdateHandoff::DownloadPage
+    }
+}
+
+/// One-shot "the tray asked Settings to run the update flow" request (an apt
+/// install). Queued before Settings opens and signalled to an open window, so
+/// both a window the tray creates and one already open see it; Settings takes
+/// it exactly once. Settings never infers the intent from its own address.
+struct PendingUpdateRequest(std::sync::atomic::AtomicBool);
+
+impl PendingUpdateRequest {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    fn request(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn pending(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn clear(&self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn take(&self) -> bool {
+        self.0.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 /// The tray's "Update to X.Y.Z…" item: installs in place where supported
-/// (see IN_PLACE_UPDATE). An apt install ("Update with apt…") opens Settings →
-/// Diagnostics, which shows the apt command to copy; Maximal never runs apt
-/// or asks for root. Anything else opens the download page.
+/// (see IN_PLACE_UPDATE) after the native confirm. An apt install ("Update
+/// with apt…") asks Settings → System to confirm and then show the apt
+/// command to copy; Maximal never runs apt or asks for root. Anything else
+/// confirms natively before opening the download page.
 fn start_update(app: &AppHandle) {
     if !app.state::<AppProfile>().updates_enabled() {
         return;
     }
-    if !IN_PLACE_UPDATE {
-        let apt = app
-            .state::<LatestUpdate>()
-            .get()
-            .is_some_and(|u| u.apt_command.is_some());
-        if apt {
-            open_settings_window(app, Some(APT_UPDATE_SECTION));
-        } else {
-            open_update_url(app);
+    let latest = app.state::<LatestUpdate>().get();
+    let apt = latest.as_ref().is_some_and(|u| u.apt_command.is_some());
+    match tray_update_handoff(IN_PLACE_UPDATE, apt) {
+        TrayUpdateHandoff::InPlace => {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                // No version: nothing has been confirmed yet, so the shell asks
+                // natively before downloading.
+                run_in_place_update(&handle, None, |_| {}).await;
+            });
         }
-        return;
+        TrayUpdateHandoff::AptInSettings => {
+            let opened = queue_update_request(&app.state::<PendingUpdateRequest>(), || {
+                try_open_settings_window(app, Some(APT_UPDATE_SECTION))
+            });
+            if !opened {
+                return;
+            }
+            if let Err(err) = app.emit_to(SETTINGS_WINDOW_LABEL, UPDATE_REQUESTED_EVENT, ()) {
+                eprintln!("[shell] emit update-requested failed: {err}");
+            }
+        }
+        TrayUpdateHandoff::DownloadPage => {
+            let Some(latest) = latest.map(|u| u.latest) else {
+                return;
+            };
+            // One confirmation at a time: more tray clicks while it is up
+            // neither stack dialogs nor open the page twice.
+            if !app.state::<DownloadPagePrompt>().claim() {
+                return;
+            }
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if confirm_open_update_page(&handle, &latest).await {
+                    open_update_url(&handle);
+                }
+                handle.state::<DownloadPagePrompt>().release();
+            });
+        }
     }
-    let handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        run_in_place_update(&handle, |_| {}).await;
-    });
+}
+
+/// Queue the tray's update request, then open Settings; keep the request only
+/// if Settings opened (or was found). Queued first so a window that starts
+/// loading during `open` sees it; cleared on failure so a later, unrelated
+/// Settings load never prompts. Returns whether Settings opened.
+fn queue_update_request(request: &PendingUpdateRequest, open: impl FnOnce() -> bool) -> bool {
+    request.request();
+    let opened = open();
+    if !opened {
+        request.clear();
+    }
+    opened
+}
+
+/// Set while the tray's download-page confirmation is showing.
+struct DownloadPagePrompt(std::sync::atomic::AtomicBool);
+
+impl DownloadPagePrompt {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Returns true if this caller may show the confirmation (none was up).
+    fn claim(&self) -> bool {
+        !self.0.swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn release(&self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Native confirm before the tray sends the person to the download page.
+/// Resolves to true only on the open button.
+async fn confirm_open_update_page(app: &AppHandle, version: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<LocaleState>().get();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(native_i18n::t(
+            &locale,
+            "native-update-open-body",
+            &[("version", version)],
+        ))
+        .title(native_i18n::tr(&locale, "native-update-confirm-title"))
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            native_i18n::tr(&locale, "native-update-open-action"),
+            native_i18n::tr(&locale, "native-update-confirm-cancel"),
+        ))
+        .show(move |confirmed| {
+            let _ = tx.send(confirmed);
+        });
+    rx.await.unwrap_or(false)
 }
 
 /// Progress the Settings window hears while an in-place update runs.
@@ -2616,18 +2813,27 @@ fn update_location_problem() -> Option<String> {
     None
 }
 
-/// Run one in-place update: check the desktop manifest, confirm the version
-/// with the user, download and verify the signed update, install it, stop the
-/// sidecar, and relaunch Maximal. Any failure tells the user and opens the
-/// download page instead.
-async fn run_in_place_update(app: &AppHandle, on_step: impl Fn(UpdateStep)) -> UpdateOutcome {
+/// Run one in-place update: check the desktop manifest, make sure the person
+/// agreed to that exact version, download and verify the signed update,
+/// install it, stop the sidecar, and relaunch Maximal. Any failure tells the
+/// user and opens the download page instead.
+///
+/// `confirmed_version` is the version Settings' own dialog just named and the
+/// person confirmed (the title-bar and System buttons); the tray passes None.
+/// The native confirm is skipped only when it equals the signed update's
+/// version, so every install is preceded by exactly one explicit yes.
+async fn run_in_place_update(
+    app: &AppHandle,
+    confirmed_version: Option<String>,
+    on_step: impl Fn(UpdateStep),
+) -> UpdateOutcome {
     if !IN_PLACE_UPDATE {
         return UpdateOutcome::Unavailable;
     }
     if !app.state::<UpdateInstall>().claim() {
         return UpdateOutcome::Busy;
     }
-    let outcome = match install_in_place(app, &on_step).await {
+    let outcome = match install_in_place(app, confirmed_version, &on_step).await {
         Ok(outcome) => outcome,
         Err(reason) => {
             eprintln!("[shell] in-place update failed: {reason}");
@@ -2643,6 +2849,7 @@ async fn run_in_place_update(app: &AppHandle, on_step: impl Fn(UpdateStep)) -> U
 /// or something fails; a successful install relaunches the app.
 async fn install_in_place(
     app: &AppHandle,
+    confirmed_version: Option<String>,
     on_step: &impl Fn(UpdateStep),
 ) -> Result<UpdateOutcome, String> {
     use tauri_plugin_updater::UpdaterExt;
@@ -2672,7 +2879,11 @@ async fn install_in_place(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "no newer release in the desktop manifest".to_string())?;
 
-    if !confirm_update(app, &update.version).await {
+    // Settings already asked about this exact signed version, or the shell
+    // asks natively now naming it. Nothing installs without one of the two.
+    let confirmed = webview_confirmed_release(confirmed_version.as_deref(), &update.version)
+        || confirm_update(app, &update.version).await;
+    if !confirmed {
         return Ok(UpdateOutcome::Cancelled);
     }
     on_step(UpdateStep::Downloading);
@@ -2706,6 +2917,20 @@ async fn install_in_place(
     // Relaunch into the new version. From this task, `restart` goes through
     // ExitRequested (nothing left to stop) and the normal exit cleanup.
     app.restart();
+}
+
+/// Whether Settings' dialog already confirmed `signed`, the version the
+/// verified desktop manifest offers: the confirmed version (an optional
+/// leading `v` and surrounding space aside) must be exactly that version.
+/// Anything else — no confirmation, a different version, an empty string —
+/// means the shell must ask natively.
+fn webview_confirmed_release(confirmed: Option<&str>, signed: &str) -> bool {
+    let Some(confirmed) = confirmed else {
+        return false;
+    };
+    let normalize = |v: &str| v.trim().trim_start_matches('v').to_string();
+    let confirmed = normalize(confirmed);
+    !confirmed.is_empty() && confirmed == normalize(signed)
 }
 
 /// Native confirm naming the version about to be installed. Resolves to
@@ -2827,14 +3052,20 @@ fn respawn_sidecar(app: &AppHandle) {
 /// The optional `section` becomes a URL fragment so the frontend can scroll to
 /// or select that section.
 fn open_settings_window(app: &AppHandle, section: Option<&str>) {
-    open_settings_window_with_presentation(app, section, MainWindowPresentation::Foreground);
+    try_open_settings_window(app, section);
+}
+
+/// `open_settings_window`, reporting whether Settings was opened or found
+/// (false when the sidecar isn't ready or the window couldn't be built).
+fn try_open_settings_window(app: &AppHandle, section: Option<&str>) -> bool {
+    open_settings_window_with_presentation(app, section, MainWindowPresentation::Foreground)
 }
 
 fn open_settings_window_with_presentation(
     app: &AppHandle,
     section: Option<&str>,
     presentation: MainWindowPresentation,
-) {
+) -> bool {
     // Any foreground window taking the stage retires the splash (it's
     // always-on-top and would otherwise sit over this one — e.g. the
     // first-launch sign-in nudge). Windows' minimized startup window keeps it.
@@ -2846,7 +3077,7 @@ fn open_settings_window_with_presentation(
     // server to point at anymore.
     let Some(endpoint) = app.state::<ManagedEndpoint>().current() else {
         eprintln!("[shell] cannot open Settings before the sidecar is ready");
-        return;
+        return false;
     };
     let settings_origin = endpoint.browser_origin();
     let url_string = match section {
@@ -2857,20 +3088,21 @@ fn open_settings_window_with_presentation(
         Ok(u) => u,
         Err(err) => {
             eprintln!("[shell] bad settings URL: {err}");
-            return;
+            return false;
         }
     };
 
     let surface = match section {
         Some(main_surface::DASHBOARD) => main_surface::DASHBOARD,
         Some(main_surface::SESSIONS) => main_surface::SESSIONS,
+        Some(main_surface::BUDGET) => main_surface::BUDGET,
         _ => main_surface::SETTINGS,
     };
     let title = main_surface_title(app, surface);
     if let Some(existing) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
         #[cfg(target_os = "windows")]
         if presentation == MainWindowPresentation::WindowsStartupMinimized {
-            return;
+            return true;
         }
         app.state::<MainSurfaceState>().set(surface);
         let _ = existing.set_title(&title);
@@ -2883,7 +3115,7 @@ fn open_settings_window_with_presentation(
             let _ = existing.navigate(url);
         }
         present_window(app, &existing);
-        return;
+        return true;
     }
     app.state::<MainSurfaceState>().set(surface);
 
@@ -2913,9 +3145,11 @@ fn open_settings_window_with_presentation(
     match builder.build() {
         Ok(window) => {
             restore_main_window(app, &window, presentation);
+            true
         }
         Err(err) => {
             eprintln!("[shell] settings window build failed: {err}");
+            false
         }
     }
 }
@@ -3072,6 +3306,7 @@ fn main_surface_title(app: &AppHandle, surface: &str) -> String {
     match surface {
         main_surface::DASHBOARD => native_i18n::tr(&locale, "native-window-dashboard-title"),
         main_surface::SESSIONS => native_i18n::tr(&locale, "native-window-sessions-title"),
+        main_surface::BUDGET => native_i18n::tr(&locale, "native-window-budget-title"),
         _ => settings_title(app),
     }
 }
@@ -3113,6 +3348,14 @@ fn open_dashboard_window(app: &AppHandle) {
 fn open_sessions_window(app: &AppHandle) {
     const _SESSIONS_ROUTE_CONTRACT: &str = "/ui/sessions/";
     open_settings_window(app, Some(main_surface::SESSIONS));
+}
+
+/// Opens (or focuses) the unified window on its Rules surface (named Budget
+/// before): a React section of the Settings bundle, reached at `#rules`
+/// (`/ui/rules/` and the old `/ui/budget/` redirect there).
+fn open_budget_window(app: &AppHandle) {
+    const _RULES_ROUTE_CONTRACT: &str = "/ui/rules/";
+    open_settings_window(app, Some(main_surface::BUDGET));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3403,6 +3646,13 @@ fn has_quit_request(state: State<'_, PendingQuitPrompt>) -> bool {
     state.pending()
 }
 
+/// Tauri command — Settings takes the tray's queued update request (true at
+/// most once per request), on load and when signalled.
+#[tauri::command]
+fn take_update_request(state: State<'_, PendingUpdateRequest>) -> bool {
+    state.take()
+}
+
 #[tauri::command]
 fn take_quit_request(state: State<'_, PendingQuitPrompt>) -> bool {
     state.take()
@@ -3428,6 +3678,7 @@ fn dispatch_shell_action(app: &AppHandle, action: ShellAction) {
         ShellAction::Settings => open_settings_window(app, None),
         ShellAction::Dashboard => open_dashboard_window(app),
         ShellAction::Sessions => open_sessions_window(app),
+        ShellAction::Budget => open_budget_window(app),
         ShellAction::CheckUpdates => check_updates_from_tray(app),
         ShellAction::ShowLogs => do_reveal_logs_dir(app),
         ShellAction::OpenConfig => do_reveal_config_dir(app),
@@ -3480,6 +3731,7 @@ fn set_main_surface(app: AppHandle, surface: String) -> Result<(), String> {
     let normalized = match surface.as_str() {
         main_surface::DASHBOARD => main_surface::DASHBOARD,
         main_surface::SESSIONS => main_surface::SESSIONS,
+        main_surface::BUDGET => main_surface::BUDGET,
         main_surface::SETTINGS => main_surface::SETTINGS,
         _ => return Err("unknown main surface".to_string()),
     };
@@ -3491,6 +3743,46 @@ fn set_main_surface(app: AppHandle, surface: String) -> Result<(), String> {
         apply_main_surface_constraints(&window, normalized).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// Tauri command: ask where to save `contents` (the Rules window's CSV export)
+/// and write it there. `Ok(true)` when saved, `Ok(false)` when the person
+/// cancelled the dialog. Only the file name of `suggested_name` is used.
+#[tauri::command]
+async fn save_text_file(
+    app: AppHandle,
+    suggested_name: String,
+    contents: String,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let path = std::path::Path::new(&suggested_name);
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "invalid file name".to_string())?
+        .to_string();
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_string);
+    // The dialog blocks until the person answers, so keep it off the async workers.
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app.dialog().file().set_file_name(name);
+        if let Some(extension) = extension.as_deref() {
+            dialog = dialog.add_filter(extension.to_uppercase(), &[extension]);
+        }
+        dialog.blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(picked) = picked else {
+        return Ok(false);
+    };
+    let destination = picked.into_path().map_err(|error| error.to_string())?;
+    std::fs::write(destination, contents).map_err(|error| error.to_string())?;
+    Ok(true)
 }
 
 /// Tauri command — reveal the maximal config directory in Finder/Explorer.
@@ -3641,16 +3933,22 @@ async fn refresh_update_status(app: AppHandle) {
     let _ = check_for_update(&app, &client, &update_status_endpoint(endpoint, false)).await;
 }
 
-/// Tauri command — the topbar "Update to X.Y.Z" button. Runs the in-place
-/// update (confirm, download, install, relaunch) and streams its progress on
-/// `on_step`. Returns `unavailable` where updates don't install in place, so
-/// the webview opens the download page itself; on success it never returns.
+/// Tauri command — the title-bar and System "Update" buttons, after
+/// Settings' confirmation dialog said yes to `version`. Runs the in-place
+/// update (download, install, relaunch; a native confirm only if the signed
+/// update isn't `version`) and streams its progress on `on_step`. Returns
+/// `unavailable` where updates don't install in place, so the webview opens
+/// the download page itself; on success it never returns.
 #[tauri::command]
-async fn install_update(app: AppHandle, on_step: Channel<UpdateStep>) -> UpdateOutcome {
+async fn install_update(
+    app: AppHandle,
+    on_step: Channel<UpdateStep>,
+    version: String,
+) -> UpdateOutcome {
     if !app.state::<AppProfile>().updates_enabled() {
         return UpdateOutcome::Unavailable;
     }
-    run_in_place_update(&app, |step| {
+    run_in_place_update(&app, Some(version), |step| {
         let _ = on_step.send(step);
     })
     .await
@@ -3763,6 +4061,7 @@ mod tests {
             ("settings", ShellAction::Settings),
             ("dashboard", ShellAction::Dashboard),
             ("sessions", ShellAction::Sessions),
+            ("budget", ShellAction::Budget),
             ("check-updates", ShellAction::CheckUpdates),
             ("show-logs", ShellAction::ShowLogs),
             ("open-config", ShellAction::OpenConfig),
@@ -3801,6 +4100,7 @@ mod tests {
             ShellAction::Settings,
             ShellAction::Dashboard,
             ShellAction::Sessions,
+            ShellAction::Budget,
             ShellAction::CheckUpdates,
             ShellAction::ShowLogs,
             ShellAction::OpenConfig,
@@ -3922,14 +4222,18 @@ mod tests {
         assert_eq!(settings.max_height, None);
         assert_eq!(
             settings.min_width,
-            Some(PixelUnit::Logical(LogicalUnit::new(736.0))),
+            Some(PixelUnit::Logical(LogicalUnit::new(772.0))),
         );
         assert_eq!(
             settings.min_height,
             Some(PixelUnit::Logical(LogicalUnit::new(480.0))),
         );
 
-        for surface in [main_surface::DASHBOARD, main_surface::SESSIONS] {
+        for surface in [
+            main_surface::DASHBOARD,
+            main_surface::SESSIONS,
+            main_surface::BUDGET,
+        ] {
             let observability = main_window_constraints(surface);
             assert_eq!(
                 observability.min_width,
@@ -4006,6 +4310,85 @@ mod tests {
         assert!(should_notify_update("0.4.47", None));
         assert!(!should_notify_update("0.4.47", Some("0.4.47")));
         assert!(should_notify_update("0.4.48", Some("0.4.47")));
+    }
+
+    #[test]
+    fn every_tray_update_handoff_starts_with_a_confirmation() {
+        use super::{tray_update_handoff, TrayUpdateHandoff};
+        // Windows/macOS: the native install confirm (apt never applies there).
+        assert_eq!(tray_update_handoff(true, false), TrayUpdateHandoff::InPlace);
+        assert_eq!(tray_update_handoff(true, true), TrayUpdateHandoff::InPlace);
+        // apt: Settings' confirmation, then the command to copy.
+        assert_eq!(
+            tray_update_handoff(false, true),
+            TrayUpdateHandoff::AptInSettings
+        );
+        // Anything else: a native confirm before the browser opens mxml.sh.
+        assert_eq!(
+            tray_update_handoff(false, false),
+            TrayUpdateHandoff::DownloadPage
+        );
+    }
+
+    #[test]
+    fn a_tray_update_request_is_taken_exactly_once() {
+        use super::PendingUpdateRequest;
+        let request = PendingUpdateRequest::new();
+        assert!(!request.take());
+        request.request();
+        assert!(request.take());
+        assert!(!request.take());
+    }
+
+    #[test]
+    fn a_tray_update_request_survives_only_if_settings_opened() {
+        use super::{queue_update_request, PendingUpdateRequest};
+        // Settings couldn't open (sidecar not ready, window build failed):
+        // nothing is left queued to prompt later, unprompted.
+        let request = PendingUpdateRequest::new();
+        assert!(!queue_update_request(&request, || false));
+        assert!(!request.take());
+        // Settings opened or was found: the request waits for it, and it was
+        // queued before the window started loading so a new window sees it.
+        let request = PendingUpdateRequest::new();
+        assert!(queue_update_request(&request, || {
+            assert!(request.pending());
+            true
+        }));
+        assert!(request.take());
+        assert!(!request.take());
+    }
+
+    #[test]
+    fn the_tray_download_page_confirm_runs_one_at_a_time() {
+        use super::DownloadPagePrompt;
+        let prompt = DownloadPagePrompt::new();
+        assert!(prompt.claim());
+        // Further tray clicks while the dialog is up neither stack dialogs
+        // nor open the page again.
+        assert!(!prompt.claim());
+        assert!(!prompt.claim());
+        prompt.release();
+        assert!(prompt.claim());
+    }
+
+    #[test]
+    fn skips_the_native_confirm_only_for_the_exact_version_settings_confirmed() {
+        use super::webview_confirmed_release;
+        // The tray never passes a version: it always asks natively.
+        assert!(!webview_confirmed_release(None, "0.4.40"));
+        // Settings' dialog named the version the signed update carries.
+        assert!(webview_confirmed_release(Some("0.4.40"), "0.4.40"));
+        assert!(webview_confirmed_release(Some("v0.4.40"), "0.4.40"));
+        assert!(webview_confirmed_release(Some(" 0.4.40 "), "0.4.40"));
+        assert!(webview_confirmed_release(Some("0.5.0-rc.1"), "0.5.0-rc.1"));
+        // Anything else: the person agreed to a different (or no) version, so
+        // the shell asks again naming the one it would install.
+        assert!(!webview_confirmed_release(Some("0.4.39"), "0.4.40"));
+        assert!(!webview_confirmed_release(Some("0.4.40"), "0.4.41"));
+        assert!(!webview_confirmed_release(Some("0.5.0"), "0.5.0-rc.1"));
+        assert!(!webview_confirmed_release(Some(""), "0.4.40"));
+        assert!(!webview_confirmed_release(Some("v"), ""));
     }
 
     #[test]

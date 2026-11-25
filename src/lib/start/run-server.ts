@@ -10,12 +10,14 @@
 
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import { initializeFigjamRelayKey } from "@stuffbucket/maximal-plugin-figjam"
 import consola from "consola"
 import { serve } from "srvx"
 
 import { removeLegacyShimIfPresent } from "~/apps/claude-code/detect"
 import { runAppBootHooks } from "~/apps/registry"
 import { type AccountType } from "~/lib/auth/auth-types"
+import { refreshAllowanceAtStartup } from "~/lib/budget/runtime"
 import { mergeConfigWithDefaults } from "~/lib/config/config"
 import { initProxyFromEnv } from "~/lib/http/proxy"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
@@ -67,6 +69,12 @@ export interface RunServerOptions {
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
+  // One FigJam relay key for this Maximal process, replacing any inherited
+  // value, set before plugin generations spawn so every generation (each
+  // inventory or settings reload) inherits the same key and the Figma plugin
+  // already written keeps connecting.
+  initializeFigjamRelayKey()
+
   // Work around unjs/consola#357 until a release includes PR #359.
   consola.options.throttle = 0
 
@@ -234,6 +242,9 @@ function afterListening(
 
   // One-time "Maximal is working" notification (shown by the menu-bar shell).
   void startWorkingNotice()
+  // Read Copilot's allowance now, so the Rules window shows it before the
+  // first request does.
+  refreshAllowanceAtStartup()
   // Log a line when a newer version is out (with the apt command for an apt
   // install), at startup and every few hours, for proxies run without the app.
   startUpdateNotice()

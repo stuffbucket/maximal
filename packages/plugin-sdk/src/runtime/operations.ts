@@ -16,6 +16,7 @@ import type {
   OperationRegistry,
   OperationRequest,
   OperationResult,
+  PreparedOperation,
   ServedModel,
 } from "../operations"
 import type { PluginDisposer } from "../types"
@@ -169,27 +170,64 @@ class OperationsCore implements OperationDispatch {
     return matches.length === 1 ? matches[0] : undefined
   }
 
-  async dispatch(
-    request: Omit<OperationRequest, "binding">,
-  ): Promise<OperationResult> {
-    const resolved = this.resolve(request.operation, request.model)
-    if (!resolved) {
-      throw new OperationUnavailableError(request.operation, request.model)
-    }
-    const key = keyOf(request.operation, resolved.binding)
+  prepare(
+    operation: ModelOperation,
+    model: string,
+  ): PreparedOperation | undefined {
+    const resolved = this.resolve(operation, model)
+    if (!resolved) return undefined
+    const key = keyOf(operation, resolved.binding)
     for (const entry of this.#entries) {
       if (entry.pluginId !== resolved.pluginId) continue
       if (
-        entry.handler.operation === request.operation
-        && entry.bindings.some((b) => keyOf(request.operation, b) === key)
+        entry.handler.operation !== operation
+        || !entry.bindings.some((binding) => keyOf(operation, binding) === key)
       ) {
-        return await entry.handler.handle({
-          ...request,
-          binding: resolved.binding,
-        })
+        continue
+      }
+      let released = false
+      return {
+        operation,
+        model,
+        pluginId: entry.pluginId,
+        binding: { ...resolved.binding },
+        execute: async (request) => {
+          if (released)
+            throw new Error("Prepared operation lease was released.")
+          return await entry.handler.handle({
+            ...request,
+            operation,
+            model,
+            binding: resolved.binding,
+          })
+        },
+        release: () => {
+          released = true
+        },
       }
     }
-    throw new OperationUnavailableError(request.operation, request.model)
+    return undefined
+  }
+
+  async dispatch(
+    request: Omit<OperationRequest, "binding">,
+  ): Promise<OperationResult> {
+    const prepared = this.prepare(request.operation, request.model)
+    if (!prepared) {
+      throw new OperationUnavailableError(request.operation, request.model)
+    }
+    try {
+      return await prepared.execute({
+        body: request.body,
+        signal: request.signal,
+        invocationId: request.invocationId,
+        providerCallId: request.providerCallId,
+        sequence: request.sequence,
+        origin: request.origin,
+      })
+    } finally {
+      prepared.release()
+    }
   }
 
   servedModels(): ReadonlyArray<ServedModel> {
@@ -280,6 +318,10 @@ class OperationsService
     return this[kCore].resolve(operation, model)
   }
 
+  prepare(operation: ModelOperation, model: string) {
+    return this[kCore].prepare(operation, model)
+  }
+
   dispatch(request: Omit<OperationRequest, "binding">) {
     return this[kCore].dispatch(request)
   }
@@ -305,6 +347,8 @@ export function operationDispatchOf(root: Context): OperationDispatch {
   return {
     resolve: (operation, model) =>
       dispatchTarget(root)?.resolve(operation, model),
+    prepare: (operation, model) =>
+      dispatchTarget(root)?.prepare(operation, model),
     dispatch: (request) => {
       const target = dispatchTarget(root)
       return target ?

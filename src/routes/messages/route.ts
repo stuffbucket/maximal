@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 
 import { requireGithubAuth } from "~/lib/auth/request-auth"
+import { withPause } from "~/lib/budget/pause-hold"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
 
 import { handleCountTokens } from "./count-tokens-handler"
@@ -12,6 +13,15 @@ export const messageRoutes = new Hono()
 messageRoutes.onError(proxyErrorHandler("anthropic"))
 messageRoutes.use(requireGithubAuth)
 
-messageRoutes.post("/", (c) => handleCompletion(c))
+// A pause rule at its limit holds the request here rather than refusing it.
+messageRoutes.post(
+  "/",
+  withPause({
+    wire: "anthropic",
+    operation: "messages",
+    handler: handleCompletion,
+    onError: proxyErrorHandler("anthropic"),
+  }),
+)
 
 messageRoutes.post("/count_tokens", (c) => handleCountTokens(c))

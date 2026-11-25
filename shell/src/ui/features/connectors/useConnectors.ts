@@ -14,7 +14,7 @@ import { type Problem, describeProblem, withRetry } from "../../problems";
  * move (a sign-in finishing minutes after the click), so the hook refetches
  * on that frame, on every (re)connect of the stream, and when Settings
  * navigates back to the section. `version` counts those nudges so an open
- * detail page can refetch on the same beat.
+ * detail dialog can refetch on the same beat.
  */
 export interface ConnectorMutationResult {
   ok: boolean;
@@ -34,7 +34,12 @@ interface UseConnectors {
 }
 
 function sortByName(connectors: Array<PluginView>): Array<PluginView> {
-  return [...connectors].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return [...connectors].sort(
+    (a, b) =>
+      a.displayName.localeCompare(b.displayName, "en", {
+        sensitivity: "base",
+      }) || a.id.localeCompare(b.id, "en"),
+  );
 }
 
 export function useConnectors(): UseConnectors {

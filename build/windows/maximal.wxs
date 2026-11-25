@@ -106,6 +106,9 @@
         Windows installer dev harness asserts. Its own component so it has
         a registry keypath independent of the file.
       -->
+      <!-- Preserve the sealed generation tree beside maximal.exe. Wildcard
+           harvesting keeps its content-addressed directory name intact. -->
+      <Files Include="plugin-builtins\**" />
       <Component Id="InstalledMarker" Bitness="always64">
         <RegistryValue
             Root="HKCU"

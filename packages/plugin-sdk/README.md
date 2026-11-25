@@ -40,6 +40,8 @@ export const manifest = {
   },
 } satisfies PluginManifest
 export const inject = ["tools", "surface", "storage", "host"] as const   // only what you use
+// If this plugin provides a Cordis service to other plugins:
+// export const provides = ["example-catalog"] as const
 
 export function apply(ctx: Context, config: Config): void {
   const lifecycle = new AbortController()
@@ -67,6 +69,32 @@ any Standard Schema library (maximal uses zod 4). `apply` should return
 quickly; long-running work (sign-in, upstream connections) runs in the
 background, tied to the fiber with `ctx.effect` and reported through
 `ctx.surface.setStatus`.
+
+A plugin service is an explicit module contract: list its lower-case Cordis
+name in `provides`, then register it with `ctx.provide(name, value)` inside
+`apply`. `provides` is planning and validation metadata, not an automatic
+registration. Consumers list the name in `inject`; the host rejects undeclared
+names, while Cordis keeps a legal consumer fiber pending whenever its declared
+provider is absent or inactive.
+
+### Exclusive resources
+
+A plugin is overlap-safe unless `apply` returns a `PluginResourceLifecycle`.
+Use that return value for a process-independent singleton such as a listener:
+declare `{ mode: "exclusive", resources: ["example-listener:4150"] }`, stage
+without acquiring it in `prepare`, bind it in `commit`, stop it in `revoke`, and
+recreate the old instance in `resume`. Hooks are serialized, bounded and must
+honor their `PluginLifecycleContext.signal`. Handoff and recovery `commit` calls
+resolve only after the resource is ready. Initial activation may deliberately
+retain the logical reservation while exposing a recoverable error and retry
+action (FigJam does this when its port is occupied). `revoke` resolves only after
+the resource is physically gone. The host acquires the parent lease before
+`commit` and retains it through an acknowledged
+`revoke` or process reap. Generation replacement is ordered candidate
+`prepare` → old `revoke` → candidate `commit`; failure before the durable point
+revokes the candidate before resuming the old generation. Keep the handle until
+`revoke` succeeds: an ambiguous failure stays fenced for retry instead of
+making the singleton appear free.
 
 ### Manifest
 
@@ -168,13 +196,18 @@ never destructured.
   `call` has `signal`, `sessionId?`, `model`, `client`, `budget?` (the
   `{ plugin, tool }` scope the host checks the budget limits under before
   `execute` runs; a refusal is the tool's result and `execute` never runs) and
-  `reportSpend?(spend)`. A billed tool declares `estimate?(input)` → `{
-  operation, provider?, body }` (the model operation the call would make and
-  the body to price it from; the app core holds that operation's estimate, so
-  the tool carries no price list) and calls `call.reportSpend({ operation,
-  model, provider, result })` with the operation's `{ usage, cost }` once the
-  provider answered, which records the usage and books the cost against the
-  hold. A free tool does neither.
+  `nextProviderCall(operation, upstreamModel)` and `reportSpend?(spend)`. A
+  billed tool declares `estimate?(input)` → `{ operation, provider?, body }`
+  (the model operation the call would make and the body to price it from; the
+  app core holds that operation's estimate, so the tool carries no price list).
+  Before each upstream request it calls `nextProviderCall`, passes the returned
+  `{ invocationId, providerCallId, sequence, operation, model }` to
+  `provider.postJson`, then reports that same identity with the provider,
+  served model and operation result through `reportSpend`. `invocationId`
+  identifies the admitted tool execution; each provider request has a distinct
+  `providerCallId` and increasing sequence, so several calls settle separately
+  without double-counting. `callBoundModel` implements this handshake for the
+  built-in capability plugins. A free tool does neither.
   Server tools are not MCP tools and have no tool permissions.
   `decision-tools.ts` has the shared pieces of a capability plugin that offers
   its model this way: `serverToolWhileAvailable` (register only while a binding's

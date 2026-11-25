@@ -44,10 +44,12 @@ afterAll(() => {
 describe("Codex app", () => {
   test("has exactly one registry entry", () => {
     expect(getAllApps().map(({ id }) => id)).toEqual([
+      "chatgpt",
       "claude-code",
       "claude-desktop",
       "codex",
       "copilot-cli",
+      "pi",
     ])
   })
 
@@ -57,7 +59,7 @@ describe("Codex app", () => {
     const details = await app.getDetails()
 
     expect(details.id).toBe("codex")
-    expect(details.name).toBe("Codex")
+    expect(details.name).toBe("Codex CLI")
     expect(details.enabled).toBe(false)
     expect(details.status).toBe("ready")
     expect(details.installs).toEqual([

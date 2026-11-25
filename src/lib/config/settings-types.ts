@@ -16,17 +16,10 @@
 
 import { z } from "zod"
 
-import {
-  BudgetDisplayUnit,
-  BudgetLimitAction,
-  BudgetLimitId,
-  BudgetLimitReset,
-  BudgetScope,
-  BudgetWarnAt,
-  CreditUsdRate,
-  NanoAiuAmount,
-} from "../budget/schema"
 import { ClaudeAutoTierState } from "../models/claude-auto-model-types"
+
+export * from "../budget/wire"
+export * from "../budget/wire-reports"
 
 export { ClaudeAutoTierState } from "../models/claude-auto-model-types"
 
@@ -440,7 +433,14 @@ export const ClaudeCodeInstallStatus = z.object({
 export type ClaudeCodeInstallStatus = z.infer<typeof ClaudeCodeInstallStatus>
 
 export const AppEntry = z.object({
-  id: z.enum(["claude-code", "claude-desktop", "codex", "copilot-cli"]),
+  id: z.enum([
+    "chatgpt",
+    "claude-code",
+    "claude-desktop",
+    "codex",
+    "copilot-cli",
+    "pi",
+  ]),
   name: z.string(),
   kind: z.enum(["config", "coming-soon"]),
   /** Whether the integration is currently active (proxy config applied). */
@@ -457,6 +457,8 @@ export const AppEntry = z.object({
       "foreign-base-url",
       "foreign-api-key-helper",
       "foreign-gateway-profile",
+      "unreadable-profile",
+      "other-maximal-config",
       "cleanup-required",
     ])
     .nullable(),
@@ -470,16 +472,21 @@ export type AppsListResponse = z.infer<typeof AppsListResponse>
 
 export const CodexToggleRequest = z.object({
   enabled: z.boolean(),
+  overrideOtherMaximal: z.boolean().optional(),
 })
 export type CodexToggleRequest = z.infer<typeof CodexToggleRequest>
 
 export const ClaudeCodeToggleRequest = z.object({
   enabled: z.boolean(),
+  overrideOtherMaximal: z.boolean().optional(),
 })
 export type ClaudeCodeToggleRequest = z.infer<typeof ClaudeCodeToggleRequest>
 
 export const ClaudeDesktopToggleRequest = z.object({
   enabled: z.boolean(),
+  overrideOtherMaximal: z.boolean().optional(),
+  /** Take over from a gateway Maximal didn't set up (explicit confirmation). */
+  overrideForeignGateway: z.boolean().optional(),
 })
 export type ClaudeDesktopToggleRequest = z.infer<
   typeof ClaudeDesktopToggleRequest
@@ -510,7 +517,12 @@ export type ClaudeDesktopToggleRequest = z.infer<
 // public manifest subset below is what keeps auth details (client ids,
 // authorities, scopes) and the config schema off the list endpoint.
 
-export const PluginClientId = z.enum(["claude-code"])
+export const PluginClientId = z.enum([
+  "claude-code",
+  "claude-desktop",
+  "codex",
+  "copilot-cli",
+])
 export type PluginClientId = z.infer<typeof PluginClientId>
 
 /** A connector exposes tools to MCP clients and gets host-managed tool
@@ -602,6 +614,32 @@ export const PluginClientView = z.object({
 })
 export type PluginClientView = z.infer<typeof PluginClientView>
 
+export const PluginAccessTargetId = z
+  .string()
+  .regex(/^(?:app|connection):[\w.-]{1,128}$/u)
+export type PluginAccessTargetId = z.infer<typeof PluginAccessTargetId>
+
+/** One app integration or named API connection that can use a connector. */
+export const PluginAccessView = z.object({
+  id: PluginAccessTargetId,
+  kind: z.enum(["app", "connection"]),
+  /** Product name for an app, user-defined label for a connection. */
+  name: z.string(),
+  permission: ToolPermission,
+  /** Whether the target is enabled and usable right now. Its permission can
+   *  still be changed while unavailable. */
+  available: z.boolean(),
+  /** Stable localization key for why this target is unavailable. */
+  reasonKind: z
+    .enum(["generic", "app-off", "unsupported", "custom"])
+    .optional(),
+  /** Host- or plugin-supplied prose when `reasonKind` is `custom`. */
+  reason: z.string().optional(),
+  clientId: PluginClientId.optional(),
+  standalone: PluginClientView.shape.standalone,
+})
+export type PluginAccessView = z.infer<typeof PluginAccessView>
+
 /** A connector's upstream, from `manifest.connector`. Public facts only:
  *  the auth *type* is shown ("Signs in with Microsoft Entra ID"); client
  *  ids, authorities, scopes and redirect URIs are never sent. */
@@ -654,16 +692,23 @@ export const PluginView = z.object({
   manifest: PluginManifestView,
   /** Desired state (config.json → plugins.<id>.enabled). */
   enabled: z.boolean(),
-  lifecycle: z.enum(["disabled", "starting", "active", "failed"]),
+  lifecycle: z.enum(["disabled", "waiting", "starting", "active", "failed"]),
   /** Why it failed (unreadable settings file, path-qualified config
    *  issues, apply error). Only with `lifecycle: "failed"`. */
   error: z.string().optional(),
+  /** Required services keeping a waiting plugin pending. */
+  waitingForServices: z.array(z.string()).optional(),
+  /** Human-readable reason for a waiting plugin. */
+  waitingReason: z.string().optional(),
   /** The running plugin's own report (`ctx.surface.setStatus`). */
   status: PluginStatus.optional(),
   /** Counts over the same tools the detail's `tools` lists (live or cached). */
   toolCounts: PluginToolCounts,
   toolsSource: PluginToolsSource,
+  /** Compatibility view of fixed app integrations. */
   clients: z.array(PluginClientView),
+  /** Every fixed app and named API connection, with its access policy. */
+  access: z.array(PluginAccessView),
   /** The plugin's MCP endpoint on this Maximal. */
   endpoint: z.string(),
 })
@@ -739,6 +784,12 @@ export const PluginUpdateRequest = z
   .object({
     enabled: z.boolean().optional(),
     clients: z.array(PluginClientId).max(8).optional(),
+    access: z
+      .record(PluginAccessTargetId, ToolPermission)
+      .refine((value) => Object.keys(value).length <= 256, {
+        message: "At most 256 app and connection permissions are allowed",
+      })
+      .optional(),
     config: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
@@ -760,155 +811,6 @@ export const PluginToolPermissionsRequest = z
 export type PluginToolPermissionsRequest = z.infer<
   typeof PluginToolPermissionsRequest
 >
-
-// ── Budget (/settings/api/budget) ───────────────────────────────────────
-//
-// Amounts are integer nano-AIU (10⁻⁹ AI credit); each limit also carries
-// them in the display unit (`display.unit`) so the shell never converts.
-
-export const BudgetLimitState = z.enum(["ok", "warning", "exhausted"])
-
-/** One limit with its spend in the current period. */
-export const BudgetLimitStatus = z.object({
-  id: BudgetLimitId,
-  label: z.string().nullable(),
-  scope: BudgetScope,
-  action: BudgetLimitAction,
-  warn_at: BudgetWarnAt,
-  limit: NanoAiuAmount,
-  limit_reset: BudgetLimitReset,
-  limit_remaining: NanoAiuAmount,
-  /** Spend in the current period. */
-  usage: NanoAiuAmount,
-  /** Held by calls in progress (their estimates), not yet spent. */
-  held: NanoAiuAmount,
-  /** Spend since 00:00 UTC today, and since Monday 00:00 UTC. */
-  usage_daily: NanoAiuAmount,
-  usage_weekly: NanoAiuAmount,
-  period_start: z.string(),
-  /** Null for a limit that never resets. */
-  resets_at: z.string().nullable(),
-  /** `provider`: the followed window's reset; `fixed`: daily, weekly or
-   *  never; `fallback`: daily, standing in for a window with no usable
-   *  reset. */
-  reset_basis: z.enum(["fixed", "provider", "fallback"]),
-  /** The period boundaries are Maximal's estimate, not the provider's. */
-  reset_estimated: z.boolean(),
-  state: BudgetLimitState,
-  display: z.object({
-    limit: z.number().min(0),
-    usage: z.number().min(0),
-    limit_remaining: z.number().min(0),
-  }),
-})
-export type BudgetLimitStatus = z.infer<typeof BudgetLimitStatus>
-
-/** A quota window a provider reported. Its counters are context only. */
-export const ProviderQuotaWindowStatus = z.object({
-  provider: z.string(),
-  id: z.string(),
-  label: z.string(),
-  unit: z.string(),
-  used: z.number().nullable(),
-  limit: z.number().nullable(),
-  percent_remaining: z.number().nullable(),
-  resets_at: z.string().nullable(),
-  previous_resets_at: z.string().nullable(),
-  kind: z.enum(["fixed", "rolling"]).nullable(),
-  duration_ms: z.number().nullable(),
-  scope: z
-    .object({
-      models: z.array(z.string()).nullable(),
-      model_class: z.string().nullable(),
-    })
-    .nullable(),
-  overage: z
-    .object({
-      used: z.number().nullable(),
-      permitted: z.boolean().nullable(),
-    })
-    .nullable(),
-  observed_at: z.string(),
-  source: z.enum(["header", "endpoint"]),
-})
-export type ProviderQuotaWindowStatus = z.infer<
-  typeof ProviderQuotaWindowStatus
->
-
-/** GET /settings/api/budget, and the reply to every limit change. */
-export const BudgetStatusResponse = z.object({
-  /** False when enforcement is switched off: limits are kept and reported,
-   *  none refuses a request. */
-  enabled: z.boolean(),
-  display: z.object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate }),
-  /** False when there is no usage database: every spend reads 0. */
-  storage_enabled: z.boolean(),
-  /** Widest scope first: global, provider, plugin, key. */
-  budgets: z.array(BudgetLimitStatus),
-  /** The blocking limit a request would hit first, or null. */
-  effective_budget: BudgetLimitId.nullable(),
-  provider_windows: z.array(ProviderQuotaWindowStatus),
-})
-export type BudgetStatusResponse = z.infer<typeof BudgetStatusResponse>
-
-/** GET /settings/api/budget/activity: what was spent in the period so far,
- *  grouped, biggest spender first (by day, oldest first). Rows that spent
- *  nothing are left out. */
-export const BudgetActivityResponse = z.object({
-  period: z.enum(["day", "week", "month"]),
-  group: z.enum(["model", "plugin", "key", "provider", "day"]),
-  /** 00:00 UTC today, on Monday, or on the 1st. */
-  period_start: z.string(),
-  display: z.object({ unit: BudgetDisplayUnit, credit_usd: CreditUsdRate }),
-  rows: z.array(
-    z.object({
-      /** The group's value; null for rows with none (no plugin, say). */
-      key: z.string().nullable(),
-      nano_aiu: NanoAiuAmount,
-      requests: z.number().int().min(0),
-      /** `nano_aiu` in the display unit. */
-      amount: z.number().min(0),
-    }),
-  ),
-})
-export type BudgetActivityResponse = z.infer<typeof BudgetActivityResponse>
-
-/** Body of PATCH /settings/api/budget. */
-export const BudgetSettingsPatchRequest = z
-  .object({
-    enabled: z.boolean().optional(),
-    display_unit: BudgetDisplayUnit.optional(),
-  })
-  .strict()
-  .refine((body) => Object.keys(body).length > 0, {
-    message: "give enabled or display_unit",
-  })
-export type BudgetSettingsPatchRequest = z.infer<
-  typeof BudgetSettingsPatchRequest
->
-
-/** Body of PUT /settings/api/budget/limits/:id, which creates or replaces
- *  the limit. Give the amount as `limit` (nano-AIU) or as `amount` in the
- *  display unit, not both. */
-export const BudgetLimitPutRequest = z
-  .object({
-    label: z.string().trim().min(1).max(128).optional(),
-    scope: BudgetScope,
-    limit: NanoAiuAmount.optional(),
-    amount: z.number().min(0).optional(),
-    limit_reset: BudgetLimitReset,
-    warn_at: BudgetWarnAt.optional(),
-    action: BudgetLimitAction,
-  })
-  .strict()
-  .refine(
-    (body) => (body.limit === undefined) !== (body.amount === undefined),
-    {
-      message: "give exactly one of limit (nano-AIU) or amount (display unit)",
-      path: ["limit"],
-    },
-  )
-export type BudgetLimitPutRequest = z.infer<typeof BudgetLimitPutRequest>
 
 /** One validation problem. `path` is dotted and relative to the request
  *  body (`"config.endpoint"`, `"permissions.fetch"`; `""` = the body). */
@@ -933,3 +835,35 @@ export type PluginValidationErrorResponse = z.infer<
 
 export const PluginActionResponse = z.object({ ok: z.literal(true) })
 export type PluginActionResponse = z.infer<typeof PluginActionResponse>
+
+// ── Presence (/settings/api/presence) ───────────────────────────────────
+// Whether the person is at the machine, reported by the menu-bar shell and
+// read by consumers such as budget limits that apply only while away.
+// Local only: nothing here leaves the machine, and nothing but these three
+// fields is accepted.
+//
+//   POST /settings/api/presence   PresenceReport → PresenceStatus
+//   GET  /settings/api/presence   → PresenceStatus (debugging)
+//   SSE  `presence.changed` on /settings/api/events (lock state changes only)
+
+/** The shell's report. `null` means the platform can't say. */
+export const PresenceReport = z
+  .object({
+    locked: z.boolean().nullable(),
+    /** Seconds since the last keyboard or pointer input. */
+    idleSeconds: z.number().min(0).nullable(),
+    /** When the shell sampled it (ISO 8601). */
+    at: z.iso.datetime({ offset: true }),
+  })
+  .strict()
+export type PresenceReport = z.infer<typeof PresenceReport>
+
+/** What `currentPresence()` says. A stale or never-reported presence is
+ *  `{ locked: null, idleSeconds: null, stale: true }`: unknown, which
+ *  consumers must treat as not away. */
+export const PresenceStatus = z.object({
+  locked: z.boolean().nullable(),
+  idleSeconds: z.number().min(0).nullable(),
+  stale: z.boolean(),
+})
+export type PresenceStatus = z.infer<typeof PresenceStatus>

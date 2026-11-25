@@ -25,11 +25,24 @@ import type {
   UpstreamRejection,
 } from "./proxy/client";
 import { apiCall, subscribeAuthEvents } from "./proxy/client";
+import { browserAuthRequired, isNativeShell } from "./proxy/browser-auth";
 import { mountApiClients } from "./ui/islands/api-clients-island";
 import { mountApps } from "./ui/islands/apps-island";
+import { mountBrowserAuth } from "./ui/islands/browser-auth-island";
+import { canonicalHash, canonicalSection } from "./section-alias";
+import { mountBudget } from "./ui/islands/budget-island";
 import { mountModels } from "./ui/islands/models-island";
 import { mountConnectors } from "./ui/islands/connectors-island";
 import { mountQuitDialog } from "./ui/islands/quit-dialog-island";
+import { mountUpdateDialog } from "./ui/islands/update-dialog-island";
+import { requestUpdateConfirmation } from "./ui/features/update/update-confirm";
+import { updateButtonLabels } from "./ui/features/update/update-copy";
+import {
+  createUpdateFlow,
+  type UpdateOffer,
+  updateOffer,
+} from "./ui/features/update/update-flow";
+import { subscribeToUpdateRequests } from "./ui/features/update/update-requests";
 import { waitForSidecarBack } from "./ui/restart";
 
 type SectionId =
@@ -40,12 +53,12 @@ type SectionId =
   | "system"
   | "dashboard"
   | "sessions"
+  | "rules"
   | "apps"
   | "connectors"
   | "endpoint"
   | "api-clients"
   | "models"
-  | "logs"
   | "diagnostics";
 
 type TopTabId =
@@ -55,7 +68,8 @@ type TopTabId =
   | "appearance"
   | "system"
   | "dashboard"
-  | "sessions";
+  | "sessions"
+  | "rules";
 
 const SECTIONS: ReadonlyArray<SectionId> = [
   "account",
@@ -65,12 +79,12 @@ const SECTIONS: ReadonlyArray<SectionId> = [
   "system",
   "dashboard",
   "sessions",
+  "rules",
   "apps",
   "connectors",
   "endpoint",
   "api-clients",
   "models",
-  "logs",
   "diagnostics",
 ];
 
@@ -79,9 +93,10 @@ const TAB_SECTIONS: Record<TopTabId, ReadonlyArray<string>> = {
   integrations: ["apps", "connectors", "endpoint", "api-clients"],
   "models-keys": ["models"],
   appearance: ["appearance"],
-  system: ["diagnostics", "logs"],
+  system: ["diagnostics"],
   dashboard: ["dashboard"],
   sessions: ["dashboard"],
+  rules: ["rules"],
 };
 
 const LAST_TAB_STORAGE_KEY = "maximal.lastTab";
@@ -110,19 +125,21 @@ function tabForSection(id: SectionId): TopTabId {
       return "appearance";
     case "system":
     case "diagnostics":
-    case "logs":
       return "system";
     case "dashboard":
       return "dashboard";
     case "sessions":
       return "sessions";
+    case "rules":
+      return "rules";
   }
 }
 
 function getStoredTab(key: string): SectionId | null {
   try {
     const val = window.localStorage.getItem(key);
-    if (val && isSectionId(val)) return val;
+    const section = val ? canonicalSection(val) : null;
+    if (section && isSectionId(section)) return section;
   } catch {
     // ignore storage errors
   }
@@ -132,7 +149,7 @@ function getStoredTab(key: string): SectionId | null {
 function persistTabSelection(tab: TopTabId): void {
   try {
     window.localStorage.setItem(LAST_TAB_STORAGE_KEY, tab);
-    if (tab !== "dashboard" && tab !== "sessions") {
+    if (tab !== "dashboard" && tab !== "sessions" && tab !== "rules") {
       window.localStorage.setItem(LAST_SETTINGS_TAB_STORAGE_KEY, tab);
     }
   } catch {
@@ -150,16 +167,17 @@ function hasAccountProblem(
   );
 }
 
-type Surface = "settings" | "dashboard" | "sessions";
+type Surface = "settings" | "dashboard" | "sessions" | "rules";
 
 function surfaceForTab(tab: TopTabId): Surface {
-  if (tab === "dashboard" || tab === "sessions") return tab;
+  if (tab === "dashboard" || tab === "sessions" || tab === "rules") return tab;
   return "settings";
 }
 
 function surfaceTitle(surface: Surface): string {
   if (surface === "dashboard") return t("dashboard-title");
   if (surface === "sessions") return t("native-window-sessions-title");
+  if (surface === "rules") return t("native-window-budget-title");
   return t("native-window-settings-title");
 }
 
@@ -173,6 +191,7 @@ function updateSurfaceModeButtons(surface: Surface): void {
       shortcut: isMac ? "⌘D" : "Ctrl+D",
     }),
     sessions: t("nav-switch-to-sessions"),
+    rules: t("nav-switch-to-budget"),
   };
   for (const button of document.querySelectorAll<HTMLButtonElement>(
     "[data-surface-target]",
@@ -197,7 +216,7 @@ function showSection(id: SectionId, options: { persist?: boolean } = {}): void {
   const tab = tabForSection(id);
   const visibleSections = new Set(TAB_SECTIONS[tab]);
   const surface = surfaceForTab(tab);
-  const isObservability = surface !== "settings";
+  const isObservability = surface === "dashboard" || surface === "sessions";
 
   if (options.persist !== false) {
     persistTabSelection(tab);
@@ -224,10 +243,14 @@ function showSection(id: SectionId, options: { persist?: boolean } = {}): void {
   const dashControls = document.querySelector<HTMLElement>(
     "[data-dashboard-controls]",
   );
-  if (settingsNav) settingsNav.hidden = isObservability;
+  if (settingsNav) settingsNav.hidden = surface !== "settings";
   if (dashControls) dashControls.hidden = surface !== "dashboard";
   updateSurfaceModeButtons(surface);
   void safeInvoke("set_main_surface", { surface });
+  // What was spent while another surface was up is current on arrival.
+  if (surface === "rules") {
+    window.dispatchEvent(new CustomEvent("maximal:budget-refresh"));
+  }
 
   for (const sec of document.querySelectorAll<HTMLElement>("[data-section]")) {
     const secId = sec.dataset.section ?? "";
@@ -291,7 +314,19 @@ function availableSection(id: SectionId): SectionId {
 /** The section part of the hash. A section may own a sub-page after a
  *  slash (`#connectors/workiq` opens Work IQ's page in Connectors). */
 function hashSection(): string {
-  return window.location.hash.replace(/^#/, "").split("/", 1)[0] ?? "";
+  return canonicalSection(
+    window.location.hash.replace(/^#/, "").split("/", 1)[0] ?? "",
+  );
+}
+
+/** Rewrite a renamed section's hash in place (`#budget` to `#rules`) so the
+ *  address bar and history carry the current id. Quiet: no `hashchange`. */
+function canonicalizeLocationHash(): void {
+  const current = window.location.hash;
+  const canonical = canonicalHash(current);
+  if (current !== "" && canonical !== current) {
+    window.history.replaceState(null, "", canonical);
+  }
 }
 
 function readHashSection(): SectionId {
@@ -302,7 +337,45 @@ function readHashSection(): SectionId {
 }
 
 function syncFromHash(options: { persist?: boolean } = {}): void {
+  canonicalizeLocationHash();
   showSection(readHashSection(), options);
+}
+
+/**
+ * Fit the title bar. While an update is offered, the update icon joins the
+ * pinned utilities (as does a plain browser's access icon); if the full
+ * Settings tab row would then no longer fit (the narrow end of the window's
+ * range), `.topbar--compact` takes the icons' width out of the title bar's
+ * own spacing instead of the tabs.
+ * Measured without the class each time, so it never sticks once the window
+ * is wide enough. Then the active tab is kept in view (longer translations
+ * may still scroll the strip).
+ */
+function fitTopbar(): void {
+  const topbar = document.querySelector<HTMLElement>(".topbar");
+  const nav = document.querySelector<HTMLElement>("[data-settings-nav]");
+  if (!topbar || !nav) return;
+  const icon = document.querySelector<HTMLElement>("[data-update-action]");
+  const optionalIcon =
+    (icon !== null && !icon.hidden) ||
+    document.querySelector("[data-browser-access]") !== null;
+  topbar.classList.remove("topbar--compact");
+  if (optionalIcon && !nav.hidden && nav.scrollWidth > nav.clientWidth) {
+    topbar.classList.add("topbar--compact");
+  }
+  nav
+    .querySelector<HTMLElement>('[data-nav][aria-current="page"]')
+    ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/** Refit whenever the tab strip changes width: the update icon appearing or
+ *  going, a window resize, Settings' tabs showing again. */
+function keepTopbarFitted(): void {
+  const nav = document.querySelector<HTMLElement>("[data-settings-nav]");
+  if (!nav || typeof ResizeObserver === "undefined") return;
+  new ResizeObserver(() => {
+    fitTopbar();
+  }).observe(nav);
 }
 
 /**
@@ -432,7 +505,11 @@ function wireNav(): void {
 
   window.addEventListener("maximal:open-settings", () => {
     const currentTab = tabForSection(readHashSection());
-    if (currentTab === "dashboard" || currentTab === "sessions") {
+    if (
+      currentTab === "dashboard" ||
+      currentTab === "sessions" ||
+      currentTab === "rules"
+    ) {
       const target: SectionId = hasAccountProblem()
         ? "account"
         : (getStoredTab(LAST_SETTINGS_TAB_STORAGE_KEY) ?? "account");
@@ -527,6 +604,8 @@ function repaintDynamicI18n(): void {
     { type: "maximal:set-locale" },
     window.location.origin,
   );
+  // React islands read t() at render; tell them the language changed.
+  window.dispatchEvent(new CustomEvent("maximal:locale-changed"));
   if (currentAuthStatus) renderAccount(currentAuthStatus);
   if (lastDiagnostics) renderDiagnostics(lastDiagnostics);
   if (lastUpdateStatus) renderUpdateStatus(lastUpdateStatus);
@@ -652,11 +731,9 @@ function renderDeviceCodeLabel(): void {
   fillWithNode(label, "account-copy-and-open", "code", code);
 }
 
-/** Logs section copy: the plural "7-day retention" sub, the `tail -F` hint,
- *  and the "7 days, then deleted…" retention value. */
+/** Log details in System's technical disclosure: the `tail -F` hint and the
+ *  "7 days, then deleted…" retention value. */
 function renderLogsCopy(): void {
-  const sub = document.querySelector<HTMLElement>('[data-field="logs_sub"]');
-  if (sub) sub.textContent = t("logs-sub", { n: LOG_RETENTION_DAYS });
   const retention = document.querySelector<HTMLElement>(
     '[data-field="logs_retention_value"]',
   );
@@ -676,7 +753,7 @@ function wireLogs(): void {
     void safeInvoke("reveal_logs_dir");
   };
   document
-    .querySelector('[data-section="logs"] [data-action="reveal-logs"]')
+    .querySelector('[data-section="diagnostics"] [data-action="reveal-logs"]')
     ?.addEventListener("click", revealLogs);
 }
 
@@ -686,7 +763,7 @@ function wireLogs(): void {
  *  the one to show: 4141 normally, another one for a dev build started
  *  with MAXIMAL_DEV_PORT. */
 const ENDPOINT_BASE_URL = `http://127.0.0.1:${window.location.port || "4141"}`;
-/** Log retention window (days). Drives the plural copy in the Logs section. */
+/** Log retention window (days). Drives the plural copy in System's log details. */
 const LOG_RETENTION_DAYS = 7;
 let endpointApiKey: string | null = null;
 
@@ -724,7 +801,7 @@ async function copyToClipboard(
   }
 }
 
-/** Show or clear the inline, non-blocking error inside the Uninstall card.
+/** Show or clear the inline, non-blocking error inside the Uninstall region.
  *  Pass null to clear. Mirrors the diagnostics error row. */
 function setUninstallError(message: string | null): void {
   const row = document.querySelector<HTMLElement>("[data-uninstall-error]");
@@ -741,9 +818,10 @@ function setUninstallError(message: string | null): void {
 }
 
 /** Wire the in-app "Uninstall Maximal…" button. Reads the two option
- *  checkboxes in the card (not the dialog — neither window.confirm nor the
- *  native dialog supports in-dialog checkboxes), summarizes the choices into a
- *  confirm prompt, then runs the privileged `uninstall_maximal` command.
+ *  checkboxes in the Uninstall region (not the dialog — neither
+ *  window.confirm nor the native dialog supports in-dialog checkboxes),
+ *  summarizes the choices into a confirm prompt, then runs the privileged
+ *  `uninstall_maximal` command.
  *  Mirrors the signOut() shape: confirm → setBusy → invoke → settle. */
 function wireUninstall(): void {
   const section = document.querySelector('[data-section="diagnostics"]');
@@ -792,8 +870,8 @@ async function runInAppUninstall(): Promise<void> {
   }
 }
 
-/** Replace the card body with a calm completion state. No new quit command —
- *  the user quits from the tray and trashes the app from Applications. */
+/** Replace the Uninstall body with a calm completion state. No new quit
+ *  command — the user quits from the tray and trashes the app from Applications. */
 function showUninstallComplete(): void {
   const body = document.querySelector<HTMLElement>("[data-uninstall-body]");
   if (!body) return;
@@ -859,7 +937,7 @@ function wireEndpoint(): void {
     });
 }
 
-// ---- Diagnostics section ---------------------------------------------------
+// ---- System section: diagnostics and update status ------------------------
 
 function formatUptime(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -981,6 +1059,12 @@ function setDiagnosticsError(message: string | null): void {
 
 let lastDiagnostics: DiagnosticsResponse | null = null;
 let lastUpdateStatus: UpdateStatusResponse | null = null;
+/** Settles once the first update-status read finished (either way), so a
+ *  tray update request that arrives at load waits for the offer. */
+let markUpdateStatusRead: () => void = () => {};
+const firstUpdateStatusRead = new Promise<void>((resolve) => {
+  markUpdateStatusRead = resolve;
+});
 
 async function loadDiagnostics(): Promise<void> {
   const root = document.querySelector<HTMLElement>("[data-diagnostics-root]");
@@ -1023,8 +1107,9 @@ function relativeTime(iso: string): string {
 
 /**
  * Render every update surface from GET /settings/api/update-status: the
- * topbar "Update to X.Y.Z" button, the Diagnostics "Updates" outcome (what it
- * reports) and the "Update check" health (whether the mechanism is working).
+ * title-bar icon and System's Update button, the System "Updates" outcome
+ * (what it reports) and the "Update check" health (whether the mechanism is
+ * working).
  */
 function renderUpdateStatus(data: UpdateStatusResponse): void {
   renderUpdateAction(data);
@@ -1039,18 +1124,20 @@ function renderUpdateStatus(data: UpdateStatusResponse): void {
  * one (`update_command`).
  */
 function aptUpdateCommand(data: UpdateStatusResponse | null): string | null {
-  return offeredUpdate(data) ? (data?.update_command ?? null) : null;
+  return updateOffer(data, updateInPlace)?.route === "apt"
+    ? (data?.update_command ?? null)
+    : null;
 }
 
 /**
- * Diagnostics' apt block: the version, the command to copy and the Linux
+ * System's apt block: the version, the command to copy and the Linux
  * guide's update section. Maximal never runs apt or asks for root.
  */
 function renderAptUpdate(data: UpdateStatusResponse | null): void {
   const block = document.querySelector<HTMLElement>("[data-update-apt]");
   if (!block) return;
   const command = aptUpdateCommand(data);
-  const version = offeredUpdate(data);
+  const version = updateOffer(data, updateInPlace)?.version ?? null;
   block.hidden = command === null;
   if (command === null || version === null || !data) return;
   const hint = block.querySelector<HTMLElement>("[data-update-apt-hint]");
@@ -1063,17 +1150,25 @@ function renderAptUpdate(data: UpdateStatusResponse | null): void {
   if (guide) guide.href = data.url;
 }
 
-/** Bring the apt block into view (the topbar button and the tray item). */
+/** Bring the apt block into view and focus its Copy button. Runs only after
+ *  the update confirmation said yes. From another section it first moves to
+ *  System and waits for that section to show. */
 function showAptUpdate(): void {
-  if (window.location.hash !== "#diagnostics")
-    window.location.hash = "diagnostics";
-  window.requestAnimationFrame(() => {
-    const copy = document.querySelector<HTMLButtonElement>(
-      '[data-update-apt] [data-action="copy-update-command"]',
-    );
-    copy?.scrollIntoView({ block: "center" });
-    copy?.focus({ preventScroll: true });
-  });
+  const focusCopy = (): void => {
+    window.requestAnimationFrame(() => {
+      const copy = document.querySelector<HTMLButtonElement>(
+        '[data-update-apt] [data-action="copy-update-command"]',
+      );
+      copy?.scrollIntoView({ block: "center" });
+      copy?.focus({ preventScroll: true });
+    });
+  };
+  if (window.location.hash === "#diagnostics") {
+    focusCopy();
+    return;
+  }
+  window.addEventListener("hashchange", focusCopy, { once: true });
+  window.location.hash = "diagnostics";
 }
 
 function wireAptUpdate(): void {
@@ -1089,109 +1184,112 @@ function wireAptUpdate(): void {
       ev.preventDefault();
       if (lastUpdateStatus) void openExternalUrl(lastUpdateStatus.url);
     });
-  // The tray's "Update with apt…" opens Settings at #diagnostics.
-  window.addEventListener("hashchange", () => {
-    if (
-      window.location.hash === "#diagnostics" &&
-      aptUpdateCommand(lastUpdateStatus)
-    ) {
-      showAptUpdate();
-    }
+  // The tray's "Update with apt…" sends an explicit request (queued for a
+  // window it creates, signalled to one already open). It goes through the
+  // same confirmation as the title bar and System button, once the update
+  // status is known. A System address alone never prompts.
+  subscribeToUpdateRequests(() => {
+    void firstUpdateStatusRead.then(() => startUpdate());
   });
 }
 
-/**
- * The version to offer the user, or null when there is nothing to offer: no
- * newer release, checks disabled, or the version couldn't be resolved. The
- * topbar button and the Diagnostics "Updates" row both read this, so they
- * always agree.
- */
-function offeredUpdate(data: UpdateStatusResponse | null): string | null {
-  if (!data?.enabled || !data.update_available || !data.latest) return null;
-  return data.latest;
-}
-
-/**
- * Where the topbar update is: `idle`, waiting on the shell's native confirm
- * (`confirming`), or downloading after the user said yes (`downloading`).
- * The button is disabled while busy so a second click can't start another.
- */
-let updatePhase: "idle" | "confirming" | "downloading" = "idle";
-
-/** Whether the button installs in place (the Windows and macOS apps) rather
+/** Whether this build installs in place (the Windows and macOS apps) rather
  *  than opening the download page. Read once from the shell at boot. */
 let updateInPlace = false;
+let updateInPlaceRead: Promise<void> = Promise.resolve();
+
+/** The offer the running flow is about, so both entry points keep showing it
+ *  (busy) even if a status re-read in the meantime comes back empty. */
+let activeUpdateOffer: UpdateOffer | null = null;
 
 /**
- * The topbar "Update to X.Y.Z" button. Hidden unless a newer release is
- * offered (or an update is already running). In the Windows and macOS apps
- * clicking installs in place after a native confirm; elsewhere it opens the
- * download page in the system browser.
+ * The one update flow behind the title-bar icon, System's Update button and
+ * the tray's apt deep link: ask in a dialog, then hand off exactly once.
+ * While it asks or installs, another start is ignored.
  */
-function renderUpdateAction(data: UpdateStatusResponse | null): void {
-  const wrap = document.querySelector<HTMLElement>("[data-update-action]");
-  const button = wrap?.querySelector<HTMLButtonElement>(
-    '[data-action="open-update"]',
-  );
-  if (!wrap || !button) return;
-  const version = offeredUpdate(data);
-  const busy = updatePhase !== "idle";
-  wrap.hidden = version === null && !busy;
-  button.disabled = busy;
-  if (updatePhase === "downloading") {
-    button.textContent = t("nav-update-downloading");
-    button.title = "";
-    return;
-  }
-  if (version === null) return;
-  if (aptUpdateCommand(data)) {
-    // An apt install: the button shows the command (see showAptUpdate).
-    button.textContent = t("nav-update-apt");
-    button.title = t("diagnostics-update-apt-hint", { version });
-    return;
-  }
-  button.textContent = t("nav-update-to", { version });
-  button.title = updateInPlace ? "" : t("diagnostics-update-get-it");
-}
+const updateFlow = createUpdateFlow({
+  confirm: requestUpdateConfirmation,
+  installInPlace: (version, onDownloading) =>
+    installUpdate(version, onDownloading),
+  openDownloadPage: (url) => {
+    void openExternalUrl(url);
+  },
+  revealAptCommand: showAptUpdate,
+  onPhaseChange: () => {
+    renderUpdateAction(lastUpdateStatus);
+  },
+});
 
 async function startUpdate(): Promise<void> {
-  const status = lastUpdateStatus;
-  if (!status || !offeredUpdate(status) || updatePhase !== "idle") return;
-  if (aptUpdateCommand(status)) {
-    showAptUpdate();
-    return;
+  await updateInPlaceRead;
+  if (updateFlow.phase !== "idle") return;
+  activeUpdateOffer = updateOffer(lastUpdateStatus, updateInPlace);
+  await updateFlow.start(activeUpdateOffer);
+}
+
+/**
+ * Both update entry points: the title bar's icon (named "Update Maximal to
+ * X.Y.Z" by aria-label and tooltip) and System's primary "Update to X.Y.Z"
+ * button. Hidden unless a newer release is offered or an update is running;
+ * disabled while it downloads, when they say so.
+ */
+function renderUpdateAction(data: UpdateStatusResponse | null): void {
+  const phase = updateFlow.phase;
+  const offer =
+    phase === "idle" ? updateOffer(data, updateInPlace) : activeUpdateOffer;
+  const labels = offer ? updateButtonLabels(offer, phase) : null;
+  const downloading = phase === "downloading";
+
+  const iconWrap = document.querySelector<HTMLElement>("[data-update-action]");
+  const button = iconWrap?.querySelector<HTMLButtonElement>(
+    '[data-action="open-update"]',
+  );
+  if (iconWrap && button) {
+    iconWrap.hidden = labels === null;
+    button.disabled = downloading;
+    if (labels) {
+      button.setAttribute("aria-label", labels.icon);
+      button.title = labels.icon;
+    }
   }
-  updatePhase = "confirming";
-  renderUpdateAction(lastUpdateStatus);
-  // The shell confirms, installs and relaunches, or on failure tells the
-  // user and opens the download page itself. "unavailable" means this build
-  // doesn't install in place (a plain browser, a Linux build without apt).
-  const outcome = await installUpdate(() => {
-    updatePhase = "downloading";
-    renderUpdateAction(lastUpdateStatus);
-  });
-  updatePhase = "idle";
-  renderUpdateAction(lastUpdateStatus);
-  if (outcome === "unavailable") void openExternalUrl(status.url);
+
+  const systemWrap = document.querySelector<HTMLElement>(
+    "[data-system-update]",
+  );
+  const system = systemWrap?.querySelector<HTMLButtonElement>(
+    '[data-action="system-update"]',
+  );
+  if (systemWrap && system) {
+    systemWrap.hidden = labels === null;
+    system.disabled = downloading;
+    if (labels) system.textContent = labels.system;
+  }
+  // The icon may have appeared or gone, or its labels changed language.
+  fitTopbar();
 }
 
 function wireUpdateAction(): void {
-  void updateInstallsInPlace().then((inPlace) => {
+  updateInPlaceRead = updateInstallsInPlace().then((inPlace) => {
     updateInPlace = inPlace;
-    renderUpdateAction(lastUpdateStatus);
+    if (lastUpdateStatus) renderUpdateStatus(lastUpdateStatus);
   });
   document
     .querySelector<HTMLButtonElement>('[data-action="open-update"]')
     ?.addEventListener("click", () => {
       void startUpdate();
     });
+  document
+    .querySelector<HTMLButtonElement>('[data-action="system-update"]')
+    ?.addEventListener("click", () => {
+      void startUpdate();
+    });
 }
 
 /**
- * The "Updates" outcome row. Three shapes: a newer release (offer the mxml.sh
- * link), up to date, or unknown (couldn't resolve a version — the "Update
- * check" row explains why; never claim "up to date" when we couldn't check).
- * The link opens in the system browser via the opener plugin.
+ * The "Updates" outcome row. Three shapes: a newer release, up to date, or
+ * unknown (couldn't resolve a version — the "Update check" row explains why;
+ * never claim "up to date" when we couldn't check). A newer release's action
+ * is the Update button beside it.
  */
 function renderUpdateOutcome(data: UpdateStatusResponse): void {
   const dd = document.querySelector<HTMLElement>(
@@ -1200,22 +1298,14 @@ function renderUpdateOutcome(data: UpdateStatusResponse): void {
   if (!dd) return;
   dd.replaceChildren();
 
-  const version = offeredUpdate(data);
-  if (version) {
+  const offer = updateOffer(data, updateInPlace);
+  if (offer) {
     const label = document.createElement("span");
     label.className = "mono";
-    label.textContent = t("diagnostics-update-newer", { version });
-    const link = document.createElement("a");
-    link.href = data.url;
-    // An apt install links the Linux guide, not the download page.
-    link.textContent = aptUpdateCommand(data)
-      ? t("diagnostics-update-apt-guide")
-      : t("diagnostics-update-get-it");
-    link.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      void openExternalUrl(data.url);
+    label.textContent = t("diagnostics-update-newer", {
+      version: offer.version,
     });
-    dd.append(label, link);
+    dd.append(label);
     return;
   }
 
@@ -1284,13 +1374,16 @@ async function loadUpdateStatus(force = false): Promise<void> {
     renderAptUpdate(null);
     setField("update_status", t("diagnostics-update-unknown"));
     setField("update_check", t("diagnostics-update-check-unavailable"));
+    markUpdateStatusRead();
     return;
   }
   lastUpdateStatus = result.data;
   renderUpdateStatus(result.data);
+  markUpdateStatusRead();
 }
 
-/** "Check now" in Diagnostics: a fresh check, then the tray reads the result. */
+/** "Check now" in System → Version and updates: a fresh check, then the tray
+ *  reads the result. */
 async function checkForUpdatesNow(): Promise<void> {
   const button = document.querySelector<HTMLButtonElement>(
     '[data-action="check-update"]',
@@ -1809,6 +1902,12 @@ function showGhAccountsForAuthenticated(): void {
 }
 
 function renderAccount(status: AuthStatus): void {
+  // A plain browser without Maximal access knows nothing about the GitHub
+  // sign-in; the access dialog speaks instead of a false "sign-in failed".
+  if (browserAuthRequired() && !isNativeShell()) {
+    stopAuthPolling();
+    return;
+  }
   notifyDashboardOfAuthChange(status);
   currentAuthStatus = status;
   const active = accountKeyFor(status.state);
@@ -2636,6 +2735,8 @@ async function checkInitialAccountHealth(): Promise<void> {
     method: "GET",
     path: "/settings/api/auth/github/status",
   });
+  // Missing browser access is not an account problem: stay where we are.
+  if (!result.ok && result.authRequired && !isNativeShell()) return;
   if (!result.ok || hasAccountProblem(result.data)) {
     if (!userExplicitlySelectedTab) {
       showSection("account", { persist: false });
@@ -2671,12 +2772,16 @@ window.addEventListener("DOMContentLoaded", () => {
   wireEndpoint();
   wireUninstall();
   wireAppearance();
+  mountBrowserAuth();
   mountApiClients();
   mountApps();
   mountConnectors();
   mountQuitDialog();
+  mountUpdateDialog();
   mountModels();
+  mountBudget();
   wireNav();
+  keepTopbarFitted();
   syncFromHash({ persist: hadExplicitHash });
   void loadDiagnostics();
   if (tabForSection(readHashSection()) === "account") {

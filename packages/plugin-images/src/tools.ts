@@ -9,6 +9,7 @@ import type {
   Context,
   ModelBinding,
   ModelOperation,
+  OperationResult,
   RelaySpec,
   ServerToolCall,
   ServerToolDefinition,
@@ -180,6 +181,22 @@ function tryParse(input: Record<string, unknown>): ImageRequest | undefined {
   }
 }
 
+function reportProviderSpend(
+  call: ServerToolCall,
+  result: OperationResult,
+  details: { operation: ModelOperation; model: string; provider: string },
+): void {
+  call.reportSpend?.({
+    invocationId: result.invocationId,
+    providerCallId: result.providerCallId,
+    sequence: result.sequence,
+    operation: details.operation,
+    model: details.model,
+    provider: details.provider,
+    result,
+  })
+}
+
 function definitionOf(
   ctx: Context,
   options: ImageToolsOptions,
@@ -215,6 +232,10 @@ function definitionOf(
         const status = bindingsStatus(ctx, options.bindings, "images")
         if (status.state !== "ready") return errorResult(status.summary)
         const body = await variant.body(request, input, binding.upstreamModel)
+        const providerCall = call.nextProviderCall(
+          variant.operation,
+          binding.upstreamModel,
+        )
         const result = await relayOperation(
           ctx,
           {
@@ -223,6 +244,9 @@ function definitionOf(
             binding,
             body,
             signal: call.signal,
+            invocationId: providerCall.invocationId,
+            providerCallId: providerCall.providerCallId,
+            sequence: providerCall.sequence,
             origin: {
               kind: "server-tool",
               tool: variant.name,
@@ -234,11 +258,10 @@ function definitionOf(
           variant.spec,
         )
         // Before anything that can fail on our side: the provider billed it.
-        call.reportSpend?.({
+        reportProviderSpend(call, result, {
           operation: variant.operation,
           model: binding.model,
           provider: binding.provider,
-          result,
         })
         const saved = await saveImages(
           options.outputDir,

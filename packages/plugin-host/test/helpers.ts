@@ -9,6 +9,10 @@ import type {
   PluginGatewayEvent,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import {
+  createFileStorage,
+  createStorageSettingsAuthority,
+} from "@stuffbucket/maximal-plugin-sdk/runtime"
 import { expect } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
@@ -124,12 +128,22 @@ export const Empty = z.object({})
 
 export const noop = () => {}
 
+export function testSettingsAuthority(storageRoot: string) {
+  return createStorageSettingsAuthority(createFileStorage(storageRoot))
+}
+
 /** A gateway built from deliberately malformed plugin lists (constructor must throw). */
 export function buildHost(plugins: Array<unknown>) {
   return () =>
     createPluginHost({
       plugins: plugins as Array<PluginModule>,
-      services: { host: fakeHost(), storageRoot: os.tmpdir() },
+      services: {
+        host: fakeHost(),
+        storageRoot: os.tmpdir(),
+        settingsAuthority: createStorageSettingsAuthority(
+          createFileStorage(os.tmpdir()),
+        ),
+      },
     })
 }
 
@@ -138,7 +152,16 @@ export function createHost(
   host = fakeHost(),
   storageRoot = tempDir(),
 ) {
-  const gateway = createPluginHost({ plugins, services: { host, storageRoot } })
+  const storage = createFileStorage(storageRoot)
+  const gateway = createPluginHost({
+    plugins,
+    services: {
+      host,
+      storageRoot,
+      storage,
+      settingsAuthority: createStorageSettingsAuthority(storage),
+    },
+  })
   cleanups.push(() => gateway.dispose())
   const events: Array<PluginGatewayEvent> = []
   gateway.subscribe((event) => events.push(event))

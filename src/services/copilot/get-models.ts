@@ -317,6 +317,24 @@ export interface TokenPrices {
   [key: string]: number | string | TokenPriceTier | null | undefined
 }
 
+/** Numeric rates from a model's default price tier (or its legacy flat
+ * sheet). The provider catalog and provisional budget estimator share this
+ * normalization so current and legacy keys cannot drift between them. */
+export function defaultTokenPriceRates(
+  model: Pick<Model, "billing">,
+): Record<string, number> | undefined {
+  const prices = model.billing?.token_prices
+  if (!prices) return undefined
+  const tier = prices.default ?? prices
+  const rates: Record<string, number> = {}
+  for (const [name, value] of Object.entries(tier)) {
+    if (typeof value === "number" && name !== "max_prompt_tokens") {
+      rates[name] = value
+    }
+  }
+  return Object.keys(rates).length > 0 ? rates : undefined
+}
+
 const legacyPriceKeys = new Set([
   "input",
   "cache_read",

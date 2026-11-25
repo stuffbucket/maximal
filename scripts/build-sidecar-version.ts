@@ -25,3 +25,18 @@ export function resolveSidecarChannel(
   if (!explicitVersion) return "stable"
   return channelForTag(`v${explicitVersion}`)
 }
+
+/** Map a supported Rust target triple to packaged generation compatibility. */
+export function pluginGenerationTarget(triple: string): {
+  platform: "darwin" | "linux" | "win32"
+  architecture: "arm64" | "x64"
+} {
+  const architecture = triple.startsWith("aarch64-") ? "arm64" : "x64"
+  if (triple.endsWith("apple-darwin"))
+    return { platform: "darwin", architecture }
+  if (triple.includes("pc-windows"))
+    return { platform: "win32", architecture }
+  if (triple.endsWith("unknown-linux-gnu"))
+    return { platform: "linux", architecture }
+  throw new Error(`Unknown plugin generation triple: ${triple}`)
+}

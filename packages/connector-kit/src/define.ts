@@ -32,6 +32,7 @@ import {
   type ConnectorConfig,
 } from "./config"
 import { toConnectorError, worded, type ConnectorError } from "./errors"
+import { registerUpstreamPool } from "./session-registry"
 import { ACTION_IDS, ConnectorController } from "./state"
 import {
   UpstreamConnection,
@@ -330,6 +331,7 @@ function applyConnector(
     onToolsChanged: () => void controller.refreshTools(),
     toError,
   })
+  const unregisterUpstreamPool = registerUpstreamPool(upstream.pool)
   const output = contributor(ctx)
   const terms = manifest.connector.terms
   const controller = new ConnectorController({
@@ -365,6 +367,7 @@ function applyConnector(
     output.stop()
     controller.dispose()
     upstream.guarded.dispose()
+    unregisterUpstreamPool()
     void upstream.pool.dispose()
   }
   ctx.effect(() => shutdown, `${manifest.id} lifecycle`)

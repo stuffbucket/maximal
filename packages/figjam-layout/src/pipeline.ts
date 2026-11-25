@@ -11,6 +11,7 @@ import {
   placeLabels,
   titleRect,
 } from "./lanes"
+import { hitRect, pathLen, rectsHit } from "./lanes-labels"
 import {
   center,
   checkValue,
@@ -35,23 +36,6 @@ export type PipelineOpts = {
 
 type Seg = [Pt, Pt]
 
-const lenOf = (pts: Array<Pt>) =>
-  pts
-    .slice(1)
-    .reduce(
-      (a, q, i) => a + Math.abs(q[0] - pts[i][0]) + Math.abs(q[1] - pts[i][1]),
-      0,
-    )
-const hitRect = ([a, b]: Seg, r: Rect, pad = 0) =>
-  Math.max(a[0], b[0]) > r.x - pad
-  && Math.min(a[0], b[0]) < r.x + r.w + pad
-  && Math.max(a[1], b[1]) > r.y - pad
-  && Math.min(a[1], b[1]) < r.y + r.h + pad
-const rectsHit = (a: Rect, b: Rect, pad = 0) =>
-  a.x < b.x + b.w + pad
-  && b.x < a.x + a.w + pad
-  && a.y < b.y + b.h + pad
-  && b.y < a.y + a.h + pad
 const shortFamily = (name: string) => name.split(/\s*&\s*|\s+/)[0]
 const routeSegments = (R: Layout): Array<Seg> =>
   R.routes.flatMap((r) => r.pts.slice(1).map((q, i): Seg => [r.pts[i], q]))
@@ -118,7 +102,7 @@ function detoured(best: Layout, tau: number, maxLen: number): Array<string> {
     .filter((r) => {
       const a = r.pts[0],
         b = last(r.pts)
-      const len = lenOf(r.pts)
+      const len = pathLen(r.pts)
       return (
         len / Math.max(40, Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1])) > tau
         || len > maxLen

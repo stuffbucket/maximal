@@ -31,6 +31,18 @@ describe("validateAppConfig", () => {
     expect(validateAppConfig(config)).toEqual(config)
   })
 
+  it("rejects a blank small model", () => {
+    expect(() => validateAppConfig({ smallModel: "   " })).toThrow(
+      ConfigValidationError,
+    )
+  })
+
+  it("normalizes surrounding whitespace in the small model", () => {
+    expect(validateAppConfig({ smallModel: "  gpt-5-mini  " })).toEqual({
+      smallModel: "gpt-5-mini",
+    })
+  })
+
   it("rejects a typo'd authType with the offending key path", () => {
     let thrown: ConfigValidationError | null = null
     try {

@@ -3,7 +3,7 @@
  * catalog, error advice, cost, quota windows) and the `providers` service that
  * holds them. Interfaces only; the registry is `runtime/providers.ts`.
  */
-import type { ProviderCost } from "./operations"
+import type { ModelOperation, ProviderCost } from "./operations"
 import type { PluginDisposer } from "./types"
 
 /** The provider call an upstream error answered. */
@@ -46,6 +46,24 @@ export interface ProviderQuotaWindow {
   source: "header" | "endpoint"
 }
 
+export interface ProviderInvocation {
+  /** One logical operation from admission through terminal accounting. */
+  invocationId: string
+  /** Idempotency key for this particular provider call. */
+  providerCallId: string
+  /** Monotonic order within the invocation. */
+  sequence: number
+  operation: ModelOperation
+  model: string
+}
+
+export interface ProviderRequestOptions {
+  signal?: AbortSignal
+  errorMessage: string
+  /** Parent-issued accounting context. Provider-backed calls require it. */
+  invocation: ProviderInvocation
+}
+
 export interface UpstreamProvider {
   /** `"copilot"`: namespaces model ids and usage/budget rows. */
   id: string
@@ -59,7 +77,7 @@ export interface UpstreamProvider {
   postJson<T>(
     path: string,
     body: Record<string, unknown> | FormData,
-    options: { signal?: AbortSignal; errorMessage: string },
+    options: ProviderRequestOptions,
   ): Promise<T>
   /** The catalog entry for `id`; undefined when the account/plan doesn't offer it. */
   model(id: string): ProviderModelInfo | undefined
@@ -83,6 +101,13 @@ export interface UpstreamProvider {
   ): ProviderCost | undefined
   /** The allowances the provider reports. Optional: not every provider has any. */
   quotaWindows?(): Promise<ReadonlyArray<ProviderQuotaWindow>>
+  /**
+   * Ask the provider for its allowances now, rather than reading what its
+   * last reply carried, and return what it says (the host records it). A
+   * provider with nothing to ask leaves this out; one that can't be reached
+   * rejects. The host calls it at most once in 30 seconds.
+   */
+  refreshQuotaWindows?(): Promise<ReadonlyArray<ProviderQuotaWindow>>
 }
 
 /**

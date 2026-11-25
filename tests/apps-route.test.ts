@@ -17,15 +17,17 @@
  *     `applyProxyBaseUrl()` got the leaked tmp path, breaking
  *     claude-code-cli-enable-persist.test.ts (#229).
  *
- * Two mocks remain because their targets have NO env/injection seam that the
+ * Three mocks remain because their targets have NO env/injection seam that the
  * route path reaches (the route calls them with no args). They spread the real
- * module and are restored in an awaited afterAll; their forward-leak is proven
+ * modules and are restored in an awaited afterAll; their forward-leak is proven
  * harmless by the sequential-import repro (see the #229 investigation):
  *   - `~/apps/claude-code/detect`: `detectClaudeInstalls()` (no args) returns a
  *     controllable install fixture. No env seam feeds a fixture in.
  *   - `~/apps/claude-desktop/config`: `home` defaults to `os.homedir()` (no env
  *     override), so without the mock the route would touch the developer's REAL
  *     Claude-3p userData dir. The mock redirects it to a tmp home.
+ *   - `~/apps/claude-desktop/detect`: fixed install fixtures keep missing-app
+ *     409 behavior deterministic on macOS and Linux.
  */
 
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
@@ -35,6 +37,9 @@ import os from "node:os"
 import path from "node:path"
 
 import type { ClaudeInstall } from "~/apps/claude-code/detect"
+
+import { profileIdForDirectory } from "~/apps/profile-identity"
+import { setListeningPort } from "~/lib/start/proxy-port"
 
 const ROUTE_3P_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-3p-"))
 const ROUTE_CC_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "apps-route-ccdir-"))
@@ -58,6 +63,7 @@ process.env.CODEX_HOME = ROUTE_CODEX_HOME
 process.env.PATH = ROUTE_CODEX_BIN
 
 let installsFixture: Array<ClaudeInstall> = []
+let desktopInstalledFixture = true
 
 const actualDetect = { ...(await import("~/apps/claude-code/detect")) }
 const realDetect = actualDetect.detectClaudeInstalls
@@ -67,6 +73,18 @@ await mock.module("~/apps/claude-code/detect", () => ({
     options && Object.keys(options).length > 0 ?
       realDetect(options)
     : installsFixture,
+}))
+
+const actualDesktopDetect = {
+  ...(await import("~/apps/claude-desktop/detect")),
+}
+await mock.module("~/apps/claude-desktop/detect", () => ({
+  ...actualDesktopDetect,
+  claudeAppInstalled: () => desktopInstalledFixture,
+  detectClaudeAppInstallations: () =>
+    desktopInstalledFixture ?
+      [{ path: "/Applications/Claude.app", version: null, source: "unknown" }]
+    : [],
 }))
 
 const actualDesktop = { ...(await import("~/apps/claude-desktop/config")) }
@@ -91,7 +109,10 @@ await mock.module("~/apps/claude-desktop/config", () => ({
     home: string = ROUTE_3P_HOME,
     ...rest: Array<unknown>
   ) => (realIsApplied as (...a: Array<unknown>) => unknown)(home, ...rest),
-  configLibraryConflict: (home: string = ROUTE_3P_HOME) => realConflict(home),
+  configLibraryConflict: (
+    home: string = ROUTE_3P_HOME,
+    ...rest: Array<unknown>
+  ) => (realConflict as (...a: Array<unknown>) => unknown)(home, ...rest),
   getClaude3pDir: (home: string = ROUTE_3P_HOME, ...rest: Array<unknown>) =>
     (realGetDir as (...a: Array<unknown>) => unknown)(home, ...rest),
 }))
@@ -108,6 +129,50 @@ function buildApp() {
 
 function fakeInstall(p: string): ClaudeInstall {
   return { path: p, resolvedPath: p, version: "1.2.3", source: "homebrew" }
+}
+
+function markClaudeCodeAsOtherProfile(): void {
+  const settings = JSON.parse(
+    fs.readFileSync(ROUTE_CC_SETTINGS).toString("utf8"),
+  ) as Record<string, unknown>
+  const profileId = profileIdForDirectory(path.join(ROUTE_CC_DIR, "other"))
+  settings._maximalProfile = { version: 1, profileId }
+  settings._maximalHelper = {
+    ...(settings._maximalHelper as Record<string, unknown>),
+    profileId,
+  }
+  fs.writeFileSync(ROUTE_CC_SETTINGS, JSON.stringify(settings))
+}
+
+function markCodexAsOtherProfile(): void {
+  const original = fs.readFileSync(ROUTE_CODEX_CONFIG, "utf8")
+  const marker = /^(# >>> maximal codex routing v1:)([^\r\n]+)$/mu
+  const match = marker.exec(original)
+  if (!match) throw new Error("missing Codex ownership marker")
+  const state = JSON.parse(
+    Buffer.from(match[2], "base64url").toString("utf8"),
+  ) as Record<string, unknown>
+  state.profileId = profileIdForDirectory(path.join(ROUTE_CODEX_HOME, "other"))
+  const encoded = Buffer.from(JSON.stringify(state), "utf8").toString(
+    "base64url",
+  )
+  fs.writeFileSync(ROUTE_CODEX_CONFIG, original.replace(marker, `$1${encoded}`))
+}
+
+function markDesktopAsOtherProfile(): void {
+  const statePath = path.join(
+    actualDesktop.getClaude3pDir(ROUTE_3P_HOME),
+    "maximal-routing.json",
+  )
+  // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse expects text in TypeScript
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as Record<
+    string,
+    unknown
+  >
+  state.ownerProfileId = profileIdForDirectory(
+    path.join(ROUTE_3P_HOME, "other"),
+  )
+  fs.writeFileSync(statePath, JSON.stringify(state))
 }
 
 function cleanTmp() {
@@ -127,6 +192,8 @@ function cleanTmp() {
 beforeEach(() => {
   writeConfig({ auth: { apiKeys: ["test-api-key"] } })
   installsFixture = []
+  desktopInstalledFixture = true
+  setListeningPort(undefined)
   cleanTmp()
 })
 
@@ -143,7 +210,9 @@ afterAll(async () => {
   else process.env.CODEX_HOME = savedCodexHome
   if (savedPath === undefined) delete process.env.PATH
   else process.env.PATH = savedPath
+  setListeningPort(undefined)
   await mock.module("~/apps/claude-code/detect", () => actualDetect)
+  await mock.module("~/apps/claude-desktop/detect", () => actualDesktopDetect)
   await mock.module("~/apps/claude-desktop/config", () => actualDesktop)
   fs.rmSync(ROUTE_3P_HOME, { recursive: true, force: true })
   fs.rmSync(ROUTE_CC_DIR, { recursive: true, force: true })
@@ -152,23 +221,31 @@ afterAll(async () => {
 })
 
 describe("GET /apps", () => {
-  test("returns four apps in alphabetical order with the right kinds", async () => {
+  test("returns six apps in registry order with the right kinds", async () => {
     const res = await buildApp().request("/apps")
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
       apps: Array<{ id: string; name: string; kind: string; status: string }>
     }
     expect(body.apps.map((a) => a.id)).toEqual([
+      "chatgpt",
       "claude-code",
       "claude-desktop",
       "codex",
       "copilot-cli",
+      "pi",
     ])
-    expect(body.apps[0].kind).toBe("config")
-    expect(body.apps[1].kind).toBe("config")
-    expect(body.apps[2].kind).toBe("config")
-    expect(body.apps[3].kind).toBe("coming-soon")
-    expect(body.apps[3].status).toBe("coming-soon")
+    expect(body.apps.filter((app) => app.kind === "config")).toHaveLength(3)
+    expect(
+      body.apps
+        .filter((app) => app.kind === "coming-soon")
+        .map((app) => app.id),
+    ).toEqual(["chatgpt", "copilot-cli", "pi"])
+    expect(
+      body.apps
+        .filter((app) => app.kind === "coming-soon")
+        .every((app) => app.status === "coming-soon"),
+    ).toBe(true)
   })
 
   test("claude-code offers an install command when no install is detected", async () => {
@@ -220,6 +297,36 @@ describe("GET /apps", () => {
   })
 })
 
+describe("app toggle request validation", () => {
+  for (const appId of ["claude-code", "claude-desktop", "codex"] as const) {
+    test(`${appId} accepts the explicit other-profile override`, async () => {
+      const response = await buildApp().request(`/apps/${appId}/toggle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enabled: false,
+          overrideOtherMaximal: true,
+        }),
+      })
+
+      expect(response.status).toBe(200)
+    })
+
+    test(`${appId} rejects a non-boolean other-profile override`, async () => {
+      const response = await buildApp().request(`/apps/${appId}/toggle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enabled: false,
+          overrideOtherMaximal: "yes",
+        }),
+      })
+
+      expect(response.status).toBe(400)
+    })
+  }
+})
+
 describe("POST /apps/claude-code/toggle", () => {
   test("enable writes ANTHROPIC_BASE_URL and persists enabled=true", async () => {
     installsFixture = [fakeInstall("/opt/homebrew/bin/claude")]
@@ -268,6 +375,44 @@ describe("POST /apps/claude-code/toggle", () => {
     // We did NOT overwrite the user's base URL.
     expect(isProxyBaseUrlConfigured(ROUTE_CC_SETTINGS)).toBe(false)
     expect(body.enabled).toBe(false)
+  })
+
+  test("requires explicit override to transfer another Maximal profile", async () => {
+    installsFixture = [fakeInstall("/opt/homebrew/bin/claude")]
+    const app = buildApp()
+    setListeningPort(5252)
+    await app.request("/apps/claude-code/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    markClaudeCodeAsOtherProfile()
+    const before = fs.readFileSync(ROUTE_CC_SETTINGS, "utf8")
+    setListeningPort(5151)
+
+    const refused = await app.request("/apps/claude-code/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    expect(await refused.json()).toMatchObject({
+      enabled: false,
+      conflict: "other-maximal-config",
+    })
+    expect(fs.readFileSync(ROUTE_CC_SETTINGS, "utf8")).toBe(before)
+
+    const overridden = await app.request("/apps/claude-code/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true, overrideOtherMaximal: true }),
+    })
+    expect(await overridden.json()).toMatchObject({
+      enabled: true,
+      conflict: null,
+    })
+    expect(fs.readFileSync(ROUTE_CC_SETTINGS, "utf8")).toContain(
+      "http://127.0.0.1:5151",
+    )
   })
 
   test("disable reverts the base URL and persists enabled=false", async () => {
@@ -329,6 +474,43 @@ describe("POST /apps/codex/toggle", () => {
     })
     expect(getConfig().apps?.codex?.enabled).toBe(false)
     expect(fs.existsSync(ROUTE_CODEX_CONFIG)).toBe(false)
+  })
+
+  test("requires explicit override to transfer another Maximal profile", async () => {
+    const app = buildApp()
+    setListeningPort(5252)
+    await app.request("/apps/codex/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    markCodexAsOtherProfile()
+    const before = fs.readFileSync(ROUTE_CODEX_CONFIG, "utf8")
+    setListeningPort(5151)
+
+    const refused = await app.request("/apps/codex/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    expect(await refused.json()).toMatchObject({
+      enabled: false,
+      conflict: "other-maximal-config",
+    })
+    expect(fs.readFileSync(ROUTE_CODEX_CONFIG, "utf8")).toBe(before)
+
+    const overridden = await app.request("/apps/codex/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true, overrideOtherMaximal: true }),
+    })
+    expect(await overridden.json()).toMatchObject({
+      enabled: true,
+      conflict: null,
+    })
+    expect(fs.readFileSync(ROUTE_CODEX_CONFIG, "utf8")).toContain(
+      'base_url = "http://127.0.0.1:5151/v1"',
+    )
   })
 
   test("surfaces cleanup-required when edited provider content is retained", async () => {
@@ -423,7 +605,149 @@ describe("POST /apps/claude-desktop/toggle", () => {
     expect(profile?.inferenceGatewayApiKey).toBe("test-api-key")
   })
 
-  test("enable leaves a foreign gateway profile alone and reports why", async () => {
+  test("enable with no install returns 409 without writing config", async () => {
+    desktopInstalledFixture = false
+
+    const response = await buildApp().request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+
+    expect(response.status).toBe(409)
+    expect(fs.existsSync(actualDesktop.getClaude3pDir(ROUTE_3P_HOME))).toBe(
+      false,
+    )
+  })
+
+  test("requires explicit override to transfer another Maximal profile", async () => {
+    const app = buildApp()
+    setListeningPort(5252)
+    await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    markDesktopAsOtherProfile()
+    const statePath = path.join(
+      actualDesktop.getClaude3pDir(ROUTE_3P_HOME),
+      "maximal-routing.json",
+    )
+    const before = fs.readFileSync(statePath, "utf8")
+    setListeningPort(5151)
+
+    const refused = await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    expect(await refused.json()).toMatchObject({
+      enabled: false,
+      conflict: "other-maximal-config",
+    })
+    expect(fs.readFileSync(statePath, "utf8")).toBe(before)
+
+    const overridden = await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true, overrideOtherMaximal: true }),
+    })
+    expect(await overridden.json()).toMatchObject({
+      enabled: true,
+      conflict: null,
+    })
+    expect(actualDesktop.isConfigLibraryApplied(ROUTE_3P_HOME)).toBe(true)
+  })
+})
+
+describe("POST /apps/claude-desktop/toggle: stale Maximal ownership", () => {
+  test("offers the transfer, not a foreign gateway, when Desktop rewrote an older Maximal's profile", async () => {
+    const app = buildApp()
+    setListeningPort(5252)
+    await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    const dir = actualDesktop.getClaude3pDir(ROUTE_3P_HOME)
+    const lib = path.join(dir, "configLibrary")
+    const metaPath = path.join(lib, "_meta.json")
+    const statePath = path.join(dir, "maximal-routing.json")
+    const readObject = (file: string) =>
+      // eslint-disable-next-line unicorn/prefer-json-parse-buffer -- JSON.parse expects text in TypeScript
+      JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>
+    // A pre-ownership build's marker: no version, no owner.
+    const {
+      version: _version,
+      ownerProfileId: _owner,
+      ...v1
+    } = readObject(statePath)
+    fs.writeFileSync(statePath, `${JSON.stringify(v1, null, 2)}\n`)
+    const meta = readObject(metaPath) as {
+      appliedId: string
+      entries: Array<{ id: string; name: string }>
+    }
+    const appliedPath = path.join(lib, `${meta.appliedId}.json`)
+    // Desktop writes an earlier Maximal copy's profile back over ours, in its
+    // own formatting.
+    const earlier = {
+      ...readObject(appliedPath),
+      inferenceGatewayBaseUrl: "http://127.0.0.1:6001",
+      inferenceGatewayApiKey: "mxl_earlier_copy",
+    }
+    fs.writeFileSync(
+      path.join(lib, "earlier.json"),
+      JSON.stringify(earlier, null, 2),
+    )
+    fs.writeFileSync(
+      metaPath,
+      JSON.stringify({
+        ...meta,
+        entries: [{ id: "earlier", name: "maximal" }, ...meta.entries],
+      }),
+    )
+    fs.writeFileSync(appliedPath, JSON.stringify(earlier, null, 2))
+    setListeningPort(5151)
+
+    const desktopRow = async () => {
+      const body = (await (await app.request("/apps")).json()) as {
+        apps: Array<{ id: string; enabled: boolean; conflict: string | null }>
+      }
+      return body.apps.find((entry) => entry.id === "claude-desktop")
+    }
+    expect(await desktopRow()).toMatchObject({
+      enabled: false,
+      conflict: "other-maximal-config",
+    })
+    const before = fs.readFileSync(appliedPath, "utf8")
+    const refused = await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    })
+    expect(await refused.json()).toMatchObject({
+      enabled: false,
+      conflict: "other-maximal-config",
+    })
+    expect(fs.readFileSync(appliedPath, "utf8")).toBe(before)
+
+    const transferred = await app.request("/apps/claude-desktop/toggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true, overrideOtherMaximal: true }),
+    })
+    expect(await transferred.json()).toMatchObject({
+      enabled: true,
+      conflict: null,
+    })
+    expect(await desktopRow()).toMatchObject({ enabled: true, conflict: null })
+    expect(readObject(metaPath).appliedId).toBe(meta.appliedId)
+    expect(readObject(path.join(lib, "earlier.json"))).toEqual(earlier)
+  })
+})
+
+describe("POST /apps/claude-desktop/toggle: another gateway", () => {
+  test("override leaves a foreign gateway profile alone and reports why", async () => {
     const lib = path.join(
       actualDesktop.getClaude3pDir(ROUTE_3P_HOME),
       "configLibrary",
@@ -447,7 +771,10 @@ describe("POST /apps/claude-desktop/toggle", () => {
     const res = await buildApp().request("/apps/claude-desktop/toggle", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ enabled: true }),
+      body: JSON.stringify({
+        enabled: true,
+        overrideOtherMaximal: true,
+      }),
     })
 
     expect(res.status).toBe(200)
@@ -459,6 +786,48 @@ describe("POST /apps/claude-desktop/toggle", () => {
     expect(body.conflict).toBe("foreign-gateway-profile")
     // The refused enable isn't recorded as the user's intent.
     expect(getConfig().apps?.claudeDesktop?.enabled).not.toBe(true)
+  })
+
+  test("Take over switches from a foreign gateway, and disable switches back", async () => {
+    const lib = path.join(
+      actualDesktop.getClaude3pDir(ROUTE_3P_HOME),
+      "configLibrary",
+    )
+    fs.mkdirSync(lib, { recursive: true })
+    const corp = JSON.stringify({
+      inferenceProvider: "gateway",
+      inferenceGatewayBaseUrl: "https://llm.corp.example",
+    })
+    fs.writeFileSync(path.join(lib, "corp.json"), corp)
+    fs.writeFileSync(
+      path.join(lib, "_meta.json"),
+      JSON.stringify({
+        appliedId: "corp",
+        entries: [{ id: "corp", name: "Work" }],
+      }),
+    )
+    const app = buildApp()
+    const toggle = (body: Record<string, boolean>) =>
+      app.request("/apps/claude-desktop/toggle", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+
+    const taken = await toggle({ enabled: true, overrideForeignGateway: true })
+
+    expect(await taken.json()).toMatchObject({ enabled: true, conflict: null })
+    expect(getConfig().apps?.claudeDesktop?.enabled).toBe(true)
+    expect(fs.readFileSync(path.join(lib, "corp.json"), "utf8")).toBe(corp)
+
+    await toggle({ enabled: false })
+
+    const meta = actualDesktop.readJsonObject(path.join(lib, "_meta.json"))
+    expect(meta).toEqual({
+      appliedId: "corp",
+      entries: [{ id: "corp", name: "Work" }],
+    })
+    expect(fs.readFileSync(path.join(lib, "corp.json"), "utf8")).toBe(corp)
   })
 
   test("disable reverts proxy config and persists enabled=false", async () => {

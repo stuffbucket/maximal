@@ -12,13 +12,14 @@ import {
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import type { BudgetService } from "~/lib/budget/service"
+import type { PersistedTokenUsageEvent } from "~/lib/token-usage/store"
 
 import { dispatchWithBudget } from "~/lib/budget/dispatch"
 import { awaitApproval } from "~/lib/http/approval"
 import { checkRateLimit } from "~/lib/http/rate-limit"
 import { requestContext } from "~/lib/http/request-context"
 import { state } from "~/lib/runtime-state/state"
-import { createTokenUsageRecorder } from "~/lib/token-usage"
+import { prepareTokenUsageEvent } from "~/lib/token-usage"
 import { deriveUsageClient } from "~/lib/token-usage/client"
 import { COPILOT_PROVIDER_ID } from "~/services/copilot/upstream-request"
 
@@ -48,25 +49,26 @@ export interface ServedOperation {
   operation: ModelOperation
   model: string
   provider: string
+  pluginId?: string
 }
 
 /**
- * Record one operation's usage: against the request's model (`model`, as the
+ * Prepare one operation's usage: against the request's model (`model`, as the
  * client named it) and the provider that served it. Copilot's rows keep
  * `source: "copilot"`; any other provider's are `source: "provider"`.
  */
-export function recordOperationUsage(
-  { operation, model, provider }: ServedOperation,
+export function prepareOperationUsage(
+  { operation, model, provider, pluginId }: ServedOperation,
   result: Pick<OperationResult, "usage" | "cost">,
-): void {
-  createTokenUsageRecorder({
-    endpoint: USAGE_ENDPOINTS[operation],
-    model,
-    providerName: provider,
-    source: provider === COPILOT_PROVIDER_ID ? "copilot" : "provider",
-  })({
+): PersistedTokenUsageEvent | null {
+  return prepareTokenUsageEvent({
     ...result.usage,
     total_nano_aiu: result.cost?.amount,
+    endpoint: USAGE_ENDPOINTS[operation],
+    model,
+    pluginId,
+    providerName: provider,
+    source: provider === COPILOT_PROVIDER_ID ? "copilot" : "provider",
   })
 }
 
@@ -91,39 +93,41 @@ export async function runOperation(
   budget?: BudgetService,
 ): Promise<Record<string, unknown>> {
   const model = requestedModel(call.model)
-  const target = operations.resolve(call.operation, model)
-  if (!target) throw new OperationUnavailableError(call.operation, model)
-  await admitUpstreamRequest()
-  const store = requestContext.getStore()
-  const { json } = await dispatchWithBudget(
-    operations,
-    {
-      operation: call.operation,
-      model,
-      body: call.body,
-      signal: call.signal,
-      origin: {
-        kind: "http",
-        client: deriveUsageClient(
-          store?.usage.apiKeyLabel,
-          store?.userAgent ?? "",
-        ),
+  const prepared = operations.prepare(call.operation, model)
+  if (!prepared) throw new OperationUnavailableError(call.operation, model)
+  try {
+    await admitUpstreamRequest()
+    const store = requestContext.getStore()
+    const { json } = await dispatchWithBudget(
+      prepared,
+      {
+        body: call.body,
+        signal: call.signal,
+        origin: {
+          kind: "http",
+          client: deriveUsageClient(
+            store?.usage.apiKeyLabel,
+            store?.userAgent ?? "",
+          ),
+        },
       },
-    },
-    {
-      provider: target.binding.provider,
-      budget,
-      record: (result) => {
-        recordOperationUsage(
-          {
-            operation: call.operation,
-            model,
-            provider: target.binding.provider,
-          },
-          result,
-        )
+      {
+        provider: prepared.binding.provider,
+        budget,
+        record: (result) =>
+          prepareOperationUsage(
+            {
+              operation: call.operation,
+              model,
+              provider: prepared.binding.provider,
+              pluginId: prepared.pluginId,
+            },
+            result,
+          ),
       },
-    },
-  )
-  return json
+    )
+    return json
+  } finally {
+    prepared.release()
+  }
 }

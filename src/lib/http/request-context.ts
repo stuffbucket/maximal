@@ -23,6 +23,9 @@ export interface RequestContext {
   sessionAffinity: string | undefined
   parentSessionId: string | undefined
   usage: RequestUsageMeta
+  /** Set when a person let this request through a budget rule that was
+   *  holding it: the budget gate lets it pass. */
+  budgetCleared?: boolean
 }
 
 const TRACE_ID_MAX_LENGTH = 64

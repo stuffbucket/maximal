@@ -11,12 +11,14 @@
  */
 
 import type {
+  PluginClientContribution,
   PluginGateway,
   PluginSnapshot,
   PluginToolView as GatewayToolView,
 } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import type {
+  PluginAccessView,
   PluginClientView,
   PluginConnectorInfo,
   PluginDetailView,
@@ -29,39 +31,51 @@ import type {
 
 import { type AppConfig, getConfig } from "~/lib/config/config"
 
-import { claudeCodePluginClient } from "./clients/claude-code"
+import {
+  PLUGIN_CLIENT_NAMES,
+  pluginAppAccessId,
+  pluginClientForApiKeyLabel,
+  pluginConnectionAccessId,
+} from "./access"
+import { pluginClientDriver } from "./clients/drivers"
 import { type PluginClientConfigurator, pluginMcpUrl } from "./clients/sync"
-import { pluginClients } from "./settings"
+import {
+  pluginClientPermission,
+  pluginClients,
+  pluginConnectionPermission,
+} from "./settings"
 
-/** The clients a connector's endpoint can be registered with, in UI order. */
-export const PLUGIN_CLIENTS: ReadonlyArray<PluginClientConfigurator> = [
-  claudeCodePluginClient,
-]
+interface ClientOption {
+  contribution: PluginClientContribution
+  configurator?: PluginClientConfigurator
+}
 
 interface ClientAvailability {
-  configurator: PluginClientConfigurator
+  option: ClientOption
   available: boolean
 }
 
-function clientAvailability(): Array<ClientAvailability> {
-  return PLUGIN_CLIENTS.map((configurator) => {
+/** Resolve projected data against the small parent-owned driver table. */
+function clientAvailability(gateway: PluginGateway): Array<ClientAvailability> {
+  return gateway.pluginClientContributions().map((contribution) => {
+    const configurator = pluginClientDriver(contribution)
     let available = false
     try {
-      available = configurator.available()
+      available = configurator?.available() ?? false
     } catch {
       // Unreadable config: shown as unavailable.
     }
-    return { configurator, available }
+    return { option: { contribution, configurator }, available }
   })
 }
 
 /** The client's own setup of the connector, which Maximal defers to. */
 function standaloneIn(
-  configurator: PluginClientConfigurator,
+  configurator: PluginClientConfigurator | undefined,
   id: string,
 ): PluginClientView["standalone"] {
   try {
-    return configurator.standalone(id)
+    return configurator?.standalone(id)
   } catch {
     return undefined
   }
@@ -149,6 +163,75 @@ interface ViewContext {
   clients: Array<ClientAvailability>
 }
 
+function appUnavailableReason(
+  unavailableReason: string | undefined,
+  configurator: PluginClientConfigurator | undefined,
+): Pick<PluginAccessView, "reasonKind" | "reason"> {
+  if (unavailableReason) {
+    return { reasonKind: "custom", reason: unavailableReason }
+  }
+  if (!configurator) return { reasonKind: "unsupported" }
+  const reason = configurator.unavailableReason()
+  return reason.kind === "custom" ?
+      { reasonKind: "custom", reason: reason.reason }
+    : { reasonKind: "app-off" }
+}
+
+function legacyClientUnavailableReason(
+  name: string,
+  unavailableReason: string | undefined,
+  configurator: PluginClientConfigurator | undefined,
+): string {
+  if (unavailableReason) return unavailableReason
+  const reason = configurator?.unavailableReason()
+  if (reason?.kind === "custom") return reason.reason
+  if (reason?.kind === "app-off") {
+    return `Turn on ${name} in Maximal first.`
+  }
+  return "This app can't receive connectors from Maximal yet."
+}
+
+function accessViews(
+  pluginId: string,
+  { config, clients }: ViewContext,
+): Array<PluginAccessView> {
+  const apps = clients.map(({ option, available }): PluginAccessView => {
+    const { contribution, configurator } = option
+    const { clientId, unavailableReason } = contribution
+    const standalone = standaloneIn(configurator, pluginId)
+    return {
+      id: pluginAppAccessId(clientId),
+      kind: "app",
+      name: PLUGIN_CLIENT_NAMES[clientId],
+      permission: pluginClientPermission(config, pluginId, clientId),
+      available,
+      ...(available ?
+        {}
+      : appUnavailableReason(unavailableReason, configurator)),
+      clientId,
+      ...(standalone ? { standalone } : {}),
+    }
+  })
+  const connections = (config.auth?.apiKeyEntries ?? []).flatMap(
+    (entry): Array<PluginAccessView> => {
+      // App-managed keys are represented by their app row, not duplicated as
+      // an implementation-detail connection.
+      if (pluginClientForApiKeyLabel(entry.label)) return []
+      return [
+        {
+          id: pluginConnectionAccessId(entry.id),
+          kind: "connection",
+          name: entry.label,
+          permission: pluginConnectionPermission(config, pluginId, entry.id),
+          available: entry.enabled,
+          ...(entry.enabled ? {} : { reasonKind: "generic" }),
+        },
+      ]
+    },
+  )
+  return [...apps, ...connections]
+}
+
 function toView(
   snapshot: PluginSnapshot,
   tools: ReadonlyArray<GatewayToolView>,
@@ -161,8 +244,8 @@ function toView(
   return {
     id: snapshot.id,
     kind: snapshot.kind,
-    // The host loads a static first-party set: every plugin is built in.
-    source: "built-in",
+    // Expose provenance class only; an external module's specifier is private.
+    source: snapshot.source.type,
     displayName: snapshot.displayName,
     description: snapshot.description,
     ...(snapshot.homepage === undefined ? {} : { homepage: snapshot.homepage }),
@@ -172,22 +255,44 @@ function toView(
     ...(snapshot.lifecycle === "failed" && snapshot.error !== undefined ?
       { error: snapshot.error }
     : {}),
+    ...((
+      snapshot.lifecycle === "waiting"
+      && snapshot.waitingForServices !== undefined
+    ) ?
+      { waitingForServices: [...snapshot.waitingForServices] }
+    : {}),
+    ...((
+      snapshot.lifecycle === "waiting" && snapshot.waitingReason !== undefined
+    ) ?
+      { waitingReason: snapshot.waitingReason }
+    : {}),
     ...(snapshot.status === undefined ? {} : { status: snapshot.status }),
     toolCounts: toolCounts(tools),
     toolsSource: snapshot.toolsSource,
     clients:
       isConnector ?
-        clients.map(({ configurator, available }): PluginClientView => {
+        clients.map(({ option, available }): PluginClientView => {
+          const { contribution, configurator } = option
+          const { clientId, unavailableReason } = contribution
           const standalone = standaloneIn(configurator, snapshot.id)
           return {
-            id: configurator.clientId,
-            selected: selected.includes(configurator.clientId),
+            id: clientId,
+            selected: selected.includes(clientId),
             available,
-            ...(available ? {} : { reason: configurator.unavailableReason() }),
+            ...(available ?
+              {}
+            : {
+                reason: legacyClientUnavailableReason(
+                  PLUGIN_CLIENT_NAMES[clientId],
+                  unavailableReason,
+                  configurator,
+                ),
+              }),
             ...(standalone ? { standalone } : {}),
           }
         })
       : [],
+    access: isConnector ? accessViews(snapshot.id, { config, clients }) : [],
     endpoint: isConnector ? pluginMcpUrl(snapshot.id) : "",
   }
 }
@@ -226,7 +331,7 @@ function safeToolViews(
 export function listPluginViews(
   gateway: PluginGateway,
 ): Promise<PluginsListResponse> {
-  const clients = clientAvailability()
+  const clients = clientAvailability(gateway)
   const config = getConfig()
   return Promise.resolve({
     plugins: gateway.list().map((snapshot) =>
@@ -242,7 +347,7 @@ export function pluginDetailView(
   gateway: PluginGateway,
   id: string,
 ): Promise<PluginDetailView | undefined> {
-  const clients = clientAvailability()
+  const clients = clientAvailability(gateway)
   const snapshot = gateway.get(id)
   if (!snapshot) return Promise.resolve(undefined)
   const tools = safeToolViews(gateway, id)

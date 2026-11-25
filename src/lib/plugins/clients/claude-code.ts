@@ -203,7 +203,7 @@ export function createClaudeCodePluginClient(
     clientId: "claude-code",
     apiKeyLabel: HELPER_LABEL,
     available: integrationOn,
-    unavailableReason: () => "Turn on Claude Code in Maximal first.",
+    unavailableReason: () => ({ kind: "app-off" }),
     standalone: (id) =>
       findStandalone(id, readServers(configPath()), settingsPath()),
     apply: (desired, legacy) => applyToFile(configPath(), desired, legacy),

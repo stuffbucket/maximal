@@ -73,16 +73,20 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
   })
 
   if (!wantsStream) {
-    const finalResponse = await runAgentLoop({
-      initialPayload: payload,
-      policy,
-      executor,
-      callOnce: buildCallOnce(upstream),
-      logger: options.logger,
-      serverTools,
-      recordUsage: args.recordUsage,
-    })
-    return c.json(finalResponse)
+    try {
+      const finalResponse = await runAgentLoop({
+        initialPayload: payload,
+        policy,
+        executor,
+        callOnce: buildCallOnce(upstream),
+        logger: options.logger,
+        serverTools,
+        recordUsage: args.recordUsage,
+      })
+      return c.json(finalResponse)
+    } finally {
+      serverTools.release()
+    }
   }
 
   // Streaming path — true streaming during agent execution. Each
@@ -107,6 +111,8 @@ export async function handleWithWebToolsAgent(args: WebToolsFlowArgs) {
         error,
         flow: "web_tools",
       })
+    } finally {
+      serverTools.release()
     }
   })
 }

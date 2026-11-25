@@ -3,7 +3,42 @@
 import { defineCommand, runMain, parseArgs } from "citty"
 
 import { HELPER_SUBCOMMAND } from "./lib/auth/api-key-helper-tokens"
+import { MCP_COMMAND, MCP_STDIO_SUBCOMMAND } from "./lib/mcp-stdio/command"
+import { INTERNAL_PLUGIN_RUNNER_COMMAND } from "./lib/plugins/runner/command"
 import { BUILD_VERSION } from "./lib/update/build-info"
+
+function mcpStdioArguments(
+  argv: ReadonlyArray<string>,
+): Array<string> | undefined {
+  let offset = -1
+  if (argv[1] === MCP_COMMAND) offset = 1
+  else if (argv[2] === MCP_COMMAND) offset = 2
+  if (offset < 0 || argv[offset + 1] !== MCP_STDIO_SUBCOMMAND) return undefined
+  const args = argv.slice(offset + 2)
+  return args.some((arg) => arg === "--help" || arg === "-h") ? undefined : args
+}
+
+const stdioArgs = mcpStdioArguments(process.argv)
+if (stdioArgs) {
+  const { runMcpStdioFromArgv } = await import("./lib/mcp-stdio/adapter")
+  process.exit(await runMcpStdioFromArgv(stdioArgs, process.env))
+}
+
+const internalRunnerInvocation =
+  process.argv[1] === INTERNAL_PLUGIN_RUNNER_COMMAND
+  || process.argv[2] === INTERNAL_PLUGIN_RUNNER_COMMAND
+if (internalRunnerInvocation) {
+  const { runInternalPluginRunner } = await import("./lib/plugins/runner/entry")
+  try {
+    await runInternalPluginRunner()
+    process.disconnect?.()
+    process.exit(0)
+  } catch (error) {
+    console.error("Plugin runner failed:", error)
+    process.disconnect?.()
+    process.exit(1)
+  }
+}
 
 const cliArgs = {
   apiKeyHelper: {
@@ -61,6 +96,7 @@ const main = defineCommand({
     start: () => import("./start").then((m) => m.start),
     setup: () => import("./setup").then((m) => m.setup),
     app: () => import("./apps/cli").then((m) => m.appCommand),
+    mcp: () => import("./mcp").then((m) => m.mcpCommand),
     // Keyed by HELPER_SUBCOMMAND so the on-disk `<bin> api <client>` token and
     // the command citty dispatches share one source of truth (no drift).
     [HELPER_SUBCOMMAND]: () => import("./apps/cli").then((m) => m.apiCommand),

@@ -3,6 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { parse } from "smol-toml"
 
+import { currentProfileId } from "~/apps/profile-identity"
 import {
   atomicWriteText,
   fsyncDirectory,
@@ -21,6 +22,8 @@ export interface CodexAuthInvocation {
 export interface PrepareCodexConfigOptions {
   invocation: CodexAuthInvocation
   createdFile?: boolean
+  profileId?: string
+  overrideOtherMaximal?: boolean
 }
 
 export interface PreparedCodexConfig {
@@ -60,7 +63,8 @@ interface SelectorRange {
 }
 
 interface OwnershipState {
-  version: 1
+  version: 1 | 2
+  profileId?: string
   providerId: string
   priorSelectorToken: string | null
   insertedSelector: string | null
@@ -77,6 +81,13 @@ export class CodexConfigConflictError extends Error {
   constructor(message: string) {
     super(message)
     this.name = "CodexConfigConflictError"
+  }
+}
+
+export class CodexOtherMaximalConfigError extends Error {
+  constructor() {
+    super("Codex routing is owned by another Maximal profile")
+    this.name = "CodexOtherMaximalConfigError"
   }
 }
 
@@ -126,7 +137,9 @@ function decodeState(encoded: string): OwnershipState {
       Buffer.from(encoded, "base64url").toString("utf8"),
     ) as Partial<OwnershipState>
     if (
-      value.version !== 1
+      (value.version !== 1 && value.version !== 2)
+      || (value.version === 2 && typeof value.profileId !== "string")
+      || (value.profileId !== undefined && typeof value.profileId !== "string")
       || typeof value.providerId !== "string"
       || (value.priorSelectorToken !== null
         && typeof value.priorSelectorToken !== "string")
@@ -252,6 +265,35 @@ function currentProviderFingerprint(
   return provider === undefined ? null : fingerprint(provider)
 }
 
+function providerBaseUrl(
+  parsed: Record<string, unknown>,
+  providerId: string,
+): string | null {
+  const providers = parsed.model_providers
+  if (!providers || typeof providers !== "object" || Array.isArray(providers)) {
+    return null
+  }
+  const provider = (providers as Record<string, unknown>)[providerId]
+  if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
+    return null
+  }
+  const baseUrl = (provider as Record<string, unknown>).base_url
+  return typeof baseUrl === "string" ? baseUrl : null
+}
+
+function stateOwnership(
+  parsed: Record<string, unknown>,
+  state: OwnershipState,
+  profileId: string,
+): "ours" | "other-maximal" {
+  if (state.version === 2) {
+    return state.profileId === profileId ? "ours" : "other-maximal"
+  }
+  return providerBaseUrl(parsed, state.providerId) === codexBaseUrl() ?
+      "ours"
+    : "other-maximal"
+}
+
 function referencesProvider(value: unknown, providerId: string): boolean {
   if (!value || typeof value !== "object") return false
   if (Array.isArray(value)) {
@@ -313,8 +355,17 @@ export function prepareCodexConfig(
   const owned = findOwnedBlock(content)
   if (owned) {
     assertOwnedSemantics(content, owned.state)
+    const profileId = options.profileId ?? currentProfileId()
+    if (
+      stateOwnership(parsed, owned.state, profileId) === "other-maximal"
+      && !options.overrideOtherMaximal
+    ) {
+      throw new CodexOtherMaximalConfigError()
+    }
     const nextFingerprint = fingerprintProvider(options.invocation)
-    if (owned.state.fingerprint === nextFingerprint) {
+    const alreadyStamped =
+      owned.state.version === 2 && owned.state.profileId === profileId
+    if (owned.state.fingerprint === nextFingerprint && alreadyStamped) {
       return {
         status: "unchanged",
         content,
@@ -323,7 +374,12 @@ export function prepareCodexConfig(
     }
 
     const newline = newlineFor(content)
-    const nextState = { ...owned.state, fingerprint: nextFingerprint }
+    const nextState: OwnershipState = {
+      ...owned.state,
+      version: 2,
+      profileId,
+      fingerprint: nextFingerprint,
+    }
     const block = [
       `${BEGIN_MARKER}${encodeState(nextState)}`,
       renderProvider(owned.state.providerId, options.invocation, newline),
@@ -354,7 +410,8 @@ export function prepareCodexConfig(
   const appendPrefix =
     transformed.endsWith(newline) ? newline : newline + newline
   const state: OwnershipState = {
-    version: 1,
+    version: 2,
+    profileId: options.profileId ?? currentProfileId(),
     providerId,
     priorSelectorToken: selector?.token ?? null,
     insertedSelector,
@@ -373,10 +430,63 @@ export function prepareCodexConfig(
   return { status: "changed", content: next, providerId }
 }
 
-export function revertCodexConfig(content: string): RevertedCodexConfig {
+function editedSelectorResult(
+  content: string,
+  parsed: Record<string, unknown>,
+  state: OwnershipState,
+): RevertedCodexConfig | null {
+  if (parsed.model_provider === state.providerId) return null
+  const reasons: Array<"selector-modified" | "provider-modified"> = [
+    "selector-modified",
+  ]
+  if (
+    currentProviderFingerprint(parsed, state.providerId) !== state.fingerprint
+    || referencesProvider(parsed, state.providerId)
+  ) {
+    reasons.push("provider-modified")
+  }
+  return { status: "cleanup-required", content, reasons }
+}
+
+function restorePriorSelector(
+  content: string,
+  selector: SelectorRange | null,
+  state: OwnershipState,
+): string {
+  if (state.priorSelectorToken === null) {
+    if (!state.insertedSelector || !selector) {
+      throw new CodexConfigConflictError(
+        "Codex root model_provider insertion has been modified",
+      )
+    }
+    return (
+      content.slice(0, selector.statementStart)
+      + content.slice(selector.statementEnd)
+    )
+  }
+  if (!selector) {
+    throw new CodexConfigConflictError(
+      "Codex root model_provider assignment is no longer source-editable",
+    )
+  }
+  return (
+    content.slice(0, selector.start)
+    + state.priorSelectorToken
+    + content.slice(selector.end)
+  )
+}
+
+export function revertCodexConfig(
+  content: string,
+  profileId: string = currentProfileId(),
+): RevertedCodexConfig {
   const parsed = parseConfig(content)
   const owned = findOwnedBlock(content)
   if (!owned) return { status: "unchanged", content }
+  if (stateOwnership(parsed, owned.state, profileId) === "other-maximal") {
+    assertOwnedSemantics(content, owned.state)
+    throw new CodexOtherMaximalConfigError()
+  }
   const prefixStart = owned.markerStart - owned.state.appendPrefix.length
   if (
     prefixStart < 0
@@ -388,44 +498,15 @@ export function revertCodexConfig(content: string): RevertedCodexConfig {
 
   const withoutBlock =
     content.slice(0, prefixStart) + content.slice(owned.endMarkerEnd)
-  const selector = findRootSelector(withoutBlock)
-  const selectorOwned = parsed.model_provider === owned.state.providerId
+  const editedSelector = editedSelectorResult(content, parsed, owned.state)
+  if (editedSelector) return editedSelector
+
+  let restored = restorePriorSelector(
+    withoutBlock,
+    findRootSelector(withoutBlock),
+    owned.state,
+  )
   const reasons: Array<"selector-modified" | "provider-modified"> = []
-
-  if (!selectorOwned) {
-    reasons.push("selector-modified")
-    if (
-      currentProviderFingerprint(parsed, owned.state.providerId)
-        !== owned.state.fingerprint
-      || referencesProvider(parsed, owned.state.providerId)
-    ) {
-      reasons.push("provider-modified")
-    }
-    return { status: "cleanup-required", content, reasons }
-  }
-
-  let restored: string
-  if (owned.state.priorSelectorToken === null) {
-    if (!owned.state.insertedSelector || !selector) {
-      throw new CodexConfigConflictError(
-        "Codex root model_provider insertion has been modified",
-      )
-    }
-    restored =
-      withoutBlock.slice(0, selector.statementStart)
-      + withoutBlock.slice(selector.statementEnd)
-  } else {
-    if (!selector) {
-      throw new CodexConfigConflictError(
-        "Codex root model_provider assignment is no longer source-editable",
-      )
-    }
-    restored =
-      withoutBlock.slice(0, selector.start)
-      + owned.state.priorSelectorToken
-      + withoutBlock.slice(selector.end)
-  }
-
   const providerModified =
     currentProviderFingerprint(parsed, owned.state.providerId)
       !== owned.state.fingerprint
@@ -475,12 +556,31 @@ function readCodexConfigFile(filePath: string): string | null {
   )
 }
 
-export function isCodexConfigFileConfigured(filePath: string): boolean {
+export function codexConfigFileConflict(
+  filePath: string,
+  profileId: string = currentProfileId(),
+): "other-maximal-config" | null {
+  const content = readCodexConfigFile(filePath)
+  if (content === null) return null
+  const parsed = parseConfig(content)
+  const owned = findOwnedBlock(content)
+  if (!owned) return null
+  assertOwnedSemantics(content, owned.state)
+  return stateOwnership(parsed, owned.state, profileId) === "other-maximal" ?
+      "other-maximal-config"
+    : null
+}
+
+export function isCodexConfigFileConfigured(
+  filePath: string,
+  profileId: string = currentProfileId(),
+): boolean {
   const content = readCodexConfigFile(filePath)
   if (content === null) return false
-  parseConfig(content)
+  const parsed = parseConfig(content)
   const owned = findOwnedBlock(content)
-  return owned ? hasOwnedSemantics(content, owned.state) : false
+  if (!owned || !hasOwnedSemantics(content, owned.state)) return false
+  return stateOwnership(parsed, owned.state, profileId) === "ours"
 }
 
 export function applyCodexConfigFile(
@@ -506,12 +606,13 @@ function unlinkAndSyncDirectory(filePath: string): void {
 
 export function revertCodexConfigFile(
   filePath: string,
+  profileId: string = currentProfileId(),
 ): RevertedCodexConfigFile {
   const original = readCodexConfigFile(filePath)
   if (original === null) {
     return { status: "unchanged", content: "", path: filePath, wrote: false }
   }
-  const reverted = revertCodexConfig(original)
+  const reverted = revertCodexConfig(original, profileId)
   if (reverted.status === "unchanged") {
     return { ...reverted, path: filePath, wrote: false }
   }

@@ -17,6 +17,8 @@ export interface PoolOptions {
   idleMs?: number
   /** Most per-session upstream connections kept open (LRU idle eviction). Default 16. */
   maxSessions?: number
+  /** Maximum wait for connection shutdown during pool disposal. Default 2500ms. */
+  closeTimeoutMs?: number
   /**
    * A tool call opened a new shared connection after an earlier one closed
    * (an expired session, a reconnect): its `list_changed` subscription is
@@ -44,7 +46,9 @@ export class UpstreamPool {
   readonly #options: PoolOptions
   readonly #idleMs: number
   readonly #maxSessions: number
+  readonly #closeTimeoutMs: number
   readonly #connections = new Map<string, Promise<UpstreamConnection>>()
+  readonly #closing = new Map<string, Promise<void>>()
   /** Calls using (or about to use) each key's connection; a sweep leaves those alone. */
   readonly #users = new Map<string, number>()
   /** A shared connection was opened before. */
@@ -56,6 +60,7 @@ export class UpstreamPool {
     this.#options = options
     this.#idleMs = options.idleMs ?? 10 * 60_000
     this.#maxSessions = options.maxSessions ?? 16
+    this.#closeTimeoutMs = options.closeTimeoutMs ?? 2500
     this.#timer = setInterval(
       () => void this.sweep(),
       Math.max(10, Math.min(this.#idleMs / 2, 60_000)),
@@ -63,9 +68,9 @@ export class UpstreamPool {
     this.#timer.unref()
   }
 
-  /** Number of open (or opening) upstream sessions. */
+  /** Number of open, opening, or closing upstream sessions still owned. */
   get size(): number {
-    return this.#connections.size
+    return this.#connections.size + this.#closing.size
   }
 
   async listTools(signal?: AbortSignal): Promise<Array<UpstreamTool>> {
@@ -112,14 +117,44 @@ export class UpstreamPool {
     }
   }
 
+  /** Release one downstream session's upstream state before generation migration. */
+  async releaseSession(sessionId: string, signal?: AbortSignal): Promise<void> {
+    const releaseSignal = this.#withLifetime(signal)
+    const alreadyClosing = this.#closing.get(sessionId)
+    if (alreadyClosing) {
+      await abortable(alreadyClosing, releaseSignal)
+      return
+    }
+    const pending = this.#connections.get(sessionId)
+    if (!pending) return
+    const connection = await abortable(pending, releaseSignal).catch(
+      (error: unknown) => {
+        if (releaseSignal.aborted) throw error
+        return undefined
+      },
+    )
+    if (!connection || this.#connections.get(sessionId) !== pending) return
+    if (this.#inUse(sessionId, connection)) {
+      throw new Error(`Upstream session "${sessionId}" is still in use.`)
+    }
+    this.#connections.delete(sessionId)
+    await abortable(this.#ownClosing(sessionId, connection), releaseSignal)
+  }
+
   /** Close every upstream session (sign-out, unload). The pool stays usable unless `dispose` was called. */
   async closeAll(): Promise<void> {
-    const pending = [...this.#connections.values()]
+    const pending = [...this.#connections.entries()]
     this.#connections.clear()
-    await Promise.all(
-      pending.map(async (entry) =>
-        (await entry.catch(() => undefined))?.close(),
-      ),
+    const starting = pending.map(async ([key, entry]) => {
+      const connection = await entry.catch(() => undefined)
+      if (connection) await this.#ownClosing(key, connection)
+    })
+    const all = Promise.allSettled([
+      ...starting,
+      ...this.#closing.values(),
+    ]).then(() => undefined)
+    await abortable(all, AbortSignal.timeout(this.#closeTimeoutMs)).catch(
+      () => undefined,
     )
   }
 
@@ -127,6 +162,15 @@ export class UpstreamPool {
     clearInterval(this.#timer)
     this.#lifetime.abort()
     await this.closeAll()
+    // The pool is permanently unusable after its lifetime aborts, so timed-out
+    // closes no longer need to fence a replacement acquisition.
+    this.#closing.clear()
+  }
+
+  #withLifetime(signal: AbortSignal | undefined): AbortSignal {
+    return signal ?
+        AbortSignal.any([signal, this.#lifetime.signal])
+      : this.#lifetime.signal
   }
 
   #inUse(key: string, connection: UpstreamConnection): boolean {
@@ -138,6 +182,9 @@ export class UpstreamPool {
     signal: AbortSignal | undefined,
     announce: boolean,
   ): Promise<UpstreamConnection> {
+    const acquisitionSignal = this.#withLifetime(signal)
+    const closing = this.#closing.get(key)
+    if (closing) await abortable(closing, acquisitionSignal)
     let pending = this.#connections.get(key)
     if (!pending) {
       this.#lifetime.signal.throwIfAborted()
@@ -158,7 +205,7 @@ export class UpstreamPool {
       })
       if (this.#connections.size > this.#maxSessions + 1) void this.sweep()
     }
-    return await abortable(pending, signal)
+    return await abortable(pending, acquisitionSignal)
   }
 
   /** Close `connection`; an idle `sweep` leaves it alone if a call picked it up meanwhile. */
@@ -174,7 +221,19 @@ export class UpstreamPool {
     if (idle && this.#inUse(key, connection)) return
     if (current && this.#connections.get(key) === pending)
       this.#connections.delete(key)
-    await connection.close()
+    await this.#ownClosing(key, connection)
+  }
+
+  #ownClosing(key: string, connection: UpstreamConnection): Promise<void> {
+    const existing = this.#closing.get(key)
+    if (existing) return existing
+    const closing = Promise.resolve()
+      .then(() => connection.close())
+      .finally(() => {
+        if (this.#closing.get(key) === closing) this.#closing.delete(key)
+      })
+    this.#closing.set(key, closing)
+    return closing
   }
 
   async #with<T>(

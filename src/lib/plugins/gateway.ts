@@ -33,6 +33,8 @@ const noUnsubscribe = (): void => {}
 export const pluginOperations: OperationDispatch = {
   resolve: (operation, model) =>
     current?.operations().resolve(operation, model),
+  prepare: (operation, model) =>
+    current?.operations().prepare(operation, model),
   dispatch: (request) =>
     current ?
       current.operations().dispatch(request)

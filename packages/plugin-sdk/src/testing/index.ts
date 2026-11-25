@@ -25,7 +25,7 @@ import {
 } from "node:fs"
 import path from "node:path"
 
-import type { PluginModule } from "../index"
+import type { PluginModule, PluginResourceLifecycle } from "../index"
 import type {
   HostServices,
   PluginLogger,
@@ -39,6 +39,11 @@ import type {
 } from "../types"
 
 import { PluginContractError } from "../errors"
+import {
+  isPluginResourceLifecycle,
+  normalizeResourceDeclaration,
+  runPluginLifecycleHook,
+} from "../lifecycle"
 import {
   activatePlugin,
   assertPluginDependencies,
@@ -303,9 +308,12 @@ async function writeTestSettings(
 }
 
 /** A root cordis context with the plugin services installed. */
+// eslint-disable-next-line max-lines-per-function -- the returned testbed owns one shared lifecycle closure
 export function createTestbed(options: TestbedOptions = {}): Testbed {
   const events: Array<PluginRuntimeEvent> = []
-  const runtime = new PluginRuntime({ onChange: (event) => events.push(event) })
+  const runtime = new PluginRuntime({
+    onChange: (event) => events.push(event),
+  })
   const ctx = new Context()
   const host = createFakeHost(options)
   const storage =
@@ -331,13 +339,34 @@ export function createTestbed(options: TestbedOptions = {}): Testbed {
     const value = await negotiateConfig(storage, plugin, manifest, config)
     const id = plugin.name
     const lifetime = new AbortController()
-    const fiber = await activatePlugin(
-      ctx,
-      runtime,
-      id,
-      toCordisPlugin(plugin),
-      value,
-    )
+    let resources: PluginResourceLifecycle | undefined
+    const cordis = toCordisPlugin(plugin, (result) => {
+      if (result === undefined) return
+      if (!isPluginResourceLifecycle(result)) {
+        throw new PluginContractError(
+          "invalid-module",
+          `Plugin "${id}" returned an invalid resource lifecycle.`,
+          { pluginId: id },
+        )
+      }
+      normalizeResourceDeclaration(id, result.declaration)
+      resources = result
+    })
+    const fiber = await activatePlugin(ctx, runtime, id, cordis, value)
+    try {
+      if (resources !== undefined) {
+        await runPluginLifecycleHook((context) => resources?.prepare(context))
+        await runPluginLifecycleHook((context) => resources?.commit(context))
+      }
+    } catch (error) {
+      if (resources !== undefined) {
+        await runPluginLifecycleHook((context) => resources?.revoke(context), {
+          purpose: "recovery",
+        }).catch(() => undefined)
+      }
+      await deactivatePlugin(runtime, id, fiber)
+      throw error
+    }
     let stopped: Promise<void> | undefined
     const handle: LoadedPlugin = {
       id,
@@ -374,7 +403,16 @@ export function createTestbed(options: TestbedOptions = {}): Testbed {
         stopped ??= (async () => {
           loaded.delete(handle)
           lifetime.abort(new Error(`Plugin "${id}" stopped.`))
-          await deactivatePlugin(runtime, id, fiber)
+          try {
+            if (resources !== undefined) {
+              await runPluginLifecycleHook(
+                (context) => resources?.revoke(context),
+                { purpose: "recovery" },
+              )
+            }
+          } finally {
+            await deactivatePlugin(runtime, id, fiber)
+          }
         })()
         return stopped
       },

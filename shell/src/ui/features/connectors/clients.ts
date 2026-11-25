@@ -4,6 +4,9 @@ import type { PluginClientId, PluginClientView, PluginView } from "../../../prox
 /** Product names, not translated. */
 export const CLIENT_NAMES: Record<PluginClientId, string> = {
   "claude-code": "Claude Code",
+  "claude-desktop": "Claude Desktop",
+  codex: "Codex",
+  "copilot-cli": "Copilot CLI",
 };
 
 type Standalone = NonNullable<PluginClientView["standalone"]>;

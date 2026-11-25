@@ -1,7 +1,7 @@
 ---
 name: workflow-process
-description: Use when preparing or merging a Maximal pull request, running the packaged Windows smoke workflow, cutting a stable or release-candidate build, monitoring release automation, updating the distribution manifest, or recovering a failed release.
-version: 1.0.0
+description: Use when preparing or merging a Maximal pull request, running the packaged Windows smoke workflow, cutting a stable or release-candidate build, monitoring release automation, updating the distribution manifest, recovering a failed release, or deploying or rolling back mxml.sh's pages.
+version: 1.1.0
 ---
 
 # Maximal Workflow Process
@@ -17,6 +17,7 @@ Use the protected repository workflows. Read the linked source of truth before a
 | Cut a stable release | Land a releasable `fix:` or `feat:` commit → generated release-please PR → protected merge |
 | Cut an RC with an exact version | Land a releasable commit whose body contains `Release-As: X.Y.Z-rc.N` → verify the generated release-please PR proposes that exact version → protected merge |
 | Recover release automation | Follow the recovery table in `docs/release-runbook.md`; preserve the existing tag and draft/release |
+| Change or publish mxml.sh's pages (landing, guide) | Content lives in stuffbucket/maximal-site; follow its `publishing-mxml-content` skill. Here, only run `deploy-pages.yml` (see **mxml.sh pages**) |
 
 ## Code-change PRs
 
@@ -51,6 +52,14 @@ Read `docs/release-runbook.md`, `.github/workflows/release-please.yml`, and `.gi
 8. Review the generated `automation/updates-manifest` PR, wait for its required check, confirm it is current, and merge it separately.
 9. Confirm Pages and post-publication distribution jobs complete.
 
+## mxml.sh pages
+
+Read `docs/release-runbook.md` → **mxml.sh pages**. This repository owns the deploy, the domain, `/updates/*`, `/apt/*` and the `/maximal/` redirect. stuffbucket/maximal-site owns the pages, chosen by its tag matching the stable version in `site/public/updates/manifest.json`.
+
+- Publish a content change without a release: `gh workflow run deploy-pages.yml --ref main` after the content is tagged in maximal-site.
+- Roll back to this repository's old `site/` pages: `gh workflow run deploy-pages.yml --ref main -f source=legacy`.
+- Don't edit pages under `site/src`; they only feed the legacy rollback.
+
 ## Recovery rules
 
 - Failed publish gate: re-run failed jobs on the original `release.yml` run.
@@ -62,7 +71,7 @@ Read `docs/release-runbook.md`, `.github/workflows/release-please.yml`, and `.gi
 
 ## Never shortcut
 
-- Do not manually create, push, move, or delete a tag in the normal flow.
+- Do not manually create, push, move, or delete a tag in the normal flow. (This repository's tags; stuffbucket/maximal-site's content tags are moved by hand on purpose.)
 - Do not run `release.yml` from a branch or use it to manufacture a release without an existing version tag.
 - Do not publish assets before all publish gates pass or append/replace assets after publication.
 - Do not push generated manifest changes directly to `main`.

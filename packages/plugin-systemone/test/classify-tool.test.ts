@@ -1,3 +1,9 @@
+/**
+ * The `classify` server tool through a real host with a fake upstream: when
+ * it is offered, what it sends, how it answers and fails.
+ */
+import type { ServerToolCall } from "@stuffbucket/maximal-plugin-sdk"
+
 import {
   capabilityServices,
   catalogModel,
@@ -5,10 +11,6 @@ import {
   createLifecycleHarness,
   type LifecycleHarness,
 } from "@stuffbucket/maximal-plugin-host/testing"
-/**
- * The `classify` server tool through a real host with a fake upstream: when
- * it is offered, what it sends, how it answers and fails.
- */
 import { afterEach, describe, expect, test } from "bun:test"
 
 import * as systemone from "../src/index"
@@ -36,12 +38,27 @@ async function start(options: Parameters<typeof createFakeUpstream>[0] = {}) {
 const toolNames = (harness: LifecycleHarness) =>
   harness.gateway.serverTools().map((tool) => `${tool.pluginId}/${tool.name}`)
 
-const run = (harness: LifecycleHarness, input: Record<string, unknown>) =>
-  harness.gateway.callServerTool("systemone", "classify", input, {
+let invocationCount = 0
+const call = (): ServerToolCall => {
+  const invocationId = `test-invocation-${++invocationCount}`
+  let sequence = 0
+  return {
     signal: new AbortController().signal,
     model: "claude-test",
     client: "claude-code",
-  })
+    invocationId,
+    nextProviderCall: (operation, model) => ({
+      invocationId,
+      providerCallId: `${invocationId}-call-${sequence + 1}`,
+      sequence: ++sequence,
+      operation,
+      model,
+    }),
+  }
+}
+
+const run = (harness: LifecycleHarness, input: Record<string, unknown>) =>
+  harness.gateway.callServerTool("systemone", "classify", input, call())
 
 const questions = {
   refund: { type: "noul", instructions: "Does it ask for a refund?" },

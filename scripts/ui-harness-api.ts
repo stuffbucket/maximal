@@ -16,6 +16,7 @@
  */
 import type { AuthStatus, PluginDetailView } from "../src/lib/config/settings-types"
 
+import { type BudgetMock, createBudgetMock } from "./ui-harness-budget"
 import {
   ClaudeAutoModelsUpdateRequest,
   PluginToolPermissionsRequest,
@@ -48,6 +49,9 @@ export interface MockBackend {
   /** Called whenever a plugin's lifecycle, status, tools or settings change
    *  (the SSE `plugins.changed` frame). Returns an unsubscribe. */
   onPluginsChange: (listener: () => void) => () => void
+  /** Called whenever a request changes the budget (the SSE `budget.changed`
+   *  frame carries the status). Returns an unsubscribe. */
+  onBudgetChange: BudgetMock["onChange"]
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -84,6 +88,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     models: ResolvedScenario["models"]
     connectors: Array<PluginDetailView>
   }
+  const budget = createBudgetMock(fixture.budget)
   const pluginListeners = new Set<() => void>()
   const pluginsChanged = (): void => {
     for (const l of pluginListeners) l()
@@ -237,6 +242,10 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       })
     }
 
+    // --- budget: limits, activity and the on/off + unit switches ---
+    const budgetReply = await budget.handle(req)
+    if (budgetReply) return budgetReply
+
     // --- reads ---
     if (path === "/settings/api/diagnostics") return json(fixture.diagnostics)
     if (path === "/settings/api/update-status")
@@ -272,7 +281,7 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       return json(state.auth)
     }
 
-    // --- apps toggles (flip enabled, echo the fresh entry) ---
+    // --- apps toggles (same conflict and install gates as the real routes) ---
     const appToggle =
       /^\/settings\/api\/apps\/(claude-code|claude-desktop|codex)\/toggle$/.exec(
         path,
@@ -280,7 +289,31 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
     if (appToggle && method === "POST") {
       const app = state.apps.apps.find((a) => a.id === appToggle[1])
       if (!app) return json({ error: { message: "no such app" } }, 404)
-      app.enabled = !!(await body()).enabled
+      const payload = await body()
+      if (
+        typeof payload.enabled !== "boolean"
+        || (payload.overrideOtherMaximal !== undefined
+          && typeof payload.overrideOtherMaximal !== "boolean")
+        || (payload.overrideForeignGateway !== undefined
+          && typeof payload.overrideForeignGateway !== "boolean")
+      ) {
+        return json({ error: { message: "Expected { enabled: boolean, overrideOtherMaximal?: boolean, overrideForeignGateway?: boolean }" } }, 400)
+      }
+      if (payload.enabled && app.status === "not-installed") {
+        return json({ error: { message: `No ${app.name} install detected. Install it first, then enable routing.` } }, 409)
+      }
+      if (payload.enabled && app.conflict) {
+        const transfer =
+          app.conflict === "other-maximal-config"
+          && payload.overrideOtherMaximal === true
+        const takeOver =
+          app.id === "claude-desktop"
+          && app.conflict === "foreign-gateway-profile"
+          && payload.overrideForeignGateway === true
+        if (!transfer && !takeOver) return json(app)
+        app.conflict = null
+      }
+      app.enabled = payload.enabled
       return json(app)
     }
 
@@ -334,6 +367,16 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       }
       if (b.clients) {
         for (const client of connector.clients) client.selected = b.clients.includes(client.id)
+      }
+      if (b.access) {
+        for (const target of connector.access) {
+          const permission = b.access[target.id]
+          if (!permission) continue
+          target.permission = permission
+          // The compatibility view of apps follows the app's policy.
+          const client = connector.clients.find((c) => c.id === target.clientId)
+          if (client) client.selected = permission !== "block"
+        }
       }
       syncTools(connector)
       pluginsChanged()
@@ -498,5 +541,6 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       pluginListeners.add(listener)
       return () => pluginListeners.delete(listener)
     },
+    onBudgetChange: budget.onChange,
   }
 }

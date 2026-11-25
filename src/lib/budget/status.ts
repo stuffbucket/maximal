@@ -9,17 +9,31 @@
  */
 
 import type {
+  BudgetFilterStatus,
   BudgetLimitStatus,
   BudgetStatusResponse,
   ProviderQuotaWindowStatus,
 } from "~/lib/config/settings-types"
 
-import { getNanoAiuSpend } from "~/lib/token-usage/spend"
+import {
+  getOldestSpendMs,
+  getRequestTimes,
+  getSpendBreakdown,
+} from "~/lib/token-usage/spend"
 import { isTokenUsageStorageEnabled } from "~/lib/token-usage/store"
 
+import type { ApprovalState } from "./approvals"
+import type { Presence } from "./conditions"
+import type { BudgetOverride } from "./overrides"
+
+import { limitApplies } from "./conditions"
+import { metricOf, type SpendMetric } from "./metric"
+import { resolveNotify } from "./notify"
+import { effectiveLimit, hasUnlimited } from "./overrides"
 import {
   fixedPeriod,
   resolvePeriod,
+  rollingPeriodEnd,
   type BudgetPeriod,
   type FollowedWindow,
 } from "./periods"
@@ -35,6 +49,7 @@ import {
   type BudgetScope,
   type BudgetScopeKind,
 } from "./schema"
+import { resolveScope } from "./scope"
 import {
   nanoAiuToDisplay,
   resolveBudgetDisplay,
@@ -46,11 +61,31 @@ const SCOPE_ORDER: Record<BudgetScopeKind, number> = {
   global: 0,
   provider: 1,
   plugin: 2,
-  key: 3,
+  filter: 3,
+  key: 4,
 }
 
 function iso(ms: number): string {
   return new Date(ms).toISOString()
+}
+
+function requestState(
+  requests: number | null,
+  max: number | undefined,
+  warnAt: number,
+): BudgetLimitStatus["state"] {
+  return requests === null || max === undefined ?
+      "ok"
+    : limitState(requests, max, warnAt)
+}
+
+const STATE_RANK = { ok: 0, warning: 1, exhausted: 2 } as const
+
+function worse(
+  a: BudgetLimitStatus["state"],
+  b: BudgetLimitStatus["state"],
+): BudgetLimitStatus["state"] {
+  return STATE_RANK[a] >= STATE_RANK[b] ? a : b
 }
 
 function limitState(
@@ -65,62 +100,152 @@ function limitState(
 
 interface StatusContext {
   nowMs: number
+  filters: BudgetConfig["filters"]
   display: BudgetDisplay
-  held: (scope: BudgetScope) => number
+  held: (scope: BudgetScope, metric: SpendMetric) => number
+  overrides: (limitId: string) => ReadonlyArray<BudgetOverride>
+  approval: (limitId: string) => ApprovalState | null
+  paused: (limitId: string) => number
+  presence: Presence | undefined
+}
+
+function overrideStatus(
+  override: BudgetOverride,
+  shown: (amount: number) => number,
+): BudgetLimitStatus["overrides"][number] {
+  return {
+    id: override.id,
+    kind: override.kind,
+    extra_nano_aiu: override.extraNanoAiu,
+    extra: shown(override.extraNanoAiu),
+    created_at: iso(override.createdAtMs),
+    expires_at:
+      override.expiresAtMs === null ? null : iso(override.expiresAtMs),
+  }
 }
 
 async function limitStatus(
   limit: BudgetLimitConfig,
   period: BudgetPeriod,
-  { nowMs, display, held }: StatusContext,
+  {
+    nowMs,
+    display,
+    held,
+    filters,
+    overrides,
+    approval,
+    paused,
+    presence,
+  }: StatusContext,
 ): Promise<BudgetLimitStatus> {
-  const [usage, usageDaily, usageWeekly] = await getNanoAiuSpend(limit.scope, [
+  const scope = resolveScope(limit.scope, filters)
+  const granted = overrides(limit.id)
+  const cap = effectiveLimit(limit.limit, granted)
+  const metric = metricOf(limit)
+  // Cost is shown in the display unit; tokens are shown as they are.
+  const shown = (amount: number): number =>
+    metric === "nano_aiu" ? nanoAiuToDisplay(amount, display) : amount
+  const ranges = [
     period,
     fixedPeriod("daily", nowMs),
     fixedPeriod("weekly", nowMs),
+  ]
+  const [spend, oldest, requestTimes] = await Promise.all([
+    getSpendBreakdown(scope, ranges, metric),
+    // A rolling window resets when its oldest counted spend ages out.
+    period.rollingMs === undefined ?
+      undefined
+    : getOldestSpendMs(scope, period, metric),
+    limit.maxRequests === undefined ?
+      undefined
+    : getRequestTimes(scope, period),
   ])
-  const remaining = Math.max(0, limit.limit - usage)
+  const [usage, usageDaily, usageWeekly] = spend.usage
+  const [unreconciled, unreconciledDaily, unreconciledWeekly] =
+    spend.unreconciled
+  const requests = requestTimes?.length ?? null
+  const endMs =
+    period.rollingMs === undefined ?
+      period.endMs
+    : rollingPeriodEnd(oldest, period.rollingMs)
+  const remaining = Math.max(0, cap - usage)
   const warnAt = limit.warnAt ?? DEFAULT_WARN_AT
+  const enforced = limitApplies(limit.when, presence)
   return {
     id: limit.id,
     label: limit.label ?? null,
     scope: limit.scope,
     action: limit.action,
     warn_at: warnAt,
+    unit: limit.unit ?? "cost",
+    measure: limit.unit === "tokens" ? (limit.measure ?? "total") : null,
+    max_requests: limit.maxRequests ?? null,
+    requests,
+    when: limit.when ?? null,
+    enforced,
     limit: limit.limit,
+    effective_limit: cap,
     limit_reset: limit.limitReset,
     limit_remaining: remaining,
+    paused: paused(limit.id),
     usage,
-    held: held(limit.scope),
+    held: held(limit.scope, metric),
+    unreconciled,
     usage_daily: usageDaily,
     usage_weekly: usageWeekly,
+    unreconciled_daily: unreconciledDaily,
+    unreconciled_weekly: unreconciledWeekly,
     period_start: iso(period.startMs),
-    resets_at: period.endMs === null ? null : iso(period.endMs),
+    resets_at: endMs === null ? null : iso(endMs),
     reset_basis: period.basis,
     reset_estimated: period.estimated,
-    state: limitState(usage, limit.limit, warnAt),
+    state:
+      hasUnlimited(granted) ? "ok" : (
+        worse(
+          limitState(usage, cap, warnAt),
+          requestState(requests, limit.maxRequests, warnAt),
+        )
+      ),
+    notify: resolveNotify(limit),
+    overrides: granted.map((override) => overrideStatus(override, shown)),
+    approval: approval(limit.id),
     display: {
-      limit: nanoAiuToDisplay(limit.limit, display),
-      usage: nanoAiuToDisplay(usage, display),
-      limit_remaining: nanoAiuToDisplay(remaining, display),
+      limit: shown(limit.limit),
+      effective_limit: shown(cap),
+      usage: shown(usage),
+      unreconciled: shown(unreconciled),
+      limit_remaining: shown(remaining),
     },
   }
 }
 
+/** Whether `a` has less room than `b`: by amount in the same unit, else by
+ *  the share of the limit that is left. */
+function hasLessRoom(a: BudgetLimitStatus, b: BudgetLimitStatus): boolean {
+  if (a.unit === b.unit) return a.limit_remaining < b.limit_remaining
+  return (
+    a.limit_remaining / Math.max(1, a.effective_limit)
+    < b.limit_remaining / Math.max(1, b.effective_limit)
+  )
+}
+
 /** The blocking limit a request would hit first: one already spent, else the
- *  one with the least room. Warn-only limits never refuse, so they don't
- *  count. */
+ *  one with the least room. Warn-only limits never refuse, and one that is
+ *  allowed for an hour isn't enforced, so neither counts. */
 function effectiveBudget(
   budgets: ReadonlyArray<BudgetLimitStatus>,
 ): string | null {
-  const blocking = budgets.filter((budget) => budget.action === "block")
+  const blocking = budgets.filter(
+    (budget) =>
+      budget.action !== "warn"
+      && budget.enforced
+      && !budget.overrides.some((override) => override.kind === "unlimited"),
+  )
   const spent = blocking.find((budget) => budget.state === "exhausted")
   if (spent) return spent.id
   let tightest: BudgetLimitStatus | undefined
   for (const budget of blocking) {
-    if (!tightest || budget.limit_remaining < tightest.limit_remaining) {
-      tightest = budget
-    }
+    if (!tightest || hasLessRoom(budget, tightest)) tightest = budget
   }
   return tightest?.id ?? null
 }
@@ -159,12 +284,40 @@ function windowStatus(
   }
 }
 
+/** Each filter, with the limits whose scope selects it. */
+export function filterStatuses(
+  budget: BudgetConfig | undefined,
+): Array<BudgetFilterStatus> {
+  return (budget?.filters ?? []).map((filter) => ({
+    id: filter.id,
+    name: filter.name,
+    kind: filter.kind,
+    members: filter.members,
+    used_by: (budget?.limits ?? [])
+      .filter(
+        (limit) =>
+          limit.scope.kind === "filter" && limit.scope.id === filter.id,
+      )
+      .map((limit) => limit.id),
+  }))
+}
+
 export interface BudgetStatusOptions {
   nowMs?: number
   /** Defaults to the windows observed so far. */
   windows?: ReadonlyArray<ObservedProviderWindow>
-  /** Nano-AIU calls in progress hold for a scope; none by default. */
-  held?: (scope: BudgetScope) => number
+  /** What calls in progress hold for a scope, in the metric's unit; none by
+   *  default. */
+  held?: (scope: BudgetScope, metric: SpendMetric) => number
+  /** Whether the person is away, for rules that apply only then; unknown
+   *  by default (so such rules don't apply). */
+  presence?: Presence
+  /** The overrides in force for a limit; none by default. */
+  overrides?: (limitId: string) => ReadonlyArray<BudgetOverride>
+  /** What an `ask` rule is waiting on; nothing by default. */
+  approval?: (limitId: string) => ApprovalState | null
+  /** Requests a `pause` rule is holding; none by default. */
+  paused?: (limitId: string) => number
 }
 
 export async function buildBudgetStatus(
@@ -187,7 +340,16 @@ export async function buildBudgetStatus(
       limitStatus(
         limit,
         resolvePeriod(limit.limitReset, nowMs, (ref) => byRef.get(ref)),
-        { nowMs, display, held: options.held ?? (() => 0) },
+        {
+          nowMs,
+          display,
+          filters: budget?.filters,
+          held: options.held ?? (() => 0),
+          overrides: options.overrides ?? (() => []),
+          approval: options.approval ?? (() => null),
+          paused: options.paused ?? (() => 0),
+          presence: options.presence,
+        },
       ),
     ),
   )
@@ -197,6 +359,7 @@ export async function buildBudgetStatus(
     storage_enabled: isTokenUsageStorageEnabled(),
     budgets,
     effective_budget: effectiveBudget(budgets),
+    filters: filterStatuses(budget),
     provider_windows: windows.map((window) => windowStatus(window)),
   }
 }

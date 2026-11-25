@@ -27,12 +27,15 @@
 import type { Context, ErrorHandler } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 
+import { WireRemoteError } from "@stuffbucket/maximal-plugin-protocol"
 import { isOperationUnavailableError } from "@stuffbucket/maximal-plugin-sdk/gateway"
 import consola from "consola"
 import { HTTPException } from "hono/http-exception"
 
 import { markAuthDegraded } from "~/lib/auth/auth-controller"
 import { BudgetExceededError, type BudgetRefusal } from "~/lib/budget/errors"
+import { DAY_MS } from "~/lib/budget/periods"
+import { NANO_AIU_PER_CREDIT } from "~/lib/budget/units"
 import {
   anthropicErrorBody,
   anthropicErrorType,
@@ -97,8 +100,6 @@ const OPERATION_PATHS: Readonly<Record<string, string>> = {
   "images.edits": "/v1/images/edits",
 }
 
-const NANO_AIU_PER_CREDIT = 1_000_000_000
-const DAY_MS = 86_400_000
 const IN_FLIGHT_RETRY_SECONDS = 5
 
 const credits = (nano: number): number => nano / NANO_AIU_PER_CREDIT
@@ -107,24 +108,41 @@ const credits = (nano: number): number => nano / NANO_AIU_PER_CREDIT
  *  plus AI credits, which GitHub bills, and the raw nano-AIU. */
 function budgetMetadata(refusal: BudgetRefusal): Record<string, unknown> {
   const usd = (nano: number) => credits(nano) * refusal.creditUsd
+  // Cost has OpenRouter's names plus credits and nano-AIU; a token or request
+  // limit has its figures in `limit`, `spend` and `requested`, in `unit`.
+  const figures =
+    refusal.unit === "nano_aiu" ?
+      {
+        limit_usd: usd(refusal.limit),
+        spend_usd: usd(refusal.used),
+        limit_credits: credits(refusal.limit),
+        spend_credits: credits(refusal.used),
+        limit_nano_aiu: refusal.limit,
+        spend_nano_aiu: refusal.used,
+        requested_nano_aiu: refusal.requested,
+      }
+    : {
+        limit: refusal.limit,
+        spend: refusal.used,
+        requested: refusal.requested,
+      }
   return {
     limit_source:
       refusal.inFlight ? "maximal_in_flight_budget" : "maximal_limit",
     scope: refusal.scope.kind,
     ...(refusal.scope.kind === "global" ? {} : { scope_id: refusal.scope.id }),
     limit_id: refusal.limitId,
-    limit_usd: usd(refusal.limit),
-    spend_usd: usd(refusal.used),
-    limit_credits: credits(refusal.limit),
-    spend_credits: credits(refusal.used),
-    limit_nano_aiu: refusal.limit,
-    spend_nano_aiu: refusal.used,
-    requested_nano_aiu: refusal.requested,
+    unit: refusal.unit,
+    ...figures,
     resets_at:
       refusal.resetsAtMs === null ?
         null
       : new Date(refusal.resetsAtMs).toISOString(),
-    remedy_hint: "Raise or remove it in Maximal → Budget.",
+    remedy_hint:
+      refusal.approval === "pending" ?
+        "Allow more in the Maximal menu or Rules, then retry."
+      : "Raise or remove it in Maximal → Rules.",
+    ...(refusal.approval === undefined ? {} : { approval: refusal.approval }),
   }
 }
 
@@ -134,8 +152,12 @@ function budgetHeaders(refusal: BudgetRefusal): Record<string, string> {
   return {
     "x-maximal-budget-limit-id": refusal.limitId,
     "x-maximal-budget-scope": refusal.scope.kind,
+    "x-maximal-budget-unit": refusal.unit,
     "x-maximal-budget-limit": String(refusal.limit),
     "x-maximal-budget-used": String(refusal.used),
+    ...(refusal.approval === undefined ?
+      {}
+    : { "x-maximal-budget-approval": refusal.approval }),
     ...(refusal.resetsAtMs === null ?
       {}
     : {
@@ -187,6 +209,21 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function remoteReply(error: WireRemoteError): ProxyErrorReply {
+  const requestedStatus = error.wire.status ?? 500
+  const status = isErrorStatus(requestedStatus) ? requestedStatus : 500
+  return {
+    status,
+    type: anthropicErrorType(status),
+    message: error.wire.message,
+    ...(error.wire.retry === "never" ? { retry: "never" as const } : {}),
+    ...(error.wire.headers === undefined ?
+      {}
+    : { headers: error.wire.headers }),
+    openai: { code: error.wire.code },
+  }
+}
+
 /** The reply before any rewrite: the error as it is. */
 function baseReply(event: ProxyErrorEvent): ProxyErrorReply {
   const { error, upstream, wire } = event
@@ -219,6 +256,7 @@ function baseReply(event: ProxyErrorEvent): ProxyErrorReply {
     }
   }
   if (error instanceof BudgetExceededError) return budgetReply(error, wire)
+  if (error instanceof WireRemoteError) return remoteReply(error)
   if (isOperationUnavailableError(error)) {
     // Nothing serves the model for this operation (its plugin is off, or the
     // id is unknown or ambiguous). 404 says "not served here", which Copilot's

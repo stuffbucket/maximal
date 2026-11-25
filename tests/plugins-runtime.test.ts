@@ -60,6 +60,25 @@ afterEach(async () => {
 })
 
 describe("startPlugins", () => {
+  test("fails closed when a packaged runtime has no sealed generation", async () => {
+    const gateway = await startPlugins({
+      startRunner: () => Promise.resolve(undefined),
+      packagedRuntime: true,
+    })
+
+    expect(gateway).toBeUndefined()
+  })
+
+  test("uses in-process built-ins only in source mode", async () => {
+    const gateway = await startPlugins({
+      startRunner: () => Promise.resolve(undefined),
+      packagedRuntime: false,
+    })
+
+    expect(gateway).toBeDefined()
+    expect(gateway?.list().map((plugin) => plugin.id)).toContain("decisions")
+  })
+
   test("moves a legacy config.json config into the settings file, once", async () => {
     writeConfig(
       validateAppConfig({

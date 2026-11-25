@@ -6,6 +6,7 @@
  */
 import type {
   Context,
+  ModelOperation,
   PluginModule,
   ServerToolDefinition,
 } from "@stuffbucket/maximal-plugin-sdk"
@@ -16,7 +17,12 @@ import { z } from "zod"
 
 import { createPluginHost, PluginContractError } from "../src/index"
 import { runPluginConformance } from "../src/testing"
-import { fakeHost, runCleanups, tempDir } from "./helpers"
+import {
+  fakeHost,
+  runCleanups,
+  tempDir,
+  testSettingsAuthority,
+} from "./helpers"
 import { rejection } from "./rejection"
 
 afterEach(runCleanups)
@@ -56,21 +62,35 @@ function provider(id: string, register: (ctx: Context) => void): PluginModule {
 }
 
 function hostWith(plugins: Array<PluginModule>) {
+  const storageRoot = tempDir()
   return createPluginHost({
     plugins,
     services: {
       host: fakeHost(),
-      storageRoot: tempDir(),
+      storageRoot,
+      settingsAuthority: testSettingsAuthority(storageRoot),
       extra: [serverToolsService],
     },
   })
 }
 
-const call = () => ({
-  signal: new AbortController().signal,
-  model: "claude-sonnet-4.6",
-  client: "claude-code",
-})
+const call = () => {
+  const invocationId = "test-invocation"
+  let sequence = 0
+  return {
+    signal: new AbortController().signal,
+    model: "claude-sonnet-4.6",
+    client: "claude-code",
+    invocationId,
+    nextProviderCall: (operation: ModelOperation, model: string) => ({
+      invocationId,
+      providerCallId: `test-provider-call-${sequence + 1}`,
+      sequence: ++sequence,
+      operation,
+      model,
+    }),
+  }
+}
 
 describe("ctx.serverTools", () => {
   test("lists active plugins' tools by name, and withdraws them with the plugin", async () => {
@@ -104,6 +124,7 @@ describe("ctx.serverTools", () => {
         render: "hidden",
         offer: "always",
         clients: ["codex"],
+        billed: false,
       })
       // Offered to Claude Code unless the plugin says otherwise.
       expect(
@@ -260,10 +281,9 @@ describe("gateway.callServerTool", () => {
         "alpha",
         { q: "x" },
         {
+          ...call(),
           signal: caller.signal,
           sessionId: "session-1",
-          model: "claude-sonnet-4.6",
-          client: "claude-code",
           budget: { plugin: "someone-else", tool: "other" },
         },
       )
@@ -353,10 +373,15 @@ describe("gateway.callServerTool", () => {
 
 test("a host without the service refuses a plugin that injects it", () => {
   const plugin = provider("amp", () => {})
+  const storageRoot = tempDir()
   expect(() =>
     createPluginHost({
       plugins: [plugin],
-      services: { host: fakeHost(), storageRoot: tempDir() },
+      services: {
+        host: fakeHost(),
+        storageRoot,
+        settingsAuthority: testSettingsAuthority(storageRoot),
+      },
     }),
   ).toThrow(/requires missing service: serverTools/)
 })
@@ -383,9 +408,12 @@ describe("a billed server tool", () => {
               }
             : undefined,
           execute: (_input, received) => {
+            const invocation = received.nextProviderCall(
+              "images.generations",
+              "m",
+            )
             received.reportSpend?.({
-              operation: "images.generations",
-              model: "m",
+              ...invocation,
               provider: "copilot",
               result: { usage: {} },
             })
@@ -399,14 +427,19 @@ describe("a billed server tool", () => {
     try {
       await gateway.reconcile({ amp: { enabled: true } })
       const [alpha, beta] = gateway.serverTools()
-      expect(alpha.estimate?.({ q: "x" })).toEqual({
+      expect(alpha.billed).toBe(true)
+      expect(
+        (await gateway.prepareServerTool("amp", "alpha", { q: "x" })).estimate,
+      ).toEqual({
         operation: "images.generations",
         provider: "copilot",
         body: { n: 2 },
       })
-      expect(alpha.estimate?.({})).toBeUndefined()
+      expect(
+        (await gateway.prepareServerTool("amp", "alpha", {})).estimate,
+      ).toBeUndefined()
       // A free tool declares none.
-      expect(beta.estimate).toBeUndefined()
+      expect(beta.billed).toBe(false)
       await gateway.callServerTool(
         "amp",
         "alpha",

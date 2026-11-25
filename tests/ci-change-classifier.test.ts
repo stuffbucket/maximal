@@ -62,7 +62,13 @@ describe("change classification", () => {
     }
   })
 
-  test("classifies a known set of paths as a paths run", () => {
+  test("classifies Markdown-only changes as a docs run", () => {
+    expect(classifyCiChanges(["README.md", "docs/commands.md"])).toEqual({
+      mode: "docs",
+    })
+  })
+
+  test("classifies a mixed set of paths as a paths run", () => {
     expect(
       classifyCiChanges(["docs/commands.md", "shell/src/main.ts"]),
     ).toEqual({ mode: "paths" })
@@ -150,11 +156,21 @@ describe("CI workflow integration", () => {
     expect(source).toContain('expected="skipped"')
   })
 
-  test("skips expensive jobs only for an explicit proven duplicate", async () => {
+  test("skips expensive jobs for docs runs or an explicit proven duplicate", async () => {
     const source = await workflow
     expect(
       source.match(/needs\.deduplicate\.outputs\.duplicate != 'true'/gu),
     ).toHaveLength(3)
+    expect(
+      source.match(/needs\.classify\.outputs\.mode != 'docs'/gu),
+    ).toHaveLength(3)
+  })
+
+  test("accepts skipped expensive jobs for a docs run", async () => {
+    const source = await workflow
+    expect(source).toContain("MODE: ${{ needs.classify.outputs.mode }}")
+    expect(source).toContain('if [ "$MODE" = "docs" ]; then')
+    expect(source).toContain('expected="skipped"')
   })
 
   test("grants Actions read only to trusted de-duplication and queries exact successful counterparts", async () => {
@@ -192,6 +208,21 @@ describe("CI workflow integration", () => {
   test("does not install or build the parked MCP broker", async () => {
     const source = await workflow
     expect(source).not.toContain("broker")
+  })
+})
+
+describe("CodeQL workflow integration", () => {
+  test("does not start for Markdown-only pull requests or main pushes", async () => {
+    const source = await Bun.file(
+      new URL("../.github/workflows/codeql.yml", import.meta.url),
+    ).text()
+    const triggers = source.slice(
+      source.indexOf("on:"),
+      source.indexOf("\npermissions:"),
+    )
+
+    expect(triggers.match(/paths-ignore:/gu)).toHaveLength(2)
+    expect(triggers.match(/- "\*\*\/\*\.md"/gu)).toHaveLength(2)
   })
 })
 

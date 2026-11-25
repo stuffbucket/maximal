@@ -11,27 +11,55 @@
 
 import { z } from "zod"
 
+const SLUG = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
+
 /** A limit's stable, user-visible slug (`images-daily`). */
-export const BudgetLimitId = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u)
+export const BudgetLimitId = z.string().min(1).max(64).regex(SLUG)
 
 /** What a limit applies to. `global` matches every billed request; `key`
  *  matches one client key (the API key's label, or for a request with no
  *  key the client Maximal recognised, else `unidentified`); `plugin` a
  *  plugin or built-in capability (`images`); `provider` everything one
- *  provider bills (`copilot`). */
+ *  provider bills (`copilot`); `filter` whatever a named filter selects
+ *  (`id` is the filter's id). */
 export const BudgetScope = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("global") }),
   z.object({
     kind: z.enum(["key", "plugin", "provider"]),
     id: z.string().trim().min(1).max(128),
   }),
+  z.object({
+    kind: z.literal("filter"),
+    id: z.string().trim().min(1).max(128),
+  }),
 ])
 export type BudgetScope = z.infer<typeof BudgetScope>
 export type BudgetScopeKind = BudgetScope["kind"]
+
+/** A reusable filter's stable, user-visible slug (`claude-models`). */
+export const BudgetFilterId = z.string().min(1).max(64).regex(SLUG)
+
+/** What a filter's members are matched against: the model a request names,
+ *  the client key (as for a `key` scope), or the plugin or capability. */
+export const BudgetFilterKind = z.enum(["models", "clients", "plugins"])
+export type BudgetFilterKind = z.infer<typeof BudgetFilterKind>
+
+/** An exact name, or a glob: `*` matches any run of characters (none
+ *  included) and `?` exactly one, so `claude-*` selects every model whose id
+ *  starts `claude-`. Matching is case-sensitive. */
+export const BudgetFilterMember = z.string().trim().min(1).max(128)
+
+/** A named set of models, clients or plugins that a limit's scope can
+ *  select (`{ kind: "filter", id }`). */
+export const BudgetFilterSchema = z
+  .object({
+    id: BudgetFilterId,
+    name: z.string().trim().min(1).max(128),
+    kind: BudgetFilterKind,
+    members: z.array(BudgetFilterMember).min(1).max(256),
+  })
+  .loose()
+export type BudgetFilterConfig = z.infer<typeof BudgetFilterSchema>
 
 /** `<provider>:<window id>`, e.g. `copilot:premium_interactions`. */
 export const ProviderWindowRef = z
@@ -39,16 +67,82 @@ export const ProviderWindowRef = z
   .max(160)
   .regex(/^[\w.-]+:[\w.-]+$/u)
 
-/** When a limit's period resets: with a provider's quota window, or at
- *  00:00 UTC every day / every Monday, or never. */
+/** Longest rolling window: the spend it counts is read into memory. */
+export const MAX_EVERY_MINUTES = 1440
+export const MAX_EVERY_HOURS = 720
+export const MAX_EVERY_DAYS = 90
+
+/** When a limit's period resets: with a provider's quota window, at 00:00
+ *  UTC every day / every Monday / on a day of the month, never, or
+ *  continuously over a trailing window of N hours or days. */
 export const BudgetLimitReset = z.union([
   z.enum(["daily", "weekly", "never"]),
   z.object({ follow: ProviderWindowRef }),
+  z.object({
+    every: z.union([
+      z
+        .object({ minutes: z.number().int().min(1).max(MAX_EVERY_MINUTES) })
+        .strict(),
+      z
+        .object({ hours: z.number().int().min(1).max(MAX_EVERY_HOURS) })
+        .strict(),
+      z.object({ days: z.number().int().min(1).max(MAX_EVERY_DAYS) }).strict(),
+    ]),
+  }),
+  z.object({
+    monthly: z.object({ day: z.number().int().min(1).max(28) }).strict(),
+  }),
 ])
 export type BudgetLimitReset = z.infer<typeof BudgetLimitReset>
 
-export const BudgetLimitAction = z.enum(["block", "warn"])
+/** What reaching a limit does: `block` refuses; `warn` never refuses; `ask`
+ *  refuses and asks the person to allow more (a notice and an attention
+ *  entry), recording what they allow as a temporary override; `pause` holds
+ *  the requests it covers, instead of refusing them, until the limit is
+ *  cleared or someone resumes or cancels them. */
+export const BudgetLimitAction = z.enum(["block", "warn", "ask", "pause"])
 export type BudgetLimitAction = z.infer<typeof BudgetLimitAction>
+
+/** What a limit's amount is in: cost (nano-AIU, today's) or tokens. */
+export const BudgetLimitUnit = z.enum(["cost", "tokens"])
+export type BudgetLimitUnit = z.infer<typeof BudgetLimitUnit>
+
+/** Which tokens a token limit counts: the prompt (cache reads included), the
+ *  reply, or both. */
+export const BudgetTokenMeasure = z.enum(["input", "output", "total"])
+export type BudgetTokenMeasure = z.infer<typeof BudgetTokenMeasure>
+
+/** A condition on enforcing a limit: only while the screen is locked, or
+ *  after `idleMinutes` with no input (either one is enough). Presence that
+ *  isn't known doesn't meet it. */
+export const BudgetWhen = z
+  .object({
+    locked: z.literal(true).optional(),
+    idleMinutes: z.number().int().min(1).max(1440).optional(),
+  })
+  .strict()
+  .refine(
+    (when) => when.locked !== undefined || when.idleMinutes !== undefined,
+    { message: "give locked or idleMinutes" },
+  )
+export type BudgetWhen = z.infer<typeof BudgetWhen>
+
+/** Where a rule's warning, or its limit being reached, is told: nowhere, a
+ *  native notification, the menu-bar attention list, or both. */
+export const BudgetNotifyChannel = z.enum([
+  "none",
+  "notification",
+  "tray",
+  "both",
+])
+export type BudgetNotifyChannel = z.infer<typeof BudgetNotifyChannel>
+
+/** Per-rule routing of its notices; what is left out takes the default
+ *  (`~/lib/budget/notify`: warnings notify, the limit notifies and lists). */
+export const BudgetNotifySchema = z.object({
+  warn: BudgetNotifyChannel.optional(),
+  limit: BudgetNotifyChannel.optional(),
+})
 
 /** Fraction of the limit (0–1) at which the limit reads as a warning. */
 export const BudgetWarnAt = z.number().min(0).max(1)
@@ -77,8 +171,26 @@ const BudgetLimitConfigSchema = z
     limitReset: BudgetLimitReset,
     warnAt: BudgetWarnAt.optional(),
     action: BudgetLimitAction,
+    notify: BudgetNotifySchema.optional(),
+    /** What `limit` is in; absent means cost. */
+    unit: BudgetLimitUnit.optional(),
+    /** For a token limit: which tokens; absent means total. */
+    measure: BudgetTokenMeasure.optional(),
+    /** At most this many requests in the period, beside the amount. */
+    maxRequests: z
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
+    /** Enforce only while this holds (the person is away). */
+    when: BudgetWhen.optional(),
   })
   .loose()
+  .refine((limit) => limit.measure === undefined || limit.unit === "tokens", {
+    message: "measure goes with unit tokens",
+    path: ["measure"],
+  })
 
 export const BudgetConfigSchema = z
   .object({
@@ -93,9 +205,32 @@ export const BudgetConfigSchema = z
       .loose()
       .optional(),
     limits: z.array(BudgetLimitConfigSchema).max(256).optional(),
+    /** Named sets a limit's `filter` scope selects. */
+    filters: z.array(BudgetFilterSchema).max(128).optional(),
+    /** How `pause` rules hold requests. */
+    pause: z
+      .object({
+        /** Longest a request is held before it fails with the 402; default
+         *  600 (ten minutes). */
+        maxWaitSeconds: z.number().int().min(1).max(3600).optional(),
+        /** Most requests held at once; default 50. */
+        maxHeld: z.number().int().min(1).max(1000).optional(),
+      })
+      .optional(),
   })
   .loose()
   .superRefine((budget, ctx) => {
+    const filterIds = new Set<string>()
+    for (const [index, filter] of (budget.filters ?? []).entries()) {
+      if (filterIds.has(filter.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate budget filter id '${filter.id}'`,
+          path: ["filters", index, "id"],
+        })
+      }
+      filterIds.add(filter.id)
+    }
     const seen = new Set<string>()
     for (const [index, limit] of (budget.limits ?? []).entries()) {
       if (seen.has(limit.id)) {

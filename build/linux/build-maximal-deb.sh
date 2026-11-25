@@ -12,6 +12,7 @@
 #   /usr/bin/maximal
 #   /usr/lib/systemd/user/maximal.service   (not enabled)
 #   /usr/lib/maximal/installed-by-apt       (tells maximal to offer apt updates)
+#   /usr/lib/maximal/plugin-builtins/       (sealed built-in plugin generation)
 #   /usr/share/doc/maximal/                 (copyright)
 # and nothing under /etc. maximal-desktop's tray app runs /usr/bin/maximal as
 # its sidecar, so this package is the only one that ships the binaries.
@@ -37,6 +38,10 @@ if [ ! -f "$bindir/maximal" ]; then
   echo "missing $bindir/maximal" >&2
   exit 1
 fi
+if [ ! -f "$bindir/plugin-builtins/committed.json" ]; then
+  echo "missing $bindir/plugin-builtins/committed.json" >&2
+  exit 1
+fi
 check_elf_arch "$bindir/maximal" "$arch"
 
 stage="$(mktemp -d)"
@@ -49,6 +54,9 @@ install -d -m 0755 \
   "$root/usr/lib/maximal" \
   "$root/usr/share/doc/maximal"
 install -m 0755 "$bindir/maximal" "$root/usr/bin/maximal"
+cp -R "$bindir/plugin-builtins" "$root/usr/lib/maximal/plugin-builtins"
+find "$root/usr/lib/maximal/plugin-builtins" -type d -exec chmod 0755 {} +
+find "$root/usr/lib/maximal/plugin-builtins" -type f -exec chmod 0644 {} +
 install -m 0644 "$here/maximal.service" "$root/usr/lib/systemd/user/maximal.service"
 printf 'maximal\n' > "$root/usr/lib/maximal/installed-by-apt"
 chmod 0644 "$root/usr/lib/maximal/installed-by-apt"

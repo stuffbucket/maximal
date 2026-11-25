@@ -10,6 +10,10 @@ import {
   UpstreamHttpError,
   type ErrorContext,
 } from "../src/errors"
+import {
+  registerUpstreamPool,
+  releaseUpstreamSession,
+} from "../src/session-registry"
 import { ADA, FakeTokenProvider } from "../src/testing/fake-auth"
 import {
   SAMPLE_TOOLS,
@@ -19,7 +23,7 @@ import {
 import { mirrorTools } from "../src/tools"
 import { UpstreamConnection } from "../src/upstream/connection"
 import { createUpstreamFetch } from "../src/upstream/fetch"
-import { UpstreamPool } from "../src/upstream/pool"
+import { type PoolOptions, UpstreamPool } from "../src/upstream/pool"
 import { rejection } from "./rejection"
 
 const EXAMPLE: ErrorContext = { name: "Example" }
@@ -581,7 +585,9 @@ function stub(name: string) {
 }
 type Stub = ReturnType<typeof stub>
 
-function stubPool(options: { onSharedReconnect?: () => void } = {}) {
+function stubPool(
+  options: Pick<PoolOptions, "closeTimeoutMs" | "onSharedReconnect"> = {},
+) {
   const made: Array<Stub> = []
   const pool = new UpstreamPool({
     connect: () => {
@@ -597,6 +603,101 @@ function stubPool(options: { onSharedReconnect?: () => void } = {}) {
 }
 
 describe("upstream session pool", () => {
+  test("releases a session through the runner-wide registry", async () => {
+    const { pool, made } = stubPool()
+    const unregister = registerUpstreamPool(pool)
+    cleanups.push(unregister)
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "a" })
+
+    await releaseUpstreamSession("a", signal())
+
+    expect(made[0].closes).toBe(1)
+    expect(pool.size).toBe(0)
+  })
+
+  test("releases one idle downstream session for generation migration", async () => {
+    const { pool, made } = stubPool()
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "a" })
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "b" })
+
+    await pool.releaseSession("a")
+
+    expect(made.map((connection) => connection.closes)).toEqual([1, 0])
+    expect(pool.size).toBe(1)
+    await pool.releaseSession("missing")
+  })
+
+  test("refuses to release upstream state while it is still busy", async () => {
+    const { pool, made } = stubPool()
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "a" })
+    made[0].busy = true
+
+    let failure: unknown
+    try {
+      await pool.releaseSession("a")
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toHaveProperty(
+      "message",
+      'Upstream session "a" is still in use.',
+    )
+    expect(pool.size).toBe(1)
+  })
+
+  test("dispose reaps an aborted release and cancels its waiters", async () => {
+    const { pool, made } = stubPool({ closeTimeoutMs: 5 })
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "a" })
+    made[0].holdClose(new Promise<void>(() => {}))
+    const abort = new AbortController()
+    const releasing = pool.releaseSession("a", abort.signal)
+    while (made[0].closes === 0) await Bun.sleep(0)
+    expect(pool.size).toBe(1)
+    abort.abort(new Error("deadline"))
+
+    let failure: unknown
+    try {
+      await releasing
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toHaveProperty("message", "deadline")
+    expect(pool.size).toBe(1)
+    const waiting = pool
+      .callTool("t", {}, { signal: signal(), sessionId: "a" })
+      .catch((error: unknown) => error)
+    await pool.dispose()
+    expect(await waiting).toBeInstanceOf(Error)
+    expect(pool.size).toBe(0)
+  })
+
+  test("keeps acquisitions behind a close that outlives closeAll's timeout", async () => {
+    const { pool, made } = stubPool({ closeTimeoutMs: 5 })
+    await pool.callTool("t", {}, { signal: signal(), sessionId: "a" })
+    let finishClose!: () => void
+    made[0].holdClose(
+      new Promise<void>((resolve) => {
+        finishClose = resolve
+      }),
+    )
+
+    await pool.closeAll()
+    let acquired = false
+    const next = pool
+      .callTool("t", {}, { signal: signal(), sessionId: "a" })
+      .then(() => {
+        acquired = true
+      })
+    await Bun.sleep(10)
+    expect(acquired).toBe(false)
+    expect(made).toHaveLength(1)
+
+    finishClose()
+    await next
+    expect(made).toHaveLength(2)
+  })
+
   test("a sweep leaves a connection alone that a call picked up meanwhile", async () => {
     const { pool, made } = stubPool()
     await pool.callTool("t", {}, { signal: signal(), sessionId: "a" })

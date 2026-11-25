@@ -39,6 +39,14 @@ const CODEX_CONFIG = path.join(CODEX_CONFIG_DIR, "config.toml")
 const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
 const savedCodexHome = process.env.CODEX_HOME
 
+const testKey = (id: string, label: string) => ({
+  id,
+  label,
+  key: `${id}-secret-key-123`,
+  enabled: true,
+  created_at: "2026-01-01T00:00:00.000Z",
+})
+
 function buildApp() {
   const app = new Hono()
   app.route("/api-keys", apiKeysRoutes)
@@ -394,6 +402,36 @@ describe("/api-keys DELETE /:id", () => {
     expect(readClaudeCodeSettings(CLAUDE_SETTINGS).apiKeyHelper).toBe(
       "echo 'fallback-key'",
     )
+  })
+
+  test("drops the deleted connection's App Permissions, and only those", async () => {
+    writeConfig({
+      auth: {
+        apiKeyEntries: [testKey("k-ci", "CI runner"), testKey("k-dev", "Dev")],
+      },
+      plugins: {
+        alpha: {
+          enabled: true,
+          clients: ["claude-code"],
+          access: {
+            "app:claude-code": "ask",
+            "connection:k-ci": "block",
+            "connection:k-dev": "ask",
+          },
+        },
+        beta: { enabled: true },
+      },
+    })
+
+    const res = await buildApp().request("/api-keys/k-ci", { method: "DELETE" })
+
+    expect(res.status).toBe(204)
+    expect(getConfig().plugins?.alpha).toEqual({
+      enabled: true,
+      clients: ["claude-code"],
+      access: { "app:claude-code": "ask", "connection:k-dev": "ask" },
+    })
+    expect(getConfig().plugins?.beta).toEqual({ enabled: true })
   })
 
   test("404 when id is unknown", async () => {

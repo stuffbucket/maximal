@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
+import { __resetBudgetServiceForTests } from "../src/lib/budget/runtime"
 import { getConfig, writeConfig } from "../src/lib/config/config"
 import { state } from "../src/lib/runtime-state/state"
+import { closeUsageStore } from "../src/lib/token-usage"
 import { completionRoutes } from "../src/routes/chat-completions/route"
 
+const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 const originalFetch = globalThis.fetch
 const originalConfig = getConfig()
 const originalState = {
@@ -63,7 +66,7 @@ const createModels = () => ({
     {
       capabilities: {
         family: "gpt",
-        limits: {},
+        limits: { max_output_tokens: 1_000 },
         object: "model_capabilities" as const,
         supports: {},
         tokenizer: "o200k_base",
@@ -87,7 +90,10 @@ const createApp = () => {
   return app
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  process.env[DB_PATH_ENV] = ":memory:"
+  await closeUsageStore()
+  __resetBudgetServiceForTests()
   writeConfig({ modelMappings: [] })
   state.accountType = "individual"
   state.copilotToken = "test-token"
@@ -106,7 +112,10 @@ beforeEach(() => {
     fetchMock as unknown as typeof fetch
 })
 
-afterEach(() => {
+afterEach(async () => {
+  __resetBudgetServiceForTests()
+  await closeUsageStore()
+  Reflect.deleteProperty(process.env, DB_PATH_ENV)
   state.accountType = originalState.accountType
   state.copilotToken = originalState.copilotToken
   state.githubToken = originalState.githubToken
@@ -149,6 +158,43 @@ describe("chat completions handler", () => {
     ]
     const forwarded = JSON.parse(init.body as string) as { model: string }
     expect(forwarded.model).toBe("gpt-test")
+  })
+
+  test("a missing client ceiling stays unheld when the upstream default is filled", async () => {
+    writeConfig({
+      modelMappings: [],
+      budget: {
+        limits: [
+          {
+            id: "output",
+            scope: { kind: "global" },
+            unit: "tokens",
+            measure: "output",
+            limit: 1,
+            limitReset: "never",
+            action: "pause",
+          },
+        ],
+      },
+    })
+
+    const response = await createApp().request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      unknown,
+      RequestInit,
+    ]
+    const forwarded = JSON.parse(init.body as string) as { max_tokens: number }
+    expect(forwarded.max_tokens).toBe(1_000)
   })
 
   test("rejects gpt-5.4 requests with invalid request error", async () => {

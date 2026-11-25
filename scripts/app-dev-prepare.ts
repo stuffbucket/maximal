@@ -50,6 +50,12 @@ export interface PreparedAppDev extends DevProfile {
   env: NodeJS.ProcessEnv
 }
 
+export interface RunningAppDev extends DevProfile {
+  pid: number
+  port: number
+  baseUrl: URL
+}
+
 function gitPath(repoRoot: string, name: string): string {
   const result = Bun.spawnSync({
     cmd: ["git", "rev-parse", "--path-format=absolute", "--git-path", name],
@@ -210,6 +216,36 @@ function processIsAlive(pid: number): boolean {
     return true
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+/** Discover this worktree's running app:dev sidecar without probing ports. */
+export function discoverRunningAppDev(
+  env: NodeJS.ProcessEnv,
+  repoRoot: string,
+  isAlive: (pid: number) => boolean = processIsAlive,
+): RunningAppDev | undefined {
+  const idPath = gitPath(repoRoot, WORKTREE_ID_FILE)
+  let worktreeId: string
+  try {
+    worktreeId = readWorktreeId(idPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+    throw error
+  }
+
+  const profile = resolveDevProfile(env, worktreeId)
+  const explicitHome = env.COPILOT_API_HOME?.trim()
+  const home = explicitHome ? path.resolve(repoRoot, explicitHome) : profile.home
+  const session = readPriorSession(home, profile.identifier)
+  if (!session || !isAlive(session.pid)) return undefined
+
+  return {
+    ...profile,
+    home,
+    pid: session.pid,
+    port: session.port,
+    baseUrl: new URL(`http://127.0.0.1:${session.port}`),
   }
 }
 

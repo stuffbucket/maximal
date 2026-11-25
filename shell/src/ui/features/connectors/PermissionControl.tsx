@@ -8,7 +8,19 @@ import { AllowGlyph, AskGlyph, BlockGlyph } from "./glyphs";
 
 const OPTIONS: ReadonlyArray<ToolPermission> = ["allow", "ask", "block"];
 
-function optionLabel(value: ToolPermission): string {
+type PermissionKind = "tool" | "access";
+
+function optionLabel(value: ToolPermission, kind: PermissionKind): string {
+  if (kind === "access") {
+    switch (value) {
+      case "allow":
+        return t("connectors-access-allow");
+      case "ask":
+        return t("connectors-access-ask");
+      case "block":
+        return t("connectors-access-block");
+    }
+  }
   switch (value) {
     case "allow":
       return t("connectors-tool-allowed");
@@ -19,7 +31,17 @@ function optionLabel(value: ToolPermission): string {
   }
 }
 
-function optionTip(value: ToolPermission): string {
+function optionTip(value: ToolPermission, kind: PermissionKind): string {
+  if (kind === "access") {
+    switch (value) {
+      case "allow":
+        return t("connectors-access-allow-tip");
+      case "ask":
+        return t("connectors-access-ask-tip");
+      case "block":
+        return t("connectors-access-block-tip");
+    }
+  }
   switch (value) {
     case "allow":
       return t("connectors-tool-allowed-tip");
@@ -42,23 +64,36 @@ function OptionGlyph({ value }: { value: ToolPermission }): JSX.Element {
 }
 
 interface PermissionControlProps {
-  /** The tool's display title, for the group's accessible name. */
-  tool: string;
+  /** Complete accessible name for the radio group. */
+  label: string;
   value: ToolPermission;
   onChange: (next: ToolPermission) => void;
+  kind?: PermissionKind;
   disabled?: boolean;
+  /**
+   * A save is in flight. The options stay focusable (so keyboard focus isn't
+   * lost when the control re-renders) but are read-only until it settles.
+   */
+  busy?: boolean;
 }
 
 /**
- * Segmented control for one tool: Allowed / Asks / Blocked. A radio
- * group with a roving tab stop: Tab lands on the chosen option, arrow keys
- * move and choose (as native radios do), Home/End jump to either end.
- * Glyph-only, so each option carries its name and a tooltip.
+ * Segmented Allow / Ask / Block control with a roving tab stop. Tab lands on
+ * the chosen option; arrow keys move and choose, and Home/End jump to either
+ * end. Glyph-only, so each option carries its own name and tooltip.
  */
-export function PermissionControl({ tool, value, onChange, disabled = false }: PermissionControlProps): JSX.Element {
+export function PermissionControl({
+  label,
+  value,
+  onChange,
+  kind = "tool",
+  disabled = false,
+  busy = false,
+}: PermissionControlProps): JSX.Element {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const choose = (index: number): void => {
+    if (busy) return;
     const next = OPTIONS[(index + OPTIONS.length) % OPTIONS.length];
     refs.current[OPTIONS.indexOf(next)]?.focus();
     if (next !== value) onChange(next);
@@ -91,8 +126,10 @@ export function PermissionControl({ tool, value, onChange, disabled = false }: P
     <div
       className="perm-seg"
       role="radiogroup"
-      aria-label={t("connectors-tool-perm-aria", { tool })}
+      aria-label={label}
       aria-disabled={disabled || undefined}
+      aria-busy={busy || undefined}
+      aria-readonly={busy || undefined}
     >
       {OPTIONS.map((option, index) => {
         const checked = option === value;
@@ -105,8 +142,8 @@ export function PermissionControl({ tool, value, onChange, disabled = false }: P
             type="button"
             role="radio"
             aria-checked={checked}
-            aria-label={optionLabel(option)}
-            title={optionTip(option)}
+            aria-label={optionLabel(option, kind)}
+            title={optionTip(option, kind)}
             tabIndex={checked ? 0 : -1}
             disabled={disabled}
             className={cx("perm-seg__option", `perm-seg__option--${option}`)}

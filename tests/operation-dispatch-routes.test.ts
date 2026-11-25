@@ -14,6 +14,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
+import { providerInvocationJournal } from "~/lib/plugins/provider-broker"
 import { state } from "~/lib/runtime-state/state"
 import { closeUsageStore } from "~/lib/token-usage"
 import { createDecisionsRoutes } from "~/routes/decisions/route"
@@ -55,18 +56,53 @@ interface FakeDispatch extends OperationDispatch {
 function fakeDispatch(
   served: Partial<Record<ModelOperation, string>>,
   provider = "acme",
-  result: OperationResult = { json: { ok: true }, usage: { input_tokens: 3 } },
+  result: Omit<
+    OperationResult,
+    "invocationId" | "providerCallId" | "sequence"
+  > = { json: { ok: true }, usage: { input_tokens: 3 } },
 ): FakeDispatch {
   const dispatched: FakeDispatch["dispatched"] = []
+  const resolved = (operation: ModelOperation, model: string) =>
+    served[operation] === model ?
+      { pluginId: "fake", binding: { provider, upstreamModel: model } }
+    : undefined
   return {
     dispatched,
-    resolve: (operation, model) =>
-      served[operation] === model ?
-        { pluginId: "fake", binding: { provider, upstreamModel: model } }
-      : undefined,
+    resolve: resolved,
+    prepare: (operation, model) => {
+      const target = resolved(operation, model)
+      if (!target) return undefined
+      return {
+        operation,
+        model,
+        pluginId: target.pluginId,
+        binding: target.binding,
+        execute: (request) => {
+          const invocation = { ...request, operation, model }
+          dispatched.push(invocation)
+          providerInvocationJournal.observe({
+            invocation,
+            provider,
+            ...(result.cost === undefined ? {} : { cost: result.cost }),
+          })
+          return Promise.resolve({
+            ...result,
+            invocationId: request.invocationId,
+            providerCallId: request.providerCallId,
+            sequence: request.sequence,
+          })
+        },
+        release: noUnsubscribe,
+      }
+    },
     dispatch: (request) => {
       dispatched.push(request)
-      return Promise.resolve(result)
+      return Promise.resolve({
+        ...result,
+        invocationId: request.invocationId,
+        providerCallId: request.providerCallId,
+        sequence: request.sequence,
+      })
     },
     servedModels: () => [],
     subscribe: () => noUnsubscribe,

@@ -181,7 +181,9 @@ describe("apiKeyLabel — single source for api <client>", () => {
     expect(getApp("claude-desktop")?.apiKeyLabel).toBe("claude-desktop")
   })
 
-  test("copilot-cli (coming-soon) has no key surface", () => {
-    expect(getApp("copilot-cli")?.apiKeyLabel).toBeUndefined()
+  test("coming-soon harnesses have no key surface", () => {
+    for (const appId of ["chatgpt", "pi", "copilot-cli"]) {
+      expect(getApp(appId)?.apiKeyLabel).toBeUndefined()
+    }
   })
 })

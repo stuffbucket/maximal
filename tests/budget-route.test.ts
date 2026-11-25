@@ -92,6 +92,7 @@ describe("GET /settings/api/budget", () => {
       budgets: [],
       effective_budget: null,
       provider_windows: [],
+      filters: [],
     })
   })
 
@@ -270,7 +271,7 @@ describe("what calls in progress hold", () => {
     if (!decision.ok) throw new Error("expected admission")
 
     const during = await status(await app.request("/budget"))
-    decision.hold.commit()
+    await decision.hold.commit()
     const after = await status(await app.request("/budget"))
 
     expect(during.budgets[0].held).toBe(0.6 * AIU)
@@ -352,7 +353,7 @@ describe("GET /settings/api/budget/activity", () => {
     expect(body.period).toBe("day")
     expect(body.group).toBe("model")
     expect(body.display).toEqual({ unit: "usd", credit_usd: 0.01 })
-    expect(body.rows).toEqual([
+    expect(body.rows).toMatchObject([
       { key: "gpt-big", nano_aiu: 3 * AIU, requests: 2, amount: 0.03 },
       { key: "gpt-small", nano_aiu: AIU, requests: 1, amount: 0.01 },
     ])
@@ -368,7 +369,7 @@ describe("GET /settings/api/budget/activity", () => {
         await (await app.request(`/budget/activity?group=${group}`)).json(),
       ).rows
 
-    expect(await get("plugin")).toEqual([
+    expect(await get("plugin")).toMatchObject([
       { key: null, nano_aiu: 2 * AIU, requests: 1, amount: 0.02 },
       { key: "images", nano_aiu: AIU, requests: 1, amount: 0.01 },
     ])
@@ -414,11 +415,46 @@ describe("GET /settings/api/budget/activity", () => {
     )
     expect(await response.text()).toBe(
       [
-        "model,nano_aiu,requests,amount_usd",
-        `"gpt, big",${2 * AIU},1,0.02`,
-        `gpt-small,${AIU},1,0.01`,
+        "model,nano_aiu,requests,amount_usd,input_tokens,output_tokens,cache_read_input_tokens,cache_creation_input_tokens,total_tokens",
+        `"gpt, big",${2 * AIU},1,0.02,1,0,0,0,1`,
+        `gpt-small,${AIU},1,0.01,1,0,0,0,1`,
         "",
       ].join("\n"),
     )
+  })
+})
+
+describe("rolling and monthly resets over the API", () => {
+  test("a rolling or monthly limit is stored and reported as given", async () => {
+    const app = buildApp()
+    const rolling = await put(app, "agents", {
+      ...images,
+      limit_reset: { every: { hours: 5 } },
+    })
+    expect(rolling.status).toBe(200)
+    const monthly = await put(app, "monthly", {
+      ...images,
+      limit_reset: { monthly: { day: 15 } },
+    })
+    const body = await status(monthly)
+    const byId = new Map(body.budgets.map((entry) => [entry.id, entry]))
+    expect(byId.get("agents")?.limit_reset).toEqual({ every: { hours: 5 } })
+    expect(byId.get("monthly")?.limit_reset).toEqual({ monthly: { day: 15 } })
+    expect(getConfig().budget?.limits?.map((l) => l.limitReset)).toEqual([
+      { every: { hours: 5 } },
+      { monthly: { day: 15 } },
+    ])
+  })
+
+  test("an out-of-range window is a 400", async () => {
+    const app = buildApp()
+    for (const limit_reset of [
+      { every: { hours: 0 } },
+      { every: { hours: 721 } },
+      { monthly: { day: 29 } },
+    ]) {
+      const response = await put(app, "bad", { ...images, limit_reset })
+      expect(response.status).toBe(400)
+    }
   })
 })

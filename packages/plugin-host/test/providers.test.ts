@@ -14,7 +14,13 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import { createPluginHost } from "../src/index"
 import { runPluginConformance } from "../src/testing"
-import { Empty, fakeHost, runCleanups, tempDir } from "./helpers"
+import {
+  Empty,
+  fakeHost,
+  runCleanups,
+  tempDir,
+  testSettingsAuthority,
+} from "./helpers"
 
 function noop() {}
 const noopSubscribe = () => noop
@@ -69,11 +75,13 @@ function start(
   plugins: Array<PluginModule>,
   initial: Array<UpstreamProvider> = [fakeProvider("copilot")],
 ) {
+  const storageRoot = tempDir()
   const gateway = createPluginHost({
     plugins,
     services: {
       host: fakeHost(),
-      storageRoot: tempDir(),
+      storageRoot,
+      settingsAuthority: testSettingsAuthority(storageRoot),
       extra: [providersService(initial)],
     },
   })

@@ -5,11 +5,17 @@ import path from "node:path"
 
 import {
   applyCodexConfigFile,
+  CodexConfigConflictError,
+  CodexOtherMaximalConfigError,
+  isCodexConfigFileConfigured,
   prepareCodexConfig,
   revertCodexConfig,
   revertCodexConfigFile,
 } from "~/apps/codex/config"
+import { profileIdForDirectory } from "~/apps/profile-identity"
 import { setListeningPort } from "~/lib/start/proxy-port"
+
+const savedCodexHome = process.env.CODEX_HOME
 
 const invocation = {
   command: "/Applications/Maximal.app/Contents/MacOS/maximal",
@@ -308,7 +314,7 @@ describe("Codex config ownership conflicts", () => {
   })
 
   test.each([
-    ["version", 2],
+    ["version", 3],
     ["providerId", 42],
     ["priorSelectorToken", 42],
     ["insertedSelector", 42],
@@ -430,6 +436,90 @@ describe("Codex config ownership conflicts", () => {
     const applied = prepareCodexConfig(original, { invocation })
     expect(applied.providerId).toBe("maximal-app-3")
     expect(revertCodexConfig(applied.content).content).toBe(original)
+  })
+})
+
+describe("Codex Maximal profile ownership", () => {
+  test("requires explicit override to move routing from another profile and port", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "maximal-codex-profiles-"),
+    )
+    const file = path.join(directory, "config.toml")
+    const otherProfileId = profileIdForDirectory(
+      path.join(directory, "other-profile"),
+    )
+    try {
+      process.env.CODEX_HOME = directory
+      setListeningPort(5252)
+      applyCodexConfigFile(file, { invocation, profileId: otherProfileId })
+      const before = fs.readFileSync(file, "utf8")
+
+      setListeningPort(5151)
+      expect(isCodexConfigFileConfigured(file)).toBe(false)
+      expect(() => applyCodexConfigFile(file, { invocation })).toThrow(
+        CodexOtherMaximalConfigError,
+      )
+      expect(fs.readFileSync(file, "utf8")).toBe(before)
+
+      const overridden = applyCodexConfigFile(file, {
+        invocation,
+        overrideOtherMaximal: true,
+      })
+      expect(overridden.wrote).toBe(true)
+      expect(fs.readFileSync(file, "utf8")).toContain(
+        'base_url = "http://127.0.0.1:5151/v1"',
+      )
+      expect(isCodexConfigFileConfigured(file)).toBe(true)
+      expect(applyCodexConfigFile(file, { invocation }).wrote).toBe(false)
+    } finally {
+      setListeningPort(undefined)
+      if (savedCodexHome === undefined) delete process.env.CODEX_HOME
+      else process.env.CODEX_HOME = savedCodexHome
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("override never replaces foreign or user-modified provider content", () => {
+    const applied = prepareCodexConfig('model_provider = "openai"\n', {
+      invocation,
+    })
+    const modified = applied.content.replace(
+      'name = "Maximal"',
+      'name = "Customized Maximal"',
+    )
+
+    expect(() =>
+      prepareCodexConfig(modified, {
+        invocation,
+        overrideOtherMaximal: true,
+      }),
+    ).toThrow(CodexConfigConflictError)
+  })
+
+  test("stale shutdown cannot revert another profile's current routing", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "maximal-codex-stale-"),
+    )
+    const file = path.join(directory, "config.toml")
+    const otherProfileId = profileIdForDirectory(
+      path.join(directory, "current-owner"),
+    )
+    try {
+      process.env.CODEX_HOME = directory
+      setListeningPort(5252)
+      applyCodexConfigFile(file, { invocation, profileId: otherProfileId })
+      const before = fs.readFileSync(file, "utf8")
+
+      expect(() => revertCodexConfigFile(file)).toThrow(
+        CodexOtherMaximalConfigError,
+      )
+      expect(fs.readFileSync(file, "utf8")).toBe(before)
+    } finally {
+      setListeningPort(undefined)
+      if (savedCodexHome === undefined) delete process.env.CODEX_HOME
+      else process.env.CODEX_HOME = savedCodexHome
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
   })
 })
 

@@ -66,7 +66,7 @@ export function installMockApi(win: Window & typeof globalThis, params: MockApiP
   }) as typeof fetch;
 
   // The real client opens one EventSource on /settings/api/events and listens
-  // for `auth.changed` and `plugins.changed`. Emulate exactly that; pass any
+  // for `auth.changed`, `plugins.changed` and `budget.changed`. Emulate exactly that; pass any
   // other URL through.
   class MockEventSource extends EventTarget {
     static readonly CONNECTING = 0;
@@ -96,6 +96,9 @@ export function installMockApi(win: Window & typeof globalThis, params: MockApiP
           backend.onAuthChange((auth) => this.emit(auth)),
           backend.onPluginsChange(() =>
             this.dispatchEvent(new MessageEvent("plugins.changed", { data: "{}" })),
+          ),
+          backend.onBudgetChange((status) =>
+            this.dispatchEvent(new MessageEvent("budget.changed", { data: JSON.stringify(status) })),
           ),
         ];
       }, 0);

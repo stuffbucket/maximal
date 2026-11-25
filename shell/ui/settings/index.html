@@ -172,15 +172,38 @@
           </div>
 
           <div class="topbar__utilities">
-            <!-- Shown by main.ts only when a newer release is available. The
-                 wrapper carries [hidden] because .btn's display rule would
-                 override the UA [hidden] style on the button itself. -->
+            <!-- Plain browser only (a headless Maximal that requires API
+                 keys): the access icon (Connect / Disconnect browser) and its
+                 dialog, mounted by browser-auth-island.tsx. The native app
+                 supplies its own key and hides this. -->
+            <div id="browser-auth-root" class="topbar__browser-access"></div>
+            <!-- Shown by main.ts only when a newer release is available: a
+                 compact icon so it never takes width from the Settings tabs.
+                 Its name ("Update Maximal to X.Y.Z") is set as aria-label and
+                 title by main.ts. The wrapper carries [hidden] because .btn's
+                 display rule would override the UA [hidden] style on the
+                 button itself. -->
             <span data-update-action hidden>
               <button
                 type="button"
-                class="btn btn--primary btn--sm"
+                class="btn btn--primary btn--icon"
                 data-action="open-update"
-              ></button>
+              >
+                <!-- lucide: download -->
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 15V3" />
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <path d="m7 10 5 5 5-5" />
+                </svg>
+              </button>
             </span>
             <div
               class="topbar__surface-switcher"
@@ -251,6 +274,27 @@
                   <path d="M3 6h.01" />
                   <path d="M3 12h.01" />
                   <path d="M3 18h.01" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="topbar__mode-btn"
+                data-surface-target="rules"
+                aria-pressed="false"
+              >
+                <!-- lucide: shield-check -->
+                <svg
+                  class="topbar__mode-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+                  <path d="m9 12 2 2 4-4" />
                 </svg>
               </button>
             </div>
@@ -760,53 +804,15 @@
             <div id="models-root"></div>
           </section>
 
-          <!-- LOGS -->
-          <section class="section" data-section="logs" hidden>
-            <header class="section__head">
-              <h2 class="section__title" data-i18n="logs-title"></h2>
-              <!-- "7-day retention" is a plural; the count is passed as an ICU
-                   argument in main.ts (renderLogsCopy). -->
-              <p class="section__sub" data-field="logs_sub"></p>
-            </header>
-
-            <div class="card">
-              <div class="card__head">
-                <h3 class="card__title" data-i18n="logs-where-title"></h3>
-              </div>
-              <!-- Hint embeds the `tail -F` CLI token: rendered in main.ts
-                   (renderLogsCopy) with {tailCmd} as an ICU argument. -->
-              <p class="card__hint" data-field="logs_where_hint"></p>
-              <dl class="kv kv--bare">
-                <div class="kv__row">
-                  <dt data-i18n="logs-path-unix-label"></dt>
-                  <dd class="mono">~/.local/share/maximal/logs/</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="logs-path-windows-label"></dt>
-                  <dd class="mono">%USERPROFILE%\.local\share\maximal\logs\</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="logs-retention-label"></dt>
-                  <!-- Plural count passed as an ICU argument in main.ts. -->
-                  <dd data-field="logs_retention_value"></dd>
-                </div>
-              </dl>
-              <div class="actions">
-                <button
-                  type="button"
-                  class="btn btn--primary"
-                  data-action="reveal-logs"
-                  data-i18n="reveal-logs"
-                ></button>
-              </div>
-            </div>
-          </section>
-
-          <!-- DIAGNOSTICS -->
+          <!-- SYSTEM: the one section behind the System tab. Everyday version
+               and update state first, then troubleshooting actions, then the
+               low-level runtime and log details folded away, then Uninstall
+               apart from all of it. The id stays "diagnostics" because the
+               tray's "Update with apt…" deep-links to #diagnostics. -->
           <section class="section" data-section="diagnostics" hidden>
             <header class="section__head">
-              <h2 class="section__title" data-i18n="diagnostics-title"></h2>
-              <p class="section__sub" data-i18n="diagnostics-sub"></p>
+              <h2 class="section__title" data-i18n="system-title"></h2>
+              <p class="section__sub" data-i18n="system-sub"></p>
             </header>
 
             <!-- Load failure: a banner across the top of the section, same
@@ -838,122 +844,210 @@
               </div>
             </div>
 
-            <!-- Shown by main.ts when an apt install (the Debian/Ubuntu
-                 packages) has an update: the command to copy, since Maximal
-                 never runs apt itself, and the Linux guide. The wrapper
-                 carries [hidden] because .app-card__install sets display. -->
-            <div data-update-apt hidden>
-              <div class="app-card__install">
-                <p class="app-card__hint" data-update-apt-hint></p>
-                <div class="app-card__cmd">
-                  <code class="app-card__cmd-text mono" data-update-apt-command></code>
-                  <div class="app-card__cmd-actions">
-                    <button
-                      type="button"
-                      class="btn btn--primary btn--sm"
-                      data-action="copy-update-command"
-                      data-i18n="apps-copy-command"
-                    ></button>
+            <!-- Marks the window while the diagnostics fetch is in flight:
+                 loadDiagnostics() sets aria-busy on it. It wraps the whole stack
+                 so there is one readiness hook, which means it also holds the
+                 static controls and the update block (filled by the separate
+                 update-status fetch). -->
+            <div class="system-stack" data-diagnostics-root aria-busy="true">
+              <div class="subsection">
+                <h3
+                  class="subsection__title"
+                  data-i18n="system-updates-title"
+                ></h3>
+                <dl class="kv kv--bare">
+                  <div class="kv__row">
+                    <dt data-i18n="diagnostics-proxy-version"></dt>
+                    <dd class="mono" data-field="version">…</dd>
+                  </div>
+                  <div class="kv__row">
+                    <dt data-i18n="diagnostics-updates"></dt>
+                    <dd class="system-update-row">
+                      <span data-field="update_status">…</span>
+                      <!-- The primary action while an update is offered:
+                           the same flow as the title-bar icon. Hidden
+                           otherwise (on the wrapper, as .btn sets display). -->
+                      <span data-system-update hidden>
+                        <button
+                          type="button"
+                          class="btn btn--primary btn--sm"
+                          data-action="system-update"
+                        ></button>
+                      </span>
+                      <button
+                        type="button"
+                        class="btn btn--ghost btn--sm"
+                        data-action="check-update"
+                        data-i18n="diagnostics-update-check-now"
+                      ></button>
+                    </dd>
+                  </div>
+                  <div class="kv__row">
+                    <dt data-i18n="diagnostics-update-check"></dt>
+                    <dd class="mono" data-field="update_check">…</dd>
+                  </div>
+                </dl>
+
+                <!-- Shown by main.ts when an apt install (the Debian/Ubuntu
+                     packages) has an update: the command to copy, since
+                     Maximal never runs apt itself, and the Linux guide. The
+                     wrapper carries [hidden] because .app-card__install sets
+                     display. -->
+                <div data-update-apt hidden>
+                  <div class="app-card__install">
+                    <p class="app-card__hint" data-update-apt-hint></p>
+                    <div class="app-card__cmd">
+                      <code class="app-card__cmd-text mono" data-update-apt-command></code>
+                      <div class="app-card__cmd-actions">
+                        <button
+                          type="button"
+                          class="btn btn--primary btn--sm"
+                          data-action="copy-update-command"
+                          data-i18n="apps-copy-command"
+                        ></button>
+                      </div>
+                    </div>
+                    <p class="app-card__hint">
+                      <a
+                        href="https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update"
+                        data-update-apt-guide
+                        data-i18n="diagnostics-update-apt-guide"
+                      ></a>
+                    </p>
                   </div>
                 </div>
-                <p class="app-card__hint">
-                  <a
-                    href="https://github.com/stuffbucket/maximal/blob/main/docs/linux.md#update"
-                    data-update-apt-guide
-                    data-i18n="diagnostics-update-apt-guide"
-                  ></a>
-                </p>
               </div>
-            </div>
 
-            <div data-diagnostics-root aria-busy="true">
-              <dl class="kv kv--bare">
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-proxy-version"></dt>
-                  <dd class="mono" data-field="version">…</dd>
+              <div class="subsection">
+                <h3
+                  class="subsection__title"
+                  data-i18n="system-support-title"
+                ></h3>
+                <p class="section__sub" data-i18n="system-support-hint"></p>
+                <div class="actions">
+                  <button
+                    type="button"
+                    class="btn btn--primary"
+                    data-action="copy-json"
+                    data-i18n="diagnostics-copy-bundle"
+                  ></button>
+                  <button
+                    type="button"
+                    class="btn btn--secondary"
+                    data-action="reveal-logs"
+                    data-i18n="reveal-logs"
+                  ></button>
+                  <button
+                    type="button"
+                    class="btn btn--secondary"
+                    data-action="reveal-config"
+                    data-i18n="reveal-config"
+                  ></button>
+                  <button
+                    type="button"
+                    class="btn btn--secondary"
+                    id="restart-proxy"
+                    disabled
+                    data-i18n="diagnostics-restart-proxy"
+                    data-i18n-title="diagnostics-restart-proxy-title"
+                  ></button>
                 </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-updates"></dt>
-                  <dd>
-                    <span data-field="update_status">…</span>
-                    <button
-                      type="button"
-                      class="btn btn--ghost btn--sm"
-                      data-action="check-update"
-                      data-i18n="diagnostics-update-check-now"
-                    ></button>
-                  </dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-update-check"></dt>
-                  <dd class="mono" data-field="update_check">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-git-sha"></dt>
-                  <dd class="mono" data-field="source_revision">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-launched-from"></dt>
-                  <dd class="mono" data-field="launch_source">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-sidecar-pid"></dt>
-                  <dd class="mono" data-field="pid">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-uptime"></dt>
-                  <dd class="mono" data-field="uptime">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-account-type"></dt>
-                  <dd class="mono" data-field="account_type">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-models-cached"></dt>
-                  <dd class="mono" data-field="models_cached">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-web-search"></dt>
-                  <dd class="mono" data-field="web_search">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-github-copilot"></dt>
-                  <dd class="mono" data-field="github_copilot_status">…</dd>
-                </div>
-                <div class="kv__row">
-                  <dt data-i18n="diagnostics-rate-limit"></dt>
-                  <dd class="mono" data-field="rate_limit">…</dd>
-                </div>
-              </dl>
-            </div>
-
-            <div class="actions">
-              <button
-                type="button"
-                class="btn btn--primary"
-                data-action="copy-json"
-                data-i18n="diagnostics-copy-bundle"
-              ></button>
-              <button
-                type="button"
-                class="btn btn--secondary"
-                data-action="reveal-config"
-                data-i18n="reveal-config"
-              ></button>
-              <button
-                type="button"
-                class="btn btn--secondary"
-                id="restart-proxy"
-                disabled
-                data-i18n="diagnostics-restart-proxy"
-                data-i18n-title="diagnostics-restart-proxy-title"
-              ></button>
-            </div>
-
-            <div class="card" data-uninstall-card>
-              <div class="card__head">
-                <h3 class="card__title" data-i18n="uninstall-title"></h3>
               </div>
+
+              <!-- Low-level runtime values and where the logs live: a native
+                   details element, closed until asked for (same pattern as the
+                   Advanced disclosure in API clients). -->
+              <details class="advanced-section" data-system-details>
+                <summary class="advanced-section__summary">
+                  <span
+                    class="advanced-section__title"
+                    data-i18n="system-details-title"
+                  ></span>
+                  <span
+                    class="advanced-section__hint"
+                    data-i18n="system-details-hint"
+                  ></span>
+                </summary>
+                <div class="advanced-section__body system-details__body">
+                  <div class="subsection">
+                    <p
+                      class="subsection__title"
+                      data-i18n="system-runtime-title"
+                    ></p>
+                    <dl class="kv kv--bare">
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-git-sha"></dt>
+                        <dd class="mono" data-field="source_revision">…</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-launched-from"></dt>
+                        <dd class="mono" data-field="launch_source">…</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-sidecar-pid"></dt>
+                        <dd class="mono" data-field="pid">…</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-uptime"></dt>
+                        <dd class="mono" data-field="uptime">…</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-account-type"></dt>
+                        <dd class="mono" data-field="account_type">…</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-models-cached"></dt>
+                        <dd class="mono" data-field="models_cached">…</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-web-search"></dt>
+                        <dd class="mono" data-field="web_search">…</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-github-copilot"></dt>
+                        <dd class="mono" data-field="github_copilot_status">…</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="diagnostics-rate-limit"></dt>
+                        <dd class="mono" data-field="rate_limit">…</dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  <div class="subsection">
+                    <p
+                      class="subsection__title"
+                      data-i18n="logs-where-title"
+                    ></p>
+                    <!-- Hint embeds the `tail -F` CLI token: rendered in
+                         main.ts (renderLogsCopy) with {tailCmd} as an ICU
+                         argument. -->
+                    <p class="section__sub" data-field="logs_where_hint"></p>
+                    <dl class="kv kv--bare">
+                      <div class="kv__row">
+                        <dt data-i18n="logs-path-unix-label"></dt>
+                        <dd class="mono">~/.local/share/maximal/logs/</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="logs-path-windows-label"></dt>
+                        <dd class="mono">%USERPROFILE%\.local\share\maximal\logs\</dd>
+                      </div>
+                      <div class="kv__row">
+                        <dt data-i18n="logs-retention-label"></dt>
+                        <!-- Plural count passed as an ICU argument in main.ts. -->
+                        <dd data-field="logs_retention_value"></dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- Uninstall stands apart from routine diagnostics: its own
+                 hairline-separated region at the very end, outside the stack
+                 above. The data-uninstall-card hook keeps its old name. -->
+            <div class="subsection system-uninstall" data-uninstall-card>
+              <h3 class="subsection__title" data-i18n="uninstall-title"></h3>
               <div data-uninstall-body>
                 <div class="uninstall-options">
                   <label class="checkbox-label">
@@ -1020,6 +1114,13 @@
             </div>
           </section>
 
+          <!-- RULES: a peer surface of the unified window. The React island
+               renders the summary, Rules, Activity and Settings into #budget-root
+               (the surface's former name, kept as the internal id). -->
+          <section class="section section--budget" data-section="rules" hidden>
+            <div id="budget-root"></div>
+          </section>
+
           <!-- DASHBOARD -->
           <section
             class="section section--dashboard"
@@ -1037,6 +1138,7 @@
       </div>
 
       <div id="quit-dialog-root"></div>
+      <div id="update-dialog-root"></div>
     </div>
   </body>
 </html>

@@ -14,7 +14,8 @@ describe("preflightCopilotError", () => {
 
   test("401 → expired/revoked, names the account", async () => {
     const msg = await preflightCopilotError("gho_x", "alice", throwsHttp(401))
-    expect(msg).toContain("expired or revoked")
+    expect(msg).toContain("revoked or has expired")
+    expect(msg).not.toContain("gh auth login")
     expect(msg).toContain("alice")
   })
 

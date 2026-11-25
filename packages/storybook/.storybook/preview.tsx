@@ -4,7 +4,11 @@ import "../src/storybook.css";
 import type { Preview } from "@storybook/react-vite";
 
 import { availableLocales, localeLabel } from "../../../shell/src/i18n";
-import { type MockApiParameters, installMockApi } from "../src/mock/fetch-mock";
+import {
+  type MockApiParameters,
+  installMockApi,
+  isScenarioId,
+} from "../src/mock/fetch-mock";
 
 /** "system" leaves <html> unpinned so the tokens follow the OS, as in the app. */
 function applyTheme(theme: unknown): void {
@@ -49,9 +53,20 @@ const preview: Preview = {
 
   // Every story gets a fresh mock sidecar, seeded from
   // `parameters.mockApi` (scenario + per-path overrides).
-  beforeEach({ parameters, globals }) {
+  beforeEach({ parameters, globals, args }) {
     applyTheme(globals.theme);
-    return installMockApi(window, parameters.mockApi as MockApiParameters | undefined);
+    const mockApi = parameters.mockApi as MockApiParameters | undefined;
+    const scenario = mockApi?.scenario ?? args.scenario;
+    if (isScenarioId(scenario)) {
+      document.documentElement.dataset.storybookScenario = scenario;
+    } else {
+      delete document.documentElement.dataset.storybookScenario;
+    }
+    const restore = installMockApi(window, mockApi);
+    return () => {
+      restore();
+      delete document.documentElement.dataset.storybookScenario;
+    };
   },
 
   parameters: {
@@ -67,6 +82,7 @@ const preview: Preview = {
           ["Tokens", "Contrast"],
           "Components",
           "Settings",
+          "FigJam",
           "Windows",
           ["Dashboard", "Sessions", "Settings"],
         ],

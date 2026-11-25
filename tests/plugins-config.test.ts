@@ -42,7 +42,7 @@ describe("plugins config schema", () => {
         workiq: {
           enabled: true,
           config: { endpoint: "https://example.test/mcp" },
-          clients: ["claude-code"],
+          clients: ["claude-code", "claude-desktop", "codex", "copilot-cli"],
           note: "kept",
         },
       },
@@ -52,15 +52,28 @@ describe("plugins config schema", () => {
     expect(entry).toEqual({
       enabled: true,
       config: { endpoint: "https://example.test/mcp" },
-      clients: ["claude-code"],
+      clients: ["claude-code", "claude-desktop", "codex", "copilot-cli"],
       note: "kept",
     })
+  })
+
+  test("accepts a strict relative inventory entry", () => {
+    expect(
+      validateAppConfig({
+        pluginInventory: { entry: "plugins/inventory.json" },
+      }).pluginInventory,
+    ).toEqual({ entry: "plugins/inventory.json" })
+    expect(() =>
+      validateAppConfig({
+        pluginInventory: { entry: "inventory.json", install: true },
+      }),
+    ).toThrow()
   })
 
   test("rejects an unknown client", () => {
     expect(() =>
       validateAppConfig({
-        plugins: { workiq: { clients: ["claude-desktop"] } },
+        plugins: { workiq: { clients: ["unknown-client"] } },
       }),
     ).toThrow()
   })

@@ -4,6 +4,12 @@ import path from "node:path"
 
 const CLAUDE_APP_PATH = "/Applications/Claude.app"
 
+export interface ClaudeDesktopInstallation {
+  path: string
+  version: null
+  source: "unknown"
+}
+
 /**
  * Candidate Claude Desktop install locations to probe, per platform.
  */
@@ -46,6 +52,40 @@ export function windowsMsixClaudeInstalled(home: string): boolean {
   }
 }
 
+export function detectClaudeAppInstallations(
+  platform: NodeJS.Platform = process.platform,
+  home: string = os.homedir(),
+): Array<ClaudeDesktopInstallation> {
+  const paths = claudeAppCandidates(platform, home).filter((candidate) => {
+    try {
+      fs.statSync(candidate)
+      return true
+    } catch {
+      return false
+    }
+  })
+  if (platform === "win32") {
+    const packages = path.join(windowsLocalAppData(home), "Packages")
+    try {
+      for (const name of fs.readdirSync(packages)) {
+        if (
+          (name.startsWith("Claude_") || name.startsWith("AnthropicPBC.Claude"))
+          && !paths.includes(path.join(packages, name))
+        ) {
+          paths.push(path.join(packages, name))
+        }
+      }
+    } catch {
+      // No package directory.
+    }
+  }
+  return paths.map((installPath) => ({
+    path: installPath,
+    version: null,
+    source: "unknown",
+  }))
+}
+
 /**
  * Is Claude Desktop installed? Real check on macOS and Windows; on any
  * other platform we can't tell, so return true (don't block).
@@ -56,15 +96,5 @@ export function claudeAppInstalled(
 ): boolean {
   const candidates = claudeAppCandidates(platform, home)
   if (candidates.length === 0) return true
-  const hasCandidate = candidates.some((p) => {
-    try {
-      fs.statSync(p)
-      return true
-    } catch {
-      return false
-    }
-  })
-  if (hasCandidate) return true
-  if (platform === "win32") return windowsMsixClaudeInstalled(home)
-  return false
+  return detectClaudeAppInstallations(platform, home).length > 0
 }

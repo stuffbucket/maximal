@@ -1,3 +1,6 @@
+import type { Fiber } from "@deepseek-ai/cordis"
+
+import { Context as CordisContext } from "@deepseek-ai/cordis"
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 
@@ -7,6 +10,7 @@ import {
   type PluginModule,
   type ToolDefinition,
 } from "../src/index"
+import { mountPlugin, PluginRuntime } from "../src/runtime/index"
 import { createTestbed, loadPlugin, waitFor } from "../src/testing/index"
 import { rejection, rejectionMessage } from "./rejection"
 
@@ -42,6 +46,34 @@ function plugin<C>(
 const Empty = z.object({})
 
 const noop = () => {}
+
+describe("runtime mounting", () => {
+  test("disposes a new fiber when its runtime slot cannot attach", async () => {
+    const root = new CordisContext()
+    let candidate: Fiber | undefined
+    class RejectingRuntime extends PluginRuntime {
+      override attach(_pluginId: string, handle: Fiber): never {
+        candidate = handle.ctx.fiber
+        throw new Error("slot collision")
+      }
+    }
+
+    expect(
+      await rejectionMessage(
+        mountPlugin(
+          root,
+          new RejectingRuntime(),
+          "candidate",
+          { name: "candidate", apply: () => {} },
+          {},
+        ),
+      ),
+    ).toBe("slot collision")
+    expect(candidate).toBeDefined()
+    expect(candidate?.state).toBe(4)
+    await root.fiber.dispose()
+  })
+})
 
 describe("testing harness", () => {
   test("tools appear on load and vanish on dispose", async () => {

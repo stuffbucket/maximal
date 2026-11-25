@@ -85,6 +85,63 @@ docker run --rm -v "$PWD:/src:ro" -v "<out-dir>:/debs:ro" \
 `build-maximal-deb.sh` needs `dpkg-deb`, so run it on Debian/Ubuntu (or in an
 `ubuntu:24.04` container).
 
+## Claude Desktop profiles
+
+`maximal app claude-desktop` lists and switches the saved configuration
+profiles in Claude Desktop's config library (`Claude-3p/configLibrary/`),
+alongside `--enable`, `--disable`, `--force` and `--managed`:
+
+```sh
+maximal app claude-desktop --profiles                  # list: * marks the applied profile
+maximal app claude-desktop --current-profile           # the profile Claude loads at its next launch
+maximal app claude-desktop --select-profile <id>       # make <id> the applied profile
+```
+
+`--profiles` and `--current-profile` only read. `--select-profile` rewrites
+`_meta.json` with `appliedId` set to `<id>` and changes nothing else: every
+other field of the index is kept, no profile file is opened for writing, and
+selecting the profile that is already applied writes nothing. It refuses an
+id that isn't `[a-f0-9-]{36}` or isn't in the index, a profile file that is
+missing, unreadable or a symlink, an unreadable, malformed or symlinked index,
+an index that changed while selecting, and an index with `hybridPointer` set
+(an admin-console connection Claude applies instead of `appliedId`). The
+profile flags can't be combined with `--enable`, `--disable`, `--managed` or
+`--force`, and none of them touches Maximal's routing marker.
+
+Claude reads its library at launch, so the output says it: **quit and relaunch
+Claude Desktop**. A running Claude keeps its current profile until then, and a
+managed (MDM) configuration or admin-console connection still outranks the
+library. Maximal can't create or remove profiles: Claude owns their content,
+including the keys it seals.
+
+All three also read (never write) the top-level `claude_desktop_config.json`
+and report whether `deploymentMode` is `3p`. When it isn't (absent, another
+value, or the file isn't readable JSON), the output warns that the applied
+profile will not be active on relaunch (or may not be, when the file is
+unreadable). `--select-profile` still sets `appliedId` and words its result as
+exactly that; it never writes `deploymentMode`, which `--enable` or Claude's own
+mode switch owns. Ids and names come from files Claude or a person wrote, so
+they are printed with control, format (bidi, zero-width) and line-separator
+characters removed and cut to 64 characters.
+
+When Maximal's own routing is on, selecting warns that Maximal re-applies its
+profile at start, after an API-key change and when routing is enabled again in
+Settings, that selecting another Maximal copy's profile can turn this copy's
+routing intent off, and to run `--disable` first to keep the selection. When it
+is off and the selected entry is named `maximal`, it warns that the port or key
+may be stale or Maximal not running.
+
+The data directory is `~/Library/Application Support/Claude-3p` on macOS,
+`%LOCALAPPDATA%\Claude-3p` on Windows and `$XDG_CONFIG_HOME/Claude-3p` (default
+`~/.config/Claude-3p`) on Linux, for the current user; a relative
+`XDG_CONFIG_HOME` is ignored. A Windows install packaged as MSIX may keep its
+data under its package folder instead; Anthropic doesn't document that
+location, so it is neither guessed nor detected.
+
+`--managed` writes `maximal-claude-3p.mobileconfig`. `profiles install` no
+longer exists on current macOS, so open the file and approve it in System
+Settings → Privacy & Security → Profiles, or deploy it through MDM.
+
 ## pnpm lockfiles and the package feed
 
 `packages/storybook` has its own pnpm
@@ -135,11 +192,21 @@ back as an `isError` result while the connector stays ready, and prints a
 pass/fail table. `tests/bench-connectors.test.ts` runs the same drive
 in-process under `bun test`.
 
-## Parked MCP broker
+## MCP stdio adapter
 
-The MCP broker and its `maximal mcp` command are parked under `parked/mcp/`
-and are not built or tested. Work IQ is now a built-in plugin (Settings →
-Integrations → Connectors; see [`workiq.md`](workiq.md)).
+`maximal mcp stdio --url http://127.0.0.1:<port>/mcp` manually bridges an
+MCP client's stdio transport to Maximal's aggregate Streamable HTTP endpoint.
+The adapter is part of the packaged `maximal` executable; it uses the official
+MCP SDK transports and needs no `npx`, `bunx`, or separate broker executable.
+Set `MAXIMAL_MCP_API_KEY` in the child process environment when the endpoint
+requires an app identity. The URL must be the exact plain-HTTP aggregate
+`/mcp` path on loopback; connector-specific paths, redirects, credentials in
+the URL, query strings, and fragments are rejected. Claude Desktop's automatic
+projection uses its direct HTTP `managedMcpServers` array instead.
+
+The older standalone broker remains parked under `parked/mcp/` and is not
+built or tested. Work IQ is a built-in plugin (Settings → Integrations →
+Connectors; see [`workiq.md`](workiq.md)).
 
 ## Fast UI iteration
 
@@ -154,23 +221,25 @@ bun run dev -- start --port 4141
 
 # Terminal B — rebuild the UI bundles on every save.
 bun run app:ui
-# Open http://localhost:4141/ui/settings/, /ui/dashboard/, or /ui/sessions/
+# Open http://localhost:4141/ui/settings/, /ui/dashboard/, /ui/sessions/,
+# or /ui/rules/ (/ui/budget/ still redirects there)
 # Reload the window after a save to pick up changes.
 ```
 
 `shell/src/main.ts`'s `safeInvoke()` already swallows Tauri-only `invoke()`
-calls when running in a plain browser, so the "Reveal in Finder" buttons
+calls when running in a plain browser, so the "Open Logs" and "Open Config" buttons
 no-op gracefully — everything else works.
 
 ## Storybook (UI catalog)
 
-Every Settings, Dashboard and Sessions piece in every state, without a running proxy.
+Every Settings, Dashboard, Sessions and Rules piece in every state, without a running proxy.
 It's an isolated package (`packages/storybook`, its own pnpm lockfile):
 
 ```sh
 bun run storybook:install   # once, or after packages/storybook/pnpm-lock.yaml changes
-bun run storybook           # dev server on :6006; rebuilds and refreshes stories on save
+bun run storybook           # dev server on :6006 (or the next free port); rebuilds and refreshes stories on save
 bun run storybook:build     # static build → packages/storybook/storybook-static
+bun run storybook:assets    # tagged SVG/WebP assets, light + dark → dist/storybook-assets
 bun run storybook:check     # fixtures vs. API schemas + stories vs. component props
 ```
 
@@ -180,7 +249,10 @@ a story whose props no longer match the component, and on a fixture that no
 longer matches the wire contract.
 
 It shares its mock backend and fixtures with `bun run ui:harness`
-(`scripts/ui-harness-api.ts`, `scripts/ui-harness-fixtures.ts`). Use the harness
+(`scripts/ui-harness-api.ts`, `scripts/ui-harness-fixtures.ts`; the Rules window's
+rules, spend and activity come from a small working budget service in
+`scripts/ui-harness-budget.ts`, so adding, editing and deleting a rule behave like
+the real routes and push `budget.changed`). Use the harness
 to click through the whole app against one scenario, and Storybook to see
 each piece in each state side by side. Details: `packages/storybook/README.md`.
 

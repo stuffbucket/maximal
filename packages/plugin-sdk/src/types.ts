@@ -27,6 +27,9 @@ export const PLUGIN_SERVICE_NAMES = [
 ] as const
 export type PluginServiceName = (typeof PLUGIN_SERVICE_NAMES)[number]
 
+/** Cordis service name declared by a plugin's `provides` export. */
+export const PLUGIN_PROVIDED_SERVICE_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/
+
 /**
  * Services the host application provides on `ctx` besides the built-in ones
  * (`PluginHostOptions.services.extra`). Empty here: the module that defines a

@@ -9,6 +9,7 @@
 import type { Context } from "@deepseek-ai/cordis"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
+import type { PluginResourceLifecycle } from "./lifecycle"
 import type {
   AppServices,
   HostServices,
@@ -25,8 +26,11 @@ export { PluginContractError, type PluginContractErrorCode } from "./errors"
 export {
   isOperationUnavailableError,
   OperationUnavailableError,
+  PLUGIN_CLIENT_IDS,
 } from "./gateway"
+export * from "./lifecycle"
 export * from "./operations"
+export * from "./plugin-clients"
 export * from "./providers"
 export * from "./relay"
 export * from "./server-tools"
@@ -60,14 +64,28 @@ export type PluginInject =
  * export function apply(ctx: Context, config: z.output<typeof Config>) { … }
  * ```
  */
+/* eslint-disable @typescript-eslint/no-invalid-void-type -- legacy plugins return void; resource-aware plugins return lifecycle hooks */
 export interface PluginModule<C = unknown> {
   /** Stable id matching `PLUGIN_ID_PATTERN`; equals `manifest.id` (cordis needs it as `name`). */
   readonly name: string
   readonly manifest: PluginManifest
   readonly inject: PluginInject
+  /**
+   * Cordis services this plugin may provide with `ctx.provide()`. Dependencies
+   * may inject only host services or names explicitly declared by an installed
+   * plugin; this declaration does not provide a value by itself.
+   */
+  readonly provides?: ReadonlyArray<string>
   /** Any Standard Schema (maximal uses zod 4); `{}` must be valid. */
   readonly Config: StandardSchemaV1<unknown, C>
-  apply(ctx: Context, config: C): void | Promise<void>
+  apply(
+    ctx: Context,
+    config: C,
+  ):
+    | void
+    | Promise<void>
+    | PluginResourceLifecycle
+    | Promise<PluginResourceLifecycle>
   /**
    * Upgrade a stored config written under settings version `fromVersion`
    * (< `manifest.settingsVersion`) to the current shape. `config` is the raw
@@ -81,6 +99,7 @@ export interface PluginModule<C = unknown> {
    */
   defaultToolPermission?(tool: ToolDefinitionPublic): ToolPermission | undefined
 }
+/* eslint-enable @typescript-eslint/no-invalid-void-type */
 
 declare module "@deepseek-ai/cordis" {
   interface Context extends AppServices {

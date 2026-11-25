@@ -623,7 +623,7 @@ test("session rows have no decorative color dots and remain selectable", async (
       .filter((tr) => !tr.dataset.sessionId.startsWith("other:"))
       .map((tr) => tr.dataset.sessionId)`,
   )
-  expect(live).toHaveLength(7)
+  expect(live).toHaveLength(8)
   await expect(page.locator(".session-swatch")).toHaveCount(0)
 
   const id = live.at(-1) ?? ""

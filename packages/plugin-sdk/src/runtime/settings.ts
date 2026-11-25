@@ -27,7 +27,7 @@ import { parsePluginConfig, type ParsedPluginConfig } from "./validate"
 export const PLUGIN_SETTINGS_SCHEMA = "maximal-plugin-settings/1"
 
 const SCHEMA_PREFIX = "maximal-plugin-settings/"
-const MAX_SETTINGS_BYTES = 1024 * 1024
+export const MAX_SETTINGS_BYTES = 1024 * 1024
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"])
 
 /** Last non-empty tool set a plugin registered. */

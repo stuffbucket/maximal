@@ -1,6 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import {
+  INSTALL_UPDATE_OUTCOMES,
+  type InstallUpdateOutcome,
+} from "./install-update-outcome";
+
 let shellKeyFetched = false;
 let shellKeyCache: string | null = null;
 
@@ -17,6 +22,10 @@ export async function getShellApiKey(): Promise<string | null> {
 
 export async function openUrl(url: string): Promise<void> {
   await invoke("plugin:opener|open_url", { url });
+}
+
+export async function revealPath(path: string): Promise<boolean> {
+  return safeInvoke("plugin:opener|reveal_item_in_dir", { paths: [path] });
 }
 
 export async function safeInvoke(
@@ -71,29 +80,21 @@ export async function onShellUpdateCheck(onChange: () => void): Promise<void> {
   }
 }
 
-/** How an in-place update attempt ended (`install_update` in the shell). */
-export type InstallUpdateOutcome =
-  | "unavailable"
-  | "busy"
-  | "cancelled"
-  | "failed";
-
-const INSTALL_UPDATE_OUTCOMES: ReadonlyArray<InstallUpdateOutcome> = [
-  "unavailable",
-  "busy",
-  "cancelled",
-  "failed",
-];
+export type { InstallUpdateOutcome };
 
 /**
- * Run the shell's in-place update: a native confirm naming the version, then
- * download, install and relaunch. `onDownloading` fires once the user
- * confirms. A failed install is reported by the shell itself, which then
- * opens the download page. Resolves "unavailable" where updates don't install
- * in place (a plain browser), so the caller opens the download page. Never
- * resolves after a successful install: the app relaunches.
+ * Run the shell's in-place update of `version`, which the person has just
+ * confirmed in Settings' dialog: download, install and relaunch. The shell
+ * skips its own native confirm only when `version` is the signed update it
+ * would install; otherwise it asks natively, naming the version it found.
+ * `onDownloading` fires once the download starts. A failed install is
+ * reported by the shell itself, which then opens the download page.
+ * Resolves "unavailable" where updates don't install in place (a plain
+ * browser), so the caller opens the download page. Never resolves after a
+ * successful install: the app relaunches.
  */
 export async function installUpdate(
+  version: string,
   onDownloading: () => void,
 ): Promise<InstallUpdateOutcome> {
   try {
@@ -101,7 +102,7 @@ export async function installUpdate(
     onStep.onmessage = (step) => {
       if (step === "downloading") onDownloading();
     };
-    const outcome = await invoke<unknown>("install_update", { onStep });
+    const outcome = await invoke<unknown>("install_update", { onStep, version });
     return INSTALL_UPDATE_OUTCOMES.find((o) => o === outcome) ?? "unavailable";
   } catch (err) {
     console.warn("install_update failed:", err);
@@ -146,5 +147,44 @@ export async function setDockVisibility(
   } catch (err) {
     console.warn("set_dock_visibility failed:", err);
     return false;
+  }
+}
+
+export type SaveTextFileOutcome = "saved" | "cancelled" | "failed";
+
+/**
+ * Save text as a file the person picks the place for. In the app that is the
+ * system's save dialog (`save_text_file` in the shell), because a webview
+ * can't be relied on to honour a download link; in a plain browser it is an
+ * ordinary download.
+ */
+export async function saveTextFile(
+  suggestedName: string,
+  contents: string,
+): Promise<SaveTextFileOutcome> {
+  if ("__TAURI_INTERNALS__" in window) {
+    try {
+      const saved = await invoke<boolean>("save_text_file", {
+        suggestedName,
+        contents,
+      });
+      return saved ? "saved" : "cancelled";
+    } catch (err) {
+      console.warn("save_text_file failed:", err);
+      return "failed";
+    }
+  }
+  try {
+    const url = URL.createObjectURL(new Blob([contents], { type: "text/csv" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = suggestedName;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    return "saved";
+  } catch {
+    return "failed";
   }
 }

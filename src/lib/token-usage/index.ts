@@ -42,6 +42,7 @@ export interface TokenUsageEventInput extends UsageTokens {
   endpoint: TokenUsageEndpoint
   fallbackSessionId?: string | null
   model: string
+  pluginId?: string | null
   providerName?: string | null
   sessionId?: string | null
   source: TokenUsageSource
@@ -58,7 +59,7 @@ interface TokenUsageRecorderOptions {
   traceId?: string | null
 }
 
-type CopilotTokenUsageRecorderOptions = Omit<
+export type CopilotTokenUsageRecorderOptions = Omit<
   TokenUsageRecorderOptions,
   "providerName" | "source"
 >
@@ -107,7 +108,7 @@ const BUILT_IN_CAPABILITY_ENDPOINTS: ReadonlySet<TokenUsageEndpoint> = new Set([
   "systemone",
 ])
 
-function toPersistedEvent(
+export function prepareTokenUsageEvent(
   input: TokenUsageEventInput,
 ): PersistedTokenUsageEvent | null {
   if (!hasAnyToken(input)) {
@@ -142,7 +143,10 @@ function toPersistedEvent(
     trace_id: resolveTraceId(input.traceId),
     user_id: resolveUserId(input),
     plugin_id:
-      BUILT_IN_CAPABILITY_ENDPOINTS.has(input.endpoint) ? input.endpoint : null,
+      input.pluginId?.trim()
+      || (BUILT_IN_CAPABILITY_ENDPOINTS.has(input.endpoint) ?
+        input.endpoint
+      : null),
     ...resolveRequestUsageFields(),
   }
 }
@@ -223,8 +227,6 @@ function resolveIsPaid(model: string): number | null {
   return billing.is_premium ? 1 : 0
 }
 
-tokenUsageEventBus.subscribe("token_usage.recorded", enqueueTokenUsageWrite)
-
 /** Called after each request that used tokens. Returns an unsubscribe. */
 export function onTokenUsageRecorded(listener: () => void): () => void {
   return tokenUsageEventBus.subscribe("token_usage.recorded", () => listener())
@@ -238,13 +240,30 @@ export function onTokenUsageEvent(
   return tokenUsageEventBus.subscribe("token_usage.recorded", listener)
 }
 
-export function recordTokenUsageEvent(input: TokenUsageEventInput): void {
-  const event = toPersistedEvent(input)
-  if (!event) {
-    return
+/** Publish rows that have already been persisted as part of another durable
+ * transaction. They reach live ledgers and observers without being inserted a
+ * second time. */
+export function publishPersistedTokenUsageEvents(
+  events: ReadonlyArray<PersistedTokenUsageEvent>,
+): void {
+  for (const event of events) {
+    tokenUsageEventBus.publish("token_usage.recorded", event)
   }
+}
 
-  tokenUsageEventBus.publish("token_usage.recorded", event)
+export function recordPreparedTokenUsageEvents(
+  events: ReadonlyArray<PersistedTokenUsageEvent>,
+): void {
+  // Queue persistence before announcing the rows, preserving the existing
+  // guarantee that an observer's database read waits behind these writes.
+  for (const event of events) enqueueTokenUsageWrite(event)
+  publishPersistedTokenUsageEvents(events)
+}
+
+export function recordTokenUsageEvent(input: TokenUsageEventInput): void {
+  const event = prepareTokenUsageEvent(input)
+  if (!event) return
+  recordPreparedTokenUsageEvents([event])
 }
 
 export function createTokenUsageRecorder(
@@ -256,6 +275,17 @@ export function createTokenUsageRecorder(
       ...options,
     })
   }
+}
+
+export function prepareCopilotTokenUsageEvent(
+  options: CopilotTokenUsageRecorderOptions,
+  usage: UsageTokens,
+): PersistedTokenUsageEvent | null {
+  return prepareTokenUsageEvent({
+    ...usage,
+    ...options,
+    source: "copilot",
+  })
 }
 
 export function createCopilotTokenUsageRecorder(

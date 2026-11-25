@@ -16,7 +16,11 @@ import { Hono } from "hono"
 
 import type { AuthStatus } from "~/lib/config/settings-types"
 
-import { extractRequestApiKey, SSE_EVENTS_PATH } from "~/lib/auth/request-auth"
+import {
+  createAuthMiddleware,
+  extractRequestApiKey,
+  SSE_EVENTS_PATH,
+} from "~/lib/auth/request-auth"
 import { settingsEventBus } from "~/lib/config/settings-events"
 import { eventsRoutes } from "~/routes/settings/events"
 
@@ -70,6 +74,46 @@ function bodyReader(res: Response): StreamReader {
 }
 
 describe("GET /settings/api/events (SSE)", () => {
+  test("real key middleware accepts a browser's header key and challenges a missing or wrong one", async () => {
+    const app = new Hono()
+    app.use(
+      "*",
+      createAuthMiddleware({
+        getApiKeys: () => ["sse-browser-key"],
+        isEnforcing: () => true,
+      }),
+    )
+    app.route(SSE_EVENTS_PATH, eventsRoutes)
+    for (const headers of [
+      new Headers(),
+      new Headers({ "x-api-key": "invalid" }),
+    ]) {
+      const denied = await app.request(SSE_EVENTS_PATH, { headers })
+      expect(denied.status).toBe(401)
+      expect(denied.headers.get("www-authenticate")).toBe(
+        'Bearer realm="copilot-api"',
+      )
+    }
+    const controller = new AbortController()
+    const response = await app.request(SSE_EVENTS_PATH, {
+      headers: { "x-api-key": "sse-browser-key" },
+      signal: controller.signal,
+    })
+    expect(response.status).toBe(200)
+    const reader = bodyReader(response)
+    try {
+      expect(await readUntil(reader, "event: auth.changed")).toContain(
+        "event: auth.changed",
+      )
+      settingsEventBus.publish("plugins.changed", { plugins: [] })
+      expect(await readUntil(reader, "event: plugins.changed")).toContain(
+        "event: plugins.changed",
+      )
+    } finally {
+      controller.abort()
+      await reader.cancel().catch(() => undefined)
+    }
+  })
   test("responds with an event-stream content type", async () => {
     const app = mount()
     const controller = new AbortController()

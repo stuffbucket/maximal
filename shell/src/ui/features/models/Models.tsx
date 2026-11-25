@@ -1,10 +1,16 @@
+import { t } from "../../../i18n";
+import type { BudgetLimitStatus } from "../../../../../src/lib/config/settings-types";
 import { Button } from "../../components/Button";
 import { ProblemCallout } from "../../components/ProblemCallout";
 import { EmptyState } from "../../components/EmptyState";
 import type { ModelSummary } from "../../../../../src/lib/config/settings-types";
 
+import { ShieldCheckGlyph } from "../budget/glyphs";
+import { rulesHashForModel, rulesNamingModel } from "../budget/modelRules";
+
 import { AutoModelControls } from "./AutoModelControls";
 import { modelTypeLabel } from "./model-type-label";
+import { useModelRules } from "./useModelRules";
 import { useModels } from "./useModels";
 
 /** Compact token count: 200000 → "200K", 1000000 → "1M", null → "—". */
@@ -52,14 +58,20 @@ function capabilityText(capabilities: ModelSummary["capabilities"]): string {
  * capabilities underneath the name. Numbers carry their own labels, so the
  * list needs no column headers.
  */
-function ModelRow({ model }: { model: ModelSummary }): JSX.Element {
+function ModelRow({ model, rules }: { model: ModelSummary; rules: ReadonlyArray<BudgetLimitStatus> }): JSX.Element {
   const capabilities = capabilityText(model.capabilities);
+  const rulesLabel = t("models-rules-link", { n: rules.length, name: model.name });
   return (
     <li className="model-row">
       <div className="model-row__who">
         <span className="model-row__name">
           {model.name}
           {model.preview && <span className="model-row__tag">Preview</span>}
+          {rules.length > 0 && (
+            <a className="model-row__rules" href={rulesHashForModel(model.id)} aria-label={rulesLabel} title={rulesLabel}>
+              <ShieldCheckGlyph />
+            </a>
+          )}
         </span>
         <code className="model-row__id">{model.id}</code>
         {capabilities && <span className="model-row__caps">{capabilities}</span>}
@@ -81,9 +93,11 @@ function ModelRow({ model }: { model: ModelSummary }): JSX.Element {
 function ModelGroup({
   type,
   models,
+  rulesFor,
 }: {
   type: string;
   models: Array<ModelSummary>;
+  rulesFor: (model: ModelSummary) => ReadonlyArray<BudgetLimitStatus>;
 }): JSX.Element {
   return (
     <details className="advanced-section">
@@ -95,7 +109,7 @@ function ModelGroup({
       </summary>
       <ul className="advanced-section__body model-list">
         {models.map((model) => (
-          <ModelRow key={model.id} model={model} />
+          <ModelRow key={model.id} model={model} rules={rulesFor(model)} />
         ))}
       </ul>
     </details>
@@ -115,6 +129,13 @@ export function Models(): JSX.Element {
     refresh,
     setAutoModels,
   } = useModels();
+
+  // A shield on a model that a rule names (a filter of models, its provider). A rule that
+  // covers everything applies to every row, so it is said once, below, instead of on each.
+  const ruleStatus = useModelRules();
+  const rulesFor = (model: ModelSummary): ReadonlyArray<BudgetLimitStatus> =>
+    ruleStatus ? rulesNamingModel(model.id, ruleStatus) : [];
+  const everythingRules = ruleStatus?.budgets.filter((rule) => rule.scope.kind === "global").length ?? 0;
 
   // Preserve the server's type-then-name order while grouping.
   const groups: Array<[string, Array<ModelSummary>]> = [];
@@ -160,6 +181,13 @@ export function Models(): JSX.Element {
         <ProblemCallout problem={problem} onRestarted={() => void refresh()} />
       )}
 
+      {everythingRules > 0 && (
+        <p className="form__hint models__rules-note">
+          {t("models-rules-everything", { n: everythingRules })}{" "}
+          <a href="#rules">{t("models-rules-everything-link")}</a>
+        </p>
+      )}
+
       {showEmpty && !problem ?
         <EmptyState title="No models cached" compact>
           <p>
@@ -169,7 +197,12 @@ export function Models(): JSX.Element {
           </p>
         </EmptyState>
       : groups.map(([type, list]) => (
-          <ModelGroup key={type} type={type} models={list} />
+          <ModelGroup
+            key={type}
+            type={type}
+            models={list}
+            rulesFor={rulesFor}
+          />
         ))
       }
     </div>

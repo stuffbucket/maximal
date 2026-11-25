@@ -1,0 +1,19 @@
+{
+  "name": "@stuffbucket/maximal-plugin-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Versioned runtime-validated wire contract for the Maximal plugin runner",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- one budget lifecycle matrix shares its real-service setup */
 /**
  * Budget enforcement at the generic seams, with the real config and the
  * real service on an in-memory usage database (nothing is module-mocked):
@@ -5,11 +6,14 @@
  * - a spent limit answers 402 on each wire (`billing_error` for Anthropic,
  *   `insufficient_quota` for OpenAI), never retried, naming the limit;
  * - an operation dispatch holds, commits with the provider's cost, books the
- *   estimate when the reply reports none, and releases on error;
+ *   estimate when the reply reports none, and preserves ambiguity on error;
  * - a server tool refused by a limit comes back as the tool's result.
  */
 
-import type { OperationDispatch } from "@stuffbucket/maximal-plugin-sdk/gateway"
+import type {
+  ModelOperation,
+  OperationDispatch,
+} from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import consola from "consola"
@@ -24,9 +28,14 @@ import { getConfig, writeConfig } from "~/lib/config/config"
 import { proxyErrorHandler } from "~/lib/errors/proxy-errors"
 import { requestContext } from "~/lib/http/request-context"
 import { traceIdMiddleware } from "~/lib/http/trace"
+import { providerInvocationJournal } from "~/lib/plugins/provider-broker"
 import { state } from "~/lib/runtime-state/state"
-import { closeUsageStore, recordTokenUsageEvent } from "~/lib/token-usage"
-import { getNanoAiuSpend } from "~/lib/token-usage/spend"
+import {
+  closeUsageStore,
+  getTokenUsageEventsPage,
+  recordTokenUsageEvent,
+} from "~/lib/token-usage"
+import { getNanoAiuSpend, getUnreconciledSpend } from "~/lib/token-usage/spend"
 import { createImagesRoutes } from "~/routes/images/route"
 import { pluginServerToolListings } from "~/routes/messages/server-tools/plugin-listings"
 import { runOperation } from "~/routes/passthrough"
@@ -102,6 +111,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   consola.level = 3
+  providerInvocationJournal.reset()
   __resetBudgetServiceForTests()
   await closeUsageStore()
   __resetProviderWindowsForTests()
@@ -194,11 +204,11 @@ describe("a spent limit answers 402", () => {
         spend_usd: 0.01,
         limit_nano_aiu: AIU,
         spend_nano_aiu: AIU,
-        remedy_hint: "Raise or remove it in Maximal → Budget.",
+        remedy_hint: "Raise or remove it in Maximal → Rules.",
       },
     })
-    expect(body.error.message).toContain('Maximal budget "Limit images-daily"')
-    expect(body.error.message).toContain("Maximal → Budget")
+    expect(body.error.message).toContain('Maximal rule "Limit images-daily"')
+    expect(body.error.message).toContain("Maximal → Rules")
     expect(body.error.metadata.resets_at).toMatch(/T00:00:00\.000Z$/u)
     expect(upstreamCalls).toBe(0)
   })
@@ -229,7 +239,7 @@ describe("a spent limit answers 402", () => {
     }
     expect(body.type).toBe("error")
     expect(body.error.type).toBe("billing_error")
-    expect(body.error.message).toContain("is used up")
+    expect(body.error.message).toContain("blocked this request")
   })
 
   test("on the OpenAI chat wire the same refusal is insufficient_quota", async () => {
@@ -317,27 +327,87 @@ interface Dispatched {
   body: unknown
 }
 
+interface FakeInvocation {
+  operation: ModelOperation
+  model: string
+  invocationId: string
+  providerCallId: string
+  sequence: number
+}
+
 function fakeDispatch(
-  handler: () => Promise<{
+  handler: (request: FakeInvocation) => Promise<{
     json: Record<string, unknown>
     cost?: { unit: "nano_aiu"; amount: number; estimated: boolean }
   }>,
   seen: Array<Dispatched> = [],
+  upstreamModel?: string,
 ): OperationDispatch {
+  const execute = async (request: FakeInvocation, body: unknown) => {
+    seen.push({ operation: request.operation, body })
+    const result = await handler(request)
+    const alreadyObserved = providerInvocationJournal
+      .unacknowledged(request.invocationId)
+      .some(
+        (observation) =>
+          observation.invocation.providerCallId === request.providerCallId,
+      )
+    if (!alreadyObserved) {
+      providerInvocationJournal.observe({
+        invocation: request,
+        provider: COPILOT_PROVIDER_ID,
+        ...(result.cost === undefined ? {} : { cost: result.cost }),
+      })
+    }
+    return {
+      json: result.json,
+      usage: { input_tokens: 10, output_tokens: 20 },
+      ...(result.cost ? { cost: result.cost } : {}),
+      invocationId: request.invocationId,
+      providerCallId: request.providerCallId,
+      sequence: request.sequence,
+    }
+  }
   return {
     resolve: (_operation, model) => ({
       pluginId: "core",
-      binding: { provider: COPILOT_PROVIDER_ID, upstreamModel: model },
+      binding: {
+        provider: COPILOT_PROVIDER_ID,
+        upstreamModel: upstreamModel ?? model,
+      },
     }),
-    dispatch: async (request) => {
-      seen.push({ operation: request.operation, body: request.body })
-      const result = await handler()
-      return {
-        json: result.json,
-        usage: { input_tokens: 10, output_tokens: 20 },
-        ...(result.cost ? { cost: result.cost } : {}),
-      }
-    },
+    prepare: (operation, model) => ({
+      operation,
+      model,
+      pluginId: "core",
+      binding: {
+        provider: COPILOT_PROVIDER_ID,
+        upstreamModel: upstreamModel ?? model,
+      },
+      execute: (request) =>
+        execute(
+          {
+            operation,
+            model: upstreamModel ?? model,
+            invocationId: request.invocationId,
+            providerCallId: request.providerCallId,
+            sequence: request.sequence,
+          },
+          request.body,
+        ),
+      release: noop,
+    }),
+    dispatch: (request) =>
+      execute(
+        {
+          operation: request.operation,
+          model: request.model,
+          invocationId: request.invocationId,
+          providerCallId: request.providerCallId,
+          sequence: request.sequence,
+        },
+        request.body,
+      ),
     servedModels: () => [],
     subscribe: () => noop,
   }
@@ -345,6 +415,13 @@ function fakeDispatch(
 
 async function globalSpend(): Promise<number> {
   const [sum] = await getNanoAiuSpend({ kind: "global" }, [
+    { startMs: 0, endMs: null },
+  ])
+  return sum
+}
+
+async function globalUnreconciledSpend(): Promise<number> {
+  const [sum] = await getUnreconciledSpend({ kind: "global" }, [
     { startMs: 0, endMs: null },
   ])
   return sum
@@ -387,16 +464,53 @@ describe("an operation dispatch under a limit", () => {
     expect(await globalSpend()).toBe(0.7 * AIU)
   })
 
-  test("a reply with no cost is booked at the estimate", async () => {
+  test("matches provider evidence to the upstream model but books the binding-facing model", async () => {
+    const clientModel = "gpt-image-client-binding"
+    const upstreamModel = "gpt-image-provider-upstream"
+    let observedModel = ""
+    const operations = fakeDispatch(
+      (request) => {
+        observedModel = request.model
+        return Promise.resolve({
+          json: { ok: true },
+          cost: { unit: "nano_aiu", amount: 0.7 * AIU, estimated: false },
+        })
+      },
+      [],
+      upstreamModel,
+    )
+
+    await runOperation(operations, {
+      ...imageCall(),
+      model: clientModel,
+      body: { model: clientModel, prompt: "x", quality: "low" },
+    })
+
+    expect(observedModel).toBe(upstreamModel)
+    const page = await getTokenUsageEventsPage({
+      page: 1,
+      pageSize: 10,
+      period: "day",
+    })
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]).toMatchObject({
+      model: clientModel,
+      provider_name: COPILOT_PROVIDER_ID,
+      total_nano_aiu: 0.7 * AIU,
+    })
+  })
+
+  test("a reply with no cost keeps its estimate unreconciled", async () => {
     const operations = fakeDispatch(() => Promise.resolve({ json: { ok: 1 } }))
 
     await runOperation(operations, imageCall())
 
     expect(await globalSpend()).toBe(0.6 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
     expect(await heldAfterwards()).toBe(0)
   })
 
-  test("an upstream error releases the hold and books nothing", async () => {
+  test("an upstream error retains the estimate as unreconciled", async () => {
     const operations = fakeDispatch(() =>
       Promise.reject(new Error("upstream 502")),
     )
@@ -406,13 +520,65 @@ describe("an operation dispatch under a limit", () => {
     )
 
     expect(await heldAfterwards()).toBe(0)
-    expect(await globalSpend()).toBe(0)
-    // The room is back: the same call is admitted again.
+    expect(await globalSpend()).toBe(0.6 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
+    // The remaining room still admits another call.
     const retry = fakeDispatch(() => Promise.resolve({ json: { ok: 1 } }))
     expect(await runOperation(retry, imageCall())).toEqual({ ok: 1 })
   })
 
-  test("an abandoned call releases its hold too", async () => {
+  test("a successful provider observation is acknowledged and booked once", async () => {
+    const cost = 777_000_000
+    const operations = fakeDispatch((request) => {
+      providerInvocationJournal.observe({
+        invocation: request,
+        provider: "copilot",
+        cost: { unit: "nano_aiu", amount: cost, estimated: false },
+      })
+      return Promise.resolve({
+        json: { ok: true },
+        cost: { unit: "nano_aiu", amount: cost, estimated: false },
+      })
+    })
+
+    await runOperation(operations, imageCall())
+
+    expect(await globalSpend()).toBe(cost)
+    expect(providerInvocationJournal.recover()).toEqual([])
+  })
+
+  test("provider success followed by handler failure still settles the hold", async () => {
+    const cost = 654_000_000
+    const operations = fakeDispatch((request) => {
+      providerInvocationJournal.observe({
+        invocation: request,
+        provider: "copilot",
+        cost: { unit: "nano_aiu", amount: cost, estimated: false },
+      })
+      return Promise.reject(new Error("handler failed after provider reply"))
+    })
+
+    const error = await failure(runOperation(operations, imageCall()))
+
+    expect(error).toEqual(new Error("handler failed after provider reply"))
+    expect(await globalSpend()).toBe(cost)
+    expect(await heldAfterwards()).toBe(0)
+  })
+
+  test("an ambiguous provider failure is conservatively booked at the estimate", async () => {
+    const operations = fakeDispatch((request) => {
+      providerInvocationJournal.begin(request, "copilot")
+      return Promise.reject(new Error("connection lost after send"))
+    })
+
+    await failure(runOperation(operations, imageCall()))
+
+    expect(await globalSpend()).toBe(0.6 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
+    expect(await heldAfterwards()).toBe(0)
+  })
+
+  test("an abandoned dispatched call becomes unreconciled", async () => {
     const controller = new AbortController()
     const operations = fakeDispatch(() => {
       controller.abort()
@@ -425,6 +591,7 @@ describe("an operation dispatch under a limit", () => {
     expect(error).toBeInstanceOf(DOMException)
 
     expect(await heldAfterwards()).toBe(0)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
   })
 
   test("a refused call never reaches the provider", async () => {
@@ -496,6 +663,7 @@ function toolText(run: { toolResult: { content: unknown } }): string {
 
 // ── a server tool refused by a limit ──────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function -- server-tool budget scenarios share one gateway fixture
 describe("a server tool under a limit", () => {
   const toolUse = {
     type: "tool_use" as const,
@@ -568,9 +736,11 @@ describe("a server tool under a limit", () => {
       is_error: true,
     })
     const text = toolText(refused)
-    expect(text).toStartWith('Not run: Maximal budget "Limit tools" is used up')
-    expect(text).toContain("Maximal → Budget")
-    expect(text).toContain("Don't retry this tool until the budget resets")
+    expect(text).toStartWith(
+      'Not run: Maximal rule "Limit tools" blocked this request',
+    )
+    expect(text).toContain("Maximal → Rules")
+    expect(text).toContain("Don't retry this tool until the rule resets")
   })
 
   test("a global limit refuses it as well, and the tool never runs", async () => {
@@ -583,7 +753,146 @@ describe("a server tool under a limit", () => {
 
     expect(run.ok).toBe(false)
     expect(executed).toBe(0)
-    expect(toolText(run)).toContain("is used up")
+    expect(toolText(run)).toContain("blocked this request")
+  })
+
+  test("duplicate spend reports for one provider call are booked once", async () => {
+    const cost = 321_000_000
+    const plugin = definePlugin(
+      "images-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          execute(_input, toolCall) {
+            const invocation = toolCall.nextProviderCall(
+              "images.generations",
+              "image-model",
+            )
+            providerInvocationJournal.observe({
+              invocation,
+              provider: "copilot",
+              cost: { unit: "nano_aiu", amount: cost, estimated: false },
+            })
+            const spend = {
+              ...invocation,
+              provider: "copilot",
+              result: {
+                usage: { input_tokens: 1, output_tokens: 1 },
+                cost: {
+                  unit: "nano_aiu" as const,
+                  amount: cost,
+                  estimated: false,
+                },
+              },
+            }
+            toolCall.reportSpend?.(spend)
+            toolCall.reportSpend?.(spend)
+            return Promise.resolve({
+              content: [{ type: "text" as const, text: "done" }],
+            })
+          },
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["images-tools"])
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const result = await listing.run(toolUse, call)
+
+    expect(result.ok).toBe(true)
+    expect(await globalSpend()).toBe(cost)
+  })
+
+  test("multiple provider calls are sequenced and each booked once", async () => {
+    const costs = [210_000_000, 340_000_000]
+    const plugin = definePlugin(
+      "images-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          execute(_input, toolCall) {
+            for (const [index, cost] of costs.entries()) {
+              const invocation = toolCall.nextProviderCall(
+                "images.generations",
+                `image-model-${index}`,
+              )
+              providerInvocationJournal.observe({
+                invocation,
+                provider: "copilot",
+                cost: { unit: "nano_aiu", amount: cost, estimated: false },
+              })
+              toolCall.reportSpend?.({
+                ...invocation,
+                provider: "copilot",
+                result: {
+                  usage: { output_tokens: 1 },
+                  cost: { unit: "nano_aiu", amount: cost, estimated: false },
+                },
+              })
+            }
+            return Promise.resolve({
+              content: [{ type: "text" as const, text: "done" }],
+            })
+          },
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["images-tools"])
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const result = await listing.run(toolUse, call)
+
+    expect(result.ok).toBe(true)
+    expect(await globalSpend()).toBe(costs[0] + costs[1])
+    expect(providerInvocationJournal.recover()).toEqual([])
+  })
+
+  test("parent-observed spend is booked when the tool fails before reporting", async () => {
+    const cost = 654_000_000
+    const plugin = definePlugin(
+      "images-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          execute(_input, toolCall) {
+            providerInvocationJournal.observe({
+              invocation: {
+                invocationId: toolCall.invocationId,
+                providerCallId: "provider-call-before-failure",
+                sequence: 1,
+                operation: "images.generations",
+                model: "image-model",
+              },
+              provider: "copilot",
+              cost: { unit: "nano_aiu", amount: cost, estimated: false },
+            })
+            throw new Error("runner stopped before reporting spend")
+          },
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["images-tools"])
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const result = await listing.run(toolUse, call)
+
+    expect(result.ok).toBe(false)
+    expect(await globalSpend()).toBe(cost)
   })
 
   test("a tool that errors releases its hold", async () => {
@@ -598,5 +907,140 @@ describe("a server tool under a limit", () => {
     expect(run.ok).toBe(false)
     expect(executed).toBe(0)
     expect(await heldAfterwards()).toBe(0)
+  })
+
+  test("an estimated tool error without spend keeps the hold unreconciled", async () => {
+    const plugin = definePlugin(
+      "error-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          estimate: () => ({
+            operation: "images.generations",
+            provider: "copilot",
+            body: { prompt: "x", quality: "low" },
+          }),
+          execute: () =>
+            Promise.resolve({
+              isError: true,
+              content: [{ type: "text", text: "provider failed" }],
+            }),
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["error-tools"])
+    setBudget({ limits: [limit("all", { kind: "global" }, 10 * AIU)] })
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const run = await listing.run(toolUse, call)
+
+    expect(run.ok).toBe(false)
+    expect(await globalSpend()).toBe(0.6 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0.6 * AIU)
+  })
+
+  test("reported spend settles even when the tool then throws", async () => {
+    const plugin = definePlugin(
+      "billed-tools",
+      (ctx) => {
+        ctx.serverTools.register({
+          name: "generate_image",
+          description: "Generate an image",
+          input_schema: { type: "object", properties: {} },
+          render: "hidden",
+          offer: "always",
+          estimate: () => ({
+            operation: "images.generations",
+            provider: "copilot",
+            body: { prompt: "x", quality: "low" },
+          }),
+          execute: (_input, received) => {
+            const invocation = received.nextProviderCall(
+              "images.generations",
+              "gpt-image-test",
+            )
+            const cost = {
+              unit: "nano_aiu" as const,
+              amount: 250_000_000,
+              estimated: false,
+            }
+            providerInvocationJournal.observe({
+              invocation,
+              provider: "copilot",
+              cost,
+            })
+            received.reportSpend?.({
+              ...invocation,
+              provider: "copilot",
+              result: {
+                usage: { input_tokens: 3 },
+                cost,
+              },
+            })
+            return Promise.reject(new Error("failed after billing"))
+          },
+        })
+      },
+      { kind: "model" },
+    )
+    running = await startTestGateway([plugin], ["billed-tools"])
+    setBudget({ limits: [limit("all", { kind: "global" }, 10 * AIU)] })
+    const [listing] = pluginServerToolListings(running.gateway)
+
+    const run = await listing.run(toolUse, call)
+
+    expect(run.ok).toBe(false)
+    expect(toolText(run)).toContain("failed after billing")
+    expect(await globalSpend()).toBe(0.25 * AIU)
+    expect(await globalUnreconciledSpend()).toBe(0)
+    expect(
+      (
+        await getNanoAiuSpend({ kind: "plugin", id: "billed-tools" }, [
+          { startMs: 0, endMs: null },
+        ])
+      )[0],
+    ).toBe(0.25 * AIU)
+    expect(
+      (
+        await getNanoAiuSpend({ kind: "plugin", id: "images" }, [
+          { startMs: 0, endMs: null },
+        ])
+      )[0],
+    ).toBe(0)
+    expect(await heldAfterwards()).toBe(0)
+  })
+})
+
+describe("a filter limit under the chat endpoints", () => {
+  const filters = [
+    {
+      id: "image-models",
+      name: "Image models",
+      kind: "models" as const,
+      members: ["gpt-image-*"],
+    },
+  ]
+
+  test("counts the rows its models recorded and gates the requests that name them", async () => {
+    setBudget({
+      filters,
+      limits: [
+        limit("images-cap", { kind: "filter", id: "image-models" }, AIU),
+      ],
+    })
+    // Recorded under the model `gpt-image-test`.
+    spend(AIU, "messages")
+
+    expect(
+      await failure(admitChat("messages", { model: "gpt-image-2" })),
+    ).toBeInstanceOf(BudgetExceededError)
+    await admitChat("messages", { model: "claude-sonnet-4" })
+    // A request that names no model isn't one a model filter selects.
+    await admitChat("messages")
   })
 })

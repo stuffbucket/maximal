@@ -8,6 +8,7 @@
  * and constants, so the cordis-free gateway seam can import it.
  */
 import type { ModelOperation, OperationResult } from "./operations"
+import type { ProviderInvocation } from "./providers"
 import type { JsonSchemaObject, PluginDisposer, ToolResult } from "./types"
 
 /** Server tool name as the model sees it. The host prefixes nothing. */
@@ -67,6 +68,12 @@ export interface ServerToolEstimate {
  * endpoint and plugin, as it does for the same call over HTTP.
  */
 export interface ServerToolSpend {
+  /** Stable parent-issued logical invocation identity. */
+  invocationId: string
+  /** Stable provider-call identity; duplicate reports are ignored. */
+  providerCallId: string
+  /** Monotonic order within the invocation. */
+  sequence: number
   operation: ModelOperation
   /** The model as the plugin's binding names it. */
   model: string
@@ -79,6 +86,10 @@ export interface ServerToolSpend {
 export interface ServerToolCall {
   /** Aborts when the client goes away or the plugin is stopped. */
   signal: AbortSignal
+  /** Stable parent-issued identity retained through spend acknowledgment. */
+  invocationId: string
+  /** Allocate the next parent-fenced provider call for this invocation. */
+  nextProviderCall(operation: ModelOperation, model: string): ProviderInvocation
   /** The conversation's session id, when the client sent one. */
   sessionId?: string
   /** The conversation's model. */
@@ -135,7 +146,7 @@ export interface ServerToolRegistry {
   register(definition: ServerToolDefinition): PluginDisposer
 }
 
-/** A live server tool as the app core sees it (cordis-free). */
+/** A live server tool as the app core sees it (cordis-free and data-only). */
 export interface ServerToolView {
   pluginId: string
   name: string
@@ -145,8 +156,19 @@ export interface ServerToolView {
   offer: ServerToolOffer
   /** Clients an `always` tool is offered to. */
   clients: ReadonlyArray<string>
-  /** The tool's own `estimate`, when it is a billed tool. */
-  estimate?: (input: Record<string, unknown>) => ServerToolEstimate | undefined
+  /** Whether prepare may return a billable operation estimate. */
+  billed: boolean
+}
+
+/** One input prepared by the exact leased tool implementation. */
+export interface PreparedServerTool {
+  readonly pluginId: string
+  readonly name: string
+  readonly estimate: ServerToolEstimate | undefined
+  /** Execute the input captured during preparation. May be called once. */
+  execute(call: ServerToolCall): Promise<ToolResult>
+  /** Release the prepared implementation without executing it. Idempotent. */
+  release(): void
 }
 
 declare module "./types" {

@@ -35,6 +35,16 @@ export interface AppUninstallResult {
   conflict?: AppEntry["conflict"]
 }
 
+export interface ClientAppEnableOptions {
+  /** Replace routing owned by another valid Maximal profile. Settings only:
+   *  callers must require an explicit confirmation before setting this. */
+  overrideOtherMaximal?: boolean
+  /** Claude Desktop only: switch away from a readable gateway profile that
+   *  Maximal doesn't own, without writing it. Settings only, behind the
+   *  explicit Take over confirmation. */
+  overrideForeignGateway?: boolean
+}
+
 export interface ClientApp {
   readonly id: AppEntry["id"]
   readonly name: string
@@ -55,7 +65,9 @@ export interface ClientApp {
   getDetails(conflict?: AppEntry["conflict"]): Promise<AppEntry>
 
   /** Enable the proxy routing for this app (e.g. write settings / profile) */
-  enable(): Promise<{ success: boolean; conflict?: AppEntry["conflict"] }>
+  enable(
+    options?: ClientAppEnableOptions,
+  ): Promise<{ success: boolean; conflict?: AppEntry["conflict"] }>
 
   /** Disable/revert the proxy routing for this app */
   disable(): Promise<{ success: boolean; conflict?: AppEntry["conflict"] }>
