@@ -35,16 +35,16 @@ export const Notice: Story = {
   args: {
     tone: "notice",
     title: "Using your existing setup",
-    children: "Claude Code already had a Work IQ server, so Maximal runs that same command.",
+    children: "Claude Code already has its own Work IQ server, so Maximal doesn't add one.",
   },
 };
 
 export const Empty: Story = {
   render: () => (
-    <EmptyState title="No MCP servers yet" action={<Button size="sm">Check again</Button>}>
+    <EmptyState title="No connectors yet" action={<Button size="sm">Check again</Button>}>
       <p>
-        Add one under <code className="mono">mcpBroker.servers</code> in Maximal's config.json. It shows up
-        here to turn on and share with your apps.
+        Turn one on in Settings → Integrations → Connectors. It shows up here to share with your
+        apps.
       </p>
     </EmptyState>
   ),

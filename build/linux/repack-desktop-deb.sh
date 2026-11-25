@@ -35,12 +35,10 @@ trap 'rm -rf "$stage"' EXIT
 root="$stage/maximal-desktop"
 dpkg-deb -R "$input" "$root"
 
-for path in usr/bin/maximal usr/bin/maximal-mcp-broker; do
-  if [ -e "$root/$path" ]; then
-    echo "$input ships /$path; build it with bundle.externalBin set to []" >&2
-    exit 1
-  fi
-done
+if [ -e "$root/usr/bin/maximal" ]; then
+  echo "$input ships /usr/bin/maximal; build it with bundle.externalBin set to []" >&2
+  exit 1
+fi
 [ -x "$root/usr/bin/maximal-desktop" ] || {
   echo "$input has no /usr/bin/maximal-desktop (mainBinaryName)" >&2
   exit 1
