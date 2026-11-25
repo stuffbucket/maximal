@@ -2,8 +2,8 @@
 /**
  * `pnpm dev`: stage the window-story UI, start Storybook, and restage on
  * every save under shell/ or the mock sources. Component and island stories
- * hot-reload through Vite on their own; the window stories pick up a
- * restage the next time their iframe loads (switch stories or reload).
+ * hot-reload through Vite on their own; a restage triggers Vite's full reload
+ * so mounted window-story iframes pick up the new staged bundle too.
  *
  * Extra args pass through to `storybook dev` (e.g. `pnpm dev --port 6007`).
  */
