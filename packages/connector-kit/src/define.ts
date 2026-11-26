@@ -362,13 +362,13 @@ function applyConnector(
     },
   })
   registerActions(ctx, controller, setup)
-  const shutdown = () => {
+  const shutdown = async () => {
     lifetime.abort(new Error(`${name} stopped.`))
     output.stop()
     controller.dispose()
     upstream.guarded.dispose()
     unregisterUpstreamPool()
-    void upstream.pool.dispose()
+    await upstream.pool.dispose()
   }
   ctx.effect(() => shutdown, `${manifest.id} lifecycle`)
   controller.start()
