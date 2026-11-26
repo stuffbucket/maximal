@@ -722,18 +722,49 @@ describe("connector tool relays", () => {
     expect(progress).toEqual(["Thinking"])
   })
 
-  test("unloading removes tools and status and closes upstream sessions", async () => {
+  test("unloading withdraws contributions immediately and waits once for upstream disposal", async () => {
     const server = fake()
+    let closeCalls = 0
+    let releaseCloses!: () => void
+    const closeGate = new Promise<void>((resolve) => (releaseCloses = resolve))
     const plugin = await load(server, new FakeTokenProvider(ADA), {
       storage: ACCEPTED,
+      connector: {
+        async fetch(url, init) {
+          if (init?.method === "DELETE") {
+            closeCalls++
+            await closeGate
+          }
+          return await fetch(url, init)
+        },
+      },
     })
     await waitFor(() => plugin.status()?.code === "ready")
     await plugin.callTool("search_paths", {}, { sessionId: "s" })
     expect(server.sessionCount).toBe(2)
-    await plugin.dispose()
-    expect(plugin.tools()).toEqual([])
+
+    let settled = 0
+    const first = plugin.dispose().then(() => settled++)
+    const second = plugin.dispose().then(() => settled++)
+    await waitFor(() => closeCalls === 2)
+
+    try {
+      expect(plugin.fiber.state).toBe(5) // Cordis FiberState.UNLOADING
+      expect(plugin.tools()).toEqual([])
+      expect(plugin.actions()).toEqual([])
+      expect(settled).toBe(0)
+      expect(server.sessionCount).toBe(2)
+    } finally {
+      releaseCloses()
+    }
+    await Promise.all([first, second])
+    expect(plugin.fiber.state).toBe(4) // Cordis FiberState.DISPOSED
     expect(plugin.status()).toBeUndefined()
-    await waitFor(() => server.sessionCount === 0)
+    expect(server.sessionCount).toBe(0)
+    expect(closeCalls).toBe(2)
+
+    await plugin.dispose()
+    expect(closeCalls).toBe(2)
   })
 
   test("unloading during the upstream handshake still ends that session", async () => {
