@@ -22,13 +22,13 @@ import { Script } from "node:vm"
 
 import {
   buildPlugin,
-  DEFAULT_BRIDGE_PORT,
   DEFAULT_MAXIMAL_PORT,
   inspectPlugin,
   panelBuild,
   panelBuildLine,
   pluginManifest,
   readPackageVersion,
+  RELAYED_BRIDGE_PORT,
   renderPlugin,
   resolveBuildOptions,
   stampPanel,
@@ -66,7 +66,7 @@ describe("build", () => {
     expect(() => stampVersion("var x = 1", "1.0.0")).toThrow("found 0")
   })
 
-  test("dev manifest is FigJam-only and reaches only Maximal, the bridge and Figma's API", async () => {
+  test("dev manifest is FigJam-only and reaches only Maximal and Figma's API, never the bridge", async () => {
     const manifest = JSON.parse(
       await readFile(path.join(outDir, "manifest.json"), "utf8"),
     ) as Record<string, unknown>
@@ -74,11 +74,14 @@ describe("build", () => {
     expect(manifest.editorType).toEqual(["figjam"])
     expect(manifest.networkAccess).toMatchObject({
       allowedDomains: ["https://api.figma.com"],
-      devAllowedDomains: ["http://localhost:4141", "ws://localhost:4150"],
+      // Maximal's origin only (HTTP for models, WebSocket for the relayed
+      // bridge socket): the bridge's port is not in the plugin.
+      devAllowedDomains: ["http://localhost:4141", "ws://localhost:4141"],
     })
+    expect(JSON.stringify(manifest)).not.toContain("4150")
   })
 
-  test("release manifest drops the dev marker and honours custom ports", async () => {
+  test("release manifest drops the dev marker and honours custom ports (a standalone bridge adds its own socket)", async () => {
     const releaseDir = path.join(outDir, "release")
     await buildPlugin({
       outDir: releaseDir,
@@ -93,7 +96,11 @@ describe("build", () => {
     expect(manifest.id).toBe("maximal-figjam-agent")
     expect(manifest.networkAccess).toMatchObject({
       allowedDomains: ["https://api.figma.com"],
-      devAllowedDomains: ["http://localhost:5141", "ws://localhost:5150"],
+      devAllowedDomains: [
+        "http://localhost:5141",
+        "ws://localhost:5141",
+        "ws://localhost:5150",
+      ],
     })
   })
 })
@@ -345,13 +352,15 @@ describe("relay key", () => {
   const KEY = "k".repeat(22) + "_-".repeat(10) + "Z"
   const OTHER_KEY = "o".repeat(43)
 
-  test("a plain build stamps the ports and no key, so the panel won't try the bridge", async () => {
+  test("a plain build stamps Maximal's port, no bridge port and no key, so the panel won't try the bridge", async () => {
     const ui = await readFile(path.join(outDir, "ui.html"), "utf8")
     expect(ui).toContain(
       panelBuildLine({
         maximalPort: DEFAULT_MAXIMAL_PORT,
-        bridgePort: DEFAULT_BRIDGE_PORT,
+        bridgePort: RELAYED_BRIDGE_PORT,
         relayKey: "",
+        profile: "",
+        dev: true,
       }),
     )
   })
@@ -365,6 +374,8 @@ describe("relay key", () => {
         maximalPort: DEFAULT_MAXIMAL_PORT,
         bridgePort: 5150,
         relayKey: KEY,
+        profile: "",
+        dev: true,
       }),
     )
     for (const name of ["manifest.json", "code.js"]) {
@@ -394,6 +405,8 @@ describe("relay key", () => {
         maximalPort: 1,
         bridgePort: 1,
         relayKey: "",
+        profile: "",
+        dev: true,
       }),
     ).toThrow("found 0")
   })
@@ -447,16 +460,17 @@ describe("sandbox", () => {
   }
 })
 
-// The built panel runs against fake browser globals and must dial the same
-// ports the manifest allows: the defaults, and non-default values for both.
-// Only a keyed build (what the bridge's host writes) opens the bridge socket.
+// The built panel runs against fake browser globals and must dial only what
+// the manifest allows: Maximal's origin (the bridge is reached through it), and
+// a standalone bridge's port only when the build names one. Only a keyed build
+// (what the bridge's host writes) asks Maximal for the bridge or opens a socket.
 describe("panel ports", () => {
   const script = path.join(import.meta.dir, "sandbox", "panel-ports.mjs")
   const KEY = "p".repeat(21) + "-_".repeat(11)
   const run = (
     dir: string,
     ports: { maximalPort: number; bridgePort: number },
-    saved?: string,
+    extra: { saved?: string; discovery?: string } = {},
   ) => {
     const result = Bun.spawnSync(
       [
@@ -465,9 +479,13 @@ describe("panel ports", () => {
         dir,
         String(ports.maximalPort),
         String(ports.bridgePort),
-        ...(saved ? [saved] : []),
+        ...(extra.saved ? [extra.saved] : []),
       ],
-      { stdout: "pipe", stderr: "pipe" },
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, PANEL_DISCOVERY: extra.discovery ?? "ok" },
+      },
     )
     return {
       code: result.exitCode,
@@ -475,16 +493,40 @@ describe("panel ports", () => {
     }
   }
 
-  test("default ports: a keyed build connects to 4141 and 4150 with its key", async () => {
+  test("default port: a keyed build asks Maximal about the bridge and opens its socket on Maximal's origin, with its key", async () => {
     const keyedDir = path.join(outDir, "default-keyed")
     await buildPlugin({ outDir: keyedDir, relayKey: KEY })
-    const result = run(keyedDir, { maximalPort: 4141, bridgePort: 4150 })
+    const result = run(keyedDir, { maximalPort: 4141, bridgePort: 0 })
     expect(result.code, result.output).toBe(0)
   })
 
-  test("an unkeyed build still calls Maximal but opens no bridge socket", () => {
-    const result = run(outDir, { maximalPort: 4141, bridgePort: 4150 })
+  test("an unkeyed build still calls Maximal for models but sends no discovery request and opens no socket", () => {
+    const result = run(outDir, { maximalPort: 4141, bridgePort: 0 })
     expect(result.code, result.output).toBe(0)
+  })
+
+  test("a standalone bridge's build dials that port directly, with its key, and the manifest allows it", async () => {
+    const standalone = path.join(outDir, "standalone")
+    await buildPlugin({ outDir: standalone, bridgePort: 4153, relayKey: KEY })
+    const result = run(standalone, { maximalPort: 4141, bridgePort: 4153 })
+    expect(result.code, result.output).toBe(0)
+  })
+
+  test("Maximal's discovery answers stop the panel from opening a socket: another profile, an unknown key, FigJam off", async () => {
+    const profiled = path.join(outDir, "profiled")
+    await buildPlugin({
+      outDir: profiled,
+      relayKey: KEY,
+      profile: "ab12cd34ef56",
+    })
+    for (const discovery of ["other-profile", "rejected", "down"]) {
+      const result = run(
+        profiled,
+        { maximalPort: 4141, bridgePort: 0 },
+        { discovery },
+      )
+      expect(result.code, `${discovery}: ${result.output}`).toBe(0)
+    }
   })
 
   test("refuses a panel with a second script element, whatever its case", async () => {
@@ -493,24 +535,23 @@ describe("panel ports", () => {
     const uiPath = path.join(extraDir, "ui.html")
     const ui = await readFile(uiPath, "utf8")
     await writeFile(uiPath, `${ui}\n<SCRIPT>void 0</SCRIPT>\n`)
-    const result = run(extraDir, { maximalPort: 4141, bridgePort: 4150 })
+    const result = run(extraDir, { maximalPort: 4141, bridgePort: 0 })
     expect(result.code).not.toBe(0)
     expect(result.output).toContain("exactly one script element, found 2")
   })
 
-  test("non-default ports reach the panel's connections and status text", async () => {
+  test("a non-default Maximal port reaches the panel's connections and status text", async () => {
     const customDir = path.join(outDir, "custom-ports")
     await buildPlugin({
       outDir: customDir,
       maximalPort: 5141,
-      bridgePort: 5150,
       relayKey: KEY,
     })
     const ui = await readFile(path.join(customDir, "ui.html"), "utf8")
     expect(ui).toContain(
-      `const PANEL_BUILD = {"maximalPort":5141,"bridgePort":5150,"relayKey":"${KEY}"};`,
+      `const PANEL_BUILD = {"maximalPort":5141,"bridgePort":0,"relayKey":"${KEY}","profile":"","dev":true};`,
     )
-    const result = run(customDir, { maximalPort: 5141, bridgePort: 5150 })
+    const result = run(customDir, { maximalPort: 5141, bridgePort: 0 })
     expect(result.code, result.output).toBe(0)
   })
 
@@ -519,34 +560,33 @@ describe("panel ports", () => {
     await buildPlugin({
       outDir: customDir,
       maximalPort: 4999,
-      bridgePort: 4998,
       relayKey: KEY,
     })
     const result = run(
       customDir,
-      { maximalPort: 4999, bridgePort: 4998 },
-      "http://localhost:4141",
+      { maximalPort: 4999, bridgePort: 0 },
+      { saved: "http://localhost:4141" },
     )
     expect(result.code, result.output).toBe(0)
   })
 
   test("refuses ports that aren't ports", () => {
     const line = "const PANEL_BUILD = {};"
+    const base = { relayKey: "", profile: "", dev: true }
     expect(() =>
-      stampPanel(line, { maximalPort: 0, bridgePort: 4150, relayKey: "" }),
+      stampPanel(line, { ...base, maximalPort: 0, bridgePort: 0 }),
     ).toThrow("Maximal port")
     expect(() =>
-      stampPanel(line, {
-        maximalPort: 4141,
-        bridgePort: Number.NaN,
-        relayKey: "",
-      }),
+      stampPanel(line, { ...base, maximalPort: 4141, bridgePort: Number.NaN }),
+    ).toThrow("bridge port")
+    expect(() =>
+      stampPanel(line, { ...base, maximalPort: 4141, bridgePort: 70_000 }),
     ).toThrow("bridge port")
     expect(() =>
       stampPanel("<html></html>", {
+        ...base,
         maximalPort: 4141,
-        bridgePort: 4150,
-        relayKey: "",
+        bridgePort: 0,
       }),
     ).toThrow("found 0")
   })

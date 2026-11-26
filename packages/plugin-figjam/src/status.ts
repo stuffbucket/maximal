@@ -17,6 +17,9 @@ export interface StartFailure {
   detail: string
 }
 
+/** The status fact that carries the port the bridge is bound to (read by Maximal's `/figjam` routes). */
+export const BRIDGE_PORT_FACT = "Port"
+
 /** Id of the action that builds (or rebuilds) the Figma plugin files. */
 export const SETUP_ACTION = "setup"
 
@@ -229,7 +232,7 @@ function composeBase(input: StatusInput): PluginStatus {
     }
   }
   const facts = [
-    { label: "Port", value: String(bridge.port) },
+    { label: BRIDGE_PORT_FACT, value: String(bridge.port) },
     ...(bridge.preferredPort === bridge.port ?
       []
     : [

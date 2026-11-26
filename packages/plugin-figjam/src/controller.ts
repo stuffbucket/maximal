@@ -235,7 +235,7 @@ export class FigjamController {
           `The FigJam bridge is listening on 127.0.0.1:${started.port} (profile ${this.#profile.id}).`,
         )
       } else {
-        // Worth saying everywhere: the Figma plugin is rebuilt to follow the move.
+        // Worth saying everywhere: the status shows the port to point the CLI at.
         this.#ctx.host.logger.info(
           `The FigJam bridge's port ${started.preferredPort} was taken, so it is listening on 127.0.0.1:${started.port} (profile ${this.#profile.id}).`,
         )
@@ -289,12 +289,13 @@ export class FigjamController {
   /**
    * The options the generated plugin is built with. The start-time check and
    * every build (start or manual) both read this, so a folder is judged
-   * against exactly what a rebuild would write.
+   * against exactly what a rebuild would write. The bridge's port is not one
+   * of them: the panel reaches the bridge through Maximal (`/figjam/plugin`),
+   * so a bridge that moves ports never changes, or rebuilds, the plugin.
    */
   #buildOptions(): PluginBuildOptions {
     const profile = pluginProfileId(this.#profile)
     return {
-      bridgePort: this.#handle?.port ?? this.#config.port,
       maximalPort: this.#ctx.host.maximalPort(),
       relayKey: relayKey(),
       ...(profile === undefined ? {} : { profile }),
@@ -317,7 +318,7 @@ export class FigjamController {
       await buildPlugin({ outDir: this.#pluginDir, ...options })
       this.#folder = "current"
       this.#note(
-        `Built the Figma plugin (${this.#pluginName()}; Maximal at localhost:${options.maximalPort}, bridge at localhost:${options.bridgePort}) in ${this.#pluginDir}`,
+        `Built the Figma plugin (${this.#pluginName()}; allows only Maximal at localhost:${options.maximalPort}) in ${this.#pluginDir}`,
       )
     } catch (error) {
       this.#buildError = errorMessage(error)

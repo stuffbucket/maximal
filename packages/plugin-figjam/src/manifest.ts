@@ -2,7 +2,7 @@ import type { PluginManifest } from "@stuffbucket/maximal-plugin-sdk"
 
 import { z } from "zod"
 
-/** Where the FigJam panel and coding agents reach the bridge (preferred; the next free port is used when taken). */
+/** The bridge's preferred port for the HTTP API that coding agents and the CLI use. */
 export const DEFAULT_BRIDGE_PORT = 4150
 
 const port = (title: string, description: string, fallback: number) =>
@@ -17,7 +17,7 @@ const port = (title: string, description: string, fallback: number) =>
 export const Config = z.object({
   port: port(
     "Bridge port",
-    "The local WebSocket port the FigJam panel connects to. When the port is taken, the next free one is used, and the Figma plugin is rebuilt for it (run the plugin again in Figma).",
+    "The local port of the bridge's HTTP API, for the figjam command-line tool and coding agents. The FigJam panel doesn't use it: it connects through Maximal, so changing it never changes the Figma plugin. When the port is taken, the next free one is used.",
     DEFAULT_BRIDGE_PORT,
   ),
 })

@@ -15,7 +15,15 @@ import {
 import { loadPlugin, waitFor } from "@stuffbucket/maximal-plugin-sdk/testing"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -243,9 +251,13 @@ describe("FigJam plugin: setup", () => {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       networkAccess: { devAllowedDomains: Array<string> }
     }
-    expect(manifest.networkAccess.devAllowedDomains).toContain(
-      `ws://localhost:${port}`,
-    )
+    // Maximal's origin only: the panel reaches the bridge through it, so the
+    // bridge's port is nowhere in the manifest.
+    expect(manifest.networkAccess.devAllowedDomains).toEqual([
+      "http://localhost:4141",
+      "ws://localhost:4141",
+    ])
+    expect(JSON.stringify(manifest)).not.toContain(String(port))
   })
 
   test("tells the Figma plugin the port Maximal serves on, and ignores an old maximalPort setting", async () => {
@@ -260,14 +272,12 @@ describe("FigJam plugin: setup", () => {
         "utf8",
       ),
     ) as { networkAccess: { devAllowedDomains: Array<string> } }
-    expect(manifest.networkAccess.devAllowedDomains).toContain(
+    expect(manifest.networkAccess.devAllowedDomains).toEqual([
       "http://localhost:5141",
-    )
-    expect(manifest.networkAccess.devAllowedDomains).not.toContain(
-      "http://localhost:4999",
-    )
-    // The panel dials the same ports the manifest allows, with this process's
-    // relay key.
+      "ws://localhost:5141",
+    ])
+    // The panel dials the same origin the manifest allows (the bridge through
+    // it: no bridge port), with this process's relay key.
     const ui = await readFile(
       path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html"),
       "utf8",
@@ -275,7 +285,7 @@ describe("FigJam plugin: setup", () => {
     const key = await generatedRelayKey()
     expect(key).toMatch(/^[\w-]{43}$/)
     expect(ui).toContain(
-      `const PANEL_BUILD = {"maximalPort":5141,"bridgePort":${port},"relayKey":"${key}"};`,
+      `{"maximalPort":5141,"bridgePort":0,"relayKey":"${key}",`,
     )
   })
 
@@ -293,7 +303,7 @@ describe("FigJam plugin: setup", () => {
     const key = await generatedRelayKey()
     const stale = current.replace(
       /^const PANEL_BUILD = .*;$/m,
-      `const PANEL_BUILD = {"maximalPort":1,"bridgePort":2,"relayKey":"${key}"};`,
+      `const PANEL_BUILD = {"maximalPort":1,"bridgePort":2,"relayKey":"${key}","profile":"","dev":true};`,
     )
     expect(stale).not.toBe(current)
     await writeFile(uiPath, stale)
@@ -576,7 +586,7 @@ describe("FigJam plugin: the port", () => {
     await waitFor(() => portIsFree(port))
   })
 
-  test("a taken port moves the bridge to the next free one, the status says so, and the plugin follows", async () => {
+  test("a taken port moves the bridge to the next free one and the status says so", async () => {
     const blocker = Bun.listen({
       hostname: "127.0.0.1",
       port,
@@ -595,14 +605,54 @@ describe("FigJam plugin: the port", () => {
           record.level === "info" && record.message.includes("was taken"),
       ),
     ).toBe(true)
-    await loaded.runAction("setup")
-    await waitFor(statusIs(loaded, "ready"))
-    // The panel is stamped with the port the bridge really bound.
-    expect(
-      (await readFile(pluginFile("ui.html"), "utf8")).includes(
-        `"bridgePort":${fact(loaded, "Port")}`,
-      ),
-    ).toBe(true)
+  })
+
+  test("a bridge port that moves never touches the plugin folder, and a rebuild writes the same bytes", async () => {
+    const first = await load()
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const names = ["code.js", "ui.html", "manifest.json"]
+    const before: Record<string, string> = {}
+    const marker = new Date(Date.now() - 60_000)
+    for (const name of names) {
+      before[name] = await readFile(pluginFile(name), "utf8")
+      await utimes(pluginFile(name), marker, marker)
+    }
+    // Nothing in the plugin names a bridge port, whichever it binds.
+    expect(before["ui.html"]).toContain('"bridgePort":0')
+    expect(before["manifest.json"]).not.toContain(String(port))
+
+    // The preferred port is taken, so the bridge binds the next free one.
+    const blocker = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: { data() {} },
+    })
+    cleanups.push(() => {
+      blocker.stop(true)
+    })
+    const second = await load()
+    await waitFor(statusIs(second, "ready"))
+    expect(Number(fact(second, "Port"))).toBeGreaterThan(port)
+    for (const name of names) {
+      expect(await readFile(pluginFile(name), "utf8")).toBe(before[name])
+      // Not rewritten at all, not just rewritten identically.
+      expect((await stat(pluginFile(name))).mtimeMs).toBeCloseTo(
+        marker.getTime(),
+        -3,
+      )
+    }
+
+    // A deliberate rebuild while the bridge is on the moved port: same bytes.
+    await second.runAction("setup")
+    await waitFor(statusIs(second, "ready"))
+    for (const name of names) {
+      expect(await readFile(pluginFile(name), "utf8")).toBe(before[name])
+    }
   })
 
   test("when no port is free the status is an error, and Try again works once one is", async () => {
