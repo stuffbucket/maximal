@@ -1,10 +1,15 @@
 // The session table's order, its wording (countdowns, times, the context
 // meter's figures) and the cold rows it shows. No DOM, so the root test suite
 // can import it.
-import type { SessionsResponse, SessionView } from "../../../../src/lib/token-usage/sessions-schema";
+import type {
+  ConnectorActivityView,
+  SessionsResponse,
+  SessionView,
+} from "../../../../src/lib/token-usage/sessions-schema";
 import { t } from "../../i18n";
 
 export type Session = SessionView;
+export type ConnectorActivity = ConnectorActivityView;
 
 const TEN_MINUTES_S = 600;
 const HOUR_S = 3600;
@@ -50,6 +55,16 @@ export function liveSessions(view: SessionsResponse, nowMs: number): SessionsRes
     ...view,
     sessions: view.sessions.map((s) => (expired(s) ? { ...s, state: "cold" } : s)),
   };
+}
+
+/**
+ * The connectors in use as of `nowMs`, in the order the server listed them.
+ * One past its `expires_at_ms` is gone now, without waiting for the next
+ * poll. Connectors are not sessions: they never reach `sortSessions`,
+ * `liveSessions` or any count of sessions or tokens.
+ */
+export function liveConnectors(view: SessionsResponse, nowMs: number): Array<ConnectorActivity> {
+  return (view.connector_activity ?? []).filter((c) => nowMs < c.expires_at_ms);
 }
 
 function formatUnit(value: number, unit: "minute" | "hour", locale: string): string {

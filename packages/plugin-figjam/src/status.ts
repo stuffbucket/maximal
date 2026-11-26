@@ -1,5 +1,7 @@
 import type {
+  PluginActivity,
   PluginAttention,
+  PluginAttentionRequest,
   PluginStatus,
   PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
@@ -14,6 +16,9 @@ export interface StartFailure {
   summary: string
   detail: string
 }
+
+/** The status fact that carries the port the bridge is bound to (read by Maximal's `/figjam` routes). */
+export const BRIDGE_PORT_FACT = "Port"
 
 /** Id of the action that builds (or rebuilds) the Figma plugin files. */
 export const SETUP_ACTION = "setup"
@@ -30,6 +35,40 @@ export function displayName(name: string): string {
   // eslint-disable-next-line no-control-regex -- stripping control characters is the point
   const clean = name.replaceAll(/[\u0000-\u001F\u007F]/g, " ").trim()
   return clean.length > 60 ? `${clean.slice(0, 59)}…` : clean || "unnamed"
+}
+
+/** Tool use older than this is left out of the status. */
+const ACTIVITY_KEEP_MS = 60_000
+
+/**
+ * The status's `activity` from the bridge's tool counters: the tool's name
+ * and times only. Left out when no call is running and the last one is old.
+ */
+export function toPluginActivity(
+  bridge: {
+    inFlight: number
+    startedAtMs: number | null
+    lastActivityAtMs: number | null
+    lastTool: string | null
+    expiresAtMs?: number | null
+  },
+  nowMs: number = Date.now(),
+): PluginActivity | undefined {
+  const { inFlight, lastActivityAtMs, lastTool } = bridge
+  if (lastActivityAtMs === null) return undefined
+  if (inFlight === 0 && nowMs - lastActivityAtMs > ACTIVITY_KEEP_MS)
+    return undefined
+  return {
+    activeCalls: inFlight,
+    startedAtMs: inFlight > 0 ? bridge.startedAtMs : null,
+    lastActivityAtMs,
+    ...(lastTool === null ? {} : { lastTool: displayName(lastTool) }),
+    ...(bridge.expiresAtMs === undefined ?
+      {}
+    : {
+        expiresAtMs: inFlight > 0 ? bridge.expiresAtMs : null,
+      }),
+  }
 }
 
 const nameList = (names: ReadonlyArray<string>): string =>
@@ -74,6 +113,8 @@ export interface StatusInput {
   bridge:
     | {
         port: number
+        /** The port that was asked for; differs from `port` when it was taken. */
+        preferredPort: number
         boards: ReadonlyArray<string>
         pending: ReadonlyArray<PendingPanel>
       }
@@ -82,7 +123,9 @@ export interface StatusInput {
   folder: PluginFolder
   buildError: string | undefined
   manifestPath: string
-  /** Approve and Deny for each waiting panel. */
+  /** The name Figma lists the development plugin under (profile-specific). */
+  pluginName: string
+  /** Approve and Deny for each waiting panel (the tray's items). */
   pairActions: Array<PluginStatusAction>
 }
 
@@ -113,10 +156,42 @@ export function pairActionIds(name: string): {
   return { approveId: `approve-${suffix}`, denyId: `deny-${suffix}` }
 }
 
-/** What the person is asked while panels wait, or `undefined` when none do. */
+/** The dialog that asks whether one waiting panel may drive its board. */
+function pairRequest(request: PendingPanel): PluginAttentionRequest {
+  const { approveId, denyId } = pairActionIds(request.name)
+  const name = displayName(request.name)
+  const board = request.board ? displayName(request.board) : undefined
+  const fileKey = request.fileKey ? displayName(request.fileKey) : undefined
+  const user = request.user ? displayName(request.user) : undefined
+  return {
+    title: `Let the FigJam panel "${name}" connect?`,
+    detail:
+      "Approving lets this panel, running in Figma on this computer, read and change the board it is open on. "
+      + "An approved panel reconnects without asking again. "
+      + "If you didn't just turn on \"Let Claude Code drive this board\" in that panel, or the board or profile isn't yours, deny it.",
+    facts: [
+      { label: "Panel", value: name },
+      ...(board ? [{ label: "Board", value: board }] : []),
+      ...(fileKey ? [{ label: "File", value: fileKey }] : []),
+      ...(user ? [{ label: "Figma profile", value: user }] : []),
+    ],
+    approve: { id: approveId, label: "Approve", kind: "primary" },
+    decline: { id: denyId, label: "Deny", kind: "secondary" },
+  }
+}
+
+/**
+ * What the person is asked while panels wait, or `undefined` when none do.
+ * `actions` are the tray's items (each names its panel); `requests` are the
+ * questions Settings asks in a dialog, one per panel whose actions exist.
+ */
 function pairAttention(input: StatusInput): PluginAttention | undefined {
   const pending = input.bridge?.pending ?? []
   if (pending.length === 0 || input.pairActions.length === 0) return undefined
+  const actionIds = new Set(input.pairActions.map((action) => action.id))
+  const asked = pending.filter((panel) =>
+    actionIds.has(pairActionIds(panel.name).approveId),
+  )
   const [first] = pending
   const board = first.board ? ` on board "${displayName(first.board)}"` : ""
   return {
@@ -125,6 +200,9 @@ function pairAttention(input: StatusInput): PluginAttention | undefined {
         `A FigJam panel ("${displayName(first.name)}")${board} wants to connect`
       : `${pending.length} FigJam panels want to connect`,
     actions: input.pairActions,
+    ...(asked.length === 0 ?
+      {}
+    : { requests: asked.map((panel) => pairRequest(panel)) }),
   }
 }
 
@@ -154,7 +232,15 @@ function composeBase(input: StatusInput): PluginStatus {
     }
   }
   const facts = [
-    { label: "Port", value: String(bridge.port) },
+    { label: BRIDGE_PORT_FACT, value: String(bridge.port) },
+    ...(bridge.preferredPort === bridge.port ?
+      []
+    : [
+        {
+          label: "Preferred port (in use)",
+          value: String(bridge.preferredPort),
+        },
+      ]),
     { label: "Connected boards", value: nameList(bridge.boards) },
     { label: "Waiting for approval", value: pendingList(bridge.pending) },
   ]
@@ -182,7 +268,6 @@ function composeBase(input: StatusInput): PluginStatus {
           label: "Set up the Figma plugin",
           kind: "primary",
         },
-        ...input.pairActions,
       ],
     }
   }
@@ -196,10 +281,10 @@ function composeBase(input: StatusInput): PluginStatus {
       : IMPORT_INSTRUCTIONS,
     facts: [
       ...facts,
+      { label: "Figma plugin", value: input.pluginName },
       { label: "Figma plugin manifest", value: input.manifestPath },
     ],
     actions: [
-      ...input.pairActions,
       {
         id: SETUP_ACTION,
         label: "Rebuild the Figma plugin",

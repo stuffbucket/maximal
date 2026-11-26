@@ -86,6 +86,10 @@ describe("GET /token-usage/sessions", () => {
 
   test("serves an empty list when nothing was recorded", async () => {
     const body = await fetchSessions()
-    expect(body).toEqual({ flow_per_min: 0, sessions: [] })
+    expect(body).toEqual({
+      flow_per_min: 0,
+      sessions: [],
+      connector_activity: [],
+    })
   })
 })

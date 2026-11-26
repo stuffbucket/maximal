@@ -1,11 +1,13 @@
 import { Hono } from "hono"
 
 import { forwardError } from "~/lib/errors/error"
+import { getPluginGateway } from "~/lib/plugins/gateway"
 import {
   getTokenUsageEventsPage,
   getTokenUsageSummary,
   type TokenUsagePeriod,
 } from "~/lib/token-usage"
+import { connectorActivityFor } from "~/lib/token-usage/connector-activity"
 import { listInFlight } from "~/lib/token-usage/in-flight"
 import {
   buildSessionsView,
@@ -71,7 +73,21 @@ tokenUsageRoute.get("/sessions", async (c) => {
       nowMs,
       observations: cacheObservations,
     })
-    return c.json(SessionsResponse.parse(view))
+    const gateway = getPluginGateway()
+    return c.json(
+      SessionsResponse.parse({
+        ...view,
+        // Kept apart from `sessions`: a connector call is not a model request.
+        // With no gateway there are no connectors, so nothing to list.
+        connector_activity:
+          gateway ?
+            connectorActivityFor(gateway).view({
+              nowMs,
+              reported: (id) => gateway.get(id)?.status?.activity,
+            })
+          : [],
+      }),
+    )
   } catch (error) {
     return forwardError(c, error)
   }

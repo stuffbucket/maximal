@@ -166,10 +166,10 @@ describe("startBridge", () => {
     expect(result).toMatchObject({ ok: false, status: 404 })
   })
 
-  test("forget revokes a paired client", () => {
+  test("forget revokes a paired client", async () => {
     const [client] = handle.status().clients
-    expect(handle.forget(client.id)).toBe(true)
-    expect(handle.forget(client.id)).toBe(false)
+    expect(await handle.forget(client.id)).toBe(true)
+    expect(await handle.forget(client.id)).toBe(false)
     expect(handle.status().clients).toEqual([])
   })
 })
@@ -295,5 +295,62 @@ describe("relay key", () => {
       await fresh.stop()
     }
     // afterAll calls stop() on the first handle, which is a no-op by now.
+  })
+})
+
+function occupy() {
+  return Bun.listen({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: { data() {} },
+  })
+}
+
+describe("port selection", () => {
+  test("takes the preferred port when it is free", async () => {
+    const probe = occupy()
+    const { port } = probe
+    probe.stop(true)
+    const bridge = await startBridge({ port, dataDir: dir })
+    try {
+      expect(bridge.port).toBe(port)
+      expect(bridge.preferredPort).toBe(port)
+      expect(bridge.status().preferredPort).toBe(port)
+    } finally {
+      await bridge.stop()
+    }
+  })
+
+  test("walks upward to the next free port when the preferred one is taken", async () => {
+    const blocker = occupy()
+    try {
+      const bridge = await startBridge({ port: blocker.port, dataDir: dir })
+      try {
+        expect(bridge.preferredPort).toBe(blocker.port)
+        expect(bridge.port).toBeGreaterThan(blocker.port)
+        expect(bridge.status().port).toBe(bridge.port)
+        const res = await fetch(`http://127.0.0.1:${bridge.port}/status`)
+        expect(res.ok).toBe(true)
+      } finally {
+        await bridge.stop()
+      }
+    } finally {
+      blocker.stop(true)
+    }
+  })
+
+  test("does not walk when portAttempts is 1, and the failure says the port is in use", async () => {
+    const blocker = occupy()
+    try {
+      const error = await failure(
+        startBridge({ port: blocker.port, portAttempts: 1, dataDir: dir }),
+      )
+      expect(error?.message).toMatch(/in use/i)
+    } finally {
+      blocker.stop(true)
+    }
+    // A failed start releases the process-wide slot.
+    const bridge = await startBridge({ port: 0, dataDir: dir })
+    await bridge.stop()
   })
 })

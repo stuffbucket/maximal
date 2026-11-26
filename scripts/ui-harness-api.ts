@@ -27,6 +27,7 @@ import {
   type ScenarioId,
   type FigjamStage,
   type WorkiqStage,
+  figjamStageAfterPairing,
   figjamStageOf,
   figjamStatus,
   listItem,
@@ -410,13 +411,16 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
       if (connector.lifecycle !== "active") {
         return json({ error: { message: "plugin is not running" } }, 409)
       }
-      if (!connector.status?.actions?.some((a) => a.id === actionId)) {
+      const offered = [...(connector.status?.actions ?? []), ...(connector.status?.attention?.actions ?? [])]
+      if (!offered.some((a) => a.id === actionId)) {
         return json({ error: { message: "no such action" } }, 404)
       }
       if (connector.kind === "extension") {
         // FigJam: setup and retry reach ready; approving a panel connects it.
-        if (actionId.startsWith("approve-")) setFigjamStage(id, "connected")
-        else setFigjamStage(id, "ready")
+        const stage = figjamStages.get(id) ?? "needs-setup"
+        if (actionId.startsWith("approve-") || actionId.startsWith("deny-")) {
+          setFigjamStage(id, figjamStageAfterPairing(stage, actionId))
+        } else setFigjamStage(id, "ready")
       } else if (actionId === "accept-terms") setStage(id, "signin-needed")
       else if (actionId === "cancel-sign-in" || actionId === "sign-out") setStage(id, "signin-needed")
       else if (actionId === "sign-in") {

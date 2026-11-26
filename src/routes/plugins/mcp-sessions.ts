@@ -48,6 +48,7 @@ import {
   type GenerationAffinityDiagnostics,
 } from "~/lib/plugins/generation-affinity"
 import { pluginAccessPermission } from "~/lib/plugins/settings"
+import { connectorActivityFor } from "~/lib/token-usage/connector-activity"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 
 // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
@@ -652,12 +653,24 @@ export class McpSessions {
       })
       if (gated.refused) return gated.refused
       if (gated.approved) call.approved = true
+      // Only the connector and tool name are recorded for the Sessions view,
+      // and only while the call runs (not while it waits for approval).
+      const gateway = this.#options.getGateway()
+      const endActivity =
+        gateway ?
+          connectorActivityFor(gateway).begin(pluginId, toolName)
+        : () => {}
       let result
+      let ran = true
       try {
         result = await generation.callTool(pluginId, toolName, args, call)
       } catch (error) {
         if (!isPluginGatewayError(error)) throw error
+        // The gateway refused it (turned off, not ready): nothing ran.
+        ran = false
         return refusal(generation, pluginId, error)
+      } finally {
+        endActivity(ran)
       }
       const advertised = generation
         .listTools(pluginId)

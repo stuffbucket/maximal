@@ -481,6 +481,64 @@ function checkStatusAttention(pluginId: string, attention: unknown): void {
     invalidStatus(pluginId, "attention needs a string summary and actions.")
   }
   checkStatusActions(pluginId, attention.actions)
+  if (attention.requests === undefined) return
+  if (!Array.isArray(attention.requests)) {
+    invalidStatus(pluginId, "attention requests must be an array.")
+  }
+  for (const request of attention.requests as Array<unknown>) {
+    if (
+      !isRecord(request)
+      || typeof request.title !== "string"
+      || typeof request.detail !== "string"
+      || !isValidStatusAction(request.approve)
+      || !isValidStatusAction(request.decline)
+    ) {
+      invalidStatus(
+        pluginId,
+        "each attention request needs a title, detail, approve action and decline action.",
+      )
+    }
+    if (request.facts !== undefined) checkStatusFacts(pluginId, request.facts)
+  }
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+function checkStatusActivity(pluginId: string, activity: unknown): void {
+  if (
+    !isRecord(activity)
+    || !isCount(activity.activeCalls)
+    || (activity.startedAtMs !== null && !isCount(activity.startedAtMs))
+    || !isCount(activity.lastActivityAtMs)
+    || (activity.lastTool !== undefined
+      && typeof activity.lastTool !== "string")
+    || (activity.expiresAtMs !== undefined
+      && activity.expiresAtMs !== null
+      && !isCount(activity.expiresAtMs))
+  ) {
+    invalidStatus(
+      pluginId,
+      "activity needs activeCalls, startedAtMs (or null), lastActivityAtMs and optional lastTool and expiresAtMs fields.",
+    )
+  }
+  const running = activity.activeCalls > 0
+  if (running !== (activity.startedAtMs !== null)) {
+    invalidStatus(
+      pluginId,
+      "activity startedAtMs must be set exactly when activeCalls is positive.",
+    )
+  }
+  if (
+    activity.expiresAtMs !== undefined
+    && running !== (activity.expiresAtMs !== null)
+  ) {
+    invalidStatus(
+      pluginId,
+      "activity expiresAtMs must be set exactly when activeCalls is positive.",
+    )
+  }
 }
 
 /** Validate and deep-copy a status (frozen). */
@@ -502,6 +560,8 @@ export function normalizeStatus(
   if (status.actions !== undefined) checkStatusActions(pluginId, status.actions)
   if (status.attention !== undefined)
     checkStatusAttention(pluginId, status.attention)
+  if (status.activity !== undefined)
+    checkStatusActivity(pluginId, status.activity)
   const copy = structuredClone(status) as unknown as PluginStatus
   return deepFreeze(copy)
 }

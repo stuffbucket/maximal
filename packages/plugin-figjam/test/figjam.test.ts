@@ -15,13 +15,22 @@ import {
 import { loadPlugin, waitFor } from "@stuffbucket/maximal-plugin-sdk/testing"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
 import {
   createFigjamPlugin,
   FIGMA_PLUGIN_DIR,
+  type FigjamPluginOptions,
   IMPORT_INSTRUCTIONS,
 } from "../src/index"
 import { pairActionIds } from "../src/status"
@@ -62,9 +71,10 @@ afterEach(async () => {
 async function load(
   config: Record<string, unknown> = {},
   maximalPort?: number,
+  pluginOptions: FigjamPluginOptions = {},
 ): Promise<Loaded> {
   const loaded = await loadPlugin(
-    createFigjamPlugin({ dataDir }),
+    createFigjamPlugin({ dataDir, ...pluginOptions }),
     { port, ...config },
     { storageDir, ...(maximalPort === undefined ? {} : { maximalPort }) },
   )
@@ -119,6 +129,8 @@ const fact = (loaded: Loaded, label: string) =>
   status(loaded)?.facts?.find((item) => item.label === label)?.value
 const actionIds = (loaded: Loaded) =>
   (status(loaded)?.actions ?? []).map((action) => action.id)
+const attentionIds = (loaded: Loaded) =>
+  (status(loaded)?.attention?.actions ?? []).map((action) => action.id)
 const statusIs = (loaded: Loaded, code: string) => () =>
   status(loaded)?.code === code
 
@@ -239,9 +251,13 @@ describe("FigJam plugin: setup", () => {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       networkAccess: { devAllowedDomains: Array<string> }
     }
-    expect(manifest.networkAccess.devAllowedDomains).toContain(
-      `ws://localhost:${port}`,
-    )
+    // Maximal's origin only: the panel reaches the bridge through it, so the
+    // bridge's port is nowhere in the manifest.
+    expect(manifest.networkAccess.devAllowedDomains).toEqual([
+      "http://localhost:4141",
+      "ws://localhost:4141",
+    ])
+    expect(JSON.stringify(manifest)).not.toContain(String(port))
   })
 
   test("tells the Figma plugin the port Maximal serves on, and ignores an old maximalPort setting", async () => {
@@ -256,14 +272,12 @@ describe("FigJam plugin: setup", () => {
         "utf8",
       ),
     ) as { networkAccess: { devAllowedDomains: Array<string> } }
-    expect(manifest.networkAccess.devAllowedDomains).toContain(
+    expect(manifest.networkAccess.devAllowedDomains).toEqual([
       "http://localhost:5141",
-    )
-    expect(manifest.networkAccess.devAllowedDomains).not.toContain(
-      "http://localhost:4999",
-    )
-    // The panel dials the same ports the manifest allows, with this process's
-    // relay key.
+      "ws://localhost:5141",
+    ])
+    // The panel dials the same origin the manifest allows (the bridge through
+    // it: no bridge port), with this process's relay key.
     const ui = await readFile(
       path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html"),
       "utf8",
@@ -271,7 +285,7 @@ describe("FigJam plugin: setup", () => {
     const key = await generatedRelayKey()
     expect(key).toMatch(/^[\w-]{43}$/)
     expect(ui).toContain(
-      `const PANEL_BUILD = {"maximalPort":5141,"bridgePort":${port},"relayKey":"${key}"};`,
+      `{"maximalPort":5141,"bridgePort":0,"relayKey":"${key}",`,
     )
   })
 
@@ -289,7 +303,7 @@ describe("FigJam plugin: setup", () => {
     const key = await generatedRelayKey()
     const stale = current.replace(
       /^const PANEL_BUILD = .*;$/m,
-      `const PANEL_BUILD = {"maximalPort":1,"bridgePort":2,"relayKey":"${key}"};`,
+      `const PANEL_BUILD = {"maximalPort":1,"bridgePort":2,"relayKey":"${key}","profile":"","dev":true};`,
     )
     expect(stale).not.toBe(current)
     await writeFile(uiPath, stale)
@@ -402,7 +416,7 @@ describe("FigJam plugin: pairing", () => {
     })
     await panel.next("pair-pending")
     await waitFor(() =>
-      actionIds(loaded).some((id) => id.startsWith("approve")),
+      attentionIds(loaded).some((id) => id.startsWith("approve")),
     )
 
     const notices = loaded.testbed.events.filter(
@@ -419,24 +433,39 @@ describe("FigJam plugin: pairing", () => {
     expect(fact(loaded, "Waiting for approval")).toBe(
       'test-lynx (board "Roadmap", file kplugin1)',
     )
-    expect(status(loaded)?.actions?.map((action) => action.label)).toContain(
-      'Approve "test-lynx"',
-    )
-    expect(status(loaded)?.actions?.map((action) => action.label)).toContain(
-      'Deny "test-lynx"',
-    )
+    // Approve and Deny are not inline buttons: the dialog and the tray carry them.
+    expect(actionIds(loaded)).toEqual(["setup"])
 
     // The ids follow the panel's name, not a counter, and the status asks
     // for attention while the request waits.
     const { approveId: approve, denyId } = pairActionIds("test-lynx")
     expect(approve).toMatch(/^approve-test-lynx-[0-9a-f]{8}$/)
-    expect(status(loaded)?.attention).toEqual({
+    const attention = status(loaded)?.attention
+    expect(attention).toMatchObject({
       summary:
         'A FigJam panel ("test-lynx") on board "Roadmap" wants to connect',
       actions: [
         { id: approve, label: 'Approve "test-lynx"', kind: "primary" },
         { id: denyId, label: 'Deny "test-lynx"', kind: "secondary" },
       ],
+    })
+    // The dialog's request names the panel, board and file and carries the same ids.
+    expect(attention?.requests).toHaveLength(1)
+    const [request] = attention?.requests ?? []
+    expect(request.title).toBe('Let the FigJam panel "test-lynx" connect?')
+    expect(request.detail).toContain("read and change the board")
+    expect(request.facts).toContainEqual({ label: "Panel", value: "test-lynx" })
+    expect(request.facts).toContainEqual({ label: "Board", value: "Roadmap" })
+    expect(request.facts).toContainEqual({ label: "File", value: "kplugin1" })
+    expect(request.approve).toEqual({
+      id: approve,
+      label: "Approve",
+      kind: "primary",
+    })
+    expect(request.decline).toEqual({
+      id: denyId,
+      label: "Deny",
+      kind: "secondary",
     })
 
     await loaded.runAction(approve)
@@ -474,7 +503,7 @@ describe("FigJam plugin: pairing", () => {
     const first = openPanel("again-lynx", { protocols: [key] })
     await first.next("pair-pending")
     await waitFor(() =>
-      actionIds(loaded).some((id) => id.startsWith("approve")),
+      attentionIds(loaded).some((id) => id.startsWith("approve")),
     )
     await loaded.runAction(pairActionIds("again-lynx").approveId)
     const { token } = await first.next("paired")
@@ -501,8 +530,10 @@ describe("FigJam plugin: pairing", () => {
       protocols: [await generatedRelayKey()],
     })
     await panel.next("pair-pending")
-    await waitFor(() => actionIds(loaded).some((id) => id.startsWith("deny")))
-    const deny = actionIds(loaded).find((id) => id.startsWith("deny"))
+    await waitFor(() =>
+      attentionIds(loaded).some((id) => id.startsWith("deny")),
+    )
+    const deny = attentionIds(loaded).find((id) => id.startsWith("deny"))
     if (deny === undefined) throw new Error("no deny action")
     await loaded.runAction(deny)
     await waitFor(() => fact(loaded, "Waiting for approval") === "None")
@@ -555,7 +586,7 @@ describe("FigJam plugin: the port", () => {
     await waitFor(() => portIsFree(port))
   })
 
-  test("a taken port is an error, and Try again works once it is free", async () => {
+  test("a taken port moves the bridge to the next free one and the status says so", async () => {
     const blocker = Bun.listen({
       hostname: "127.0.0.1",
       port,
@@ -565,10 +596,79 @@ describe("FigJam plugin: the port", () => {
       blocker.stop(true)
     })
     const loaded = await load()
+    await waitFor(statusIs(loaded, "plugin-not-built"))
+    expect(Number(fact(loaded, "Port"))).toBeGreaterThan(port)
+    expect(fact(loaded, "Preferred port (in use)")).toBe(String(port))
+    expect(
+      loaded.testbed.host.logs.some(
+        (record) =>
+          record.level === "info" && record.message.includes("was taken"),
+      ),
+    ).toBe(true)
+  })
+
+  test("a bridge port that moves never touches the plugin folder, and a rebuild writes the same bytes", async () => {
+    const first = await load()
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const names = ["code.js", "ui.html", "manifest.json"]
+    const before: Record<string, string> = {}
+    const marker = new Date(Date.now() - 60_000)
+    for (const name of names) {
+      before[name] = await readFile(pluginFile(name), "utf8")
+      await utimes(pluginFile(name), marker, marker)
+    }
+    // Nothing in the plugin names a bridge port, whichever it binds.
+    expect(before["ui.html"]).toContain('"bridgePort":0')
+    expect(before["manifest.json"]).not.toContain(String(port))
+
+    // The preferred port is taken, so the bridge binds the next free one.
+    const blocker = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: { data() {} },
+    })
+    cleanups.push(() => {
+      blocker.stop(true)
+    })
+    const second = await load()
+    await waitFor(statusIs(second, "ready"))
+    expect(Number(fact(second, "Port"))).toBeGreaterThan(port)
+    for (const name of names) {
+      expect(await readFile(pluginFile(name), "utf8")).toBe(before[name])
+      // Not rewritten at all, not just rewritten identically.
+      expect((await stat(pluginFile(name))).mtimeMs).toBeCloseTo(
+        marker.getTime(),
+        -3,
+      )
+    }
+
+    // A deliberate rebuild while the bridge is on the moved port: same bytes.
+    await second.runAction("setup")
+    await waitFor(statusIs(second, "ready"))
+    for (const name of names) {
+      expect(await readFile(pluginFile(name), "utf8")).toBe(before[name])
+    }
+  })
+
+  test("when no port is free the status is an error, and Try again works once one is", async () => {
+    const blocker = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: { data() {} },
+    })
+    cleanups.push(() => {
+      blocker.stop(true)
+    })
+    const loaded = await load({}, undefined, { portAttempts: 1 })
     await waitFor(statusIs(loaded, "port-in-use"))
     expect(status(loaded)).toMatchObject({
       state: "error",
-      summary: `Port ${port} is already in use`,
+      summary: `No free port from ${port} up`,
       actions: [{ id: "retry", label: "Try again" }],
     })
 
@@ -576,5 +676,82 @@ describe("FigJam plugin: the port", () => {
     await loaded.runAction("retry")
     await waitFor(statusIs(loaded, "plugin-not-built"))
     expect(existsSync(path.join(dataDir, "figjam"))).toBe(true)
+  })
+})
+
+const manifestOf = async (): Promise<{ id: string; name: string }> =>
+  JSON.parse(await readFile(pluginFile("manifest.json"), "utf8")) as {
+    id: string
+    name: string
+  }
+
+async function setUp(profile: FigjamPluginOptions["profile"]) {
+  const loaded = await load({}, undefined, { profile })
+  await waitFor(statusIs(loaded, "plugin-not-built"))
+  await loaded.runAction("setup")
+  await waitFor(statusIs(loaded, "ready"))
+  return loaded
+}
+
+const lines = (loaded: Loaded, level: string) =>
+  loaded.testbed.host.logs
+    .filter((record) => record.level === level)
+    .map((record) => record.message)
+
+describe("FigJam plugin: profiles", () => {
+  test("a development profile gets its own plugin id and name, and says so in the status", async () => {
+    const loaded = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    expect(await manifestOf()).toMatchObject({
+      id: "maximal-figjam-agent-dev-ab12cd34ef56",
+      name: "Maximal Agent (dev ab12cd34)",
+    })
+    expect(fact(loaded, "Figma plugin")).toBe("Maximal Agent (dev ab12cd34)")
+  })
+
+  test("production keeps the shared plugin id", async () => {
+    await setUp({ kind: "production", id: "production" })
+    expect((await manifestOf()).id).toBe("maximal-figjam-agent-dev")
+  })
+
+  test("a changed profile rebuilds the folder in the same place", async () => {
+    const first = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+    const second = await load({}, undefined, {
+      profile: { kind: "development", id: "0f0f0f0f0f0f" },
+    })
+    await waitFor(statusIs(second, "ready"))
+    expect((await manifestOf()).id).toBe(
+      "maximal-figjam-agent-dev-0f0f0f0f0f0f",
+    )
+  })
+
+  test("development logs the bind, and pairing, by name only; production stays quiet", async () => {
+    const dev = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    const panel = openPanel("log-lynx", {
+      protocols: [await generatedRelayKey()],
+    })
+    await panel.next("pair-pending")
+    await waitFor(() =>
+      lines(dev, "info").some((line) => line.includes('"log-lynx" asked')),
+    )
+    expect(
+      lines(dev, "info").some((line) => line.includes("listening on")),
+    ).toBe(true)
+    expect(lines(dev, "info").join("\n")).not.toMatch(/token/i)
+    expect(JSON.stringify(dev.testbed.host.logs)).not.toContain(
+      await generatedRelayKey(),
+    )
+    await dev.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const prod = await load({}, undefined, {
+      profile: { kind: "production", id: "production" },
+    })
+    await waitFor(statusIs(prod, "ready"))
+    expect(lines(prod, "info")).toEqual([])
+    expect(
+      lines(prod, "debug").some((line) => line.includes("listening")),
+    ).toBe(true)
   })
 })

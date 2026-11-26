@@ -577,6 +577,15 @@ const PluginStatusAction = z.object({
   confirm: z.string().optional(),
 })
 
+/** A yes-or-no question a plugin asks in Settings (a panel asking to pair). */
+const PluginAttentionRequest = z.object({
+  title: z.string(),
+  detail: z.string(),
+  facts: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
+  approve: PluginStatusAction,
+  decline: PluginStatusAction,
+})
+
 export const PluginStatus = z.object({
   state: z.enum(["ready", "needs-setup", "working", "error"]),
   code: z.string(),
@@ -586,7 +595,11 @@ export const PluginStatus = z.object({
   actions: z.array(PluginStatusAction).optional(),
   /** Set while the plugin needs the person now (see `PluginsAttentionResponse`). */
   attention: z
-    .object({ summary: z.string(), actions: z.array(PluginStatusAction) })
+    .object({
+      summary: z.string(),
+      actions: z.array(PluginStatusAction),
+      requests: z.array(PluginAttentionRequest).optional(),
+    })
     .optional(),
 })
 export type PluginStatus = z.infer<typeof PluginStatus>

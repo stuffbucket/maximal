@@ -17,6 +17,7 @@ import { watch } from "node:fs"
  *   bun scripts/build.ts                 # dev build → dist/dev
  *   bun scripts/build.ts --release       # release build → dist/release
  *   bun scripts/build.ts --out <dir>     # write somewhere else
+ *   bun scripts/build.ts --profile <id>  # a profile-specific dev plugin id and name
  *   bun scripts/build.ts --watch         # rebuild when src/ changes
  */
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
@@ -43,9 +44,17 @@ const VERSION_LINE = /^var PLUGIN_VERSION = "[^"\n]*"$/m
 const PANEL_BUILD_LINE = /^const PANEL_BUILD = .*;$/m
 /** A bridge relay key: 32 random bytes as base64url. */
 const RELAY_KEY = /^[\w-]{43}$/
+/** A development profile id: what a Maximal dev profile calls itself (`a-z0-9-`). */
+const PROFILE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/
 
 export const DEFAULT_MAXIMAL_PORT = 4141
-export const DEFAULT_BRIDGE_PORT = 4150
+/**
+ * No bridge port: the panel reaches the bridge through Maximal's own origin
+ * (`/figjam/plugin`), so the bridge's port is not in the plugin at all and can
+ * move without the plugin changing. Only a standalone bridge
+ * (`bun run figjam:bridge`) is dialled directly, by its port.
+ */
+export const RELAYED_BRIDGE_PORT = 0
 
 /** Where `bun run figjam:build` writes by default: `dist/dev` or `dist/release`. */
 export function defaultOutDir(release = false): string {
@@ -59,14 +68,29 @@ export interface BuildOptions {
   release?: boolean
   /** Maximal's port, which the panel calls for models and messages. */
   maximalPort?: number
-  /** The bridge's WebSocket port, for coding agents driving the board. */
+  /**
+   * A standalone bridge's WebSocket port (`bun run figjam:bridge`); the
+   * manifest then also allows `ws://localhost:<port>` and the panel dials it
+   * directly. Leave it out when Maximal runs the bridge: the panel then reaches
+   * it through Maximal's own origin, so the manifest allows nothing but
+   * Maximal, and a bridge port that moves never changes the plugin.
+   */
   bridgePort?: number
   /**
-   * The running bridge's relay key (`BridgeHandle.relayKey`). Only a panel
-   * built with it can open the bridge socket. Stamped into ui.html alone,
-   * never the manifest or any output; release builds never carry one.
+   * The relay key of the process that hosts the bridge (Maximal's, for the
+   * plugin it writes; `BridgeHandle.relayKey` for a standalone bridge). The
+   * panel offers it to Maximal's relay and to a standalone bridge, and both
+   * refuse a socket without it. Stamped into ui.html alone, never the manifest
+   * or any other output; release builds never carry one.
    */
   relayKey?: string
+  /**
+   * A Maximal development profile's id (`a-z0-9-`). It makes the dev plugin's
+   * id and name profile-specific, so two profiles imported into one Figma
+   * keep separate `clientStorage` (tokens, saved settings). Omit for the
+   * shared "Maximal Agent (dev)" plugin. Ignored by release builds.
+   */
+  profile?: string
 }
 
 /**
@@ -92,10 +116,17 @@ export function resolveBuildOptions(
   if (relayKey !== "" && !RELAY_KEY.test(relayKey)) {
     throw new Error("A FigJam relay key must be 32 bytes of base64url text.")
   }
+  const profile = release ? "" : (options.profile ?? "")
+  if (profile !== "" && !PROFILE_ID.test(profile)) {
+    throw new Error(
+      `A plugin profile id is lowercase letters, digits and dashes (up to 40), got "${profile}".`,
+    )
+  }
   return {
     release,
+    profile,
     maximalPort: options.maximalPort ?? DEFAULT_MAXIMAL_PORT,
-    bridgePort: options.bridgePort ?? DEFAULT_BRIDGE_PORT,
+    bridgePort: options.bridgePort ?? RELAYED_BRIDGE_PORT,
     relayKey,
   }
 }
@@ -134,13 +165,18 @@ function assertPort(name: string, value: number): void {
 
 /**
  * What the build stamps into the panel as `PANEL_BUILD`: the ports its
- * manifest allows, and the relay key it opens the bridge socket with ("" =
- * none, so the panel says it can't reach the bridge instead of trying).
+ * manifest allows (`bridgePort` 0 = the bridge is reached through Maximal),
+ * the relay key it opens sockets with ("" = none, so the panel says it can't
+ * reach the bridge instead of trying), the Maximal profile it was built for
+ * ("" = the shared plugin, which doesn't check) and whether it is a
+ * development build (console diagnostics on).
  */
 export interface PanelBuild {
   maximalPort: number
   bridgePort: number
   relayKey: string
+  profile: string
+  dev: boolean
 }
 
 /**
@@ -152,17 +188,23 @@ export function panelBuild(options: ResolvedBuildOptions): PanelBuild {
     maximalPort: options.maximalPort,
     bridgePort: options.bridgePort,
     relayKey: options.relayKey,
+    profile: options.profile,
+    dev: !options.release,
   }
 }
 
 /** The `PANEL_BUILD` line stamped into the panel. */
 export function panelBuildLine(build: PanelBuild): string {
   assertPort("Maximal port", build.maximalPort)
-  assertPort("bridge port", build.bridgePort)
+  if (build.bridgePort !== RELAYED_BRIDGE_PORT) {
+    assertPort("bridge port", build.bridgePort)
+  }
   const stamped: PanelBuild = {
     maximalPort: build.maximalPort,
     bridgePort: build.bridgePort,
     relayKey: build.relayKey,
+    profile: build.profile,
+    dev: build.dev,
   }
   return `const PANEL_BUILD = ${JSON.stringify(stamped)};`
 }
@@ -183,13 +225,28 @@ export function stampPanel(html: string, build: PanelBuild): string {
   return html.replace(PANEL_BUILD_LINE, () => line)
 }
 
+/** The plugin's identity: shared, or specific to one Maximal dev profile. */
+export function pluginIdentity(
+  options: Pick<ResolvedBuildOptions, "release" | "profile">,
+): { id: string; name: string } {
+  if (options.release) {
+    return { id: "maximal-figjam-agent", name: "Maximal Agent" }
+  }
+  if (options.profile === "") {
+    return { id: "maximal-figjam-agent-dev", name: "Maximal Agent (dev)" }
+  }
+  return {
+    id: `maximal-figjam-agent-dev-${options.profile}`,
+    name: `Maximal Agent (dev ${options.profile.slice(0, 8)})`,
+  }
+}
+
 /** The manifest never sees the relay key. */
 export function pluginManifest(
   options: Omit<ResolvedBuildOptions, "relayKey">,
 ): Record<string, unknown> {
   return {
-    name: options.release ? "Maximal Agent" : "Maximal Agent (dev)",
-    id: options.release ? "maximal-figjam-agent" : "maximal-figjam-agent-dev",
+    ...pluginIdentity(options),
     api: "1.0.0",
     main: "code.js",
     ui: "ui.html",
@@ -200,10 +257,13 @@ export function pluginManifest(
       allowedDomains: ["https://api.figma.com"],
       devAllowedDomains: [
         `http://localhost:${options.maximalPort}`,
-        `ws://localhost:${options.bridgePort}`,
+        `ws://localhost:${options.maximalPort}`,
+        ...(options.bridgePort === RELAYED_BRIDGE_PORT ?
+          []
+        : [`ws://localhost:${options.bridgePort}`]),
       ],
       reasoning:
-        "The agent's model calls go to Maximal, a proxy running on this computer. An optional local bridge lets a coding agent on this computer drive the board. Reading and posting the board's comments uses Figma's REST API with a personal access token the user saves in the plugin's settings.",
+        "The agent's model calls go to Maximal, a proxy running on this computer. An optional local bridge, reached through Maximal, lets a coding agent on this computer drive the board. Reading and posting the board's comments uses Figma's REST API with a personal access token the user saves in the plugin's settings.",
     },
   }
 }
@@ -389,6 +449,7 @@ function parseArgs(argv: Array<string>): BuildOptions & { watch: boolean } {
     release,
     maximalPort: port("--maximal-port"),
     bridgePort: port("--bridge-port"),
+    profile: value("--profile"),
     watch: argv.includes("--watch"),
   }
 }

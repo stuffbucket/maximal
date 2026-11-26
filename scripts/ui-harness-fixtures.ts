@@ -967,14 +967,35 @@ export type FigjamStage =
   | "ready"
   | "connected"
   | "pairing"
+  | "pairing-two"
+  | "pairing-retro"
   | "port-in-use"
 
 const FIGJAM_PORT = 4150
 const FIGJAM_MANIFEST_PATH = "~/.local/share/copilot-api/plugins/figjam/figma-plugin/manifest.json"
 const FIGJAM_IMPORT_INSTRUCTIONS =
   "In the Figma desktop app: Plugins → Development → Import plugin from manifest…, then choose this file."
-/** The id suffix `pairActionIds("Roadmap workshop")` yields. */
-const FIGJAM_PANEL = { name: "Roadmap workshop", suffix: "roadmap-workshop-26e61ac6" }
+/** Panels waiting to pair. `suffix` is what `pairActionIds(name)` yields. */
+const FIGJAM_PANELS = {
+  roadmap: { name: "Roadmap workshop", suffix: "roadmap-workshop-26e61ac6", board: "Roadmap", user: "Alex Morgan" },
+  retro: { name: "Sprint retro", suffix: "sprint-retro-3f9a1c0e", board: "Retro board", user: "Sam Rivera" },
+} as const
+type FigjamPanel = (typeof FIGJAM_PANELS)[keyof typeof FIGJAM_PANELS]
+
+/** Which panels wait in each pairing stage. */
+const FIGJAM_WAITING: Partial<Record<FigjamStage, ReadonlyArray<FigjamPanel>>> = {
+  pairing: [FIGJAM_PANELS.roadmap],
+  "pairing-two": [FIGJAM_PANELS.roadmap, FIGJAM_PANELS.retro],
+  "pairing-retro": [FIGJAM_PANELS.retro],
+}
+
+/** The stage a decision on a waiting panel leaves behind (the other panel waits on). */
+export function figjamStageAfterPairing(stage: FigjamStage, actionId: string): FigjamStage {
+  const approved = actionId.startsWith("approve-")
+  const remaining = (FIGJAM_WAITING[stage] ?? []).filter((panel) => !actionId.endsWith(panel.suffix))
+  if (remaining.length === 1) return remaining[0] === FIGJAM_PANELS.retro ? "pairing-retro" : "pairing"
+  return approved ? "connected" : "ready"
+}
 
 /** The Settings status the FigJam plugin reports in each stage. */
 export function figjamStatus(stage: FigjamStage): PluginStatus {
@@ -983,7 +1004,10 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
     { label: "Connected boards", value: boards },
     { label: "Waiting for approval", value: pending },
   ]
-  const manifestFact = { label: "Figma plugin manifest", value: FIGJAM_MANIFEST_PATH }
+  const manifestFacts = [
+    { label: "Figma plugin", value: "Maximal Agent (dev)" },
+    { label: "Figma plugin manifest", value: FIGJAM_MANIFEST_PATH },
+  ]
   const rebuild = { id: "setup", label: "Rebuild the Figma plugin", kind: "secondary" as const }
   switch (stage) {
     case "needs-setup":
@@ -1000,7 +1024,7 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
         code: "ready",
         summary: "Ready for FigJam panels",
         detail: FIGJAM_IMPORT_INSTRUCTIONS,
-        facts: [...facts("None", "None"), manifestFact],
+        facts: [...facts("None", "None"), ...manifestFacts],
         actions: [rebuild],
       }
     case "connected":
@@ -1009,24 +1033,41 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
         code: "ready",
         summary: "Connected to 2 FigJam boards",
         detail: FIGJAM_IMPORT_INSTRUCTIONS,
-        facts: [...facts("Roadmap workshop, Retro board", "None"), manifestFact],
+        facts: [...facts("Roadmap workshop, Retro board", "None"), ...manifestFacts],
         actions: [rebuild],
       }
-    case "pairing": {
-      const pairActions = [
-        { id: `approve-${FIGJAM_PANEL.suffix}`, label: `Approve "${FIGJAM_PANEL.name}"`, kind: "primary" as const },
-        { id: `deny-${FIGJAM_PANEL.suffix}`, label: `Deny "${FIGJAM_PANEL.name}"`, kind: "secondary" as const },
-      ]
+    case "pairing":
+    case "pairing-two":
+    case "pairing-retro": {
+      const waiting = FIGJAM_WAITING[stage] ?? []
+      const names = waiting.map((panel) => panel.name)
       return {
         state: "ready",
         code: "ready",
         summary: "A FigJam panel is waiting for approval",
         detail: FIGJAM_IMPORT_INSTRUCTIONS,
-        facts: [...facts("None", FIGJAM_PANEL.name), manifestFact],
-        actions: [...pairActions, rebuild],
+        facts: [...facts("None", names.join(", ")), ...manifestFacts],
+        actions: [rebuild],
         attention: {
-          summary: `A FigJam panel ("${FIGJAM_PANEL.name}") wants to connect`,
-          actions: pairActions,
+          summary: waiting.length === 1
+            ? `A FigJam panel ("${waiting[0].name}") wants to connect`
+            : `${waiting.length} FigJam panels want to connect`,
+          actions: waiting.flatMap((panel) => [
+            { id: `approve-${panel.suffix}`, label: `Approve "${panel.name}"`, kind: "primary" as const },
+            { id: `deny-${panel.suffix}`, label: `Deny "${panel.name}"`, kind: "secondary" as const },
+          ]),
+          requests: waiting.map((panel) => ({
+            title: `Let the FigJam panel "${panel.name}" connect?`,
+            detail:
+              "Approving lets this panel, running in Figma on this computer, read and change the board it is open on. An approved panel reconnects without asking again. If you didn't just turn on \"Let Claude Code drive this board\" in that panel, or the board or profile isn't yours, deny it.",
+            facts: [
+              { label: "Panel", value: panel.name },
+              { label: "Board", value: panel.board },
+              { label: "Figma profile", value: panel.user },
+            ],
+            approve: { id: `approve-${panel.suffix}`, label: "Approve", kind: "primary" as const },
+            decline: { id: `deny-${panel.suffix}`, label: "Deny", kind: "secondary" as const },
+          })),
         },
       }
     }
@@ -1034,8 +1075,8 @@ export function figjamStatus(stage: FigjamStage): PluginStatus {
       return {
         state: "error",
         code: "port-in-use",
-        summary: `Port ${FIGJAM_PORT} is already in use`,
-        detail: `Another program is listening on port ${FIGJAM_PORT}, possibly a FigJam bridge started with "bun run figjam:bridge". Stop it, or choose another bridge port in this plugin's settings.`,
+        summary: `No free port from ${FIGJAM_PORT} up`,
+        detail: `Ports ${FIGJAM_PORT}-${FIGJAM_PORT + 63} are all in use (EADDRINUSE). Another program is listening on each of them, possibly FigJam bridges started with "bun run figjam:bridge". Stop one, or choose another bridge port in this plugin's settings.`,
         actions: [{ id: "retry", label: "Try again" }],
       }
   }
@@ -1046,7 +1087,9 @@ export function figjamStageOf(status: PluginStatus | undefined): FigjamStage {
   if (!status) return "needs-setup"
   if (status.code === "port-in-use") return "port-in-use"
   if (status.code !== "ready") return "needs-setup"
-  if (status.attention) return "pairing"
+  const waiting = status.attention?.requests ?? []
+  if (waiting.length > 1) return "pairing-two"
+  if (waiting.length === 1) return waiting[0].approve.id.endsWith(FIGJAM_PANELS.retro.suffix) ? "pairing-retro" : "pairing"
   return status.summary.startsWith("Connected") ? "connected" : "ready"
 }
 
@@ -1061,7 +1104,7 @@ export const figjamConfigSchema: PluginDetailView["configSchema"] = {
       default: FIGJAM_PORT,
       title: "Bridge port",
       description:
-        "The local WebSocket port the FigJam panel connects to. Set up the Figma plugin again after changing it.",
+        "The local port of the bridge's HTTP API, for the figjam command-line tool and coding agents. The FigJam panel doesn't use it: it connects through Maximal. When the port is taken, the next free one is used.",
     },
   },
 }
@@ -1263,6 +1306,36 @@ function figjamSession(now: number): SessionView {
     [0, 0, 1_800, 0, 3_200, 2_600, 0, 4_100, 3_700, 0, 2_900, 5_300, 3_100, 1_400, 0],
     now,
   )
+}
+
+/** The live sessions plus connectors in use: Work IQ with a call running and
+ *  FigJam whose last call just ended. They are listed apart from the sessions
+ *  and change none of their counts. */
+function connectorActivitySessions(): SessionsResponse {
+  const now = Date.now()
+  return {
+    ...liveSessions(),
+    connector_activity: [
+      {
+        connector: "workiq",
+        state: "running",
+        active_calls: 2,
+        started_at_ms: now - 4_000,
+        last_activity_at_ms: now - 1_000,
+        expires_at_ms: now + 296_000,
+        last_tool: "search_mail",
+      },
+      {
+        connector: "figjam",
+        state: "recent",
+        active_calls: 0,
+        started_at_ms: null,
+        last_activity_at_ms: now - 3_000,
+        expires_at_ms: now + 7_000,
+        last_tool: "get_board",
+      },
+    ],
+  }
 }
 
 /** The live-sessions scenario: every state the Dashboard's sessions view draws.
@@ -1915,6 +1988,11 @@ export const SCENARIOS = {
     },
   },
 
+  "connector-activity": {
+    ...healthy("Dashboard · live sessions with Work IQ running and FigJam just used"),
+    dashboard: { ...busyDashboard, sessions: connectorActivitySessions },
+  },
+
   "connectors-off": {
     ...healthy("Connectors · Work IQ off, nothing seen yet"),
     connectors: workiqOff,
@@ -2016,8 +2094,13 @@ export const SCENARIOS = {
   },
 
   "figjam-pairing": {
-    ...healthy("FigJam · a panel is waiting for approval (attention, Approve / Deny)"),
+    ...healthy("FigJam · a panel is waiting for approval (review dialog, tray Approve / Deny)"),
     connectors: [workiqDetail({ stage: "ready" }), figjamDetail("pairing")],
+  },
+
+  "figjam-pairing-two": {
+    ...healthy("FigJam · two panels are waiting for approval (one dialog at a time)"),
+    connectors: [workiqDetail({ stage: "ready" }), figjamDetail("pairing-two")],
   },
 
   "figjam-port-in-use": {

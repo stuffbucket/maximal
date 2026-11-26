@@ -296,6 +296,27 @@ export interface PluginStatus {
    * item that has gone stale still reaches the right target.
    */
   attention?: PluginAttention
+  /**
+   * Set while the plugin is serving tool calls of its own (a FigJam board
+   * being read or changed) so the app can show that it is in use. It carries
+   * counts, times and a tool name only: never a call's arguments or results.
+   * Omit it, or leave it out of the next status, when nothing is running.
+   */
+  activity?: PluginActivity
+}
+
+/** Live tool use inside a plugin; see `PluginStatus.activity`. */
+export interface PluginActivity {
+  /** Tool calls running now. */
+  activeCalls: number
+  /** When the oldest running call began (ms since the epoch); null when none runs. */
+  startedAtMs: number | null
+  /** When a call last began or ended (ms since the epoch). */
+  lastActivityAtMs: number
+  /** The tool of the latest call: its name only. */
+  lastTool?: string
+  /** When the newest running call must stop being shown; null when none runs. */
+  expiresAtMs?: number | null
 }
 
 /** What a plugin needs the person to look at now; see `PluginStatus.attention`. */
@@ -304,6 +325,27 @@ export interface PluginAttention {
   summary: string
   /** What the person can do about it; the labels are shown as they are. */
   actions: Array<PluginStatusAction>
+  /**
+   * Questions the person answers in a dialog in Settings (a panel asking to
+   * pair, say). Each is shown on its own; `approve` and `decline` must be
+   * actions the plugin has registered, and are not listed in `status.actions`.
+   * The tray still uses `actions` above.
+   */
+  requests?: Array<PluginAttentionRequest>
+}
+
+/** One yes-or-no question a plugin asks in Settings; see `PluginAttention.requests`. */
+export interface PluginAttentionRequest {
+  /** English dialog title, e.g. `Let "grumpy-lynx" drive this board?`. */
+  title: string
+  /** English sentences saying what approving allows. */
+  detail: string
+  /** What the request names (panel, board, profile), one row each. */
+  facts?: Array<{ label: string; value: string }>
+  /** Allows it. Labelled as a verb, e.g. `Approve`. */
+  approve: PluginStatusAction
+  /** Refuses it for good (unexpected, stale, wrong profile), e.g. `Deny`. */
+  decline: PluginStatusAction
 }
 
 /** Handler for a surface action; errors should be reported via status. */

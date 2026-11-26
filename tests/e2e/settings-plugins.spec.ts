@@ -121,3 +121,79 @@ test("stacks action confirmation above plugin details", async ({
   await expect(details).toBeVisible()
   await expect(action).toBeFocused()
 })
+
+test("asks about a waiting FigJam panel in one dialog and keeps focus safe", async ({
+  page,
+  request,
+}) => {
+  await selectScenario(request, "figjam-pairing")
+  await page.goto(`${BASE}/ui/settings/#connectors/figjam`)
+  await page.addStyleTag({
+    content: "#__harness { display: none !important; }",
+  })
+
+  const details = page.getByRole("dialog", { name: "FigJam" })
+  await expect(details).toBeVisible()
+  // No inline Approve/Deny beside the status: one offer to review the request.
+  await expect(details.getByRole("button", { name: /^Approve/ })).toHaveCount(0)
+  await expect(details.getByRole("button", { name: /^Deny/ })).toHaveCount(0)
+  const review = details.getByRole("button", { name: "Review request" })
+  await review.click()
+
+  const ask = page.getByRole("dialog", {
+    name: 'Let the FigJam panel "Roadmap workshop" connect?',
+  })
+  await expect(ask).toBeVisible()
+  await expect(page.locator("dialog[open]")).toHaveCount(2)
+  await expect(ask.getByText("Roadmap", { exact: true })).toBeVisible()
+  await expect(ask.getByText("Alex Morgan")).toBeVisible()
+  // Approving is never the default: focus starts on Not now.
+  await expect(ask.getByRole("button", { name: "Not now" })).toBeFocused()
+
+  // Escape is Not now: it answers nothing, and focus returns to Review.
+  await page.keyboard.press("Escape")
+  await expect(ask).not.toBeVisible()
+  await expect(details).toBeVisible()
+  await expect(review).toBeFocused()
+
+  // So is a click on the backdrop.
+  await review.click()
+  await expect(ask).toBeVisible()
+  await ask.click({ position: { x: 1, y: 1 } })
+  await expect(ask).not.toBeVisible()
+  await expect(review).toBeVisible()
+
+  // Deny answers it for good.
+  await review.click()
+  await ask.getByRole("button", { name: "Deny" }).click()
+  await expect(ask).not.toBeVisible()
+  await expect(
+    details.getByRole("button", { name: "Review request" }),
+  ).toHaveCount(0)
+  await expect(details.getByText("Ready for FigJam panels")).toBeVisible()
+})
+
+test("answering the first of two FigJam panels moves on to the next", async ({
+  page,
+  request,
+}) => {
+  await selectScenario(request, "figjam-pairing-two")
+  await page.goto(`${BASE}/ui/settings/#connectors/figjam`)
+  await page.addStyleTag({
+    content: "#__harness { display: none !important; }",
+  })
+
+  const details = page.getByRole("dialog", { name: "FigJam" })
+  await expect(details.getByText("1 more request is waiting.")).toBeVisible()
+  await details.getByRole("button", { name: "Review request" }).click()
+  const first = page.getByRole("dialog", {
+    name: 'Let the FigJam panel "Roadmap workshop" connect?',
+  })
+  await first.getByRole("button", { name: "Approve" }).click()
+
+  const next = page.getByRole("dialog", {
+    name: 'Let the FigJam panel "Sprint retro" connect?',
+  })
+  await expect(next).toBeVisible()
+  await expect(next.getByRole("button", { name: "Not now" })).toBeFocused()
+})

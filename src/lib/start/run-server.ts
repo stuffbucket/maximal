@@ -19,6 +19,7 @@ import { runAppBootHooks } from "~/apps/registry"
 import { type AccountType } from "~/lib/auth/auth-types"
 import { refreshAllowanceAtStartup } from "~/lib/budget/runtime"
 import { mergeConfigWithDefaults } from "~/lib/config/config"
+import { figjamRelay } from "~/lib/figjam/relay"
 import { initProxyFromEnv } from "~/lib/http/proxy"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
 import { ensurePaths } from "~/lib/platform/paths"
@@ -177,6 +178,8 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     port: options.port,
     bun: {
       idleTimeout: 0,
+      // The FigJam panel's socket (/figjam/plugin), relayed to the bridge.
+      websocket: figjamRelay,
     },
   })
   await httpServer.ready()
