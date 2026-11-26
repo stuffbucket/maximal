@@ -1,14 +1,22 @@
 import { getShellApiKey } from "../tauri/shell";
 
+import {
+  browserApiKey,
+  isApiKeyChallenge,
+  isNativeShell,
+  requireBrowserAuth,
+} from "./browser-auth";
+import { subscribeBrowserEvents } from "./browser-events";
+
 /**
  * Typed fetch client for the proxy's `/settings/api/*` surface.
  *
  * - All data endpoints are auth-gated (see src/routes/settings/api.ts).
- *   The shell pulls its API key from the same Tauri-managed config
- *   the sidecar uses; for now we read it from a global injected by
- *   the Tauri Rust shell (TODO: wire via @tauri-apps/api in a later
- *   phase). In dev (Vite on :1420) the user supplies a key via the
- *   `VITE_API_KEY` env.
+ *   The native shell supplies its per-launch key over Tauri IPC. A plain
+ *   browser supplies an existing Maximal API key the person entered,
+ *   kept only in this tab's sessionStorage (./browser-auth.ts). Maximal's
+ *   key challenge opens the access dialog; the refused request (a
+ *   mutation especially) is reported as failed, never sent again.
  * - 5s timeout per call via AbortController.
  * - Zero retries for v1. If retry logic is needed later, layer it
  *   here so call sites stay flat — do NOT scatter retry into each
@@ -160,6 +168,7 @@ export type AppConflict =
   | "foreign-base-url"
   | "foreign-api-key-helper"
   | "foreign-gateway-profile"
+  | "unreadable-profile"
   | "other-maximal-config"
   | "cleanup-required";
 
@@ -329,7 +338,11 @@ type Endpoint =
       kind: "claude-desktop-toggle";
       method: "POST";
       path: "/settings/api/apps/claude-desktop/toggle";
-      body: { enabled: boolean; overrideOtherMaximal?: boolean };
+      body: {
+        enabled: boolean;
+        overrideOtherMaximal?: boolean;
+        overrideForeignGateway?: boolean;
+      };
     }
   | {
       kind: "claude-code-install-status";
@@ -480,7 +493,13 @@ interface ApiOptions {
 
 export type ApiResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status: number; error: string };
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      /** Maximal's own API-key challenge, not a 401 forwarded from GitHub. */
+      authRequired?: boolean;
+    };
 
 /** A failed call: HTTP status (0 when Maximal never answered) + raw body. */
 export type ApiFailure = Extract<ApiResult<unknown>, { ok: false }>;
@@ -502,10 +521,33 @@ function baseUrl(): string {
 
 async function resolveApiKey(override?: string): Promise<string | undefined> {
   if (override) return override;
+  // A plain browser has no shell to ask; it uses the key entered for this tab.
+  if (!isNativeShell()) return browserApiKey();
   // The Tauri shell injects a per-launch key into the sidecar and serves
-  // it to the webview on demand; that's the sole key source now.
+  // it to the webview on demand.
   const shellKey = await getShellApiKey();
   return shellKey ?? undefined;
+}
+
+/**
+ * A failed reply, noting (and acting on) Maximal's key challenge. A key
+ * passed as `override` is being tested (the access dialog), so its rejection
+ * neither discards the stored key nor reopens the dialog.
+ */
+function failureFrom(
+  res: Response,
+  text: string,
+  apiKey: string | undefined,
+  override?: string,
+): ApiFailure {
+  const authRequired = isApiKeyChallenge(res);
+  if (authRequired && !override) requireBrowserAuth(apiKey);
+  return {
+    ok: false,
+    status: res.status,
+    error: text || `HTTP ${res.status}`,
+    ...(authRequired ? { authRequired: true } : {}),
+  };
 }
 
 export async function apiCall<K extends EndpointKind>(
@@ -543,11 +585,7 @@ export async function apiCall<K extends EndpointKind>(
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      return {
-        ok: false,
-        status: res.status,
-        error: text || `HTTP ${res.status}`,
-      };
+      return failureFrom(res, text, apiKey, options.apiKey);
     }
     // 204 No Content (delete) — no JSON to parse. The endpoint catalog
     // declares its response type as `{ ok: true }` so the call site
@@ -581,9 +619,11 @@ export interface EventSubscription {
  * to the handlers — currently `auth.changed`, carrying the full `AuthStatus`
  * (same shape as GET /settings/api/auth/github/status).
  *
- * EventSource can't send headers, so the API key rides in the query string;
- * the sidecar honours `?key=` only for this endpoint (see request-auth.ts).
- * The browser's EventSource auto-reconnects on transient drops; `onError`
+ * In the app, EventSource can't send headers, so the shell's key rides in the
+ * query string; the sidecar honours `?key=` only for this endpoint (see
+ * request-auth.ts). A plain browser reads the same stream with fetch
+ * (./browser-events.ts), keeping its key in a header and out of the URL.
+ * Both reconnect after transient drops; `onError`
  * fires on each disconnect so the caller can fall back to a GET/poll until
  * the stream recovers. Never throws — payload parse failures are swallowed
  * and resynced by the next event or the GET fallback.
@@ -593,6 +633,20 @@ export async function subscribeAuthEvents(handlers: {
   onOpen?: () => void;
   onError?: () => void;
 }): Promise<EventSubscription> {
+  if (!isNativeShell()) {
+    return subscribeBrowserEvents({
+      onOpen: handlers.onOpen,
+      onError: handlers.onError,
+      onEvent: (event, data) => {
+        if (event !== "auth.changed") return;
+        try {
+          handlers.onAuth(JSON.parse(data) as AuthStatus);
+        } catch {
+          // Malformed frame: the next event (or a GET fallback) resyncs.
+        }
+      },
+    });
+  }
   const apiKey = await resolveApiKey();
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : "";
   const source = new EventSource(`${baseUrl()}/settings/api/events${query}`);
@@ -623,6 +677,15 @@ export async function subscribePluginEvents(handlers: {
   onOpen?: () => void;
   onError?: () => void;
 }): Promise<EventSubscription> {
+  if (!isNativeShell()) {
+    return subscribeBrowserEvents({
+      onOpen: handlers.onOpen,
+      onError: handlers.onError,
+      onEvent: (event) => {
+        if (event === "plugins.changed") handlers.onChanged();
+      },
+    });
+  }
   const apiKey = await resolveApiKey();
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : "";
   const source = new EventSource(`${baseUrl()}/settings/api/events${query}`);
@@ -646,6 +709,20 @@ export async function subscribeBudgetEvents(handlers: {
   onOpen?: () => void;
   onError?: () => void;
 }): Promise<EventSubscription> {
+  if (!isNativeShell()) {
+    return subscribeBrowserEvents({
+      onOpen: handlers.onOpen,
+      onError: handlers.onError,
+      onEvent: (event, data) => {
+        if (event !== "budget.changed") return;
+        try {
+          handlers.onChanged(JSON.parse(data) as BudgetStatusResponse);
+        } catch {
+          // Malformed frame: drop it; the next event or reconnect resyncs.
+        }
+      },
+    });
+  }
   const apiKey = await resolveApiKey();
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : "";
   const source = new EventSource(`${baseUrl()}/settings/api/events${query}`);
@@ -683,13 +760,7 @@ export async function fetchBudgetCsv(
       },
     );
     const text = await res.text().catch(() => "");
-    if (!res.ok) {
-      return {
-        ok: false,
-        status: res.status,
-        error: text || `HTTP ${res.status}`,
-      };
-    }
+    if (!res.ok) return failureFrom(res, text, apiKey);
     return { ok: true, data: text };
   } catch (err) {
     return {

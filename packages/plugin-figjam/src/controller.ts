@@ -6,15 +6,16 @@ import type {
   Context,
   PluginDisposer,
   PluginLifecycleContext,
+  PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
 
 import { startBridge } from "@stuffbucket/maximal-figjam-bridge/server"
 import {
   buildPlugin,
+  inspectPlugin,
   pluginIdentity,
-  renderPlugin,
+  type PluginBuildOptions,
 } from "@stuffbucket/maximal-figjam-plugin/build"
-import { readFile, stat } from "node:fs/promises"
 import path from "node:path"
 
 import type { FigjamConfig } from "./manifest"
@@ -25,10 +26,12 @@ import {
   pluginProfileId,
   resolveProfile,
 } from "./profile"
+import { generationRelayKey } from "./relay-key"
 import {
   composeStatus,
   displayName,
   pairActionIds,
+  type PendingPanel,
   type PluginFolder,
   RETRY_ACTION,
   SETUP_ACTION,
@@ -47,11 +50,12 @@ export interface FigjamPluginOptions {
   profile?: FigjamProfile
   /** How many ports the bridge tries from the configured one (default: its own). */
   portAttempts?: number
-  /** Test seam; production reads the capability installed by `runServer`. */
-  relayKey?: string
 }
 
 interface PairRequest {
+  label: string
+  approveId: string
+  denyId: string
   dispose: PluginDisposer
 }
 
@@ -61,6 +65,16 @@ let previousStop: Promise<void> = Promise.resolve()
 
 /** Tool events arrive in bursts; the status follows them at most this often. */
 const ACTIVITY_RENDER_MS = 250
+
+// One relay key per owning Maximal process, in memory only (see relay-key.ts).
+// Every bridge this generation starts uses it, so a Retry, a config reload or
+// a resumed handoff keeps the panels already written working, and the next
+// generation (a plugin inventory or settings reload) inherits the same key
+// from the parent. Only a new owning process (Maximal restarted) makes a new
+// key and rewrites the plugin. The copy stamped into the plugin folder opens
+// nothing once that process ends.
+let processRelayKey: string | undefined
+const relayKey = (): string => (processRelayKey ??= generationRelayKey())
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -84,39 +98,6 @@ function describeStartFailure(error: unknown, port: number): StartFailure {
     summary: "The FigJam bridge could not start",
     detail: message,
   }
-}
-
-/**
- * Whether the files in `dir` exist, and whether they are exactly what a build
- * with these options writes. The comparison is by content (every file), not by
- * version or port strings, so an edited panel, a new profile id or a hand-edit
- * all count as stale. `differs` names the files that are not current.
- */
-async function inspectFolder(
-  dir: string,
-  options: Parameters<typeof renderPlugin>[0],
-): Promise<{ folder: PluginFolder; differs: Array<string> }> {
-  const expected = await renderPlugin(options)
-  try {
-    if (!(await stat(dir)).isDirectory()) {
-      return { folder: "stale", differs: Object.keys(expected) }
-    }
-  } catch {
-    // A wholly absent folder means the person has never staged/imported it.
-    return { folder: "missing", differs: Object.keys(expected) }
-  }
-  const differs: Array<string> = []
-  for (const [name, contents] of Object.entries(expected)) {
-    try {
-      const actual = await readFile(path.join(dir, name), "utf8")
-      if (actual !== contents) differs.push(name)
-    } catch {
-      // A folder with only some build outputs is an interrupted/stale staging,
-      // not first-time setup. Rebuild it automatically below.
-      differs.push(name)
-    }
-  }
-  return { folder: differs.length === 0 ? "current" : "stale", differs }
 }
 
 /**
@@ -163,21 +144,6 @@ export class FigjamController {
     const { logger } = this.#ctx.host
     if (this.#verbose) logger.info(message)
     else logger.debug(message)
-  }
-
-  /** What the Figma plugin is built from: Maximal's port now, and this profile. */
-  #buildOptions(): {
-    maximalPort: number
-    profile?: string
-    relayKey: string
-  } {
-    const profile = pluginProfileId(this.#profile)
-    return {
-      maximalPort: this.#ctx.host.maximalPort(),
-      ...(profile === undefined ? {} : { profile }),
-      relayKey:
-        this.#options.relayKey ?? process.env.MAXIMAL_FIGJAM_RELAY_KEY ?? "",
-    }
   }
 
   /** Register actions and status without acquiring the exclusive bridge port. */
@@ -252,6 +218,7 @@ export class FigjamController {
       const { dataDir, portAttempts } = this.#options
       const started = await startBridge({
         port: this.#config.port,
+        relayKey: relayKey(),
         ...(dataDir === undefined ? {} : { dataDir }),
         ...(portAttempts === undefined ? {} : { portAttempts }),
         ...(this.#verbose ? { verbose: true } : {}),
@@ -268,7 +235,7 @@ export class FigjamController {
           `The FigJam bridge is listening on 127.0.0.1:${started.port} (profile ${this.#profile.id}).`,
         )
       } else {
-        // Worth saying everywhere: the Figma plugin has to follow the move.
+        // Worth saying everywhere: the Figma plugin is rebuilt to follow the move.
         this.#ctx.host.logger.info(
           `The FigJam bridge's port ${started.preferredPort} was taken, so it is listening on 127.0.0.1:${started.port} (profile ${this.#profile.id}).`,
         )
@@ -295,17 +262,19 @@ export class FigjamController {
     return run
   }
 
-  /** Learn what the plugin folder holds, and bring a stale one up to date. */
+  /**
+   * Learn what the plugin folder holds, and bring a stale one up to date. The
+   * managed files are compared byte for byte with what a build would write,
+   * so a source, manifest or security change rebuilds even when the version
+   * and ports are unchanged, and so does a folder holding another process's
+   * relay key.
+   */
   async #checkFolder(): Promise<void> {
     try {
-      const { folder, differs } = await inspectFolder(
-        this.#pluginDir,
-        this.#buildOptions(),
-      )
-      this.#folder = folder
-      if (folder !== "current") {
+      this.#folder = await inspectPlugin(this.#pluginDir, this.#buildOptions())
+      if (this.#folder !== "current") {
         this.#note(
-          `The Figma plugin folder is ${folder} (${differs.join(", ")}): ${this.#pluginDir}`,
+          `The Figma plugin folder is ${this.#folder}: ${this.#pluginDir}`,
         )
       }
     } catch (error) {
@@ -315,6 +284,27 @@ export class FigjamController {
       return
     }
     if (this.#folder === "stale") await this.#build()
+  }
+
+  /**
+   * The options the generated plugin is built with. The start-time check and
+   * every build (start or manual) both read this, so a folder is judged
+   * against exactly what a rebuild would write.
+   */
+  #buildOptions(): PluginBuildOptions {
+    const profile = pluginProfileId(this.#profile)
+    return {
+      bridgePort: this.#handle?.port ?? this.#config.port,
+      maximalPort: this.#ctx.host.maximalPort(),
+      relayKey: relayKey(),
+      ...(profile === undefined ? {} : { profile }),
+    }
+  }
+
+  /** The name Figma lists this profile's development plugin under. */
+  #pluginName(): string {
+    const { profile } = this.#buildOptions()
+    return pluginIdentity({ release: false, profile: profile ?? "" }).name
   }
 
   async #build(): Promise<void> {
@@ -327,7 +317,7 @@ export class FigjamController {
       await buildPlugin({ outDir: this.#pluginDir, ...options })
       this.#folder = "current"
       this.#note(
-        `Built the Figma plugin (${this.#pluginName()}; allows only Maximal at localhost:${options.maximalPort}) in ${this.#pluginDir}`,
+        `Built the Figma plugin (${this.#pluginName()}; Maximal at localhost:${options.maximalPort}, bridge at localhost:${options.bridgePort}) in ${this.#pluginDir}`,
       )
     } catch (error) {
       this.#buildError = errorMessage(error)
@@ -340,18 +330,6 @@ export class FigjamController {
     }
   }
 
-  /** The name Figma lists this profile's development plugin under. */
-  #pluginName(): string {
-    const options = this.#buildOptions()
-    return pluginIdentity({
-      release: false,
-      maximalPort: options.maximalPort,
-      bridgePort: 0,
-      profile: options.profile ?? "",
-      relayKey: options.relayKey,
-    }).name
-  }
-
   #onEvent(event: BridgeEvent): void {
     if (this.#disposed) return
     this.#logEvent(event)
@@ -360,7 +338,7 @@ export class FigjamController {
       return
     }
     if (event.type === "pair-requested" && !this.#requests.has(event.name)) {
-      this.#notify(event.name)
+      this.#notify(event)
     }
     try {
       this.#sync()
@@ -416,13 +394,15 @@ export class FigjamController {
     }
   }
 
-  #notify(name: string): void {
-    const shown = displayName(name)
+  #notify(event: { name: string; board?: string }): void {
+    const shown = displayName(event.name)
+    const board =
+      event.board === undefined ? undefined : displayName(event.board)
     try {
       this.#ctx.surface.notify({
         code: "figjam-pair-requested",
-        message: `A FigJam panel ("${shown}") wants to connect.`,
-        params: { name: shown },
+        message: `A FigJam panel ("${shown}")${board === undefined ? "" : ` on board "${board}"`} wants to connect.`,
+        params: { name: shown, ...(board === undefined ? {} : { board }) },
       })
     } catch (error) {
       this.#ctx.host.logger.warn(
@@ -459,6 +439,9 @@ export class FigjamController {
       surface.registerAction(denyId, () => this.#decide("deny", name)),
     ]
     this.#requests.set(name, {
+      label: displayName(name),
+      approveId,
+      denyId,
       dispose: () => {
         for (const dispose of disposers) dispose()
       },
@@ -478,6 +461,21 @@ export class FigjamController {
     }
   }
 
+  #pairActions(): Array<PluginStatusAction> {
+    return [...this.#requests.values()].flatMap((request) => [
+      {
+        id: request.approveId,
+        label: `Approve "${request.label}"`,
+        kind: "primary" as const,
+      },
+      {
+        id: request.denyId,
+        label: `Deny "${request.label}"`,
+        kind: "secondary" as const,
+      },
+    ])
+  }
+
   #render(): void {
     if (this.#disposed) return
     const view = this.#handle?.status()
@@ -494,11 +492,14 @@ export class FigjamController {
                   title
                 : board.id
             }),
-            pending: view.pending.map((request) => ({
-              name: request.name,
-              board: request.board,
-              user: request.user,
-            })),
+            pending: view.pending.map(
+              (request): PendingPanel => ({
+                name: request.name,
+                board: request.board,
+                fileKey: request.fileKey,
+                user: request.user,
+              }),
+            ),
           }
         : undefined,
       building: this.#building,
@@ -506,7 +507,7 @@ export class FigjamController {
       buildError: this.#buildError,
       manifestPath: path.join(this.#pluginDir, "manifest.json"),
       pluginName: this.#pluginName(),
-      registered: new Set(this.#requests.keys()),
+      pairActions: this.#pairActions(),
     })
     const activity = view ? toPluginActivity(view.activity) : undefined
     this.#ctx.surface.setStatus(activity ? { ...status, activity } : status)

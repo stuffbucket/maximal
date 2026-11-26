@@ -29,6 +29,7 @@ permissions = [
   "allow-confirm-quit",
   "allow-update-installs-in-place",
   "allow-install-update",
+  "allow-take-update-request",
   "allow-refresh-update-status",
 ]
 
@@ -109,8 +110,13 @@ commands.allow = ["update_installs_in_place"]
 
 [[permission]]
 identifier = "allow-install-update"
-description = "Run the in-place update from the Settings window's 'Update to X.Y.Z' button: a native confirm naming the version, then download, verify, install, and relaunch. Where updates don't install in place it returns 'unavailable' and the webview opens the download page."
+description = "Run the in-place update after the Settings window's own confirmation (title-bar icon or System's 'Update to X.Y.Z' button) said yes to a version: download, verify, install, and relaunch, asking natively only if the signed update is a different version. Where updates don't install in place it returns 'unavailable' and the webview opens the download page."
 commands.allow = ["install_update"]
+
+[[permission]]
+identifier = "allow-take-update-request"
+description = "Take the tray's queued 'run the update flow' request (an apt install) from the Settings window, on load and when signalled, so only that tray action prompts."
+commands.allow = ["take_update_request"]
 
 
 [[permission]]

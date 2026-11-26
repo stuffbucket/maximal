@@ -187,6 +187,35 @@ html[data-os="macos"] .topbar {
   background: var(--border-subtle);
 }
 
+/* The browser-access mount adds no box (so no extra utilities gap) until it
+   holds the access icon; its dialog lives in the top layer. */
+.topbar__browser-access {
+  display: contents;
+}
+
+.topbar__browser-access[hidden] {
+  display: none;
+}
+
+/* Update offered and the full tab row would otherwise not fit (the narrow
+   end of Settings' width range): the update icon's width comes out of the
+   title bar's own spacing, not the tabs. The utilities close up, the
+   divider goes (the icon and the switcher already separate the picker),
+   and the end padding steps down. main.ts sets this class only when it is
+   needed (fitTopbar); wider windows keep the regular spacing, and the
+   macOS traffic-light clearance on the other side is untouched. */
+.topbar--compact {
+  padding-inline-end: var(--space-2);
+}
+
+.topbar--compact .topbar__utilities {
+  gap: var(--space-1);
+}
+
+.topbar--compact .topbar__divider {
+  display: none;
+}
+
 .lang-picker {
   position: relative;
   display: inline-flex;
@@ -929,10 +958,10 @@ html[data-os="macos"] .topbar {
   margin: 0;
 }
 
-/* ---- Uninstall card ----
- * The card itself is the only surface (no nested card). Its body is a
- * vertical stack matching the card's own rhythm; the option checkboxes,
- * inline error, and action button each get their own row. */
+/* ---- Uninstall region ----
+ * A typographic region under a hairline (.system-uninstall), not a card. Its
+ * body is a vertical stack; the option checkboxes, inline error, and action
+ * button each get their own row. */
 [data-uninstall-body] {
   display: flex;
   flex-direction: column;
@@ -2118,6 +2147,55 @@ html[data-os="macos"] .topbar {
   max-width: 60ch;
 }
 
+/* The summary is the disclosure's only control, so keyboard focus has to show
+   on it. */
+.advanced-section__summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-chip);
+}
+
+/* ---- System tab ----
+   One section, one display heading. Everyday version/update state and the
+   troubleshooting actions come first; runtime values and log locations sit in
+   the .advanced-section disclosure; Uninstall is a hairline-separated region
+   after everything else. */
+.system-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.system-details__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The Updates row: the status, Update to X and Check now. A long translation
+   wraps whole items onto the next line, never a label mid-phrase. */
+.system-update-row {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+
+.system-update-row > *,
+.system-update-row .btn {
+  white-space: nowrap;
+}
+
+/* Paths and revisions have no break opportunities; let them wrap inside the
+   narrower disclosure body instead of widening the pane. */
+.system-details__body .kv__row dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.system-uninstall {
+  padding-block-start: var(--space-5);
+  border-block-start: var(--border-width-hairline) solid var(--border-subtle);
+}
+
 /* ---- Modal dialogs ----
    Native <dialog> owns the top layer, inert background, focus containment,
    and nested modal stacking. Content decides whether the surface is compact
@@ -2209,10 +2287,36 @@ html[data-os="macos"] .topbar {
   flex-wrap: wrap;
 }
 
+/* A callout in a dialog (e.g. a refused Connect) sits above the text it
+   qualifies, with the same step as between paragraphs. */
+.confirm-dialog__body > .callout {
+  margin-bottom: var(--space-2);
+}
+
 .confirm-dialog__actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* Browser access (a plain browser against a headless Maximal): the key
+   field, with a refused key as a caption under it. */
+.browser-auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.browser-auth__field label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-md);
+  color: var(--text-strong);
+}
+
+.browser-auth__error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--status-error);
 }
 
 /* Default: a subtle fade-in. Respect reduced-motion as a hard contract. */
@@ -2534,7 +2638,7 @@ html[data-os="macos"] .topbar {
    remedy, in a hairline-bordered box. No colored edge stripe — the icon's
    color carries the tone. error: something failed (--status-error icon).
    notice: worth knowing, nothing wrong (muted icon). Rendered by
-   components/Callout.tsx; the vanilla Diagnostics error uses the same
+   components/Callout.tsx; the vanilla System error uses the same
    classes. */
 .callout {
   display: flex;

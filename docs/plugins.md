@@ -4,7 +4,64 @@
 
 Settings → Apps presents each integration as a compact row with one end-to-end status: **Working** when Maximal owns and has applied the route, **Off** when the app is available but routing is disabled, **Not found** when detection cannot find the app, and **Needs attention** when ownership or cleanup prevents the requested state. Selecting a missing app asks for confirmation, then opens that app’s official setup and download instructions. Maximal does not proactively install it or run an installer; after the app is installed, detection finds it and the person can enable routing.
 
-Routing ownership is profile-aware. A Maximal profile reconciles and reverts only markers it owns, including during boot and shutdown, so two development profiles that share an app’s user configuration do not flap the route as either profile starts or stops. A valid marker owned by another Maximal profile or copy is reported separately and can be replaced only through the explicit override confirmation. That override transfers Maximal’s routing ownership and stops the other copy from managing the app. It is not a general force option: foreign, malformed, incomplete, or user-edited configuration is preserved and still refused.
+Routing ownership is profile-aware. A Maximal profile reconciles and reverts only markers it owns, including during boot and shutdown, so two development profiles that share an app’s user configuration do not flap the route as either profile starts or stops. A valid marker owned by another Maximal profile or copy is reported separately and can be replaced only through the explicit override confirmation. That override transfers Maximal’s routing ownership and stops the other copy from managing the app. It is not a general force option: foreign, malformed, incomplete, or user-edited configuration is preserved and still refused. The one deliberate exception is Claude Desktop's **Take over** (below), which switches Claude away from another gateway without changing it.
+
+## Claude Desktop ownership
+
+Settings names the app **Claude**, as Anthropic does, in its Harnesses row and its Connect, transfer and Take over dialogs; the `claude-desktop` id, API-key label and `Claude-3p` paths are unchanged.
+
+Claude Desktop routing is a `maximal` entry in Desktop's config library (`Claude-3p/configLibrary/`) plus a `maximal-routing.json` marker beside it, which records the profile id, a SHA-256 fingerprint of the profile as Maximal wrote it, the prior selection, and (since profile ownership) `version: 2` with the owning Maximal profile's id. A marker without an owner, written by an older build, is attributed by comparing the profile's gateway URL with this copy's.
+
+Desktop rewrites library profiles in its own formatting (two-space JSON, no trailing newline) and can write an earlier profile's values back over the applied one. So the marker's profile still counts as Maximal's when either:
+
+- its parsed content, serialized the way Maximal writes it, matches the fingerprint (a reformat, possibly with keys reordered); or
+- it is exactly a Maximal artifact: the entry is named `maximal`, the profile has exactly the routing fields Maximal writes plus, optionally, Maximal's exact `managedMcpServers` array, every routing field except the gateway URL and key equals this copy's values, the URL is `http://127.0.0.1:<port>`, and either the key has the exact form Maximal generates (`isGeneratedApiKey`: `mxl_` plus 32 base64url characters, as from `generateApiKey`) or the URL and key pair is this copy's own or another `maximal` entry's in the library. That covers a stale copy Desktop wrote back, a rotated key and the connector configurator's managed MCP update.
+
+Ownership then follows the marker: this profile's marker is reapplied normally, repairing its own stale entry in place; another profile's, a dead profile's, or an ownerless marker on another port is offered through the explicit transfer, which repairs that same entry in place, so a dead duplicate is never kept to switch back to. Anything else on the marker's profile, such as a person's own gateway and key (even on a loopback port, and even a key that only resembles Maximal's), a changed folder or flag, an added field, or a renamed entry, is theirs: it is reported as a gateway set up by the user or another tool and is never overwritten, transferred, or deleted.
+
+**Claude seals the key.** When Claude reads a profile it rewrites the gateway key in its own sealed form (`__sealed__:v1:` and a base64 payload), so the key and the file bytes no longer match what Maximal wrote. The marker therefore records two more pieces of evidence (`src/apps/claude-desktop/marker-evidence.ts`): `managedFingerprint`, a SHA-256 of every managed field except the key, and `keyFingerprint`, an HMAC-SHA256 of the plaintext key under a random secret kept only in this Maximal profile's `secrets/claude-desktop-marker` (mode 0600). `keyFingerprint` adds neither the key nor an unkeyed hash of it to the marker. The marker's whole-file `fingerprint`, which notices edits, is an unkeyed SHA-256 of the profile as written, key included, so a short key a person chose could in principle be guessed from it; keys Maximal generates carry 192 random bits. An empty or corrupt secret file (a crash mid-write) is replaced atomically with an owner-only one, since nothing can verify against it; a valid secret is never replaced, and a link or other non-file is never used. When the marker is a current one with both fields, its own `maximal` entry has exactly the managed fields, every field but the key matches `managedFingerprint`, and the key has exactly Claude's sealed form, the entry is still Maximal's and ownership follows the marker. It counts as applied, and is left alone, only while `managedFingerprint` and `keyFingerprint` also match what this profile would write now; a rotated key or a new port rewrites the same entry and refreshes the marker. Losing the secret costs one such rewrite. An older marker over a profile that is still current in plaintext gets the evidence on the next boot or apply: only the marker is rewritten, and only while the profile's bytes are exactly what that marker recorded and the profile is this copy's, so it is recognized once Claude seals the key. Maximal never decodes the sealed value or reads the Keychain, and the key's shape alone proves nothing: a plaintext or near-miss key, any other field change, an added or missing field, a renamed entry, or a marker without the evidence (an older build's) stays conservative and goes through the transfer or Take over. One limit follows from never decoding: a key changed only inside Claude's editor, with every other field left exactly as Maximal wrote it, looks the same as Claude's own sealing; it is left in place until Maximal's own key or port changes.
+
+**Managed MCP projection.** Claude Desktop's connector projection lives on that same owned config-library profile as the array-form `managedMcpServers`, not in the top-level `mcpServers` developer configuration. When at least one connector is allowed for the Desktop app, Maximal writes one aggregate remote entry named `maximal`, with `transport: "http"`, the loopback `/mcp` URL and the Desktop app identity key in an `Authorization` header. The aggregate endpoint applies each connector's App Permission and namespaces its tools. The profile write and routing-marker fingerprint are updated together; a port or routing-key refresh preserves the MCP array, while blocking the final connector removes the field. The first successful pass removes the structurally signed `mcpServers.maximal` stdio entry written by the preceding configurator. A foreign or edited managed array is never absorbed into Maximal ownership.
+
+Claude Code intentionally keeps its ordinary per-connector `~/.claude.json` entries. Its same-named `managedMcpServers` setting is a different object schema, is ignored outside administrator-managed sources, and accepts only HTTPS remote URLs, so it cannot represent Maximal's local HTTP endpoint.
+
+**Take over.** When Claude is on a readable gateway profile Maximal doesn't own (`foreign-gateway-profile`), the Connect dialog ("Connect Claude") says Maximal found another gateway and didn't change it. **Close** is the default; **Take over** sends `overrideForeignGateway: true` (Settings only). That applies Maximal's own entry and never writes the other profile, which stays saved: disabling switches back to it. When a marker already exists, its first snapshot of the top-level keys is kept and only the selection to switch back to is updated, so disabling removes Maximal's `deploymentMode` and `coworkWebSearchEnabled` and restores exactly; with no marker, the current state is snapshotted. Take over is one-shot: boot never repeats it if Claude is later switched back.
+
+Take over never bypasses the marker: another profile's marker, or an ownerless marker whose own entry traces to another copy, needs the explicit transfer (`overrideOtherMaximal`) whatever Claude has applied, and when both are needed the dialog sends both only after each was confirmed. A profile Maximal can't read or safely address is `unreadable-profile`, whose dialog offers only Close; an unreadable `_meta.json` or a malformed marker keeps its own refusal. A refused or failed request keeps the dialog open with a callout ("Nothing was changed." or the error) above what still needs attention. At boot, a profile whose own marker is intact keeps its routing intent even when another copy's stale `maximal` entry is applied; only another copy's marker turns this profile's stale intent off.
+
+### Choosing a profile from the CLI
+
+`maximal app claude-desktop --profiles`, `--current-profile` and
+`--select-profile <id>` (see [Commands](commands.md)) work on the config
+library directly through `src/apps/claude-desktop/profile-library.ts`, not
+through the ownership checks above: they never write a profile, never touch
+`maximal-routing.json`, and never turn Maximal's routing on or off. Selecting
+sets `_meta.json`'s `appliedId` only, through the shared no-follow atomic writer
+with the index's exact bytes as the expected content, so a change by Claude or a
+person between the read and the write is refused rather than overwritten, and
+fields Maximal doesn't know survive. It refuses (touching nothing) an
+unreadable, malformed or symlinked index or library directory, a profile file
+that is missing, unreadable or a symlink, an id that isn't `[a-f0-9-]{36}`, and
+an index with `hybridPointer`, which Claude honours instead of `appliedId`. A
+selection takes effect when Claude is next launched, and only while
+`claude_desktop_config.json` has `deploymentMode` `3p`, which the command reads
+(never writes) and reports; otherwise it says the profile will not be active on
+relaunch. While Maximal's routing intent is on, the command warns that Maximal's
+next boot, an API-key change, or enabling routing again in Settings reapplies
+this copy's profile: a readable gateway profile Maximal doesn't own is left
+untouched (`foreign-gateway-profile`), but a profile that sets no
+`inferenceProvider` is not a gateway, so it is switched back; and selecting a
+profile another Maximal copy owns can turn this copy's intent off at the next
+reapply. With routing off, selecting a `maximal` entry warns that its port or
+key may be stale. Select with routing off (`--disable`) to keep a selection.
+
+Claude publishes no schema for `_meta.json` or the profile files. The layout is
+taken from Anthropic's documentation (`claude.com/docs/third-party/claude-desktop/`,
+"Configuration implementation" and "Deploy with MDM") and from the shape checks in
+Claude Desktop 5.11492.5's bundled main-process code
+(`Contents/Resources/app.asar`, `.vite/build/index.chunk-*.js`; minified and not
+a schema). So the index schema here is deliberately loose: `appliedId` and
+`entries[{ id, name }]` are required, everything else is preserved untouched.
 
 ## Claude Code integration
 

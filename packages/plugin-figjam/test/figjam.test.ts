@@ -15,22 +15,14 @@ import {
 import { loadPlugin, waitFor } from "@stuffbucket/maximal-plugin-sdk/testing"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  stat,
-  utimes,
-  writeFile,
-} from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
 import {
   createFigjamPlugin,
-  type FigjamPluginOptions,
   FIGMA_PLUGIN_DIR,
+  type FigjamPluginOptions,
   IMPORT_INSTRUCTIONS,
 } from "../src/index"
 import { pairActionIds } from "../src/status"
@@ -145,13 +137,43 @@ async function portIsFree(candidate: number): Promise<boolean> {
 
 interface Panel {
   ws: WebSocket
-  next(type: string): Promise<void>
+  seen: Array<PanelMessage>
+  opened: Promise<boolean>
+  next(type: string): Promise<PanelMessage>
 }
 
-function openPanel(name: string): Panel {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/plugin`)
-  const seen: Array<string> = []
-  const waiters: Array<{ type: string; resolve: () => void }> = []
+interface PanelMessage {
+  type: string
+  token?: string
+  clientId?: string
+}
+
+const pluginFile = (name: string) =>
+  path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, name)
+
+/** The relay key stamped into the panel the plugin wrote, as the panel reads it. */
+async function generatedRelayKey(): Promise<string> {
+  const html = await readFile(pluginFile("ui.html"), "utf8")
+  const line = /^const PANEL_BUILD = (.*);$/m.exec(html)
+  if (!line) throw new Error("no PANEL_BUILD line in ui.html")
+  return (JSON.parse(line[1]) as { relayKey: string }).relayKey
+}
+
+/**
+ * A fake panel, the way the Figma plugin connects: opaque `Origin: null`, the
+ * relay key as its subprotocol, then a hello (with its token once paired).
+ */
+function openPanel(
+  name: string,
+  options: { protocols: Array<string>; token?: string },
+): Panel {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/plugin`, {
+    protocols: options.protocols,
+    headers: { origin: "null" },
+  })
+  const seen: Array<PanelMessage> = []
+  const waiters: Array<{ type: string; resolve: (m: PanelMessage) => void }> =
+    []
   ws.addEventListener("open", () => {
     ws.send(
       JSON.stringify({
@@ -160,45 +182,43 @@ function openPanel(name: string): Panel {
         board: { name: "Roadmap", boardId: "plugin1", fileKey: "kplugin1" },
         plugin: { version: "test" },
         tools: [],
+        ...(options.token === undefined ? {} : { token: options.token }),
       }),
     )
   })
   ws.addEventListener("message", (event) => {
-    const type = (JSON.parse(String(event.data)) as { type: string }).type
-    seen.push(type)
-    for (const waiter of waiters.filter((item) => item.type === type))
-      waiter.resolve()
+    const message = JSON.parse(String(event.data)) as PanelMessage
+    seen.push(message)
+    for (const waiter of waiters.filter((item) => item.type === message.type))
+      waiter.resolve(message)
+  })
+  const opened = new Promise<boolean>((resolve) => {
+    ws.addEventListener("open", () => resolve(true))
+    ws.addEventListener("error", () => resolve(false))
+    ws.addEventListener("close", () => resolve(false))
   })
   cleanups.push(() => ws.close())
   return {
     ws,
-    next: (type) =>
-      seen.includes(type) ?
-        Promise.resolve()
-      : new Promise((resolve) => waiters.push({ type, resolve })),
+    seen,
+    opened,
+    next: (type) => {
+      const found = seen.find((message) => message.type === type)
+      return found ?
+          Promise.resolve(found)
+        : new Promise((resolve) => waiters.push({ type, resolve }))
+    },
   }
 }
 
-const manifestOf = async (): Promise<{ id: string; name: string }> =>
-  JSON.parse(
-    await readFile(
-      path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "manifest.json"),
-      "utf8",
-    ),
-  ) as { id: string; name: string }
-
-async function setUp(profile: FigjamPluginOptions["profile"]) {
-  const loaded = await load({}, undefined, { profile })
+/** Load, build the Figma plugin, and open a panel holding its relay key. */
+async function loadBuilt(): Promise<Loaded> {
+  const loaded = await load()
   await waitFor(statusIs(loaded, "plugin-not-built"))
   await loaded.runAction("setup")
   await waitFor(statusIs(loaded, "ready"))
   return loaded
 }
-
-const lines = (loaded: Loaded, level: string) =>
-  loaded.testbed.host.logs
-    .filter((record) => record.level === level)
-    .map((record) => record.message)
 
 describe("FigJam plugin: setup", () => {
   test("needs setup until the Figma plugin is built, then shows the manifest", async () => {
@@ -223,11 +243,9 @@ describe("FigJam plugin: setup", () => {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       networkAccess: { devAllowedDomains: Array<string> }
     }
-    expect(manifest.networkAccess.devAllowedDomains).toEqual([
-      "http://localhost:4141",
-      "ws://localhost:4141",
-    ])
-    expect(JSON.stringify(manifest)).not.toContain(String(port))
+    expect(manifest.networkAccess.devAllowedDomains).toContain(
+      `ws://localhost:${port}`,
+    )
   })
 
   test("tells the Figma plugin the port Maximal serves on, and ignores an old maximalPort setting", async () => {
@@ -242,10 +260,47 @@ describe("FigJam plugin: setup", () => {
         "utf8",
       ),
     ) as { networkAccess: { devAllowedDomains: Array<string> } }
-    expect(manifest.networkAccess.devAllowedDomains).toEqual([
+    expect(manifest.networkAccess.devAllowedDomains).toContain(
       "http://localhost:5141",
-      "ws://localhost:5141",
-    ])
+    )
+    expect(manifest.networkAccess.devAllowedDomains).not.toContain(
+      "http://localhost:4999",
+    )
+    // The panel dials the same ports the manifest allows, with this process's
+    // relay key.
+    const ui = await readFile(
+      path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html"),
+      "utf8",
+    )
+    const key = await generatedRelayKey()
+    expect(key).toMatch(/^[\w-]{43}$/)
+    expect(ui).toContain(
+      `const PANEL_BUILD = {"maximalPort":5141,"bridgePort":${port},"relayKey":"${key}"};`,
+    )
+  })
+
+  test("rebuilds on start when the panel was stamped with other ports", async () => {
+    const first = await load()
+    await waitFor(statusIs(first, "plugin-not-built"))
+    await first.runAction("setup")
+    await waitFor(statusIs(first, "ready"))
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const uiPath = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html")
+    const current = await readFile(uiPath, "utf8")
+    // Same version, same manifest and key, but a panel built for other ports.
+    const key = await generatedRelayKey()
+    const stale = current.replace(
+      /^const PANEL_BUILD = .*;$/m,
+      `const PANEL_BUILD = {"maximalPort":1,"bridgePort":2,"relayKey":"${key}"};`,
+    )
+    expect(stale).not.toBe(current)
+    await writeFile(uiPath, stale)
+
+    const second = await load()
+    await waitFor(statusIs(second, "ready"))
+    expect(await readFile(uiPath, "utf8")).toBe(current)
   })
 
   test("rebuilds on start when the folder is stale", async () => {
@@ -275,53 +330,7 @@ describe("FigJam plugin: setup", () => {
     expect(await readFile(codePath, "utf8")).toBe(current)
   })
 
-  test("rebuilds a partial staged folder, while an absent folder still needs setup", async () => {
-    const relayKey = "a".repeat(43)
-    const first = await load({}, undefined, { relayKey })
-    await waitFor(statusIs(first, "plugin-not-built"))
-    await first.runAction("setup")
-    await waitFor(statusIs(first, "ready"))
-    await first.dispose()
-    await waitFor(() => portIsFree(port))
-
-    const dir = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR)
-    const uiPath = path.join(dir, "ui.html")
-    await rm(uiPath)
-    expect(existsSync(dir)).toBe(true)
-
-    const second = await load({}, undefined, { relayKey })
-    await waitFor(statusIs(second, "ready"))
-    expect((await readFile(uiPath, "utf8")).toLowerCase()).toStartWith(
-      "<!doctype html>",
-    )
-  })
-
-  test("stages the per-process relay key only in ui.html and rebuilds when it changes", async () => {
-    const firstKey = "a".repeat(43)
-    const first = await load({}, undefined, { relayKey: firstKey })
-    await waitFor(statusIs(first, "plugin-not-built"))
-    await first.runAction("setup")
-    await waitFor(statusIs(first, "ready"))
-    const dir = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR)
-    expect(await readFile(path.join(dir, "ui.html"), "utf8")).toContain(
-      firstKey,
-    )
-    expect(
-      await readFile(path.join(dir, "manifest.json"), "utf8"),
-    ).not.toContain(firstKey)
-    expect(JSON.stringify(first.testbed.host.logs)).not.toContain(firstKey)
-    await first.dispose()
-    await waitFor(() => portIsFree(port))
-
-    const secondKey = "b".repeat(43)
-    const second = await load({}, undefined, { relayKey: secondKey })
-    await waitFor(statusIs(second, "ready"))
-    const ui = await readFile(path.join(dir, "ui.html"), "utf8")
-    expect(ui).toContain(secondKey)
-    expect(ui).not.toContain(firstKey)
-  })
-
-  test("rebuilds on start when the panel or manifest differ in content, though version and ports match", async () => {
+  test("rebuilds on start when generated content differs but version and ports match", async () => {
     const first = await load()
     await waitFor(statusIs(first, "plugin-not-built"))
     await first.runAction("setup")
@@ -330,23 +339,26 @@ describe("FigJam plugin: setup", () => {
     await waitFor(() => portIsFree(port))
 
     const dir = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR)
-    const uiPath = path.join(dir, "ui.html")
-    const manifestPath = path.join(dir, "manifest.json")
-    const ui = await readFile(uiPath, "utf8")
-    const manifest = await readFile(manifestPath, "utf8")
-    await writeFile(uiPath, `${ui}<!-- edited -->\n`)
+    const expected: Record<string, string> = {}
+    for (const name of ["code.js", "ui.html", "manifest.json"]) {
+      expected[name] = await readFile(path.join(dir, name), "utf8")
+    }
+    // The same version and ports, but the sandbox, panel and manifest differ.
+    await writeFile(path.join(dir, "code.js"), `${expected["code.js"]}\n// old`)
+    await writeFile(path.join(dir, "ui.html"), "<!-- old panel -->")
     await writeFile(
-      manifestPath,
-      manifest.replace("ws://localhost:4141", "ws://localhost:4150"),
+      path.join(dir, "manifest.json"),
+      expected["manifest.json"].replace('"api": "1.0.0"', '"api": "0.9.0"'),
     )
 
     const second = await load()
     await waitFor(statusIs(second, "ready"))
-    expect(await readFile(uiPath, "utf8")).toBe(ui)
-    expect(await readFile(manifestPath, "utf8")).toBe(manifest)
+    for (const [name, contents] of Object.entries(expected)) {
+      expect(await readFile(path.join(dir, name), "utf8")).toBe(contents)
+    }
   })
 
-  test("leaves a current folder alone, even when the bridge had to move ports", async () => {
+  test("rebuilds on start when a managed file is missing", async () => {
     const first = await load()
     await waitFor(statusIs(first, "plugin-not-built"))
     await first.runAction("setup")
@@ -354,101 +366,44 @@ describe("FigJam plugin: setup", () => {
     await first.dispose()
     await waitFor(() => portIsFree(port))
 
-    const manifestPath = path.join(
-      storageDir,
-      "figjam",
-      FIGMA_PLUGIN_DIR,
-      "manifest.json",
-    )
-    const before = await readFile(manifestPath, "utf8")
-    const marker = new Date(Date.now() - 60_000)
-    await utimes(manifestPath, marker, marker)
+    const uiPath = path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html")
+    const panel = await readFile(uiPath, "utf8")
+    await rm(uiPath)
 
-    const blocker = Bun.listen({
-      hostname: "127.0.0.1",
-      port,
-      socket: { data() {} },
-    })
-    cleanups.push(() => {
-      blocker.stop(true)
-    })
     const second = await load()
     await waitFor(statusIs(second, "ready"))
-    expect(Number(fact(second, "Port"))).toBeGreaterThan(port)
-    expect(fact(second, "Preferred port (in use)")).toBe(String(port))
-    expect(await readFile(manifestPath, "utf8")).toBe(before)
-    // Not rewritten: the bridge's port is not part of the Figma plugin.
-    expect((await stat(manifestPath)).mtimeMs).toBeCloseTo(marker.getTime(), -3)
+    expect(await readFile(uiPath, "utf8")).toBe(panel)
   })
-})
 
-describe("FigJam plugin: profiles", () => {
-  test("a development profile gets its own plugin id and name, and says so in the status", async () => {
-    const loaded = await setUp({ kind: "development", id: "ab12cd34ef56" })
-    expect(await manifestOf()).toEqual({
-      ...(await manifestOf()),
-      id: "maximal-figjam-agent-dev-ab12cd34ef56",
-      name: "Maximal Agent (dev ab12cd34)",
-    })
-    expect(fact(loaded, "Figma plugin")).toBe("Maximal Agent (dev ab12cd34)")
-    const ui = await readFile(
-      path.join(storageDir, "figjam", FIGMA_PLUGIN_DIR, "ui.html"),
-      "utf8",
+  test("stamps this process's relay key into ui.html alone, and rebuilds a folder holding another key", async () => {
+    const first = await loadBuilt()
+    const key = await generatedRelayKey()
+    expect(key).toMatch(/^[\w-]{43}$/)
+    expect(await readFile(pluginFile("manifest.json"), "utf8")).not.toContain(
+      key,
     )
-    expect(ui).toContain('"profile":"ab12cd34ef56"')
-  })
-
-  test("production keeps the shared plugin id", async () => {
-    await setUp({ kind: "production", id: "production" })
-    expect((await manifestOf()).id).toBe("maximal-figjam-agent-dev")
-  })
-
-  test("a changed profile rebuilds the folder in the same place", async () => {
-    const first = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    expect(await readFile(pluginFile("code.js"), "utf8")).not.toContain(key)
+    expect(JSON.stringify(status(first))).not.toContain(key)
+    expect((await stat(pluginFile("ui.html"))).mode & 0o777).toBe(0o600)
     await first.dispose()
     await waitFor(() => portIsFree(port))
-    const second = await load({}, undefined, {
-      profile: { kind: "development", id: "0f0f0f0f0f0f" },
-    })
+
+    // A folder another process wrote carries a key no bridge here accepts.
+    const ui = await readFile(pluginFile("ui.html"), "utf8")
+    await writeFile(pluginFile("ui.html"), ui.replace(key, "A".repeat(43)))
+    const second = await load()
     await waitFor(statusIs(second, "ready"))
-    expect((await manifestOf()).id).toBe(
-      "maximal-figjam-agent-dev-0f0f0f0f0f0f",
-    )
-  })
-
-  test("development logs the bind, and pairing, by name only; production stays quiet", async () => {
-    const dev = await setUp({ kind: "development", id: "ab12cd34ef56" })
-    const panel = openPanel("log-lynx")
-    await panel.next("pair-pending")
-    await waitFor(() =>
-      lines(dev, "info").some((line) => line.includes('"log-lynx" asked')),
-    )
-    expect(
-      lines(dev, "info").some((line) => line.includes("listening on")),
-    ).toBe(true)
-    expect(lines(dev, "info").join("\n")).not.toMatch(/token/i)
-    await dev.dispose()
-    await waitFor(() => portIsFree(port))
-
-    const prod = await load({}, undefined, {
-      profile: { kind: "production", id: "production" },
-    })
-    await waitFor(statusIs(prod, "ready"))
-    expect(lines(prod, "info")).toEqual([])
-    expect(
-      lines(prod, "debug").some((line) => line.includes("listening")),
-    ).toBe(true)
+    expect(await generatedRelayKey()).toBe(key)
   })
 })
 
 describe("FigJam plugin: pairing", () => {
   test("a panel asks, the notice and actions appear, approving pairs it", async () => {
-    const loaded = await load()
-    await waitFor(statusIs(loaded, "plugin-not-built"))
-    await loaded.runAction("setup")
-    await waitFor(statusIs(loaded, "ready"))
+    const loaded = await loadBuilt()
 
-    const panel = openPanel("test-lynx")
+    const panel = openPanel("test-lynx", {
+      protocols: [await generatedRelayKey()],
+    })
     await panel.next("pair-pending")
     await waitFor(() =>
       attentionIds(loaded).some((id) => id.startsWith("approve")),
@@ -460,11 +415,14 @@ describe("FigJam plugin: pairing", () => {
     expect(notices.map((event) => event.notice)).toEqual([
       {
         code: "figjam-pair-requested",
-        message: 'A FigJam panel ("test-lynx") wants to connect.',
-        params: { name: "test-lynx" },
+        message:
+          'A FigJam panel ("test-lynx") on board "Roadmap" wants to connect.',
+        params: { name: "test-lynx", board: "Roadmap" },
       },
     ])
-    expect(fact(loaded, "Waiting for approval")).toBe("test-lynx")
+    expect(fact(loaded, "Waiting for approval")).toBe(
+      'test-lynx (board "Roadmap", file kplugin1)',
+    )
     // Approve and Deny are not inline buttons: the dialog and the tray carry them.
     expect(actionIds(loaded)).toEqual(["setup"])
 
@@ -474,19 +432,21 @@ describe("FigJam plugin: pairing", () => {
     expect(approve).toMatch(/^approve-test-lynx-[0-9a-f]{8}$/)
     const attention = status(loaded)?.attention
     expect(attention).toMatchObject({
-      summary: 'A FigJam panel ("test-lynx") wants to connect',
+      summary:
+        'A FigJam panel ("test-lynx") on board "Roadmap" wants to connect',
       actions: [
         { id: approve, label: 'Approve "test-lynx"', kind: "primary" },
         { id: denyId, label: 'Deny "test-lynx"', kind: "secondary" },
       ],
     })
-    // The dialog's request names the panel and board and carries the same ids.
+    // The dialog's request names the panel, board and file and carries the same ids.
     expect(attention?.requests).toHaveLength(1)
     const [request] = attention?.requests ?? []
     expect(request.title).toBe('Let the FigJam panel "test-lynx" connect?')
     expect(request.detail).toContain("read and change the board")
     expect(request.facts).toContainEqual({ label: "Panel", value: "test-lynx" })
-    expect(request.facts?.map((item) => item.label)).toContain("Board")
+    expect(request.facts).toContainEqual({ label: "Board", value: "Roadmap" })
+    expect(request.facts).toContainEqual({ label: "File", value: "kplugin1" })
     expect(request.approve).toEqual({
       id: approve,
       label: "Approve",
@@ -509,11 +469,56 @@ describe("FigJam plugin: pairing", () => {
     )
   })
 
-  test("denying clears the request and its actions", async () => {
-    const loaded = await load()
-    await waitFor(statusIs(loaded, "plugin-not-built"))
+  test("a forged Origin: null panel without the generated key raises no request", async () => {
+    const loaded = await loadBuilt()
+    const key = await generatedRelayKey()
+    const forged = [
+      openPanel("forged-lynx", { protocols: [] }),
+      openPanel("forged-lynx", { protocols: ["A".repeat(43)] }),
+      openPanel("forged-lynx", { protocols: [key.slice(1)] }),
+    ]
+    for (const panel of forged) expect(await panel.opened).toBe(false)
+    await Bun.sleep(50)
+    expect(fact(loaded, "Waiting for approval")).toBe("None")
+    expect(status(loaded)?.attention).toBeUndefined()
+    expect(actionIds(loaded)).toEqual(["setup"])
+    expect(
+      loaded.testbed.events.filter((event) => event.type === "notice"),
+    ).toEqual([])
+  })
 
-    const panel = openPanel("test-koala")
+  test("the generated panel reconnects with its token, without a new request", async () => {
+    const loaded = await loadBuilt()
+    const key = await generatedRelayKey()
+    const first = openPanel("again-lynx", { protocols: [key] })
+    await first.next("pair-pending")
+    await waitFor(() =>
+      attentionIds(loaded).some((id) => id.startsWith("approve")),
+    )
+    await loaded.runAction(pairActionIds("again-lynx").approveId)
+    const { token } = await first.next("paired")
+    expect(token).toBeDefined()
+    first.ws.close()
+    await waitFor(() => fact(loaded, "Connected boards") === "None")
+
+    const again = openPanel("again-lynx", { protocols: [key], token })
+    await again.next("paired")
+    await waitFor(() => fact(loaded, "Connected boards") === "Roadmap")
+    expect(again.seen.map((message) => message.type)).not.toContain(
+      "pair-pending",
+    )
+    expect(
+      loaded.testbed.events.filter((event) => event.type === "notice"),
+    ).toHaveLength(1)
+    expect(status(loaded)?.attention).toBeUndefined()
+  })
+
+  test("denying clears the request and its actions", async () => {
+    const loaded = await loadBuilt()
+
+    const panel = openPanel("test-koala", {
+      protocols: [await generatedRelayKey()],
+    })
     await panel.next("pair-pending")
     await waitFor(() =>
       attentionIds(loaded).some((id) => id.startsWith("deny")),
@@ -571,7 +576,7 @@ describe("FigJam plugin: the port", () => {
     await waitFor(() => portIsFree(port))
   })
 
-  test("a taken port moves the bridge to the next free one, and the status says so", async () => {
+  test("a taken port moves the bridge to the next free one, the status says so, and the plugin follows", async () => {
     const blocker = Bun.listen({
       hostname: "127.0.0.1",
       port,
@@ -588,6 +593,14 @@ describe("FigJam plugin: the port", () => {
       loaded.testbed.host.logs.some(
         (record) =>
           record.level === "info" && record.message.includes("was taken"),
+      ),
+    ).toBe(true)
+    await loaded.runAction("setup")
+    await waitFor(statusIs(loaded, "ready"))
+    // The panel is stamped with the port the bridge really bound.
+    expect(
+      (await readFile(pluginFile("ui.html"), "utf8")).includes(
+        `"bridgePort":${fact(loaded, "Port")}`,
       ),
     ).toBe(true)
   })
@@ -613,5 +626,82 @@ describe("FigJam plugin: the port", () => {
     await loaded.runAction("retry")
     await waitFor(statusIs(loaded, "plugin-not-built"))
     expect(existsSync(path.join(dataDir, "figjam"))).toBe(true)
+  })
+})
+
+const manifestOf = async (): Promise<{ id: string; name: string }> =>
+  JSON.parse(await readFile(pluginFile("manifest.json"), "utf8")) as {
+    id: string
+    name: string
+  }
+
+async function setUp(profile: FigjamPluginOptions["profile"]) {
+  const loaded = await load({}, undefined, { profile })
+  await waitFor(statusIs(loaded, "plugin-not-built"))
+  await loaded.runAction("setup")
+  await waitFor(statusIs(loaded, "ready"))
+  return loaded
+}
+
+const lines = (loaded: Loaded, level: string) =>
+  loaded.testbed.host.logs
+    .filter((record) => record.level === level)
+    .map((record) => record.message)
+
+describe("FigJam plugin: profiles", () => {
+  test("a development profile gets its own plugin id and name, and says so in the status", async () => {
+    const loaded = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    expect(await manifestOf()).toMatchObject({
+      id: "maximal-figjam-agent-dev-ab12cd34ef56",
+      name: "Maximal Agent (dev ab12cd34)",
+    })
+    expect(fact(loaded, "Figma plugin")).toBe("Maximal Agent (dev ab12cd34)")
+  })
+
+  test("production keeps the shared plugin id", async () => {
+    await setUp({ kind: "production", id: "production" })
+    expect((await manifestOf()).id).toBe("maximal-figjam-agent-dev")
+  })
+
+  test("a changed profile rebuilds the folder in the same place", async () => {
+    const first = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    await first.dispose()
+    await waitFor(() => portIsFree(port))
+    const second = await load({}, undefined, {
+      profile: { kind: "development", id: "0f0f0f0f0f0f" },
+    })
+    await waitFor(statusIs(second, "ready"))
+    expect((await manifestOf()).id).toBe(
+      "maximal-figjam-agent-dev-0f0f0f0f0f0f",
+    )
+  })
+
+  test("development logs the bind, and pairing, by name only; production stays quiet", async () => {
+    const dev = await setUp({ kind: "development", id: "ab12cd34ef56" })
+    const panel = openPanel("log-lynx", {
+      protocols: [await generatedRelayKey()],
+    })
+    await panel.next("pair-pending")
+    await waitFor(() =>
+      lines(dev, "info").some((line) => line.includes('"log-lynx" asked')),
+    )
+    expect(
+      lines(dev, "info").some((line) => line.includes("listening on")),
+    ).toBe(true)
+    expect(lines(dev, "info").join("\n")).not.toMatch(/token/i)
+    expect(JSON.stringify(dev.testbed.host.logs)).not.toContain(
+      await generatedRelayKey(),
+    )
+    await dev.dispose()
+    await waitFor(() => portIsFree(port))
+
+    const prod = await load({}, undefined, {
+      profile: { kind: "production", id: "production" },
+    })
+    await waitFor(statusIs(prod, "ready"))
+    expect(lines(prod, "info")).toEqual([])
+    expect(
+      lines(prod, "debug").some((line) => line.includes("listening")),
+    ).toBe(true)
   })
 })

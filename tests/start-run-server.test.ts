@@ -162,12 +162,15 @@ globalThis.fetch = (() =>
 // --- Module under test (imported after mocks are wired) -----------
 
 const { freePort } = await import("./helpers/free-port")
+const { FIGJAM_RELAY_KEY_ENV } =
+  await import("@stuffbucket/maximal-plugin-figjam")
 const { state } = await import("~/lib/runtime-state/state")
 const { runServer, start } = await import("~/start")
 const { currentProxyPort, setListeningPort } =
   await import("~/lib/start/proxy-port")
 const { clearSessionRunning, runningSessionPort } =
   await import("~/lib/start/session-sentinel")
+const { stopRegistryAdoption } = await import("~/lib/auth/registry-adoption")
 const { getAuthStatus, signOut, __resetAuthControllerForTests } =
   await import("~/lib/auth/auth-controller")
 const { CopilotAuthFatalError } = await import("~/lib/errors/error")
@@ -482,6 +485,41 @@ describe("runServer — server bind", () => {
   })
 })
 
+describe("runServer — FigJam relay key ordering", () => {
+  const RELAY_KEY = /^[\w-]{43}$/
+  const saved = process.env[FIGJAM_RELAY_KEY_ENV]
+  afterEach(() => {
+    if (saved === undefined)
+      Reflect.deleteProperty(process.env, FIGJAM_RELAY_KEY_ENV)
+    else process.env[FIGJAM_RELAY_KEY_ENV] = saved
+  })
+
+  // The plugin runner copies process.env for every generation it spawns, and
+  // it first does so inside startPlugins, which runServer reaches only after
+  // several awaits (the port preflight, bootstrap, the server binding). An
+  // async function runs synchronously up to its first await, so a key that
+  // is already in place when runServer returns its promise is in place
+  // before any generation can snapshot the environment.
+  test("replaces an inherited key before its first await, and keeps it through startup", async () => {
+    process.env[FIGJAM_RELAY_KEY_ENV] = "inherited"
+    const running = runServer(baseOptions())
+    const beforeFirstAwait = process.env[FIGJAM_RELAY_KEY_ENV]
+    await running
+
+    expect(beforeFirstAwait).toMatch(RELAY_KEY)
+    expect(process.env[FIGJAM_RELAY_KEY_ENV]).toBe(beforeFirstAwait)
+  })
+
+  test("each Maximal start makes its own key", async () => {
+    await runServer(baseOptions())
+    const first = process.env[FIGJAM_RELAY_KEY_ENV]
+    await runServer(baseOptions())
+    expect(first).toMatch(RELAY_KEY)
+    expect(process.env[FIGJAM_RELAY_KEY_ENV]).toMatch(RELAY_KEY)
+    expect(process.env[FIGJAM_RELAY_KEY_ENV]).not.toBe(first)
+  })
+})
+
 describe("start.run — citty args → runServer options", () => {
   test("threads every flag into runServer (manifests as state mutation)", async () => {
     const port = pickFreePort()
@@ -566,6 +604,7 @@ afterAll(async () => {
   // later files don't see them.
   setListeningPort(undefined)
   clearSessionRunning()
+  stopRegistryAdoption()
   globalThis.fetch = realFetch
   mock.restore()
   await mock.module("~/lib/platform/paths", () => realPathsModule)

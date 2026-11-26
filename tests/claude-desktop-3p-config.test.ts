@@ -16,11 +16,11 @@ import {
   applyConfigLibraryProfile,
   CLAUDE_3P_PREF_DOMAIN,
   gatewayProfile,
-  generateManagedProfile,
   getClaude3pDir,
   isConfigLibraryApplied,
   revertConfigLibraryProfile,
 } from "~/apps/claude-desktop/config"
+import { generateManagedProfile } from "~/apps/claude-desktop/managed-profile"
 import { getConfig, writeConfig } from "~/lib/config/config"
 import { setListeningPort } from "~/lib/start/proxy-port"
 
@@ -127,6 +127,69 @@ describe("getClaude3pDir — Windows (platform injected)", () => {
   it("still resolves the macOS path when platform is darwin", () => {
     const dir = getClaude3pDir(home, "darwin")
     expect(dir).toBe(
+      path.join(home, "Library", "Application Support", "Claude-3p"),
+    )
+  })
+})
+
+describe("getClaude3pDir — Linux (platform injected)", () => {
+  let savedXdg: string | undefined
+
+  beforeEach(() => {
+    savedXdg = process.env.XDG_CONFIG_HOME
+  })
+
+  afterEach(() => {
+    if (savedXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = savedXdg
+  })
+
+  it("targets ~/.config/Claude-3p when XDG_CONFIG_HOME is unset", () => {
+    delete process.env.XDG_CONFIG_HOME
+    expect(getClaude3pDir(home, "linux")).toBe(
+      path.join(home, ".config", "Claude-3p"),
+    )
+  })
+
+  it("follows an absolute XDG_CONFIG_HOME for the current user's home", () => {
+    const xdg = path.join(home, "xdg-config")
+    process.env.XDG_CONFIG_HOME = xdg
+    expect(getClaude3pDir(os.homedir(), "linux")).toBe(
+      path.join(xdg, "Claude-3p"),
+    )
+  })
+
+  it("ignores XDG_CONFIG_HOME for any other home (fixtures, other accounts)", () => {
+    process.env.XDG_CONFIG_HOME = path.join(home, "xdg-config")
+    expect(getClaude3pDir(home, "linux")).toBe(
+      path.join(home, ".config", "Claude-3p"),
+    )
+  })
+
+  it("ignores an empty or relative XDG_CONFIG_HOME, as the XDG spec says", () => {
+    for (const value of ["", "relative/config"]) {
+      process.env.XDG_CONFIG_HOME = value
+      expect(getClaude3pDir(os.homedir(), "linux")).toBe(
+        path.join(os.homedir(), ".config", "Claude-3p"),
+      )
+    }
+  })
+
+  it("leaves macOS and Windows untouched by XDG_CONFIG_HOME", () => {
+    process.env.XDG_CONFIG_HOME = path.join(home, "xdg-config")
+    expect(getClaude3pDir(home, "darwin")).toBe(
+      path.join(home, "Library", "Application Support", "Claude-3p"),
+    )
+    expect(getClaude3pDir(home, "win32")).toBe(
+      path.join(
+        process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"),
+        "Claude-3p",
+      ),
+    )
+  })
+
+  it("a platform other than linux, win32 or darwin keeps the macOS layout", () => {
+    expect(getClaude3pDir(home, "freebsd")).toBe(
       path.join(home, "Library", "Application Support", "Claude-3p"),
     )
   })
@@ -390,9 +453,7 @@ describe("ownership is never inferred loosely", () => {
   it("refuses to switch away from an applied profile it can't read", () => {
     seedUserProfile("broken", {})
     fs.writeFileSync(path.join(libDir(), "broken.json"), "{ not json")
-    expect(applyConfigLibraryProfile(home).conflict).toBe(
-      "foreign-gateway-profile",
-    )
+    expect(applyConfigLibraryProfile(home).conflict).toBe("unreadable-profile")
   })
 
   it("keeps _meta.json fields it doesn't know about", () => {

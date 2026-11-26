@@ -10,6 +10,7 @@
 
 import type { PluginGateway } from "@stuffbucket/maximal-plugin-sdk/gateway"
 
+import { initializeFigjamRelayKey } from "@stuffbucket/maximal-plugin-figjam"
 import consola from "consola"
 import { serve } from "srvx"
 
@@ -18,8 +19,6 @@ import { runAppBootHooks } from "~/apps/registry"
 import { type AccountType } from "~/lib/auth/auth-types"
 import { refreshAllowanceAtStartup } from "~/lib/budget/runtime"
 import { mergeConfigWithDefaults } from "~/lib/config/config"
-import { figjamRelay } from "~/lib/figjam/relay"
-import { initializeFigjamRelayKey } from "~/lib/figjam/relay-key"
 import { initProxyFromEnv } from "~/lib/http/proxy"
 import { initOpencodeVersion } from "~/lib/platform/opencode"
 import { ensurePaths } from "~/lib/platform/paths"
@@ -70,8 +69,10 @@ export interface RunServerOptions {
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
-  // Replace any inherited value before the routes are imported or plugin child
-  // processes spawn. The staged FigJam panel is the only consumer.
+  // One FigJam relay key for this Maximal process, replacing any inherited
+  // value, set before plugin generations spawn so every generation (each
+  // inventory or settings reload) inherits the same key and the Figma plugin
+  // already written keeps connecting.
   initializeFigjamRelayKey()
 
   // Work around unjs/consola#357 until a release includes PR #359.
@@ -176,8 +177,6 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     port: options.port,
     bun: {
       idleTimeout: 0,
-      // The FigJam panel's socket (/figjam/plugin), relayed to the bridge.
-      websocket: figjamRelay,
     },
   })
   await httpServer.ready()

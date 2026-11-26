@@ -39,7 +39,7 @@ beforeAll(async () => {
       events.push(event)
     },
   })
-  ws = new WebSocket(`ws://127.0.0.1:${handle.port}/plugin`)
+  ws = new WebSocket(`ws://127.0.0.1:${handle.port}/plugin`, [handle.relayKey])
   ws.addEventListener("open", () => {
     ws.send(
       JSON.stringify({

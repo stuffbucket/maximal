@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { t } from "../../i18n";
+import { openBrowserAuth } from "../../proxy/browser-auth";
 import type { Problem } from "../problems";
 import { type RestartOutcome, restartMaximal } from "../restart";
 
@@ -43,6 +45,12 @@ export function ProblemCallout({ problem, onRetry, onRestarted }: ProblemCallout
     action = (
       <Button size="sm" disabled={restarting} onClick={() => void restart()}>
         {restarting ? "Restarting…" : "Restart Maximal"}
+      </Button>
+    );
+  } else if (problem.remedy === "connect-browser") {
+    action = (
+      <Button size="sm" onClick={openBrowserAuth}>
+        {t("browser-auth-connect")}
       </Button>
     );
   } else if (problem.remedy === "retry" && onRetry) {

@@ -76,7 +76,6 @@ describe("renderFormula", () => {
     expect(out).toMatch(/^\s*def install$/m)
     expect(out).toContain('bin.install "maximal"')
     expect(out).toContain('libexec.install "plugin-builtins"')
-    expect(out).not.toContain("maximal-mcp-broker")
     expect(out).toMatch(/^\s*service do$/m)
     expect(out).toMatch(/^\s*test do$/m)
     expect(out).toMatch(/^end$/m)

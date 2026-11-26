@@ -18,5 +18,8 @@
     "start": "bun src/bridge.ts",
     "test": "bun test test",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stuffbucket/maximal-figjam-plugin": "workspace:*"
   }
 }

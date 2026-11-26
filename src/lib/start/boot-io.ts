@@ -3,7 +3,7 @@
  *
  * The boot logger writes to `~/.local/share/maximal/logs/startup-<date>.log`
  * via the same handler-logger machinery as `/v1/messages`. The first write
- * creates the logs directory so "Reveal logs in Finder" lands somewhere
+ * creates the logs directory so "Open Logs" lands somewhere
  * even on first boot, and the per-restart record gives operators an audit
  * trail stdout alone can't answer.
  *

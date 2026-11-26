@@ -6,6 +6,8 @@ import { type Problem, describeProblem, withRetry } from "../../problems";
 import type { AppEntry, AppId } from "../../../proxy/client";
 import { humanize } from "../api-clients/humanize";
 
+import { toggleApplied } from "./desktop-restart";
+
 /**
  * Data hook over `/settings/api/apps`. Owns the list of integrations,
  * loading + error state, and the two mutation verbs the Apps screen needs.
@@ -20,10 +22,15 @@ import { humanize } from "../api-clients/humanize";
 export interface MutationResult {
   ok: boolean;
   error?: string;
+  /** The server applied the requested state. A refused enable still comes
+   *  back `ok` (the fresh entry carries the conflict) but is not applied. */
+  applied?: boolean;
 }
 
 export interface ToggleAppOptions {
   overrideOtherMaximal?: boolean;
+  /** Claude Desktop only: the explicit Take over from another gateway. */
+  overrideForeignGateway?: boolean;
 }
 
 interface UseApps {
@@ -152,6 +159,9 @@ export function useApps(): UseApps {
           ...(options?.overrideOtherMaximal
             ? { overrideOtherMaximal: true }
             : {}),
+          ...(options?.overrideForeignGateway && appId === "claude-desktop"
+            ? { overrideForeignGateway: true }
+            : {}),
         },
       });
       refreshGeneration.current += 1;
@@ -164,7 +174,10 @@ export function useApps(): UseApps {
       }
       setProblem(null);
       splice(result.data);
-      return { ok: true };
+      return {
+        ok: true,
+        applied: toggleApplied(result.data, enabled),
+      };
     },
     [splice],
   );

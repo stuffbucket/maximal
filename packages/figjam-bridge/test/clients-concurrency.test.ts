@@ -1,6 +1,7 @@
 import type { Subprocess } from "bun"
 
 import { describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import {
   mkdir,
   mkdtemp,
@@ -29,10 +30,17 @@ function freePort(): number {
   return port
 }
 
-async function waitForBridge(port: number): Promise<void> {
+/** Each standalone bridge's relay key, read from the panel it wrote. */
+const relayKeys = new Map<number, string>()
+
+async function waitForBridge(port: number, pluginDir: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
-      if ((await fetch(`http://127.0.0.1:${port}/status`)).ok) return
+      if (
+        (await fetch(`http://127.0.0.1:${port}/status`)).ok
+        && existsSync(path.join(pluginDir, "ui.html"))
+      )
+        return
     } catch {
       // It has not bound yet.
     }
@@ -42,6 +50,7 @@ async function waitForBridge(port: number): Promise<void> {
 }
 
 async function startBridge(dataDir: string, port: number): Promise<Subprocess> {
+  const pluginDir = path.join(dataDir, `plugin-${port}`)
   const bridge = Bun.spawn(
     [process.execPath, path.join(import.meta.dir, "..", "src", "bridge.ts")],
     {
@@ -49,17 +58,25 @@ async function startBridge(dataDir: string, port: number): Promise<Subprocess> {
         ...process.env,
         COPILOT_API_HOME: dataDir,
         FIGJAM_BRIDGE_PORT: String(port),
+        FIGJAM_PLUGIN_OUT: pluginDir,
       },
       stdout: "ignore",
       stderr: "ignore",
     },
   )
-  await waitForBridge(port)
+  await waitForBridge(port, pluginDir)
+  const html = await readFile(path.join(pluginDir, "ui.html"), "utf8")
+  const line = /^const PANEL_BUILD = (.*);$/m.exec(html)
+  if (!line) throw new Error("no PANEL_BUILD line in ui.html")
+  relayKeys.set(port, (JSON.parse(line[1]) as { relayKey: string }).relayKey)
   return bridge
 }
 
 function openPanel(port: number, name: string, token?: string) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/plugin`)
+  const key = relayKeys.get(port)
+  if (key === undefined)
+    throw new Error(`no relay key for the bridge on ${port}`)
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/plugin`, [key])
   const messages: Array<PanelMessage> = []
   const waiters = new Map<string, Array<(message: PanelMessage) => void>>()
   ws.addEventListener("open", () => {

@@ -7,6 +7,38 @@ const readRepoFile = (path: string): Promise<string> =>
 const readWorkflow = (name: string): Promise<string> =>
   readRepoFile(`.github/workflows/${name}`)
 
+interface TauriBundleConfig {
+  bundle?: { externalBin?: Array<unknown>; resources?: Array<unknown> }
+}
+
+interface TauriBuildOverride extends TauriBundleConfig {
+  build?: { beforeBuildCommand?: string }
+}
+
+/**
+ * The JSON a workflow passes to `tauri build --config`. Single-quoted shell
+ * arguments are literal; double-quoted ones (as release.yml writes them, with
+ * a ${VERSION} placeholder) escape their quotes.
+ */
+const tauriBuildOverride = (
+  workflow: string,
+  invocation: string,
+): TauriBuildOverride => {
+  const start = workflow.indexOf(invocation)
+  expect(start, invocation).toBeGreaterThan(-1)
+  const nextStep = workflow.indexOf("\n      - ", start)
+  const step = workflow.slice(start, nextStep === -1 ? undefined : nextStep)
+  const literal = /--config '([^']*)'/u.exec(step)?.[1]
+  const escaped = /--config "((?:[^"\\]|\\.)*)"/u.exec(step)?.[1]
+  if (literal === undefined && escaped === undefined) {
+    throw new Error(`no --config after "${invocation}"`)
+  }
+  const json = literal ?? (escaped ?? "").replaceAll(/\\(.)/gu, "$1")
+  return JSON.parse(
+    json.replaceAll("${VERSION}", "0.0.0"),
+  ) as TauriBuildOverride
+}
+
 const workflowJob = (workflow: string, name: string): string => {
   const start = workflow.indexOf(`\n  ${name}:`)
   expect(start).toBeGreaterThan(-1)
@@ -381,7 +413,7 @@ describe("release action supply chain", () => {
   })
 })
 
-describe("parked MCP broker distribution", () => {
+describe("retired MCP broker distribution", () => {
   test("raw release archives carry maximal and its sealed plugin generation", async () => {
     const workflow = await readWorkflow("release.yml")
 
@@ -402,7 +434,6 @@ describe("parked MCP broker distribution", () => {
       readRepoFile("build/homebrew/maximal.rb"),
     ])
 
-    expect(debSmoke).toContain("[ ! -e /usr/bin/maximal-mcp-broker ]")
     expect(debSmoke).not.toContain("USAGE")
     expect(debBuild).not.toContain("maximal-mcp-broker")
     expect(formula).not.toContain("maximal-mcp-broker")
@@ -480,12 +511,38 @@ describe("Linux Rust cache", () => {
     expect(saveStep).toContain("github.event_name == 'workflow_dispatch'")
   })
 
-  test("warms the release profile without fake external sidecars", async () => {
-    const workflow = await readWorkflow("linux-rust-cache.yml")
+  test("warms the release profile with the desktop package's Linux overrides, no fake sidecars", async () => {
+    const [cacheWorkflow, release, baseConf] = await Promise.all([
+      readWorkflow("linux-rust-cache.yml"),
+      readWorkflow("release.yml"),
+      readRepoFile("shell/src-tauri/tauri.conf.json"),
+    ])
 
-    expect(workflow).toContain("tauri build --no-bundle")
-    expect(workflow).toContain('"bundle":{"externalBin":[]}')
-    expect(workflow).not.toContain(": > src-tauri/binaries/")
+    expect(cacheWorkflow).toContain("tauri build --no-bundle")
+    expect(cacheWorkflow).not.toContain(": > src-tauri/binaries/")
+
+    // Compare parsed overrides, not text: the two lanes quote the JSON
+    // differently, and a drift in either list must fail here.
+    const cache = tauriBuildOverride(
+      cacheWorkflow,
+      "bun run tauri build --no-bundle",
+    )
+    const desktop = tauriBuildOverride(
+      release,
+      "bun run tauri build --bundles deb",
+    )
+    expect(cache.build).toEqual(desktop.build)
+    expect(cache.bundle).toEqual(desktop.bundle)
+    expect(cache.bundle).toEqual({ externalBin: [], resources: [] })
+
+    // Every list the base config populates must be cleared by the Linux
+    // override. A populated resource the override forgets is exactly the
+    // "resource path ... doesn't exist" failure on the cache lane.
+    const base = JSON.parse(baseConf) as TauriBundleConfig
+    for (const key of ["externalBin", "resources"] as const) {
+      expect(base.bundle?.[key], `base ${key}`).not.toEqual([])
+      expect(cache.bundle?.[key], `cache override ${key}`).toEqual([])
+    }
   })
 })
 

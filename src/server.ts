@@ -20,7 +20,6 @@ import { completionRoutes } from "./routes/chat-completions/route"
 import { debugRoutes } from "./routes/debug/route"
 import { decisionsRoutes } from "./routes/decisions/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
-import { figjamRoutes } from "./routes/figjam/route"
 import { imagesRoutes } from "./routes/images/route"
 import { internalRoutes } from "./routes/internal/route"
 import { messageRoutes } from "./routes/messages/route"
@@ -86,11 +85,7 @@ server.use(
     // /ui/* serves the settings + dashboard UI shells and their assets.
     // /settings/api/* are data endpoints — gated by requireAuthPrefixes.
     // /mcp/* (plugin MCP endpoints) applies these same rules in its own route.
-    // /figjam/* is the FigJam panel's discovery and socket; the handlers
-    // enforce loopback, browser Origin and the staged panel's per-process relay
-    // key themselves. The panel's own pairing token then authenticates it to
-    // the bridge.
-    allowUnauthenticatedPrefixes: ["/ui", "/mcp", "/figjam"],
+    allowUnauthenticatedPrefixes: ["/ui", "/mcp"],
     requireAuthPrefixes: ["/settings/api"],
     // The dashboard at /ui/dashboard fetches these endpoints from the
     // same machine. Trusting loopback lets us drop the client-side API
@@ -160,10 +155,6 @@ server.route("/ui", uiRoutes)
 server.route("/mcp", pluginMcpRoutes.app)
 // Close MCP sessions deterministically when the plugins stop.
 onPluginsStopping(() => pluginMcpRoutes.closeAll())
-// `/figjam/bridge.json` tells the FigJam panel whether its bridge is up;
-// `/figjam/plugin` relays the panel's WebSocket to it (lib/figjam/relay.ts, wired into the
-// listener in run-server.ts). Loopback only.
-server.route("/figjam", figjamRoutes)
 
 // Gate every upstream-touching route on the presence of a GitHub token.
 // When the sidecar boots without one, the HTTP server still listens (so

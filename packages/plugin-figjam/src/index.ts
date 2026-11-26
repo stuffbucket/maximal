@@ -22,12 +22,5 @@ export {
   type FigjamConfig,
 } from "./manifest"
 export { createFigjamPlugin } from "./plugin"
-export {
-  type FigjamProfile,
-  isVerbose,
-  pluginProfileId,
-  PRODUCTION_INSTANCE_ID,
-  type ProfileKind,
-  resolveProfile,
-} from "./profile"
-export { BRIDGE_PORT_FACT, IMPORT_INSTRUCTIONS } from "./status"
+export { FIGJAM_RELAY_KEY_ENV, initializeFigjamRelayKey } from "./relay-key"
+export { IMPORT_INSTRUCTIONS } from "./status"

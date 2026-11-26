@@ -3,6 +3,7 @@ import type {
   PluginAttention,
   PluginAttentionRequest,
   PluginStatus,
+  PluginStatusAction,
 } from "@stuffbucket/maximal-plugin-sdk"
 
 import { createHash } from "node:crypto"
@@ -15,9 +16,6 @@ export interface StartFailure {
   summary: string
   detail: string
 }
-
-/** The status fact that carries the port the bridge is bound to (read by the discovery route). */
-export const BRIDGE_PORT_FACT = "Port"
 
 /** Id of the action that builds (or rebuilds) the Figma plugin files. */
 export const SETUP_ACTION = "setup"
@@ -75,17 +73,35 @@ const nameList = (names: ReadonlyArray<string>): string =>
     "None"
   : names.map((name) => displayName(name)).join(", ")
 
-const pendingNames = (bridge: { pending: ReadonlyArray<PairPending> }) =>
-  bridge.pending.map((request) => request.name)
-
-/** A panel waiting to be let in, as the bridge describes it. */
-export interface PairPending {
+/**
+ * A panel waiting for approval and where it says it comes from: the board,
+ * its file key and the Figma user, as the panel reported them. Only a panel
+ * holding the bridge's relay key (the plugin Maximal wrote) gets this far,
+ * but the values are still what the panel says, so they identify a request
+ * rather than prove anything.
+ */
+export interface PendingPanel {
   name: string
-  /** The board the panel is open on, when it said. */
   board?: string | null
-  /** The Figma profile the panel runs as, when it said. */
+  fileKey?: string | null
   user?: string | null
 }
+
+/** `grumpy-lynx (board "Roadmap", file abc123, Figma user Ann)`. */
+export function describePending(panel: PendingPanel): string {
+  const where = [
+    panel.board ? `board "${displayName(panel.board)}"` : undefined,
+    panel.fileKey ? `file ${displayName(panel.fileKey)}` : undefined,
+    panel.user ? `Figma user ${displayName(panel.user)}` : undefined,
+  ].filter((part) => part !== undefined)
+  const name = displayName(panel.name)
+  return where.length === 0 ? name : `${name} (${where.join(", ")})`
+}
+
+const pendingList = (panels: ReadonlyArray<PendingPanel>): string =>
+  panels.length === 0 ?
+    "None"
+  : panels.map((panel) => describePending(panel)).join("; ")
 
 /** Everything the status shows, as the controller knows it. */
 export interface StatusInput {
@@ -97,7 +113,7 @@ export interface StatusInput {
         /** The port that was asked for; differs from `port` when it was taken. */
         preferredPort: number
         boards: ReadonlyArray<string>
-        pending: ReadonlyArray<PairPending>
+        pending: ReadonlyArray<PendingPanel>
       }
     | undefined
   building: boolean
@@ -106,8 +122,8 @@ export interface StatusInput {
   manifestPath: string
   /** The name Figma lists the development plugin under (profile-specific). */
   pluginName: string
-  /** Names of the panels whose Approve and Deny actions are registered. */
-  registered: ReadonlySet<string>
+  /** Approve and Deny for each waiting panel (the tray's items). */
+  pairActions: Array<PluginStatusAction>
 }
 
 function readySummary(boards: number, pending: number): string {
@@ -138,10 +154,11 @@ export function pairActionIds(name: string): {
 }
 
 /** The dialog that asks whether one waiting panel may drive its board. */
-function pairRequest(request: PairPending): PluginAttentionRequest {
+function pairRequest(request: PendingPanel): PluginAttentionRequest {
   const { approveId, denyId } = pairActionIds(request.name)
   const name = displayName(request.name)
   const board = request.board ? displayName(request.board) : undefined
+  const fileKey = request.fileKey ? displayName(request.fileKey) : undefined
   const user = request.user ? displayName(request.user) : undefined
   return {
     title: `Let the FigJam panel "${name}" connect?`,
@@ -152,6 +169,7 @@ function pairRequest(request: PairPending): PluginAttentionRequest {
     facts: [
       { label: "Panel", value: name },
       ...(board ? [{ label: "Board", value: board }] : []),
+      ...(fileKey ? [{ label: "File", value: fileKey }] : []),
       ...(user ? [{ label: "Figma profile", value: user }] : []),
     ],
     approve: { id: approveId, label: "Approve", kind: "primary" },
@@ -162,35 +180,26 @@ function pairRequest(request: PairPending): PluginAttentionRequest {
 /**
  * What the person is asked while panels wait, or `undefined` when none do.
  * `actions` are the tray's items (each names its panel); `requests` are the
- * questions Settings asks in a dialog.
+ * questions Settings asks in a dialog, one per panel whose actions exist.
  */
 function pairAttention(input: StatusInput): PluginAttention | undefined {
-  const waiting = (input.bridge?.pending ?? []).filter((request) =>
-    input.registered.has(request.name),
+  const pending = input.bridge?.pending ?? []
+  if (pending.length === 0 || input.pairActions.length === 0) return undefined
+  const actionIds = new Set(input.pairActions.map((action) => action.id))
+  const asked = pending.filter((panel) =>
+    actionIds.has(pairActionIds(panel.name).approveId),
   )
-  if (waiting.length === 0) return undefined
+  const [first] = pending
+  const board = first.board ? ` on board "${displayName(first.board)}"` : ""
   return {
     summary:
-      waiting.length === 1 ?
-        `A FigJam panel ("${displayName(waiting[0].name)}") wants to connect`
-      : `${waiting.length} FigJam panels want to connect`,
-    actions: waiting.flatMap((request) => {
-      const { approveId, denyId } = pairActionIds(request.name)
-      const name = displayName(request.name)
-      return [
-        {
-          id: approveId,
-          label: `Approve "${name}"`,
-          kind: "primary" as const,
-        },
-        {
-          id: denyId,
-          label: `Deny "${name}"`,
-          kind: "secondary" as const,
-        },
-      ]
-    }),
-    requests: waiting.map((request) => pairRequest(request)),
+      pending.length === 1 ?
+        `A FigJam panel ("${displayName(first.name)}")${board} wants to connect`
+      : `${pending.length} FigJam panels want to connect`,
+    actions: input.pairActions,
+    ...(asked.length === 0 ?
+      {}
+    : { requests: asked.map((panel) => pairRequest(panel)) }),
   }
 }
 
@@ -220,7 +229,7 @@ function composeBase(input: StatusInput): PluginStatus {
     }
   }
   const facts = [
-    { label: BRIDGE_PORT_FACT, value: String(bridge.port) },
+    { label: "Port", value: String(bridge.port) },
     ...(bridge.preferredPort === bridge.port ?
       []
     : [
@@ -230,7 +239,7 @@ function composeBase(input: StatusInput): PluginStatus {
         },
       ]),
     { label: "Connected boards", value: nameList(bridge.boards) },
-    { label: "Waiting for approval", value: nameList(pendingNames(bridge)) },
+    { label: "Waiting for approval", value: pendingList(bridge.pending) },
   ]
   if (input.building) {
     return {

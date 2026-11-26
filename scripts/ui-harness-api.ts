@@ -295,19 +295,23 @@ export function createMockBackend(scenario: ScenarioId): MockBackend {
         typeof payload.enabled !== "boolean"
         || (payload.overrideOtherMaximal !== undefined
           && typeof payload.overrideOtherMaximal !== "boolean")
+        || (payload.overrideForeignGateway !== undefined
+          && typeof payload.overrideForeignGateway !== "boolean")
       ) {
-        return json({ error: { message: "Expected { enabled: boolean, overrideOtherMaximal?: boolean }" } }, 400)
+        return json({ error: { message: "Expected { enabled: boolean, overrideOtherMaximal?: boolean, overrideForeignGateway?: boolean }" } }, 400)
       }
       if (payload.enabled && app.status === "not-installed") {
         return json({ error: { message: `No ${app.name} install detected. Install it first, then enable routing.` } }, 409)
       }
       if (payload.enabled && app.conflict) {
-        if (
-          app.conflict !== "other-maximal-config"
-          || payload.overrideOtherMaximal !== true
-        ) {
-          return json(app)
-        }
+        const transfer =
+          app.conflict === "other-maximal-config"
+          && payload.overrideOtherMaximal === true
+        const takeOver =
+          app.id === "claude-desktop"
+          && app.conflict === "foreign-gateway-profile"
+          && payload.overrideForeignGateway === true
+        if (!transfer && !takeOver) return json(app)
         app.conflict = null
       }
       app.enabled = payload.enabled

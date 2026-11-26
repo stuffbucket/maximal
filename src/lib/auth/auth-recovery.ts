@@ -85,7 +85,7 @@ export function __resetAuthRecoveryDepsForTests(): void {
  * active pointer is only committed to disk AFTER the mint succeeds, so a failed
  * candidate never becomes the boot default. Throws if the mint is rejected.
  */
-async function switchActiveAccountLive(
+export async function switchActiveAccountLive(
   rec: AccountRecord & { key: string },
 ): Promise<void> {
   setGithubToken(rec.token)
@@ -104,10 +104,7 @@ async function switchActiveAccountLive(
   try {
     await refreshModels()
   } catch (err) {
-    log.warn(
-      "Auto-recovery: model refresh failed after switch (continuing):",
-      err,
-    )
+    log.warn("Live account switch: model refresh failed (continuing):", err)
   }
 
   clearLastUpstreamRejection()

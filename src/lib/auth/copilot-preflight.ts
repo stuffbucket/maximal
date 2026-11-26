@@ -30,7 +30,7 @@ export async function preflightCopilotError(
   } catch (error) {
     const status = error instanceof HTTPError ? error.response.status : 0
     if (status === 401) {
-      return `GitHub rejected ${login}'s token — it may be expired or revoked. Run \`gh auth login\` and try again, or sign in with a code.`
+      return `GitHub rejected ${login}'s token. It was revoked or has expired. Sign in again with a code.`
     }
     if (status === 403 || status === 404) {
       return `${login} doesn't have access to GitHub Copilot. Pick another account, or sign in with a code.`

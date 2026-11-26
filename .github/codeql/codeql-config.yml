@@ -24,7 +24,6 @@ queries:
 # Every literal entry must exist (tests/codeql-languages.test.ts).
 paths-ignore:
   - tests
-  - parked
   - packages/storybook
   - "**/vendor"
   - "**/*.min.js"

@@ -31,9 +31,15 @@
  * feed (long-polls up to 25 s). POST /claims takes advisory locks on node ids
  * or an area; another agent's write that touches them gets 409.
  *
- * Loopback only, and paired. A panel pairs by approval: its first hello (no
- * token, or one the bridge doesn't know) becomes a pending request with a
- * 6-digit code shown in the panel and logged here; `bun run figjam -- approve`
+ * Loopback only, keyed, and paired. Each bridge has a relay key (32 random
+ * bytes, `BridgeHandle.relayKey`), held in memory only; the process hosting
+ * the bridge stamps it into the Figma plugin it writes, and the panel offers
+ * it as its WebSocket subprotocol. An upgrade to /plugin without that key is
+ * refused (403) before a socket exists, so a page that merely shares the
+ * plugin iframe's opaque `Origin: null` (a sandboxed frame, a data: URL) can't
+ * even ask to pair. Behind the key, a panel pairs by approval: its first hello
+ * (no token, or one the bridge doesn't know) becomes a pending request named
+ * after the panel instance; `bun run figjam -- approve`
  * (or POST /pair/approve) mints a per-client token that the panel keeps and
  * sends in later hellos. Only token hashes are stored, in
  * <data>/figjam/clients.json (mode 0600); `bun run figjam -- forget <clientId>`
@@ -79,6 +85,9 @@ let VERBOSE = false
 let DATA_DIR = ""
 let EXPORT_DIR = ""
 let BRIDGE_STARTED_AT = 0
+// This bridge's relay key, as bytes for the constant-time check. Memory only:
+// never logged, written, or returned by the HTTP API or status().
+let RELAY_KEY = Buffer.alloc(0)
 let emit: (event: BridgeEvent) => void = () => {}
 const MAX_FETCH_BYTES = 20 * 1024 * 1024
 
@@ -267,6 +276,34 @@ function bearer(request: Request): string | null {
     request.headers.get("authorization") ?? "",
   )
   return m ? m[1] : null
+}
+
+/** A relay key: 32 random bytes as base64url (a valid subprotocol token). */
+const RELAY_KEY_PATTERN = /^[\w-]{43}$/
+// A browser offers a handful of subprotocols at most; don't scan an unbounded list.
+const MAX_OFFERED_PROTOCOLS = 8
+
+/** A fresh relay key for a bridge (`BridgeOptions.relayKey`). */
+export function createRelayKey(): string {
+  return randomBytes(32).toString("base64url")
+}
+
+// The subprotocol that is this bridge's relay key, if the upgrade offers it.
+// Constant-time per candidate, every candidate checked. Never log a candidate.
+function offeredRelayKey(request: Request): string | undefined {
+  const offered = (request.headers.get("sec-websocket-protocol") ?? "")
+    .split(",", MAX_OFFERED_PROTOCOLS)
+    .map((value) => value.trim())
+  let found: string | undefined
+  for (const candidate of offered) {
+    const bytes = Buffer.from(candidate)
+    const same =
+      bytes.length === RELAY_KEY.length
+      && RELAY_KEY.length > 0
+      && timingSafeEqual(bytes, RELAY_KEY)
+    if (same && !found) found = candidate
+  }
+  return found
 }
 
 function label(b: Board): string {
@@ -1451,15 +1488,29 @@ function listen(hostname: string, port: number) {
       const origin = request.headers.get("origin")
 
       if (url.pathname === "/plugin") {
-        // The plugin iframe's origin is `null`; the hello's pairing token is
-        // what actually authenticates the socket.
+        // The plugin iframe's origin is `null`, which any sandboxed frame can
+        // also send, so the origin only rules out real web pages. The relay
+        // key proves the socket comes from the plugin this bridge's host
+        // wrote; the hello's per-panel token (or an approval) comes after.
         if (origin !== null && origin !== "null") {
           log(`refused plugin socket from origin ${origin}`)
           return new Response("forbidden", { status: 403 })
         }
-        return server.upgrade(request, { data: {} }) ? undefined : (
-            new Response("upgrade failed", { status: 400 })
-          )
+        const relayKey = offeredRelayKey(request)
+        if (relayKey === undefined) {
+          log("refused plugin socket without this bridge's relay key")
+          return new Response("forbidden", { status: 403 })
+        }
+        // Selecting the offered key is what lets a browser complete the
+        // handshake; it only echoes what the panel itself sent.
+        return (
+            server.upgrade(request, {
+              data: {},
+              headers: { "Sec-WebSocket-Protocol": relayKey },
+            })
+          ) ?
+            undefined
+          : new Response("upgrade failed", { status: 400 })
       }
 
       // The HTTP API is for CLIs and agents only: no browser, and the token.
@@ -1953,6 +2004,12 @@ export interface BridgeHandle {
   readonly port: number
   /** The port that was asked for; differs from `port` when it was taken. */
   readonly preferredPort: number
+  /**
+   * The key a panel must offer as its WebSocket subprotocol to open /plugin.
+   * For the bridge's host to stamp into the Figma plugin it writes; never
+   * log it, show it, or send it anywhere else.
+   */
+  readonly relayKey: string
   /** Closes every socket and the listener, and frees the port. Idempotent. */
   stop: () => Promise<void>
   status: () => BridgeStatus
@@ -1979,6 +2036,12 @@ export interface BridgeOptions {
   hostname?: string
   /** Default $COPILOT_API_HOME, else the platform data dir. */
   dataDir?: string
+  /**
+   * The relay key panels must present (`createRelayKey()`). Default: a fresh
+   * one for this start. A host that restarts the bridge passes the same key
+   * so panels it already wrote keep reconnecting.
+   */
+  relayKey?: string
   onEvent?: (event: BridgeEvent) => void
 }
 
@@ -2034,6 +2097,9 @@ let running = false
 export async function startBridge(
   opts: BridgeOptions = {},
 ): Promise<BridgeHandle> {
+  const relayKey = opts.relayKey ?? createRelayKey()
+  if (!RELAY_KEY_PATTERN.test(relayKey))
+    throw new Error("A FigJam relay key must be 32 bytes of base64url text.")
   if (running) throw new Error("A FigJam bridge is already running here.")
   running = true
   let server: Server<SocketData>
@@ -2044,6 +2110,7 @@ export async function startBridge(
   PREFERRED_PORT = preferredPort
   try {
     VERBOSE = opts.verbose ?? process.env.FIGJAM_BRIDGE_DEBUG === "1"
+    RELAY_KEY = Buffer.from(relayKey)
     DATA_DIR = opts.dataDir ?? defaultDataDir()
     EXPORT_DIR = path.join(DATA_DIR, "figjam", "exports")
     await mkdir(path.join(DATA_DIR, "figjam"), { recursive: true })
@@ -2063,6 +2130,7 @@ export async function startBridge(
     if (chatsOpen) chats.close()
     // eslint-disable-next-line require-atomic-updates -- the flag only guards against a second start; a failed start releases it.
     running = false
+    RELAY_KEY = Buffer.alloc(0)
     throw error
   }
   PORT = server.port ?? 0
@@ -2077,10 +2145,12 @@ export async function startBridge(
   const handle: BridgeHandle = {
     port: PORT,
     preferredPort,
+    relayKey,
     async stop() {
       if (stopped) return
       stopped = true
       await server.stop(true)
+      RELAY_KEY = Buffer.alloc(0)
       for (const r of pairRequests.values()) clearTimeout(r.timer)
       for (const entry of pending.values()) clearTimeout(entry.timer)
       for (const st of states.values()) for (const wake of st.waiters) wake()

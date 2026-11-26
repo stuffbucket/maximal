@@ -30,7 +30,7 @@ switch (action) {
   case "check":
     ensureReady()
     prepareUi()
-    buildWindowsSidecars()
+    buildWindowsSidecar()
     runXwin("check")
     break
   case "build":
@@ -51,7 +51,6 @@ function setup(): void {
   run("mise", ["trust", join(TOOL_DIR, "mise.toml")])
   run("mise", ["-C", TOOL_DIR, "install"])
   runMise(["rustup", "target", "add", TARGET])
-  run(process.execPath, ["run", "mcp-broker:install"], undefined, REPO)
 
   mkdirSync(windowsCacheDir(), { recursive: true })
   console.error(
@@ -98,7 +97,7 @@ function runXwin(command: "build" | "check"): void {
   )
 }
 
-function buildWindowsSidecars(): void {
+function buildWindowsSidecar(): void {
   run(
     process.execPath,
     ["run", "scripts/build-sidecar.ts", "--force", `--target-triple=${TARGET}`],
@@ -109,7 +108,7 @@ function buildWindowsSidecars(): void {
 
 function buildVmPayload(): void {
   prepareUi()
-  buildWindowsSidecars()
+  buildWindowsSidecar()
   runXwin("build")
 
   const shellExe = join(
@@ -118,8 +117,7 @@ function buildVmPayload(): void {
   )
   const binaries = join(REPO, "shell/src-tauri/binaries")
   const proxyExe = join(binaries, `maximal-${TARGET}.exe`)
-  const brokerExe = join(binaries, `maximal-mcp-broker-${TARGET}.exe`)
-  for (const artifact of [shellExe, proxyExe, brokerExe]) {
+  for (const artifact of [shellExe, proxyExe]) {
     if (!existsSync(artifact))
       fail(`expected build artifact is missing: ${artifact}`)
   }
@@ -128,13 +126,12 @@ function buildVmPayload(): void {
   mkdirSync(OUTPUT_DIR, { recursive: true })
   copyFileSync(shellExe, join(OUTPUT_DIR, "maximal-shell.exe"))
   copyFileSync(proxyExe, join(OUTPUT_DIR, "maximal.exe"))
-  copyFileSync(brokerExe, join(OUTPUT_DIR, "maximal-mcp-broker.exe"))
   writeFileSync(
     join(OUTPUT_DIR, "README.txt"),
     [
       "Maximal Windows development payload",
       "",
-      "Keep all three .exe files together and run maximal-shell.exe.",
+      "Keep both .exe files together and run maximal-shell.exe.",
       "This is an installer-free developer build for local VM testing only.",
       "",
     ].join("\r\n"),

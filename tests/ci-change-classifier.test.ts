@@ -204,11 +204,6 @@ describe("CI workflow integration", () => {
     expect(concurrency).toContain("&& inputs.expected_sha")
     expect(concurrency).not.toContain("|| github.sha")
   })
-
-  test("does not install or build the parked MCP broker", async () => {
-    const source = await workflow
-    expect(source).not.toContain("broker")
-  })
 })
 
 describe("CodeQL workflow integration", () => {

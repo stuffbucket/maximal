@@ -8,7 +8,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { createFigjamPlugin } from "../src/index"
+import { createFigjamPlugin, FIGMA_PLUGIN_DIR } from "../src/index"
 import { pairActionIds, toPluginActivity } from "../src/status"
 
 const NOW = 1_800_000_000_000
@@ -104,7 +104,15 @@ describe("FigJam plugin: tool activity", () => {
     await waitFor(() => loaded.status()?.code === "ready")
     expect(loaded.status()?.activity).toBeUndefined()
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/plugin`)
+    // The panel Maximal wrote carries the key the bridge demands.
+    const html = await readFile(
+      path.join(root, "plugins", "figjam", FIGMA_PLUGIN_DIR, "ui.html"),
+      "utf8",
+    )
+    const { relayKey } = JSON.parse(
+      /^const PANEL_BUILD = (.*);$/m.exec(html)?.[1] ?? "{}",
+    ) as { relayKey: string }
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/plugin`, [relayKey])
     cleanups.push(() => ws.close())
     ws.addEventListener("open", () => {
       ws.send(

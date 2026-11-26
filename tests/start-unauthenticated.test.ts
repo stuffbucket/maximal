@@ -143,7 +143,6 @@ describe("start in unauthenticated mode", () => {
       expect(body.subsystems.copilot.ready).toBe(false)
       expect(typeof body.subsystems.copilot.account_type).toBe("string")
       expect(body.subsystems.models.cached).toBeGreaterThanOrEqual(0)
-      expect("mcp_broker" in body.subsystems).toBe(false)
     }
   })
 

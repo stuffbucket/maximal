@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import type { AppEntry } from "../../../../shell/src/proxy/client";
 import { AppsPanel } from "../../../../shell/src/ui/features/apps/AppsPanel";
@@ -143,6 +143,175 @@ export const OtherMaximalConnectDialog: Story = {
   },
 };
 
+// ---- Claude Desktop restart dialog (after an applied change) ---------------
+
+const claudeDesktop: AppEntry = {
+  ...claudeCode,
+  id: "claude-desktop",
+  name: "Claude Desktop",
+  installs: [
+    {
+      path: "/Applications/Claude.app",
+      version: null,
+      source: "unknown",
+      kind: "desktop",
+    },
+  ],
+};
+
+const RESTART_TITLE = "Restart Claude";
+const restartDialog = (): HTMLElement =>
+  within(document.body).getByRole("dialog", { name: RESTART_TITLE });
+
+/** Flip the row's switch; the server applies it, so the dialog opens. */
+const toggleDesktop = (enabledBefore: boolean): Story => ({
+  args: {
+    app: { ...claudeDesktop, enabled: enabledBefore },
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole("checkbox"));
+    await waitFor(() => expect(restartDialog()).toBeVisible());
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+});
+
+/** After enabling: restart guidance plus the sign-in recovery note. */
+export const DesktopRestartAfterEnable = toggleDesktop(false);
+/** After disabling: the same guidance, no sign-in note. */
+export const DesktopRestartAfterDisable = toggleDesktop(true);
+
+/** Connecting over another Maximal profile's setting is an enable too. */
+export const DesktopRestartAfterConnect: Story = {
+  args: {
+    app: { ...claudeDesktop, enabled: false, conflict: "other-maximal-config" },
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: /connect/i }),
+    );
+    const connect = await within(document.body).findByRole("dialog");
+    await userEvent.click(
+      within(connect).getByRole("button", { name: /connect/i }),
+    );
+    await waitFor(() => expect(restartDialog()).toBeVisible());
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+};
+
+const takeOverApp: AppEntry = {
+  ...claudeDesktop,
+  enabled: false,
+  conflict: "foreign-gateway-profile",
+};
+
+const openTakeOver = async (canvasElement: HTMLElement): Promise<HTMLElement> => {
+  await userEvent.click(
+    within(canvasElement).getByRole("button", { name: /connect/i }),
+  );
+  return within(document.body).findByRole("dialog", { name: "Connect Claude" });
+};
+
+/** Another gateway is applied: Maximal left it alone. Close is the default
+ *  (right, first focus); Take over is the explicit alternative on the left. */
+export const DesktopTakeOverDialog: Story = {
+  args: {
+    app: takeOverApp,
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ args, canvasElement }) => {
+    const dialog = await openTakeOver(canvasElement);
+    await expect(
+      within(dialog)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Take over", "Close"]);
+    await expect(within(dialog).getByRole("button", { name: "Close" })).toHaveFocus();
+    await expect(dialog).not.toHaveTextContent("Cowork");
+    await expect(args.onToggle).not.toHaveBeenCalled();
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+};
+
+/** Take over is an enable that switches away from the other gateway. */
+export const DesktopTakeOverApplied: Story = {
+  args: {
+    app: takeOverApp,
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ args, canvasElement }) => {
+    const dialog = await openTakeOver(canvasElement);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Take over" }),
+    );
+    await waitFor(() => expect(restartDialog()).toBeVisible());
+    await expect(args.onToggle).toHaveBeenCalledWith(true, {
+      overrideForeignGateway: true,
+    });
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+};
+
+/** A refused Take over keeps the dialog open and says nothing changed. */
+export const DesktopTakeOverRefused: Story = {
+  args: {
+    app: takeOverApp,
+    onToggle: fn(async () => ({ ok: true, applied: false })),
+  },
+  play: async ({ args, canvasElement }) => {
+    const dialog = await openTakeOver(canvasElement);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Take over" }),
+    );
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent("Nothing was changed."),
+    );
+    await expect(dialog).toBeVisible();
+    await expect(args.onToggle).toHaveBeenCalledWith(true, {
+      overrideForeignGateway: true,
+    });
+  },
+  parameters: { docs: { story: { inline: false, height: "420px" } } },
+};
+
+/** A configuration Maximal can't read is never offered a Take over. */
+export const DesktopUnreadableProfile: Story = {
+  args: {
+    app: { ...claudeDesktop, enabled: false, conflict: "unreadable-profile" },
+    onToggle: fn(async () => ({ ok: true, applied: true })),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: /connect/i }),
+    );
+    const dialog = await within(document.body).findByRole("dialog", {
+      name: "Connect Claude",
+    });
+    await expect(
+      within(dialog)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Close"]);
+  },
+  parameters: { docs: { story: { inline: false, height: "360px" } } },
+};
+
+/** A refused enable says nothing about restarting: the row offers Connect. */
+export const DesktopEnableRefused: Story = {
+  args: {
+    app: { ...claudeDesktop, enabled: false },
+    onToggle: fn(async () => ({ ok: true, applied: false })),
+  },
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole("checkbox"));
+    await waitFor(() => expect(args.onToggle).toHaveBeenCalledWith(true));
+    await expect(
+      within(document.body).queryByRole("dialog", { name: RESTART_TITLE }),
+    ).toBeNull();
+  },
+};
+
 /** ChatGPT is represented without implying that routing works yet. */
 export const ChatGptComingSoon: Story = {
   args: { app: comingSoon("chatgpt", "ChatGPT") },
@@ -174,7 +343,7 @@ export const PanelLoaded: Story = {
     ).toEqual([
       "ChatGPT",
       "Claude Code",
-      "Claude Desktop (Cowork, Code)",
+      "Claude",
       "Codex CLI",
       "Copilot CLI",
       "Pi",

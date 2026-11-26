@@ -7,7 +7,7 @@ import path from "node:path"
 
 import type { BridgeEvent, BridgeHandle } from "../src/server"
 
-import { startBridge } from "../src/server"
+import { createRelayKey, startBridge } from "../src/server"
 
 let dir: string
 let handle: BridgeHandle
@@ -22,31 +22,70 @@ async function failure(promise: Promise<unknown>): Promise<Error | undefined> {
   return undefined
 }
 
-function openPanel(port: number, name: string) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/plugin`)
-  const seen: Array<string> = []
-  const waiters: Array<{ type: string; resolve: () => void }> = []
+interface PanelOptions {
+  /** Subprotocols to offer; default: the bridge's relay key, as the panel does. */
+  protocols?: Array<string>
+  /** Default `null`: the Figma plugin iframe's opaque origin. */
+  origin?: string
+  token?: string
+  boardId?: string
+}
+
+interface Message {
+  type: string
+  token?: string
+  clientId?: string
+}
+
+function openPanel(port: number, name: string, options: PanelOptions = {}) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/plugin`, {
+    protocols: options.protocols ?? [handle.relayKey],
+    headers: { origin: options.origin ?? "null" },
+  })
+  const seen: Array<Message> = []
+  const waiters: Array<{ type: string; resolve: (m: Message) => void }> = []
   ws.addEventListener("open", () => {
     ws.send(
       JSON.stringify({
         type: "hello",
         session: name,
-        board: { name: "Lib board", boardId: "lib1", fileKey: "klib1" },
+        board: {
+          name: "Lib board",
+          boardId: options.boardId ?? "lib1",
+          fileKey: "klib1",
+        },
         plugin: { version: "test" },
         tools: [],
+        ...(options.token === undefined ? {} : { token: options.token }),
       }),
     )
   })
   ws.addEventListener("message", (event) => {
-    const type = (JSON.parse(String(event.data)) as { type: string }).type
-    seen.push(type)
-    for (const w of waiters.filter((x) => x.type === type)) w.resolve()
+    const message = JSON.parse(String(event.data)) as Message
+    seen.push(message)
+    for (const w of waiters.filter((x) => x.type === message.type))
+      w.resolve(message)
   })
-  const next = (type: string): Promise<void> =>
-    seen.includes(type) ?
-      Promise.resolve()
-    : new Promise((resolve) => waiters.push({ type, resolve }))
-  return { ws, next }
+  // Settles when the socket opens (true) or fails/closes first (false).
+  const opened = new Promise<boolean>((resolve) => {
+    ws.addEventListener("open", () => resolve(true))
+    ws.addEventListener("error", () => resolve(false))
+    ws.addEventListener("close", () => resolve(false))
+  })
+  const closed = new Promise<number>((resolve) => {
+    ws.addEventListener("close", (event) => resolve(event.code))
+  })
+  const next = (type: string): Promise<Message> => {
+    const found = seen.find((m) => m.type === type)
+    return found ?
+        Promise.resolve(found)
+      : new Promise((resolve) => waiters.push({ type, resolve }))
+  }
+  return { ws, seen, opened, closed, next }
+}
+
+async function waitUntil(check: () => boolean): Promise<void> {
+  for (let i = 0; i < 100 && !check(); i++) await Bun.sleep(20)
 }
 
 beforeAll(async () => {
@@ -106,8 +145,7 @@ describe("startBridge", () => {
     expect(status.clients).toHaveLength(1)
 
     panel.ws.close()
-    for (let i = 0; i < 100 && handle.status().boards.length > 0; i++)
-      await Bun.sleep(20)
+    await waitUntil(() => handle.status().boards.length === 0)
     expect(events).toContainEqual({
       type: "board-disconnected",
       name: "lib-lynx",
@@ -134,16 +172,128 @@ describe("startBridge", () => {
     expect(await handle.forget(client.id)).toBe(false)
     expect(handle.status().clients).toEqual([])
   })
+})
 
-  test("stop frees the port", async () => {
-    const { port } = handle
+describe("relay key", () => {
+  test("each bridge gets a fresh 32-byte key, kept out of status", () => {
+    expect(handle.relayKey).toMatch(/^[\w-]{43}$/)
+    expect(createRelayKey()).not.toBe(handle.relayKey)
+    expect(JSON.stringify(handle.status())).not.toContain(handle.relayKey)
+  })
+
+  test("the HTTP API never answers with the key", async () => {
+    const res = await fetch(`http://127.0.0.1:${handle.port}/status`)
+    expect(await res.text()).not.toContain(handle.relayKey)
+  })
+
+  test("a forged Origin: null socket can't open, so no request is pending", async () => {
+    const before = events.length
+    const forged = [
+      openPanel(handle.port, "forged-none", { protocols: [] }),
+      openPanel(handle.port, "forged-wrong", {
+        protocols: [createRelayKey()],
+      }),
+      openPanel(handle.port, "forged-short", {
+        protocols: [handle.relayKey.slice(0, 42)],
+      }),
+      openPanel(handle.port, "forged-padded", {
+        protocols: [`${handle.relayKey}x`],
+      }),
+    ]
+    for (const panel of forged) expect(await panel.opened).toBe(false)
+    await Bun.sleep(50)
+    expect(handle.status().pending).toEqual([])
+    expect(events.slice(before)).toEqual([])
+    for (const panel of forged) expect(panel.seen).toEqual([])
+  })
+
+  test("a web page's origin is refused even with the key", async () => {
+    const page = openPanel(handle.port, "page-lynx", {
+      origin: "https://example.com",
+    })
+    expect(await page.opened).toBe(false)
+    expect(handle.status().pending).toEqual([])
+  })
+
+  test("the key may sit among other offered subprotocols, and is the one selected", async () => {
+    const panel = openPanel(handle.port, "multi-lynx", {
+      protocols: ["chat", handle.relayKey],
+      boardId: "multi",
+    })
+    expect(await panel.opened).toBe(true)
+    expect(panel.ws.protocol).toBe(handle.relayKey)
+    await panel.next("pair-pending")
+    expect((await handle.deny("multi-lynx")).ok).toBe(true)
+  })
+
+  test("the keyed panel pairs, then reconnects with its token without asking again", async () => {
+    const first = openPanel(handle.port, "keyed-lynx", { boardId: "keyed" })
+    await first.next("pair-pending")
+    expect((await handle.approve("keyed-lynx")).ok).toBe(true)
+    const { token, clientId } = await first.next("paired")
+    expect(token).toMatch(/^[\w-]{43}$/)
+    first.ws.close()
+    await waitUntil(() => handle.status().boards.length === 0)
+
+    const before = events.length
+    const again = openPanel(handle.port, "keyed-lynx", {
+      boardId: "keyed",
+      token,
+    })
+    const paired = await again.next("paired")
+    expect(paired.clientId).toBe(clientId)
+    expect(paired.token).toBeUndefined()
+    expect(again.seen.map((m) => m.type)).not.toContain("pair-pending")
+    expect(events.slice(before).map((e) => e.type)).toEqual(["board-connected"])
+    again.ws.close()
+    await waitUntil(() => handle.status().boards.length === 0)
+
+    // The per-panel token doesn't stand in for the relay key.
+    const tokenOnly = openPanel(handle.port, "keyed-lynx", {
+      boardId: "keyed",
+      token,
+      protocols: [],
+    })
+    expect(await tokenOnly.opened).toBe(false)
+    expect(handle.status().boards).toEqual([])
+  })
+
+  test("a malformed key is refused at start", async () => {
+    const error = await failure(
+      startBridge({ port: 0, dataDir: dir, relayKey: "short" }),
+    )
+    expect(error?.message).toContain("relay key")
+  })
+
+  test("a restart keeps a key it is given, and a new key shuts the old one out", async () => {
+    const { port, relayKey } = handle
     await handle.stop()
     expect(
       await failure(fetch(`http://127.0.0.1:${port}/status`)),
     ).toBeDefined()
-    const again = await startBridge({ port, dataDir: dir })
-    expect(again.port).toBe(port)
-    await again.stop()
+
+    const same = await startBridge({ port, dataDir: dir, relayKey })
+    try {
+      expect(same.port).toBe(port)
+      const panel = openPanel(port, "same-key", {
+        protocols: [relayKey],
+        boardId: "same",
+      })
+      await panel.next("pair-pending")
+      panel.ws.close()
+    } finally {
+      await same.stop()
+    }
+
+    const fresh = await startBridge({ port, dataDir: dir })
+    try {
+      expect(fresh.relayKey).not.toBe(relayKey)
+      const stale = openPanel(port, "stale-key", { protocols: [relayKey] })
+      expect(await stale.opened).toBe(false)
+      expect(fresh.status().pending).toEqual([])
+    } finally {
+      await fresh.stop()
+    }
     // afterAll calls stop() on the first handle, which is a no-op by now.
   })
 })
