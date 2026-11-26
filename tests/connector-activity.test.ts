@@ -16,9 +16,8 @@ import path from "node:path"
 import { setPluginGateway } from "~/lib/plugins/gateway"
 import { closeUsageStore } from "~/lib/token-usage"
 import {
-  __resetConnectorActivityForTests,
-  beginConnectorCall,
-  connectorActivity,
+  ConnectorActivityLedger,
+  connectorActivityFor,
   LINGER_MS,
   MAX_CALL_MS,
 } from "~/lib/token-usage/connector-activity"
@@ -38,19 +37,21 @@ import {
 
 const NOW = 1_800_000_000_000
 
-beforeEach(() => {
-  __resetConnectorActivityForTests()
-})
-
 describe("connectorActivity", () => {
+  // A ledger per test: nothing is shared, so nothing needs resetting.
+  let ledger: ConnectorActivityLedger
+  beforeEach(() => {
+    ledger = new ConnectorActivityLedger()
+  })
+
   test("lists nothing before any call", () => {
-    expect(connectorActivity({ nowMs: NOW })).toEqual([])
+    expect(ledger.view({ nowMs: NOW })).toEqual([])
   })
 
   test("a running call is listed with its count, start, tool and a hard deadline", () => {
-    beginConnectorCall("workiq", "search_mail", NOW - 4000)
-    beginConnectorCall("workiq", "search_files", NOW - 1000)
-    expect(connectorActivity({ nowMs: NOW })).toEqual([
+    ledger.begin("workiq", "search_mail", NOW - 4000)
+    ledger.begin("workiq", "search_files", NOW - 1000)
+    expect(ledger.view({ nowMs: NOW })).toEqual([
       {
         connector: "workiq",
         state: "running",
@@ -64,9 +65,9 @@ describe("connectorActivity", () => {
   })
 
   test("a finished call lingers, then is gone", () => {
-    const end = beginConnectorCall("workiq", "search_mail", Date.now() - 2000)
+    const end = ledger.begin("workiq", "search_mail", Date.now() - 2000)
     end()
-    const [view] = connectorActivity({ nowMs: Date.now() })
+    const [view] = ledger.view({ nowMs: Date.now() })
     expect(view).toMatchObject({
       connector: "workiq",
       state: "recent",
@@ -76,68 +77,67 @@ describe("connectorActivity", () => {
     })
     expect(view.expires_at_ms).toBe(view.last_activity_at_ms + LINGER_MS)
     expect(
-      connectorActivity({ nowMs: view.last_activity_at_ms + LINGER_MS }),
+      ledger.view({ nowMs: view.last_activity_at_ms + LINGER_MS }),
     ).toEqual([])
   })
 
   test("ending a call twice counts once", () => {
-    const first = beginConnectorCall("workiq", "a", NOW - 1000)
-    beginConnectorCall("workiq", "b", NOW - 500)
+    const first = ledger.begin("workiq", "a", NOW - 1000)
+    ledger.begin("workiq", "b", NOW - 500)
     first()
     first()
-    expect(connectorActivity({ nowMs: NOW })[0]).toMatchObject({
+    expect(ledger.view({ nowMs: NOW })[0]).toMatchObject({
       state: "running",
       active_calls: 1,
     })
   })
 
   test("a call refused before it ran leaves no trace", () => {
-    const earlier = beginConnectorCall("workiq", "kept", NOW - 20_000)
+    const earlier = ledger.begin("workiq", "kept", NOW - 20_000)
     earlier()
-    const refused = beginConnectorCall("workiq", "blocked", NOW)
+    const refused = ledger.begin("workiq", "blocked", NOW)
     refused(false)
-    expect(connectorActivity({ nowMs: NOW })).toEqual([])
-    beginConnectorCall("figjam", "x", NOW)(false)
-    expect(connectorActivity({ nowMs: NOW })).toEqual([])
+    expect(ledger.view({ nowMs: NOW })).toEqual([])
+    ledger.begin("figjam", "x", NOW)(false)
+    expect(ledger.view({ nowMs: NOW })).toEqual([])
   })
 
   test("overlapping calls remain until the newest call's deadline", () => {
-    beginConnectorCall("workiq", "old", NOW - MAX_CALL_MS + 1000)
-    beginConnectorCall("workiq", "new", NOW - 1000)
+    ledger.begin("workiq", "old", NOW - MAX_CALL_MS + 1000)
+    ledger.begin("workiq", "new", NOW - 1000)
 
-    expect(connectorActivity({ nowMs: NOW })[0]).toMatchObject({
+    expect(ledger.view({ nowMs: NOW })[0]).toMatchObject({
       active_calls: 2,
       started_at_ms: NOW - MAX_CALL_MS + 1000,
       expires_at_ms: NOW - 1000 + MAX_CALL_MS,
     })
-    expect(connectorActivity({ nowMs: NOW + 1000 })[0]).toMatchObject({
+    expect(ledger.view({ nowMs: NOW + 1000 })[0]).toMatchObject({
       active_calls: 1,
       started_at_ms: NOW - 1000,
     })
   })
 
   test("a call that never ends stops counting at its deadline", () => {
-    beginConnectorCall("workiq", "stuck", NOW - MAX_CALL_MS - 1)
-    expect(connectorActivity({ nowMs: NOW })).toEqual([])
+    ledger.begin("workiq", "stuck", NOW - MAX_CALL_MS - 1)
+    expect(ledger.view({ nowMs: NOW })).toEqual([])
   })
 
   test("a plugin that is not listed is ignored", () => {
-    const end = beginConnectorCall("other", "x", NOW)
+    const end = ledger.begin("other", "x", NOW)
     end()
-    expect(connectorActivity({ nowMs: NOW })).toEqual([])
+    expect(ledger.view({ nowMs: NOW })).toEqual([])
   })
 
   test("tool names are cleaned and bounded", () => {
-    beginConnectorCall("workiq", `get\n${"x".repeat(200)}`, NOW)
-    const [view] = connectorActivity({ nowMs: NOW })
+    ledger.begin("workiq", `get\n${"x".repeat(200)}`, NOW)
+    const [view] = ledger.view({ nowMs: NOW })
     expect(view.last_tool).toHaveLength(80)
     expect(view.last_tool).not.toContain("\n")
   })
 
   test("remembers at most a bounded number of calls", () => {
-    for (let call = 0; call < 1000; call += 1)
-      beginConnectorCall("workiq", "t", NOW)
-    expect(connectorActivity({ nowMs: NOW })[0].active_calls).toBe(256)
+    for (let call = 0; call < 1000; call += 1) ledger.begin("workiq", "t", NOW)
+    expect(ledger.view({ nowMs: NOW })[0].active_calls).toBe(256)
   })
 
   test("FigJam is read from what the plugin reports, with the same bounds", () => {
@@ -148,7 +148,7 @@ describe("connectorActivity", () => {
       lastTool?: string
       expiresAtMs?: number | null
     }) =>
-      connectorActivity({
+      ledger.view({
         nowMs: NOW,
         reported: (id) => (id === "figjam" ? activity : undefined),
       })
@@ -211,8 +211,8 @@ describe("connectorActivity", () => {
   })
 
   test("lists Work IQ before FigJam", () => {
-    beginConnectorCall("workiq", "a", NOW)
-    const views = connectorActivity({
+    ledger.begin("workiq", "a", NOW)
+    const views = ledger.view({
       nowMs: NOW,
       reported: (id) =>
         id === "figjam" ?
@@ -269,8 +269,9 @@ describe("Work IQ over /mcp", () => {
       name: "search_mail",
       arguments: { query: "do-not-keep-this" },
     })
-    await waitFor(() => connectorActivity({ nowMs: Date.now() }).length === 1)
-    const [running] = connectorActivity({ nowMs: Date.now() })
+    const ledger = connectorActivityFor(plugins.gateway)
+    await waitFor(() => ledger.view({ nowMs: Date.now() }).length === 1)
+    const [running] = ledger.view({ nowMs: Date.now() })
     expect(running).toMatchObject({
       connector: "workiq",
       state: "running",
@@ -281,7 +282,7 @@ describe("Work IQ over /mcp", () => {
 
     release?.()
     await call
-    const [after] = connectorActivity({ nowMs: Date.now() })
+    const [after] = ledger.view({ nowMs: Date.now() })
     expect(after).toMatchObject({ state: "recent", active_calls: 0 })
   })
 })
@@ -334,7 +335,7 @@ describe("GET /token-usage/sessions: connector_activity", () => {
   test("serves connectors apart from the sessions and their totals", async () => {
     const gateway = await startTestGateway([figjam], ["figjam"])
     disposers.push(() => gateway.dispose())
-    beginConnectorCall("workiq", "search_mail")
+    connectorActivityFor(gateway.gateway).begin("workiq", "search_mail")
 
     const view = await fetchSessions()
     expect(view.sessions).toEqual([])
@@ -352,5 +353,23 @@ describe("GET /token-usage/sessions: connector_activity", () => {
   test("is empty with nothing in use", async () => {
     const view = await fetchSessions()
     expect(view.connector_activity).toEqual([])
+  })
+
+  test("belongs to its gateway: a connector's calls are not listed once another gateway, or none, serves", async () => {
+    const first = await startTestGateway([figjam], ["figjam"])
+    disposers.push(() => first.dispose())
+    connectorActivityFor(first.gateway).begin("workiq", "retrieve")
+    expect(
+      (await fetchSessions()).connector_activity?.map((c) => c.connector),
+    ).toContain("workiq")
+
+    // No gateway (the plugins stopped): there are no connectors to list.
+    setPluginGateway(undefined)
+    expect((await fetchSessions()).connector_activity).toEqual([])
+
+    // A new gateway starts with a clean ledger, whatever ran before it.
+    const second = await startTestGateway([], [])
+    disposers.push(() => second.dispose())
+    expect((await fetchSessions()).connector_activity).toEqual([])
   })
 })

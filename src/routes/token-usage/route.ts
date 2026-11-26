@@ -7,7 +7,7 @@ import {
   getTokenUsageSummary,
   type TokenUsagePeriod,
 } from "~/lib/token-usage"
-import { connectorActivity } from "~/lib/token-usage/connector-activity"
+import { connectorActivityFor } from "~/lib/token-usage/connector-activity"
 import { listInFlight } from "~/lib/token-usage/in-flight"
 import {
   buildSessionsView,
@@ -78,10 +78,14 @@ tokenUsageRoute.get("/sessions", async (c) => {
       SessionsResponse.parse({
         ...view,
         // Kept apart from `sessions`: a connector call is not a model request.
-        connector_activity: connectorActivity({
-          nowMs,
-          reported: (id) => gateway?.get(id)?.status?.activity,
-        }),
+        // With no gateway there are no connectors, so nothing to list.
+        connector_activity:
+          gateway ?
+            connectorActivityFor(gateway).view({
+              nowMs,
+              reported: (id) => gateway.get(id)?.status?.activity,
+            })
+          : [],
       }),
     )
   } catch (error) {

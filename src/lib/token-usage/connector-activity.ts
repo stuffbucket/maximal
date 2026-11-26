@@ -13,9 +13,19 @@
  * Work IQ runs in this process, so the MCP route records its calls here.
  * FigJam's bridge runs in the plugin child: it reports through its status
  * (`PluginStatus.activity`), which the caller passes as `reported`.
+ *
+ * A ledger belongs to the plugin gateway whose connectors ran
+ * (`connectorActivityFor`), not to the process: the MCP route that records a
+ * call and the Sessions route that lists it both reach the same ledger through
+ * the gateway they serve, a new gateway starts with none, and with no gateway
+ * there is nothing to list. Nothing outlives the gateway it describes, so one
+ * test (or one restart of the plugins) can't leave connector use for another.
  */
 
-import type { PluginActivity } from "@stuffbucket/maximal-plugin-sdk/gateway"
+import type {
+  PluginActivity,
+  PluginGateway,
+} from "@stuffbucket/maximal-plugin-sdk/gateway"
 
 import type { ConnectorActivityView } from "./sessions-schema"
 
@@ -38,9 +48,6 @@ interface Ledger {
   lastTool: string | null
 }
 
-const ledgers = new Map<ConnectorId, Ledger>()
-let nextCall = 0
-
 const isConnector = (id: string): id is ConnectorId =>
   (CONNECTOR_IDS as ReadonlyArray<string>).includes(id)
 
@@ -49,47 +56,6 @@ function toolLabel(name: string): string | null {
   // eslint-disable-next-line no-control-regex -- stripping control characters is the point
   const clean = name.replaceAll(/[\u0000-\u001F\u007F]/g, " ").trim()
   return clean === "" ? null : clean.slice(0, MAX_TOOL_NAME)
-}
-
-/**
- * Record that `pluginId` started running `tool`. Returns the function that
- * records its end (safe to call twice); `end(false)` says the call was
- * refused before it ran (a blocked tool, say), which leaves no trace. A
- * plugin that isn't listed is ignored.
- */
-export function beginConnectorCall(
-  pluginId: string,
-  tool: string,
-  nowMs: number = Date.now(),
-): (ran?: boolean) => void {
-  if (!isConnector(pluginId)) return () => {}
-  let ledger = ledgers.get(pluginId)
-  if (!ledger) {
-    ledger = { calls: new Map(), lastActivityAtMs: 0, lastTool: null }
-    ledgers.set(pluginId, ledger)
-  }
-  const owner = ledger
-  if (owner.calls.size >= MAX_CALLS) {
-    const oldest = owner.calls.keys().next()
-    if (oldest.done !== true) owner.calls.delete(oldest.value)
-  }
-  const before = {
-    lastActivityAtMs: owner.lastActivityAtMs,
-    lastTool: owner.lastTool,
-  }
-  const call = nextCall++
-  owner.calls.set(call, nowMs)
-  owner.lastActivityAtMs = nowMs
-  owner.lastTool = toolLabel(tool)
-  return (ran = true) => {
-    if (!owner.calls.delete(call)) return
-    if (ran) {
-      owner.lastActivityAtMs = Date.now()
-    } else if (owner.lastActivityAtMs === nowMs) {
-      // Nothing else has happened since: forget this call altogether.
-      Object.assign(owner, before)
-    }
-  }
 }
 
 /** Calls in progress and when each began, from the proxy's own ledger and a
@@ -148,40 +114,98 @@ function lastActivity(
     : { atMs: ledgerAt, tool: ledger?.lastTool ?? null }
 }
 
-/**
- * The connectors in use at `nowMs`: running ones, and ones whose last call
- * ended less than `LINGER_MS` ago. `reported` is what a connector's own
- * status says about its calls (FigJam).
- */
-export function connectorActivity(options: {
-  nowMs: number
-  reported?: (connector: ConnectorId) => Readonly<PluginActivity> | undefined
-}): Array<ConnectorActivityView> {
-  const { nowMs } = options
-  const views: Array<ConnectorActivityView> = []
-  for (const connector of CONNECTOR_IDS) {
-    const ledger = ledgers.get(connector)
-    const reported = options.reported?.(connector)
-    const running = runningCalls(ledger, reported, nowMs)
+/** The calls one plugin gateway's connectors are running or just ran. */
+export class ConnectorActivityLedger {
+  readonly #ledgers = new Map<ConnectorId, Ledger>()
+  #nextCall = 0
 
-    const last = lastActivity(ledger, reported, nowMs)
-    if (running.count === 0 && nowMs - last.atMs >= LINGER_MS) continue
-
-    views.push({
-      connector,
-      state: running.count > 0 ? "running" : "recent",
-      active_calls: running.count,
-      started_at_ms: running.startedAtMs,
-      last_activity_at_ms: last.atMs,
-      expires_at_ms: running.expiresAtMs ?? last.atMs + LINGER_MS,
-      last_tool: last.tool === null ? null : toolLabel(last.tool),
-    })
+  /**
+   * Record that `pluginId` started running `tool`. Returns the function that
+   * records its end (safe to call twice); `end(false)` says the call was
+   * refused before it ran (a blocked tool, say), which leaves no trace. A
+   * plugin that isn't listed is ignored.
+   */
+  begin(
+    pluginId: string,
+    tool: string,
+    nowMs: number = Date.now(),
+  ): (ran?: boolean) => void {
+    if (!isConnector(pluginId)) return () => {}
+    let ledger = this.#ledgers.get(pluginId)
+    if (!ledger) {
+      ledger = { calls: new Map(), lastActivityAtMs: 0, lastTool: null }
+      this.#ledgers.set(pluginId, ledger)
+    }
+    const owner = ledger
+    if (owner.calls.size >= MAX_CALLS) {
+      const oldest = owner.calls.keys().next()
+      if (oldest.done !== true) owner.calls.delete(oldest.value)
+    }
+    const before = {
+      lastActivityAtMs: owner.lastActivityAtMs,
+      lastTool: owner.lastTool,
+    }
+    const call = this.#nextCall++
+    owner.calls.set(call, nowMs)
+    owner.lastActivityAtMs = nowMs
+    owner.lastTool = toolLabel(tool)
+    return (ran = true) => {
+      if (!owner.calls.delete(call)) return
+      if (ran) {
+        owner.lastActivityAtMs = Date.now()
+      } else if (owner.lastActivityAtMs === nowMs) {
+        // Nothing else has happened since: forget this call altogether.
+        Object.assign(owner, before)
+      }
+    }
   }
-  return views
+
+  /**
+   * The connectors in use at `nowMs`: running ones, and ones whose last call
+   * ended less than `LINGER_MS` ago. `reported` is what a connector's own
+   * status says about its calls (FigJam).
+   */
+  view(options: {
+    nowMs: number
+    reported?: (connector: ConnectorId) => Readonly<PluginActivity> | undefined
+  }): Array<ConnectorActivityView> {
+    const { nowMs } = options
+    const views: Array<ConnectorActivityView> = []
+    for (const connector of CONNECTOR_IDS) {
+      const ledger = this.#ledgers.get(connector)
+      const reported = options.reported?.(connector)
+      const running = runningCalls(ledger, reported, nowMs)
+
+      const last = lastActivity(ledger, reported, nowMs)
+      if (running.count === 0 && nowMs - last.atMs >= LINGER_MS) continue
+
+      views.push({
+        connector,
+        state: running.count > 0 ? "running" : "recent",
+        active_calls: running.count,
+        started_at_ms: running.startedAtMs,
+        last_activity_at_ms: last.atMs,
+        expires_at_ms: running.expiresAtMs ?? last.atMs + LINGER_MS,
+        last_tool: last.tool === null ? null : toolLabel(last.tool),
+      })
+    }
+    return views
+  }
 }
 
-/** Forget every call. For tests. */
-export function __resetConnectorActivityForTests(): void {
-  ledgers.clear()
-  nextCall = 0
+const byGateway = new WeakMap<PluginGateway, ConnectorActivityLedger>()
+
+/**
+ * The ledger of the connectors `gateway` runs, made on first use. Held weakly,
+ * so it goes when the gateway does.
+ */
+export function connectorActivityFor(
+  gateway: PluginGateway,
+): ConnectorActivityLedger {
+  let ledger = byGateway.get(gateway)
+  if (!ledger) {
+    ledger = new ConnectorActivityLedger()
+    byGateway.set(gateway, ledger)
+  }
+  return ledger
 }

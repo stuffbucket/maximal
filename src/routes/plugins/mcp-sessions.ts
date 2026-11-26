@@ -48,7 +48,7 @@ import {
   type GenerationAffinityDiagnostics,
 } from "~/lib/plugins/generation-affinity"
 import { pluginAccessPermission } from "~/lib/plugins/settings"
-import { beginConnectorCall } from "~/lib/token-usage/connector-activity"
+import { connectorActivityFor } from "~/lib/token-usage/connector-activity"
 import { BUILD_VERSION } from "~/lib/update/build-info"
 
 // eslint-disable-next-line @typescript-eslint/no-deprecated -- see the module comment
@@ -655,7 +655,11 @@ export class McpSessions {
       if (gated.approved) call.approved = true
       // Only the connector and tool name are recorded for the Sessions view,
       // and only while the call runs (not while it waits for approval).
-      const endActivity = beginConnectorCall(pluginId, toolName)
+      const gateway = this.#options.getGateway()
+      const endActivity =
+        gateway ?
+          connectorActivityFor(gateway).begin(pluginId, toolName)
+        : () => {}
       let result
       let ran = true
       try {
