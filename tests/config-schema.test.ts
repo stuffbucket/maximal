@@ -261,7 +261,7 @@ describe("validateAppConfig — Anthropic Messages model settings", () => {
   })
 })
 
-describe("validateAppConfig — parked mcpBroker", () => {
+describe("validateAppConfig — retired mcpBroker", () => {
   it("accepts an old mcpBroker section silently and keeps it as-is", () => {
     const config = {
       mcpBroker: {
@@ -282,7 +282,7 @@ describe("validateAppConfig — parked mcpBroker", () => {
     expect(detectUnknownKeys(config)).toEqual([])
   })
 
-  it("does not validate the parked section's contents", () => {
+  it("does not validate the retired section's contents", () => {
     const config = { mcpBroker: { servers: "not-an-array" } }
     expect(validateAppConfig(config)).toEqual(config)
   })

@@ -7,7 +7,7 @@ const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1"]
 /**
  * Add the loopback hosts to NO_PROXY (and no_proxy). Bun's fetch reads
  * HTTP_PROXY itself and sends even a 127.0.0.1 request through it, and a
- * proxy can't reach this machine's loopback, where the MCP broker listens.
+ * proxy can't reach this machine's loopback, where Maximal itself listens.
  */
 export function keepLoopbackOffProxy(
   env: Record<string, string | undefined> = process.env,

@@ -1,6 +1,6 @@
 /**
  * `config.json` → `plugins`: schema, per-plugin updates, and the one-time
- * migration of Work IQ from the parked MCP broker config.
+ * migration of Work IQ from the retired MCP broker config.
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
@@ -139,7 +139,7 @@ describe("migrateLegacyWorkIq", () => {
     expect(migrated?.plugins).toEqual({
       workiq: { enabled: true, clients: ["claude-code"] },
     })
-    // The parked block itself is left as it was.
+    // The retired block itself is left as it was.
     expect(migrated?.mcpBroker).toBeDefined()
   })
 

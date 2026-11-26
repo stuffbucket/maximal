@@ -3,7 +3,7 @@
  * chosen for the client, integration on, not already set up by the user),
  * the one-time removal of entry names older versions recorded
  * (`apps.claudeCode.mcpServers`), uninstall, and the one-shot cleanup of the
- * parked broker's Claude Desktop entries.
+ * retired broker's Claude Desktop entries.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"

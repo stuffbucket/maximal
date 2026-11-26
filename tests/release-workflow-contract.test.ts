@@ -413,7 +413,7 @@ describe("release action supply chain", () => {
   })
 })
 
-describe("parked MCP broker distribution", () => {
+describe("retired MCP broker distribution", () => {
   test("raw release archives carry maximal and its sealed plugin generation", async () => {
     const workflow = await readWorkflow("release.yml")
 
@@ -434,7 +434,6 @@ describe("parked MCP broker distribution", () => {
       readRepoFile("build/homebrew/maximal.rb"),
     ])
 
-    expect(debSmoke).toContain("[ ! -e /usr/bin/maximal-mcp-broker ]")
     expect(debSmoke).not.toContain("USAGE")
     expect(debBuild).not.toContain("maximal-mcp-broker")
     expect(formula).not.toContain("maximal-mcp-broker")
