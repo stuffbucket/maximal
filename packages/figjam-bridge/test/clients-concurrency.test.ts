@@ -142,14 +142,20 @@ describe("shared clients.json", () => {
     )
     const portA = freePort()
     const portB = freePort()
+    const adminToken = "clients-test-admin-token"
     const processes: Array<Subprocess> = []
     const sockets: Array<WebSocket> = []
     try {
+      // Both bridges keep an admin token that is already on disk, so the test
+      // picks its own instead of reading a generated one back.
+      await mkdir(path.join(dataDir, "figjam"), { recursive: true })
+      await writeFile(
+        path.join(dataDir, "figjam", "pairing-token"),
+        `${adminToken}\n`,
+        { mode: 0o600 },
+      )
       const bridgeA = await startBridge(dataDir, portA)
       processes.push(bridgeA)
-      const adminToken = (
-        await readFile(path.join(dataDir, "figjam", "pairing-token"), "utf8")
-      ).trim()
       const seed = openPanel(portA, "seed")
       sockets.push(seed.ws)
       await seed.next("pair-pending")

@@ -8,7 +8,7 @@ import {
   setSystemTime,
   test,
 } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -36,6 +36,13 @@ async function until(check: () => boolean): Promise<void> {
 
 beforeAll(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), "figjam-bridge-activity-"))
+  // The bridge keeps an admin token that is already on disk, so the test picks
+  // its own instead of reading the generated one back.
+  token = "activity-test-admin-token"
+  await mkdir(path.join(dir, "figjam"), { recursive: true })
+  await writeFile(path.join(dir, "figjam", "pairing-token"), `${token}\n`, {
+    mode: 0o600,
+  })
   handle = await startBridge({
     port: 0,
     dataDir: dir,
@@ -65,9 +72,6 @@ beforeAll(async () => {
     const { id, name } = message
     received.push({ id, name })
   })
-  token = (
-    await readFile(path.join(dir, "figjam", "pairing-token"), "utf8")
-  ).trim()
   await until(() => handle.status().pending.length === 1)
   await handle.approve("activity-panel")
   await until(() => handle.status().boards.length === 1)

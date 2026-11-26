@@ -607,9 +607,14 @@ describe("doctype and panel script", () => {
 
   test("the panel's script parses", async () => {
     const { "ui.html": html } = await renderPlugin({})
-    const script = /<script>([\s\S]*)<\/script>/.exec(html)?.[1]
-    expect(script).toBeDefined()
-    expect(() => new Script(script ?? "")).not.toThrow()
+    // The panel has exactly one bare script element (see panel-ports.mjs).
+    const open = html.indexOf("<script>")
+    const close = html.lastIndexOf("</script>")
+    expect(open).toBeGreaterThan(-1)
+    expect(close).toBeGreaterThan(open)
+    expect(
+      () => new Script(html.slice(open + "<script>".length, close)),
+    ).not.toThrow()
   })
 })
 

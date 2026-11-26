@@ -4,7 +4,7 @@
  */
 import { loadPlugin, waitFor } from "@stuffbucket/maximal-plugin-sdk/testing"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -93,6 +93,17 @@ describe("FigJam plugin: tool activity", () => {
 
   test("a running call shows in the status with its tool name, and lingers after it ends", async () => {
     const dataDir = path.join(root, "data")
+    // The bridge keeps an admin token that is already on disk, so the test
+    // picks its own instead of reading the generated one back.
+    const token = "activity-test-admin-token"
+    await mkdir(path.join(dataDir, "figjam"), { recursive: true })
+    await writeFile(
+      path.join(dataDir, "figjam", "pairing-token"),
+      `${token}\n`,
+      {
+        mode: 0o600,
+      },
+    )
     const loaded = await loadPlugin(
       createFigjamPlugin({ dataDir }),
       { port },
@@ -142,9 +153,6 @@ describe("FigJam plugin: tool activity", () => {
         === true,
     )
 
-    const token = (
-      await readFile(path.join(dataDir, "figjam", "pairing-token"), "utf8")
-    ).trim()
     const call = fetch(`http://127.0.0.1:${port}/tool`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
