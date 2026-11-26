@@ -1,5 +1,5 @@
 /**
- * One-shot cleanup of the Claude Desktop MCP entries the parked broker
+ * One-shot cleanup of the Claude Desktop MCP entries the retired broker
  * strategy wrote.
  *
  * Claude Desktop ran Maximal's endpoints through the broker's stdio adapter

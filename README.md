@@ -30,7 +30,6 @@ src/                       Proxy source (request handlers, web-tools agent,
 tests/                     bun-test suites.
 shell/                     Tauri desktop app (menu-bar shell + settings and
                            dashboard UIs) that runs the proxy as a sidecar.
-parked/mcp/               Parked MCP broker integration (not built).
 packages/storybook/        Component sandbox for the shell UI.
 site/                      Marketing and download site (mxml.sh).
 build/                     Packaging inputs (Homebrew formula, Windows

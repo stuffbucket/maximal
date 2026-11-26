@@ -61,11 +61,6 @@ describe("sidecar build version", () => {
     expect(BUILD_SCRIPT).toContain("shell/src-tauri/plugin-builtins")
     expect(BUILD_SCRIPT).toContain("runtime: `bun:${Bun.version}`")
   })
-
-  test("does not build the parked MCP broker", () => {
-    expect(BUILD_SCRIPT).not.toContain("mcp-broker")
-    expect(BUILD_SCRIPT).not.toContain("BROKER_PACKAGE")
-  })
 })
 
 // The macOS app's sidecar is built by .macos-builder/build.sh, which sets

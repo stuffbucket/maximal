@@ -155,8 +155,6 @@ export default [
       // through. The Node stub tests load that output in a vm.
       "packages/figjam-plugin/src/legacy/**",
       "packages/figjam-plugin/test/sandbox/**",
-      // Parked code (kept in git, not part of the build): see parked/mcp/README.md.
-      "parked/**",
       "site/**",
       ".dependency-cruiser.cjs",
       ".pnpmfile.cjs",

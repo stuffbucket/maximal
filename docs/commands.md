@@ -197,16 +197,15 @@ in-process under `bun test`.
 `maximal mcp stdio --url http://127.0.0.1:<port>/mcp` manually bridges an
 MCP client's stdio transport to Maximal's aggregate Streamable HTTP endpoint.
 The adapter is part of the packaged `maximal` executable; it uses the official
-MCP SDK transports and needs no `npx`, `bunx`, or separate broker executable.
+MCP SDK transports and needs no `npx`, `bunx`, or separate executable.
 Set `MAXIMAL_MCP_API_KEY` in the child process environment when the endpoint
 requires an app identity. The URL must be the exact plain-HTTP aggregate
 `/mcp` path on loopback; connector-specific paths, redirects, credentials in
 the URL, query strings, and fragments are rejected. Claude Desktop's automatic
 projection uses its direct HTTP `managedMcpServers` array instead.
 
-The older standalone broker remains parked under `parked/mcp/` and is not
-built or tested. Work IQ is a built-in plugin (Settings → Integrations →
-Connectors; see [`workiq.md`](workiq.md)).
+Work IQ is a built-in plugin (Settings → Integrations → Connectors; see
+[`workiq.md`](workiq.md)).
 
 ## Fast UI iteration
 

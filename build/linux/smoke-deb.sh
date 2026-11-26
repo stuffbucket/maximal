@@ -78,9 +78,6 @@ reported="$(maximal --version)"
 echo "$reported"
 [[ "$reported" == *"$version"* ]] || fail "maximal --version did not print $version"
 
-step "No MCP broker"
-[ ! -e /usr/bin/maximal-mcp-broker ] || fail "unexpected /usr/bin/maximal-mcp-broker"
-
 # A manifest naming a newer version on this build's channel.
 mkdir -p "$work/site/updates"
 printf '{"schema":2,"channels":{"%s":{"version":"999.0.0","tag":"v999.0.0","notes":"x"}}}\n' \
@@ -137,8 +134,8 @@ else
   apt-get install -y -qq "$work/$(basename "$desktop_deb")" >/dev/null
   dpkg-query -W -f='${Depends}\n' maximal-desktop | tee "$work/depends"
   grep -qF "maximal (= $debver)" "$work/depends" || fail "maximal-desktop does not depend on maximal (= $debver)"
-  if dpkg -L maximal-desktop | grep -Ex '/usr/bin/maximal(-mcp-broker)?'; then
-    fail "maximal-desktop ships its own copy of the binaries"
+  if dpkg -L maximal-desktop | grep -Fx '/usr/bin/maximal'; then
+    fail "maximal-desktop ships its own copy of the binary"
   fi
   [ -x /usr/bin/maximal-desktop ] || fail "missing /usr/bin/maximal-desktop"
   [ -e /usr/lib/maximal/desktop-installed-by-apt ] || fail "missing the desktop marker"
