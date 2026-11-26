@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.1-rc.1](https://github.com/stuffbucket/maximal/compare/v0.6.0-rc.1...v0.6.1-rc.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **auth:** pick up a sign-in written by maximal auth in a running sidecar ([03b4ce5](https://github.com/stuffbucket/maximal/commit/03b4ce5727bc2ca77b4394b3f82758e65249d740))
+* **auth:** point revoked-token messages at Maximal's own sign-in ([a103d8a](https://github.com/stuffbucket/maximal/commit/a103d8a1a5a42afbf4e4b4f67a7ecad56b9a11e6))
+* **connector-kit:** await upstream pool disposal ([#691](https://github.com/stuffbucket/maximal/issues/691)) ([95eb370](https://github.com/stuffbucket/maximal/commit/95eb370d348a57733a7e0b84d0c5a034e4631dc9))
+* **dashboard:** refresh quotas on auth changes and polish previews ([2a6e232](https://github.com/stuffbucket/maximal/commit/2a6e2329cf0f589e633394a01c2afc807daf18e7))
+* log Copilot inference socket closures ([d0676b0](https://github.com/stuffbucket/maximal/commit/d0676b0e49df2a4ff5789374b192cd85b45701ed))
+
 ## [0.6.0-rc.1](https://github.com/stuffbucket/maximal/compare/v0.5.2...v0.6.0-rc.1) (2026-11-18)
 
 
