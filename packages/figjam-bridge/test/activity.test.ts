@@ -21,9 +21,13 @@ let handle: BridgeHandle
 let ws: WebSocket
 let token: string
 const events: Array<BridgeEvent> = []
-/** Tool messages the fake panel received, each answered by `release`. */
+/** Tool messages the fake panel received, each answered by `answer(id)`. */
 const received: Array<{ id: string; name: string }> = []
-const answers = new Map<string, () => void>()
+
+/** The fake panel finishes the tool call it was sent under `id`. */
+function answer(id: string): void {
+  ws.send(JSON.stringify({ type: "tool-result", id, ok: true, result: {} }))
+}
 
 async function until(check: () => boolean): Promise<void> {
   for (let i = 0; i < 200 && !check(); i++) await Bun.sleep(10)
@@ -60,11 +64,6 @@ beforeAll(async () => {
     if (message.type !== "tool" || !message.id || !message.name) return
     const { id, name } = message
     received.push({ id, name })
-    answers.set(id, () =>
-      ws.send(
-        JSON.stringify({ type: "tool-result", id, ok: true, result: {} }),
-      ),
-    )
   })
   token = (
     await readFile(path.join(dir, "figjam", "pairing-token"), "utf8")
@@ -112,7 +111,7 @@ describe("bridge tool activity", () => {
       board: "activity-panel",
     })
 
-    answers.get(received[0].id)?.()
+    answer(received[0].id)
     expect((await call).status).toBe(200)
     const done = handle.status().activity
     expect(done).toMatchObject({
@@ -156,7 +155,7 @@ describe("bridge tool activity", () => {
         lastTool: "get_second",
       })
 
-      answers.get(received[offset].id)?.()
+      answer(received[offset].id)
       expect((await first).status).toBe(200)
       expect(handle.status().activity).toMatchObject({
         inFlight: 1,
@@ -171,7 +170,7 @@ describe("bridge tool activity", () => {
         startedAtMs: null,
         expiresAtMs: null,
       })
-      answers.get(received[offset + 1].id)?.()
+      answer(received[offset + 1].id)
       expect((await second).status).toBe(200)
     } finally {
       setSystemTime()
@@ -188,7 +187,7 @@ describe("bridge tool activity", () => {
     })
     await until(() => received.length === offset + 1)
     expect(handle.status().activity.lastTool).toHaveLength(80)
-    answers.get(received[offset].id)?.()
+    answer(received[offset].id)
     await call
   })
 })
