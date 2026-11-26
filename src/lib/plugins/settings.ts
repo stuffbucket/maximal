@@ -1,6 +1,6 @@
 /**
  * The `plugins` section of `config.json`: reading and changing one plugin's
- * entry (`{ enabled, clients }`), the one-time migration from the parked MCP
+ * entry (`{ enabled, clients }`), the one-time migration from the retired MCP
  * broker's Work IQ endpoint, and finding the legacy `plugins.<id>.config`
  * values that boot moves into each plugin's settings file.
  */
@@ -166,7 +166,7 @@ export function updatePluginEntry(
  * Work IQ used to be an MCP broker endpoint (`mcpBroker.servers[]` entry
  * with `catalog: "workiq"`). When `plugins.workiq` doesn't exist yet, carry
  * its on/off state and its Claude Code choice over. Returns undefined when
- * there is nothing to migrate. The `mcpBroker` block is parked config, so
+ * there is nothing to migrate. The `mcpBroker` block is retired config, so
  * it is read defensively.
  */
 export function migrateLegacyWorkIq(config: AppConfig): AppConfig | undefined {

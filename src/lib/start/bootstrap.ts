@@ -34,6 +34,7 @@ import {
   migrateLegacyRecord,
   readDefaultRecord,
 } from "~/lib/auth/github-token-store"
+import { startRegistryAdoption } from "~/lib/auth/registry-adoption"
 import {
   ensureSecretsDir,
   loadSecretIntoEnv,
@@ -55,6 +56,14 @@ import { getGitHubUser } from "~/services/github/get-user"
 import { emitBootStatus } from "./boot-status"
 
 export async function bootstrapUpstream(
+  githubTokenOverride: string | undefined,
+): Promise<void> {
+  await bootAuth(githubTokenOverride)
+  // A --github-token run is pinned to that token; accounts.json doesn't own it.
+  if (!githubTokenOverride) await startRegistryAdoption()
+}
+
+async function bootAuth(
   githubTokenOverride: string | undefined,
 ): Promise<void> {
   // Wire the auto-recovery sweep ONLY when the user has opted in

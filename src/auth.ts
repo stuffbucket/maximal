@@ -22,7 +22,10 @@ export async function runAuth(options: RunAuthOptions): Promise<void> {
 
   await ensurePaths()
   await setupGitHubToken({ force: true })
-  consola.success("GitHub token written to", PATHS.GITHUB_TOKEN_PATH)
+  consola.success(`Signed in. Saved to ${PATHS.ACCOUNTS_PATH}.`)
+  consola.info(
+    "A running Maximal that is signed out picks this up within a few seconds.",
+  )
 }
 
 export const auth = defineCommand({

@@ -170,6 +170,7 @@ const { currentProxyPort, setListeningPort } =
   await import("~/lib/start/proxy-port")
 const { clearSessionRunning, runningSessionPort } =
   await import("~/lib/start/session-sentinel")
+const { stopRegistryAdoption } = await import("~/lib/auth/registry-adoption")
 const { getAuthStatus, signOut, __resetAuthControllerForTests } =
   await import("~/lib/auth/auth-controller")
 const { CopilotAuthFatalError } = await import("~/lib/errors/error")
@@ -603,6 +604,7 @@ afterAll(async () => {
   // later files don't see them.
   setListeningPort(undefined)
   clearSessionRunning()
+  stopRegistryAdoption()
   globalThis.fetch = realFetch
   mock.restore()
   await mock.module("~/lib/platform/paths", () => realPathsModule)

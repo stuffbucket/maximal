@@ -237,7 +237,7 @@ export const AppConfigSchema = z
       .object({ entry: z.string().trim().min(1).max(512) })
       .strict()
       .optional(),
-    // The parked MCP broker's config (`parked/mcp`), accepted silently so
+    // The retired MCP broker's config (last shipped in v0.5.2), accepted silently so
     // existing config.json files don't warn. Not interpreted here; the plugin
     // migration reads `servers[]` defensively.
     mcpBroker: z.unknown().optional(),
